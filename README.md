@@ -140,7 +140,7 @@ In fact, the PEG parser generator is made with operators. You can see the code a
 The following are available operators:
 
 | Description        | Operator |
-|--------------------|----------|
+|:-------------------|:---------|
 | Sequence           | seq      |
 | Prioritized Choice | cho      |
 | Grouping           | grp      |
@@ -153,6 +153,12 @@ The following are available operators:
 | Character class    | cls      |
 | Character          | chr      |
 | Any character      | any      |
+
+Sample codes
+------------
+
+  * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
+  * [Calculator with parser operators](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
 
 Tested Compilers
 ----------------
@@ -167,8 +173,10 @@ TODO
   * Optimization of grammars
   * Unicode support
 
-Other C++ PEG parser libraries that inspired cpp-peblib
--------------------------------------------------------
+Other C++ PEG parser libraries
+------------------------------
+
+Thanks to the authors of the libraries that inspired *cpp-peglib*.
 
  * [PEGTL](https://github.com/ColinH/PEGTL) - Parsing Expression Grammar Template Library
  * [lars::Parser](https://github.com/TheLartians/Parser) - A header-only linear-time c++ parsing expression grammar (PEG) parser generator supporting left-recursion and grammar ambiguity
