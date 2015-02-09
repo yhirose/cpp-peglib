@@ -5,7 +5,7 @@ ifdef USE_CLANG
 CC = clang++
 CFLAGS = -std=c++1y -stdlib=libc++ -g
 else
-CC = g++-4.9
+CC = g++
 CFLAGS = -std=c++1y -g
 endif
 

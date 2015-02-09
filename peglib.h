@@ -15,7 +15,7 @@
 #include <map>
 #include <set>
 #include <cassert>
-#include <iostream>
+#include <cstring>
 
 namespace peglib {
 
@@ -63,6 +63,15 @@ public:
         return *this;
     }
 
+    template <typename T>
+    Any& operator=(const T& value) {
+        if (content_) {
+            delete content_;
+        }
+        content_ = new holder<T>(value);
+        return *this;
+    }
+
     ~Any() {
         delete content_;
     }
@@ -71,16 +80,38 @@ public:
         return content_ == nullptr;
     }
 
-    template <typename T>
+    template <
+        typename T,
+        typename std::enable_if<!std::is_same<T, Any>::value>::type*& = enabler
+    >
     T& get() {
         assert(content_);
         return dynamic_cast<holder<T>*>(content_)->value_;
     }
 
-    template <typename T>
+    template <
+        typename T,
+        typename std::enable_if<std::is_same<T, Any>::value>::type*& = enabler
+    >
+    T& get() {
+        return *this;
+    }
+
+    template <
+        typename T,
+        typename std::enable_if<!std::is_same<T, Any>::value>::type*& = enabler
+    >
     const T& get() const {
         assert(content_);
         return dynamic_cast<holder<T>*>(content_)->value_;
+    }
+
+    template <
+        typename T,
+        typename std::enable_if<std::is_same<T, Any>::value>::type*& = enabler
+    >
+    const Any& get() const {
+        return *this;
     }
 
 private:
@@ -106,226 +137,22 @@ private:
 };
 
 /*-----------------------------------------------------------------------------
- *  Variant
- *---------------------------------------------------------------------------*/
-
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
-#define static_max(a, b) (a > b ? a : b)
-#define alignof _alignof
-#else
-template <typename T>
-constexpr T static_max(T a, T b) { return a > b ? a : b; }
-#endif
-
-/*
- * For debug
- */
-static int VARINT_COUNT = 0;
-
-template <typename T> void log_copy_construct() {
-    VARINT_COUNT++;
-}
-
-template <typename T> void log_move_construct() {
-    VARINT_COUNT++;
-}
-
-template <typename T> void log_destruct() {
-    VARINT_COUNT--;
-}
-
-void log_variant_count() {
-    std::cout << "VARIANT COUNT (" << VARINT_COUNT << ")" << std::endl;
-};
-
-/*
- * Type list
- */
-template <typename... Ts>
-struct typelist;
-
-template <typename T, typename... Ts>
-struct typelist<T, Ts...>
-{
-    static const size_t max_elem_size = static_max(sizeof(T), typelist<Ts...>::max_elem_size);
-    static const size_t max_elem_align = static_max(alignof(T), typelist<Ts...>::max_elem_align);
-};
-
-template <>
-struct typelist<>
-{
-    static const size_t max_elem_size = 0;
-    static const size_t max_elem_align = 0;
-};
-
-template <typename T, typename... Ts>
-struct typelist_index;
-
-template <typename T, typename U, typename... Us>
-struct typelist_index <T, U, Us...>
-{
-    static const size_t value = 1 + typelist_index<T, Us...>::value;
-};
-
-template <typename U, typename... Us>
-struct typelist_index <U, U, Us...>
-{
-    static const size_t value = 0;
-};
-
-template <typename U>
-struct typelist_index <U>
-{
-    static const size_t value = 0;
-};
-
-/*
- * Variant helper
- */
-template <size_t N, typename... Ts>
-struct variant_helper;
-
-template <size_t N, typename T, typename... Ts>
-struct variant_helper<N, T, Ts...>
-{
-    template <typename VT>
-    static void copy_construct(size_t type_index, void* data, const VT& vt) {
-        if (N == type_index) {
-            log_copy_construct<T>();
-            new (data) T(vt.template get<T>());
-            return;
-        }
-        variant_helper<N + 1, Ts...>::copy_construct(type_index, data, vt);
-    }
-
-    template <typename VT>
-    static void move_construct(size_t type_index, void* data, VT&& vt) {
-        if (N == type_index) {
-            log_move_construct<T>();
-            new (data) T(std::move(vt.template get<T>()));
-            return;
-        }
-        variant_helper<N + 1, Ts...>::move_construct(type_index, data, vt);
-    }
-
-    static void destruct(size_t type_index, void* data) {
-        if (N == type_index) {
-            log_destruct<T>();
-            reinterpret_cast<T*>(data)->~T();
-            return;
-        }
-        variant_helper<N + 1, Ts...>::destruct(type_index, data);
-    }
-};
-
-template <size_t N>
-struct variant_helper<N>
-{
-    template <typename VT>
-    static void copy_construct(size_t type_index, void* data, const VT& vt) {}
-
-    template <typename VT>
-    static void move_construct(size_t type_index, void* data, VT&& vt) {}
-
-    static void destruct(size_t type_index, void* data) {}
-};
-
-
-/*
- * Variant
- */
-template <typename... Ts>
-struct Variant
-{
-    typedef typelist<Ts...> tlist;
-    typedef typename std::aligned_storage<tlist::max_elem_size, tlist::max_elem_align>::type data_type;
-
-    data_type data;
-    size_t    type_index;
-
-    template <typename T>
-    explicit Variant(const T& val) : type_index(typelist_index<T, Ts...>::value) {
-        static_assert(typelist_index<T, Ts...>::value < sizeof...(Ts), "Invalid variant type.");
-        log_copy_construct<T>();
-        new (&data) T(val);
-    }
-
-    template <typename T>
-    explicit Variant(T&& val) : type_index(typelist_index<T, Ts...>::value) {
-        static_assert(typelist_index<T, Ts...>::value < sizeof...(Ts), "Invalid variant type.");
-        log_move_construct<T>();
-        new (&data) T(std::move(val));
-    }
-
-    Variant() : type_index(sizeof...(Ts)) {}
-
-    Variant(const Variant& rhs) : type_index(rhs.type_index) {
-        variant_helper<0, Ts...>::copy_construct(type_index, &data, rhs);
-    }
-
-    Variant(Variant&& rhs) : type_index(rhs.type_index) {
-        variant_helper<0, Ts...>::move_construct(type_index, &data, rhs);
-    }
-
-    Variant& operator=(const Variant& rhs) {
-        if (this != &rhs) {
-            variant_helper<0, Ts...>::destruct(type_index, &data);
-            type_index = rhs.type_index;
-            variant_helper<0, Ts...>::copy_construct(type_index, &data, rhs);
-        }
-        return *this;
-    }
-
-    Variant& operator=(Variant&& rhs) {
-        if (this != &rhs) {
-            variant_helper<0, Ts...>::destruct(type_index, &data);
-            type_index = rhs.type_index;
-            variant_helper<0, Ts...>::move_construct(type_index, &data, rhs);
-        }
-        return *this;
-    }
-
-    ~Variant() {
-        variant_helper<0, Ts...>::destruct(type_index, &data);
-    }
-
-    template <typename T>
-    T& get() {
-        if (type_index != typelist_index<T, Ts...>::value) {
-            throw std::invalid_argument("Invalid template argument.");
-        }
-        return *reinterpret_cast<T*>(&data);
-    }
-
-    template <typename T>
-    const T& get() const {
-        if (type_index != typelist_index<T, Ts...>::value) {
-            throw std::invalid_argument("Invalid template argument.");
-        }
-        return *reinterpret_cast<const T*>(&data);
-    }
-};
-
-#if _MSC_VER < 1900 // Less than Visual Studio 2015
-#undef static_max
-#undef alignof
-#endif
-
-/*-----------------------------------------------------------------------------
  *  PEG
  *---------------------------------------------------------------------------*/
 
 /*
  * Forward declalations
  */
-class Rule;
 class Definition;
 
-template <typename T>
-struct SemanticActions;
-
-template <typename T>
-struct SemanticValues;
+/*
+* Semantic values
+*/
+struct SemanticValues
+{
+    std::vector<std::string> names;
+    std::vector<Any>         values;
+};
 
 /*
  * Match
@@ -348,7 +175,14 @@ Match fail() {
 /*
  * Rules
  */
-class Sequence
+class Rule
+{
+   public:
+      virtual ~Rule() {};
+      virtual Match parse(const char* s, size_t l, SemanticValues& sv) const = 0;
+};
+
+class Sequence : public Rule
 {
 public:
     Sequence(const Sequence& rhs) : rules_(rhs.rules_) {}
@@ -372,14 +206,23 @@ public:
     Sequence(const std::vector<std::shared_ptr<Rule>>& rules) : rules_(rules) {}
     Sequence(std::vector<std::shared_ptr<Rule>>&& rules) : rules_(std::move(rules)) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        size_t i = 0;
+        for (const auto& rule : rules_) {
+            auto m = rule->parse(s + i, l - i, sv);
+            if (!m.ret) {
+                return fail();
+            }
+            i += m.len;
+        }
+        return success(i);
+    }
 
 private:
     std::vector<std::shared_ptr<Rule>> rules_;
 };
 
-class PrioritizedChoice
+class PrioritizedChoice : public Rule
 {
 public:
 #if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
@@ -401,80 +244,123 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Rule>>& rules) : rules_(rules) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Rule>>&& rules) : rules_(std::move(rules)) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        for (const auto& rule : rules_) {
+            auto m = rule->parse(s, l, sv);
+            if (m.ret) {
+                return success(m.len);
+            }
+        }
+        return fail();
+    }
+
 
 private:
     std::vector<std::shared_ptr<Rule>> rules_;
 };
 
-class ZeroOrMore
+class ZeroOrMore : public Rule
 {
 public:
     ZeroOrMore(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto i = 0;
+        while (l - i > 0) {
+            auto m = rule_->parse(s + i, l - i, sv);
+            if (!m.ret) {
+                break;
+            }
+            i += m.len;
+        }
+        return success(i);
+    }
 
 private:
     std::shared_ptr<Rule> rule_;
 };
 
-class OneOrMore
+class OneOrMore : public Rule
 {
 public:
     OneOrMore(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto m = rule_->parse(s, l, sv);
+        if (!m.ret) {
+            return fail();
+        }
+        auto i = m.len;
+        while (l - i > 0) {
+            auto m = rule_->parse(s + i, l - i, sv);
+            if (!m.ret) {
+                break;
+            }
+            i += m.len;
+        }
+        return success(i);
+    }
 
 private:
     std::shared_ptr<Rule> rule_;
 };
 
-class Option
+class Option : public Rule
 {
 public:
     Option(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto m = rule_->parse(s, l, sv);
+        return success(m.ret ? m.len : 0);
+    }
 
 private:
     std::shared_ptr<Rule> rule_;
 };
 
-class AndPredicate
+class AndPredicate : public Rule
 {
 public:
     AndPredicate(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto m = rule_->parse(s, l, sv);
+        if (m.ret) {
+            return success(0);
+        } else {
+            return fail();
+        }
+    }
 
 private:
     std::shared_ptr<Rule> rule_;
 };
 
-class NotPredicate
+class NotPredicate : public Rule
 {
 public:
     NotPredicate(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto m = rule_->parse(s, l, sv);
+        if (m.ret) {
+            return fail();
+        } else {
+            return success(0);
+        }
+    }
 
 private:
     std::shared_ptr<Rule> rule_;
 };
 
-class LiteralString
+class LiteralString : public Rule
 {
 public:
     LiteralString(const char* s) : lit_(s) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
@@ -488,13 +374,12 @@ private:
     std::string lit_;
 };
 
-class CharacterClass
+class CharacterClass : public Rule
 {
 public:
     CharacterClass(const char* chars) : chars_(chars) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
         if (l < 1) {
             return fail();
         }
@@ -520,13 +405,12 @@ private:
     std::string chars_;
 };
 
-class Character
+class Character : public Rule
 {
 public:
     Character(char ch) : ch_(ch) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
         if (l < 1 || s[0] != ch_) {
             return fail();
         }
@@ -537,11 +421,10 @@ private:
     char ch_;
 };
 
-class AnyCharacter
+class AnyCharacter : public Rule
 {
 public:
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
         if (l < 1) {
             return fail();
         }
@@ -549,160 +432,69 @@ public:
     }
 };
 
-class Grouping
+class Grouping : public Rule
 {
 public:
     Grouping(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
     Grouping(const std::shared_ptr<Rule>& rule, std::function<void(const char* s, size_t l)> match) : rule_(rule), match_(match) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        assert(rule_);
+        auto m = rule_->parse(s, l, sv);
+        if (m.ret && match_) {
+            match_(s, m.len);
+        }
+        return m;
+    }
 
 private:
     std::shared_ptr<Rule>                        rule_;
     std::function<void(const char* s, size_t l)> match_;
 };
 
-class NonTerminal
-{
-public:
-    NonTerminal(Definition* outer) : outer_(outer) {};
-
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
-
-private:
-    friend class Definition;
-
-    template<typename T, typename Action>
-    T reduce(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n, Action action) const;
-
-    std::shared_ptr<Rule> rule_;
-    Definition*           outer_;
-};
-
-class DefinitionReference
-{
-public:
-    DefinitionReference(
-        const std::map<std::string, Definition>& grammar, const std::string& name)
-        : grammar_(grammar)
-        , name_(name) {}
-
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
-
-private:
-    const std::map<std::string, Definition>& grammar_;
-    std::string name_;
-};
-
-class WeakHolder
+class WeakHolder : public Rule
 {
 public:
     WeakHolder(const std::shared_ptr<Rule>& rule) : weak_(rule) {}
 
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto rule = weak_.lock();
+        assert(rule);
+        return rule->parse(s, l, sv);
+    }
 
 private:
     std::weak_ptr<Rule> weak_;
 };
 
 /*
- * Rule
- */
-template <typename... Ts>
-class TRule
-{
-public:
-    template <typename T>
-    TRule(const T& val) : vt(val) {}
-
-    template <typename T>
-    TRule(T&& val) : vt(std::move(val)) {}
-
-    template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-        switch (vt.type_index) {
-            case 0: return vt.template get<Sequence>().template parse<T>(s, l, sa, sv);
-            case 1: return vt.template get<PrioritizedChoice>().template parse<T>(s, l, sa, sv);
-            case 2: return vt.template get<ZeroOrMore>().template parse<T>(s, l, sa, sv);
-            case 3: return vt.template get<OneOrMore>().template parse<T>(s, l, sa, sv);
-            case 4: return vt.template get<Option>().template parse<T>(s, l, sa, sv);
-            case 5: return vt.template get<AndPredicate>().template parse<T>(s, l, sa, sv);
-            case 6: return vt.template get<NotPredicate>().template parse<T>(s, l, sa, sv);
-            case 7: return vt.template get<LiteralString>().template parse<T>(s, l, sa, sv);
-            case 8: return vt.template get<CharacterClass>().template parse<T>(s, l, sa, sv);
-            case 9: return vt.template get<Character>().template parse<T>(s, l, sa, sv);
-            case 10: return vt.template get<AnyCharacter>().template parse<T>(s, l, sa, sv);
-            case 11: return vt.template get<Grouping>().template parse<T>(s, l, sa, sv);
-            case 12: return vt.template get<NonTerminal>().template parse<T>(s, l, sa, sv);
-            case 13: return vt.template get<DefinitionReference>().template parse<T>(s, l, sa, sv);
-            case 14: return vt.template get<WeakHolder>().template parse<T>(s, l, sa, sv);
-        }
-
-        throw std::logic_error("couldn't find the internal data in the variant...");
-        return fail();
-    }
-
-    Variant<Ts...> vt;
-};
-
-class Rule : public TRule<
-    Sequence,
-    PrioritizedChoice,
-    ZeroOrMore,
-    OneOrMore,
-    Option,
-    AndPredicate,
-    NotPredicate,
-    LiteralString,
-    CharacterClass,
-    Character,
-    AnyCharacter,
-    Grouping,
-    NonTerminal,
-    DefinitionReference,
-    WeakHolder>
-{
-public:
-    template <typename T>
-    Rule(const T& val) : TRule(val) {}
-
-    template <typename T>
-    Rule(T&& val) : TRule(std::move(val)) {}
-};
-
-/*
  * Semantic action
  */
 template <
-    typename T, typename R, typename F,
+    typename R, typename F,
     typename std::enable_if<!std::is_void<R>::value>::type*& = enabler,
     typename... Args>
-T call(F fn, Args&&... args) {
-    return T(fn(std::forward<Args>(args)...));
+Any call(F fn, Args&&... args) {
+    return Any(fn(std::forward<Args>(args)...));
 }
 
 template <
-    typename T, typename R, typename F,
+    typename R, typename F,
     typename std::enable_if<std::is_void<R>::value>::type*& = enabler,
     typename... Args>
-T call(F fn, Args&&... args) {
+Any call(F fn, Args&&... args) {
     fn(std::forward<Args>(args)...);
-    return T();
+    return Any();
 }
 
-template <typename T>
-class SemanticActionAdaptor
+class SemanticAction
 {
 public:
     operator bool() const {
         return (bool)fn_;
     }
 
-    T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) const {
+    Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) const {
         return fn_(s, l, v, n);
     }
 
@@ -719,79 +511,79 @@ public:
 private:
     template <typename R>
     struct TypeAdaptor {
-        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> fn)
+        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> fn)
             : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_, s, l, v, n);
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_, s, l, v, n);
         }
-        std::function<R (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_s_l_v {
-        TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<T>& v)> fn)
+        TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<Any>& v)> fn)
             : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_, s, l, v);
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_, s, l, v);
         }
-        std::function<R (const char* s, size_t l, const std::vector<T>& v)> fn_;
+        std::function<R (const char* s, size_t l, const std::vector<Any>& v)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_s_l {
         TypeAdaptor_s_l(std::function<R (const char* s, size_t l)> fn) : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_, s, l);
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_, s, l);
         }
         std::function<R (const char* s, size_t l)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_v_n {
-        TypeAdaptor_v_n(std::function<R (const std::vector<T>& v, const std::vector<std::string>& n)> fn) : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_, v, n);
+        TypeAdaptor_v_n(std::function<R (const std::vector<Any>& v, const std::vector<std::string>& n)> fn) : fn_(fn) {}
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_, v, n);
         }
-        std::function<R (const std::vector<T>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const std::vector<Any>& v, const std::vector<std::string>& n)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_v {
-        TypeAdaptor_v(std::function<R (const std::vector<T>& v)> fn) : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_, v);
+        TypeAdaptor_v(std::function<R (const std::vector<Any>& v)> fn) : fn_(fn) {}
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_, v);
         }
-        std::function<R (const std::vector<T>& v)> fn_;
+        std::function<R (const std::vector<Any>& v)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_empty {
         TypeAdaptor_empty(std::function<R ()> fn) : fn_(fn) {}
-        T operator()(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n) {
-            return call<T, R>(fn_);
+        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+            return call<R>(fn_);
         }
         std::function<R ()> fn_;
     };
 
-    typedef std::function<T(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Fty;
+    typedef std::function<Any (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> Fty;
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<T>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<Any>& v, const std::vector<std::string>& n) const) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<T>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<Any>& v, const std::vector<std::string>& n)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<T>& v) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<Any>& v) const) {
         return TypeAdaptor_s_l_v<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<T>& v)) {
+    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<Any>& v)) {
         return TypeAdaptor_s_l_v<R>(fn);
     }
 
@@ -806,22 +598,22 @@ private:
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<T>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<Any>& v, const std::vector<std::string>& n) const) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const std::vector<T>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R (*mf)(const std::vector<Any>& v, const std::vector<std::string>& n)) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<T>& v) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<Any>& v) const) {
         return TypeAdaptor_v<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const std::vector<T>& v)) {
+    Fty make_adaptor(F fn, R (*mf)(const std::vector<Any>& v)) {
         return TypeAdaptor_v<R>(fn);
     }
 
@@ -839,59 +631,35 @@ private:
 };
 
 /*
- * Semantic actions
- */
-template <typename T>
-struct SemanticActions : public std::map<void*, SemanticActionAdaptor<T>>
-{
-    typedef T value_type;
-};
-
-template <typename T>
-struct SemanticValues
-{
-    std::vector<std::string> names;
-    std::vector<T>           values;
-};
-
-/*
  * Definition
  */
 class Definition
 {
 public:
-    Definition() : rule_(std::make_shared<Rule>(NonTerminal(this))) {}
+    Definition() : rule_(std::make_shared<NonTerminal>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
-        , match(rhs.match)
         , rule_(rhs.rule_)
     {
-        auto& nt = rule_->vt.get<NonTerminal>();
-        nt.outer_ = this;
+        non_terminal().outer_ = this;
     }
 
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
-        , match(std::move(rhs.match))
         , rule_(std::move(rhs.rule_))
     {
-        auto& nt = rule_->vt.get<NonTerminal>();
-        nt.outer_ = this;
+        non_terminal().outer_ = this;
     }
 
     Definition(const std::shared_ptr<Rule>& rule)
-        : rule_(std::make_shared<Rule>(NonTerminal(this)))
+        : rule_(std::make_shared<NonTerminal>(this))
     {
         set_rule(rule);
     }
 
     operator std::shared_ptr<Rule>() {
-        return std::make_shared<Rule>(WeakHolder(rule_));
-    }
-
-    operator void*() {
-        return static_cast<void*>(this);
+        return std::make_shared<WeakHolder>(rule_);
     }
 
     Definition& operator<=(const std::shared_ptr<Rule>& rule) {
@@ -900,29 +668,17 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, size_t l, const SemanticActions<T>& sa, T& val) const {
-        SemanticValues<T> sv;
+    bool parse(const char* s, size_t l, T& val) const {
+        SemanticValues sv;
 
-        auto m = rule_->parse<T>(s, l, &sa, &sv);
+        auto m = rule_->parse(s, l, sv);
         auto ret = m.ret && m.len == l;
 
-        if (ret && !sv.values.empty()) {
-            val = sv.values[0];
+        if (ret && !sv.values.empty() && !sv.values.front().is_undefined()) {
+            val = sv.values[0].get<T>();
         }
 
         return ret;
-    }
-
-    template <typename T>
-    bool parse(const char* s, const SemanticActions<T>& sa, T& val) const {
-        return parse(s, strlen(s), sa, val);
-    }
-
-    template <typename T>
-    bool parse(const char* s, size_t l, T& val) const {
-        SemanticValues<Any> sv;
-        auto m = rule_->parse<Any>(s, l, nullptr, &sv);
-        return m.ret && m.len == l;
     }
 
     template <typename T>
@@ -931,8 +687,8 @@ public:
     }
 
     bool parse(const char* s, size_t l) const {
-        SemanticValues<Any> sv;
-        auto m = rule_->parse<Any>(s, l, nullptr, &sv);
+        SemanticValues sv;
+        auto m = rule_->parse(s, l, sv);
         return m.ret && m.len == l;
     }
 
@@ -940,260 +696,164 @@ public:
         return parse(s, strlen(s));
     }
 
-    std::string name;
-
-    std::function<void (const char* s, size_t l)> match;
-
     template <typename F>
     void operator,(F fn) {
         action = fn;
     }
-    SemanticActionAdaptor<Any> action;
+
+    std::string    name;
+    SemanticAction action;
 
 private:
     friend class DefinitionReference;
 
+    class NonTerminal : public Rule
+    {
+    public:
+        NonTerminal(Definition* outer) : outer_(outer) {};
+
+        Match parse(const char* s, size_t l, SemanticValues& sv) const {
+            if (!rule_) {
+                throw std::logic_error("Uninitialized definition rule was used...");
+            }
+
+            SemanticValues chldsv;
+
+            auto m = rule_->parse(s, l, chldsv);
+            if (m.ret) {
+                 sv.names.push_back(outer_->name);
+                 auto val = reduce(s, m.len, chldsv, outer_->action);
+                 sv.values.push_back(val);
+            }
+
+            return m;
+        }
+
+    private:
+        friend class Definition;
+
+        template<typename Action>
+        Any reduce(const char* s, size_t l, const SemanticValues& sv, Action action) const {
+            if (action) {
+                return action(s, l, sv.values, sv.names);
+            } else if (sv.values.empty()) {
+                return Any();
+            } else {
+                return sv.values.front();
+            }
+        }
+
+        std::shared_ptr<Rule> rule_;
+        Definition*           outer_;
+    };
+
     Definition& operator=(const Definition& rhs);
     Definition& operator=(Definition&& rhs);
 
+    NonTerminal& non_terminal() {
+        return *dynamic_cast<NonTerminal*>(rule_.get());
+    }
+
     void set_rule(const std::shared_ptr<Rule>& rule) {
-        rule_->vt.get<NonTerminal>().rule_ = rule;
+        non_terminal().rule_ = rule;
     }
 
     std::shared_ptr<Rule> rule_;
 };
 
-/*
- * Implementation
- */
-template <typename T>
-Match Sequence::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    size_t i = 0;
-    for (const auto& rule : rules_) {
-        auto m = rule->parse<T>(s + i, l - i, sa, sv);
-        if (!m.ret) {
-            return fail();
-        }
-        i += m.len;
-    }
-    return success(i);
-}
+class DefinitionReference : public Rule
+{
+public:
+    DefinitionReference(
+        const std::map<std::string, Definition>& grammar, const std::string& name)
+        : grammar_(grammar)
+        , name_(name) {}
 
-template <typename T>
-Match PrioritizedChoice::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    for (const auto& rule : rules_) {
-        auto m = rule->parse<T>(s, l, sa, sv);
-        if (m.ret) {
-            return success(m.len);
-        }
-    }
-    return fail();
-}
-
-template <typename T>
-Match ZeroOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto i = 0;
-    while (l - i > 0) {
-        auto m = rule_->parse<T>(s + i, l - i, sa, sv);
-        if (!m.ret) {
-            break;
-        }
-        i += m.len;
-    }
-    return success(i);
-}
-
-template <typename T>
-Match OneOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto m = rule_->parse<T>(s, l, sa, sv);
-    if (!m.ret) {
-        return fail();
-    }
-    auto i = m.len;
-    while (l - i > 0) {
-        auto m = rule_->parse<T>(s + i, l - i, sa, sv);
-        if (!m.ret) {
-            break;
-        }
-        i += m.len;
-    }
-    return success(i);
-}
-
-template <typename T>
-Match Option::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto m = rule_->parse<T>(s, l, sa, sv);
-    return success(m.ret ? m.len : 0);
-}
-
-template <typename T>
-Match AndPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto m = rule_->parse<T>(s, l, sa, sv);
-    if (m.ret) {
-        return success(0);
-    } else {
-        return fail();
-    }
-}
-
-template <typename T>
-Match NotPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto m = rule_->parse<T>(s, l, sa, sv);
-    if (m.ret) {
-        return fail();
-    } else {
-        return success(0);
-    }
-}
-
-template <typename T>
-Match Grouping::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    assert(rule_);
-    auto m = rule_->parse<T>(s, l, sa, sv);
-    if (m.ret && match_) {
-        match_(s, m.len);
-    }
-    return m;
-}
-
-template <typename T>
-Match NonTerminal::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    if (!rule_) {
-        throw std::logic_error("Uninitialized definition rule was used...");
+    Match parse(const char* s, size_t l, SemanticValues& sv) const {
+       auto rule = grammar_.at(name_).rule_;
+       return rule->parse(s, l, sv);
     }
 
-    std::unique_ptr<SemanticValues<T>> chldsv;
-    if (sv) {
-        chldsv.reset(new SemanticValues<T>());
-    }
-
-    auto m = rule_->parse<T>(s, l, sa, chldsv.get());
-    if (m.ret) {
-        if (outer_->match) {
-            outer_->match(s, m.len);
-        }
-
-        if (sv) {
-            typedef std::function<T (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Action;
-            Action action;
-
-            if (outer_->action) {
-                action = outer_->action;
-            } else if (sa) {
-                auto it = sa->find(outer_);
-                if (it != sa->end()) {
-                    action = it->second;
-                }
-            }
-
-            sv->names.push_back(outer_->name);
-            auto val = reduce<T>(s, m.len, chldsv->values, chldsv->names, action);
-            sv->values.push_back(val);
-        }
-    }
-
-    return m;
-}
-
-template<typename T, typename Action>
-T NonTerminal::reduce(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n, Action action) const {
-    if (action) {
-        return action(s, l, v, n);
-    } else if (v.empty()) {
-        return T();
-    } else {
-        return v.front();
-    }
-}
-
-template <typename T>
-Match WeakHolder::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto rule = weak_.lock();
-    assert(rule);
-    return rule->parse<T>(s, l, sa, sv);
-}
-
-template <typename T>
-Match DefinitionReference::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
-    auto rule = grammar_.at(name_).rule_;
-    return rule->parse<T>(s, l, sa, sv);
-}
+private:
+    const std::map<std::string, Definition>& grammar_;
+    std::string name_;
+};
 
 /*
  * Factories
  */
 template <typename... Args>
 std::shared_ptr<Rule> seq(Args&& ...args) {
-    return std::make_shared<Rule>(Sequence(static_cast<std::shared_ptr<Rule>>(args)...));
+    return std::make_shared<Sequence>(static_cast<std::shared_ptr<Rule>>(args)...);
 }
 
 inline std::shared_ptr<Rule> seq_v(const std::vector<std::shared_ptr<Rule>>& rules) {
-    return std::make_shared<Rule>(Sequence(rules));
+    return std::make_shared<Sequence>(rules);
 }
 
 inline std::shared_ptr<Rule> seq_v(std::vector<std::shared_ptr<Rule>>&& rules) {
-    return std::make_shared<Rule>(Sequence(std::move(rules)));
+    return std::make_shared<Sequence>(std::move(rules));
 }
 
 template <typename... Args>
 std::shared_ptr<Rule> cho(Args&& ...args) {
-    return std::make_shared<Rule>(PrioritizedChoice(static_cast<std::shared_ptr<Rule>>(args)...));
+    return std::make_shared<PrioritizedChoice>(static_cast<std::shared_ptr<Rule>>(args)...);
 }
 
 inline std::shared_ptr<Rule> cho_v(const std::vector<std::shared_ptr<Rule>>& rules) {
-    return std::make_shared<Rule>(PrioritizedChoice(rules));
+    return std::make_shared<PrioritizedChoice>(rules);
 }
 
 inline std::shared_ptr<Rule> cho_v(std::vector<std::shared_ptr<Rule>>&& rules) {
-    return std::make_shared<Rule>(PrioritizedChoice(std::move(rules)));
+    return std::make_shared<PrioritizedChoice>(std::move(rules));
 }
 
 inline std::shared_ptr<Rule> zom(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(ZeroOrMore(rule));
+    return std::make_shared<ZeroOrMore>(rule);
 }
 
 inline std::shared_ptr<Rule> oom(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(OneOrMore(rule));
+    return std::make_shared<OneOrMore>(rule);
 }
 
 inline std::shared_ptr<Rule> opt(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(Option(rule));
+    return std::make_shared<Option>(rule);
 }
 
 inline std::shared_ptr<Rule> apd(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(AndPredicate(rule));
+    return std::make_shared<AndPredicate>(rule);
 }
 
 inline std::shared_ptr<Rule> npd(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(NotPredicate(rule));
+    return std::make_shared<NotPredicate>(rule);
 }
 
 inline std::shared_ptr<Rule> lit(const char* lit) {
-    return std::make_shared<Rule>(LiteralString(lit));
+    return std::make_shared<LiteralString>(lit);
 }
 
 inline std::shared_ptr<Rule> cls(const char* chars) {
-    return std::make_shared<Rule>(CharacterClass(chars));
+    return std::make_shared<CharacterClass>(chars);
 }
 
 inline std::shared_ptr<Rule> chr(char c) {
-    return std::make_shared<Rule>(Character(c));
+    return std::make_shared<Character>(c);
 }
 
 inline std::shared_ptr<Rule> any() {
-    return std::make_shared<Rule>(AnyCharacter());
+    return std::make_shared<AnyCharacter>();
 }
 
 inline std::shared_ptr<Rule> grp(const std::shared_ptr<Rule>& rule) {
-    return std::make_shared<Rule>(Grouping(rule));
+    return std::make_shared<Grouping>(rule);
 }
 
 inline std::shared_ptr<Rule> grp(const std::shared_ptr<Rule>& rule, std::function<void (const char* s, size_t l)> match) {
-    return std::make_shared<Rule>(Grouping(rule, match));
+    return std::make_shared<Grouping>(rule, match);
 }
 
 inline std::shared_ptr<Rule> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
-    return std::make_shared<Rule>(DefinitionReference(grammar, name));
+    return std::make_shared<DefinitionReference>(grammar, name);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1271,10 +931,9 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
     start.clear();
 
     // Setup actions
-    SemanticActions<Any> sa;
     std::set<std::string> refs;
 
-    sa[peg["Definition"]] = [&](const std::vector<Any>& v) {
+    peg["Definition"].action = [&](const std::vector<Any>& v) {
         const auto& name = v[0].get<std::string>();
         (*grammar)[name] <= v[2].get<std::shared_ptr<Rule>>();
         (*grammar)[name].name = name;
@@ -1284,7 +943,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         }
     };
 
-    sa[peg["Expression"]] = [&](const std::vector<Any>& v) {
+    peg["Expression"].action = [&](const std::vector<Any>& v) {
         std::vector<std::shared_ptr<Rule>> rules;
         for (auto i = 0u; i < v.size(); i++) {
             if (!(i % 2)) {
@@ -1294,7 +953,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         return cho_v(rules);
     };
 
-    sa[peg["Sequence"]] = [&](const std::vector<Any>& v) {
+    peg["Sequence"].action = [&](const std::vector<Any>& v) {
         std::vector<std::shared_ptr<Rule>> rules;
         for (const auto& x: v) {
             rules.push_back(x.get<std::shared_ptr<Rule>>());
@@ -1302,7 +961,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         return seq_v(rules);
     };
 
-    sa[peg["Prefix"]] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
+    peg["Prefix"].action = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
         std::shared_ptr<Rule> rule;
         if (v.size() == 1) {
             rule = v[0].get<std::shared_ptr<Rule>>();
@@ -1318,7 +977,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         return rule;
     };
 
-    sa[peg["Suffix"]] = [&](const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+    peg["Suffix"].action = [&](const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
         auto rule = v[0].get<std::shared_ptr<Rule>>();
         if (v.size() == 1) {
             return rule;
@@ -1334,7 +993,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         }
     };
 
-    sa[peg["Primary"]] = [&](const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+    peg["Primary"].action = [&](const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
         if (v.size() == 3) {
             return v[1];
         } else if (n[0] == "Identifier") {
@@ -1347,33 +1006,32 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         }
     };
 
-    sa[peg["IdentCont"]] = [](const char*s, size_t l) {
+    peg["IdentCont"].action = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
-    sa[peg["Literal"]] = [](const std::vector<Any>& v) {
+    peg["Literal"].action = [](const std::vector<Any>& v) {
         return lit(v[0].get<std::string>().c_str());
     };
-    sa[peg["SQCont"]] = [](const char*s, size_t l) {
+    peg["SQCont"].action = [](const char*s, size_t l) {
         return std::string(s, l);
     };
-    sa[peg["DQCont"]] = [](const char*s, size_t l) {
+    peg["DQCont"].action = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
-    sa[peg["Class"]] = [](const std::vector<Any>& v) {
+    peg["Class"].action = [](const std::vector<Any>& v) {
         return cls(v[0].get<std::string>().c_str());
     };
-    sa[peg["ClassCont"]] = [](const char*s, size_t l) {
+    peg["ClassCont"].action = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
-    sa[peg["DOT"]] = []() {
+    peg["DOT"].action = []() {
         return any();
     };
 
-    Any val;
-    if (peg["Grammar"].parse(syntax, sa, val)) {
+    if (peg["Grammar"].parse(syntax)) {
         for (const auto& name : refs) {
             if (grammar->find(name) == grammar->end()) {
                 return nullptr;
@@ -1403,14 +1061,14 @@ public:
 
     bool parse(const char* s, Any& val) const {
         if (grammar_ != nullptr)
-            return (*grammar_)[start_].parse(s, actions_, val);
+            return (*grammar_)[start_].parse(s, val);
         return false;
     }
 
     bool parse(const char* s) const {
         if (grammar_ != nullptr) {
             Any val;
-            return (*grammar_)[start_].parse(s, actions_, val);
+            return (*grammar_)[start_].parse(s, val);
         }
         return false;
     }
@@ -1419,7 +1077,7 @@ public:
     bool parse(const char* s, T& out) const {
         if (grammar_ != nullptr) {
             Any val;
-            auto ret = (*grammar_)[start_].parse(s, actions_, val);
+            auto ret = (*grammar_)[start_].parse(s, val);
             if (ret) {
                 out = val.get<T>();
             }
@@ -1428,14 +1086,13 @@ public:
         return false;
     }
 
-    SemanticActionAdaptor<Any>& operator[](const char* s) {
-        return actions_[(*grammar_)[s]];
+    SemanticAction& operator[](const char* s) {
+        return (*grammar_)[s].action;
     }
 
 private:
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
-    SemanticActions<Any>     actions_;
 };
 
 Parser make_parser(const char* syntax) {

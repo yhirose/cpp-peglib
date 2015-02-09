@@ -112,46 +112,51 @@ Here are available user actions:
 
 `const std::vector<std::string>& n` holds names of child definitions that could be helpful when we want to check what are the actual child definitions.
 
-Make a parser with parser operators and simple actions
-------------------------------------------------------
+Make a parser with parser operators
+-----------------------------------
 
-Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser operators* and use the *simple action* method rather than the semantic action method. Here is an example:
+Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser operators*. Here is an example:
 
 ```c++
 using namespace peglib;
 using namespace std;
 
+vector<string> tags;
+
 Definition ROOT, TAG_NAME, _;
 ROOT     = seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME = oom(seq(npd(chr(']')), any()));
+TAG_NAME = oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
 _        = zom(cls(" \t"));
-
-vector<string> tags;
-TAG_NAME.match = [&](const char* s, size_t l) {
-    tags.push_back(string(s, l));
-};
 
 auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 ```
 
-In fact, the PEG parser generator is made with operators. You can see the code at `make_peg_grammar` function in `peglib.h`.
+It is also possible to specify a *string match action* with a *grp* operator. The string match action doesn't affect the resular semantic action behavior.
+
+```c++
+ROOT     = seq(_, zom(seq(chr('['), grp(TAG_NAME, [&](const char* s, size_t l) { tags.push_back(string(s, l)); }), chr(']'), _)));
+TAG_NAME = oom(seq(npd(chr(']')), any()));
+_        = zom(cls(" \t"));
+```
+
+In fact, the PEG parser generator is made with the parser operators. You can see the code at `make_peg_grammar` function in `peglib.h`.
 
 The following are available operators:
 
-| Description        | Operator |
-|:-------------------|:---------|
-| Sequence           | seq      |
-| Prioritized Choice | cho      |
-| Grouping           | grp      |
-| Zero or More       | zom      |
-| One or More        | oom      |
-| Optional           | opt      |
-| And predicate      | apd      |
-| Not predicate      | npd      |
-| Literal string     | lit      |
-| Character class    | cls      |
-| Character          | chr      |
-| Any character      | any      |
+| Operator | Description        |
+|:---------|:-------------------|
+| seq      | Sequence           |
+| cho      | Prioritized Choice |
+| grp      | Grouping           |
+| zom      | Zero or More       |
+| oom      | One or More        |
+| opt      | Optional           |
+| apd      | And predicate      |
+| npd      | Not predicate      |
+| lit      | Literal string     |
+| cls      | Character class    |
+| chr      | Character          |
+| any      | Any character      |
 
 Sample codes
 ------------

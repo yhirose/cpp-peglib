@@ -7,7 +7,7 @@
 
 #include <peglib.h>
 #include <iostream>
-#include <map>
+#include <cstdlib>
 
 using namespace peglib;
 using namespace std;
@@ -22,32 +22,16 @@ using namespace std;
 //      FACTOR_OPERATOR  <-  [/*]
 //      NUMBER           <-  [0-9]+
 //
-class Calculator
+int main(int argc, const char** argv)
 {
-public:
-    Calculator() {
-        EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
-        TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;
-        FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
-        TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t l) { return (char)*s; };
-        FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t l) { return (char)*s; };
-        NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    if (argc < 2 || string("--help") == argv[1]) {
+        cout << "usage: calc [formula]" << endl;
+        return 1;
     }
 
-    bool execute(const char* s, long& v) const {
-        Any val;
-        auto ret = EXPRESSION.parse(s, actions, val);
-        if (ret) {
-            v = val.get<long>();
-        }
-        return ret;
-    }
+    const char* s = argv[1];
 
-private:
-    Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
-    SemanticActions<Any> actions;
-
-    static long reduce(const vector<Any>& v) {
+    auto reduce = [](const vector<Any>& v) -> long {
         auto result = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -60,27 +44,22 @@ private:
             }
         }
         return result;
-    }
-};
+    };
 
-int main(int argc, const char** argv)
-{
-    if (argc < 2 || string("--help") == argv[1]) {
-        cout << "usage: calc [formula]" << endl;
-        return 1;
-    }
+    Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
-    const char* s = argv[1];
-
-    Calculator calc;
+    EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
+    TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;
+    FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
+    TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t l) { return (char)*s; };
+    FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t l) { return (char)*s; };
+    NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t l) { return atol(s); };
 
     long val = 0;
-    if (calc.execute(s, val)) {
+    if (EXPRESSION.parse(s, val)) {
         cout << s << " = " << val << endl;
         return 0;
     }
-
-    cout << "syntax error..." << endl;
 
     return -1;
 }

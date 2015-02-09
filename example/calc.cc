@@ -7,7 +7,7 @@
 
 #include <peglib.h>
 #include <iostream>
-#include <map>
+#include <cstdlib>
 
 using namespace peglib;
 using namespace std;
@@ -22,36 +22,16 @@ using namespace std;
 //      FACTOR_OPERATOR  <-  [/*]
 //      NUMBER           <-  [0-9]+
 //
-class Calculator
+int main(int argc, const char** argv)
 {
-public:
-    Calculator() {
-        const char* syntax =
-            "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
-            "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-            "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-            "  TERM_OPERATOR    <-  [-+]                              "
-            "  FACTOR_OPERATOR  <-  [/*]                              "
-            "  NUMBER           <-  [0-9]+                            "
-            ;
-
-        parser.load_syntax(syntax);
-
-        parser["EXPRESSION"]      = reduce;
-        parser["TERM"]            = reduce;
-        parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
-        parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
-        parser["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    if (argc < 2 || string("--help") == argv[1]) {
+        cout << "usage: calc [formula]" << endl;
+        return 1;
     }
 
-    bool execute(const char* s, long& v) const {
-        return parser.parse(s, v);
-    }
+    const char* s = argv[1];
 
-private:
-    Parser parser;
-
-    static long reduce(const vector<Any>& v) {
+    auto reduce = [](const vector<Any>& v) -> long {
         auto result = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -64,22 +44,27 @@ private:
             }
         }
         return result;
-    }
-};
+    };
 
-int main(int argc, const char** argv)
-{
-    if (argc < 2 || string("--help") == argv[1]) {
-        cout << "usage: calc [formula]" << endl;
-        return 1;
-    }
+    const char* syntax =
+        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
+        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
+        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
+        "  TERM_OPERATOR    <-  [-+]                              "
+        "  FACTOR_OPERATOR  <-  [/*]                              "
+        "  NUMBER           <-  [0-9]+                            "
+        ;
 
-    const char* s = argv[1];
+    Parser parser = make_parser(syntax);
 
-    Calculator calc;
+    parser["EXPRESSION"]      = reduce;
+    parser["TERM"]            = reduce;
+    parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
+    parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
+    parser["NUMBER"]          = [](const char* s, size_t l) { return atol(s); };
 
     long val = 0;
-    if (calc.execute(s, val)) {
+    if (parser.parse(s, val)) {
         cout << s << " = " << val << endl;
         return 0;
     }

@@ -7,7 +7,6 @@
 
 TEST_CASE("String capture test", "[general]")
 {
-    {
     auto parser = peglib::make_parser(
         "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
@@ -27,9 +26,6 @@ TEST_CASE("String capture test", "[general]")
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
     REQUIRE(tags[2] == "tag-3");
-    }
-
-    REQUIRE(peglib::VARINT_COUNT == 0);
 }
 
 using namespace peglib;
@@ -37,7 +33,6 @@ using namespace std;
 
 TEST_CASE("String capture test2", "[general]")
 {
-    {
     vector<string> tags;
 
     Definition ROOT, TAG, TAG_NAME, WS;
@@ -53,14 +48,10 @@ TEST_CASE("String capture test2", "[general]")
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
     REQUIRE(tags[2] == "tag-3");
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
 }
 
 TEST_CASE("String capture test with embedded match action", "[general]")
 {
-    {
     Definition ROOT, TAG, TAG_NAME, WS;
 
     vector<string> tags;
@@ -77,22 +68,15 @@ TEST_CASE("String capture test with embedded match action", "[general]")
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
     REQUIRE(tags[2] == "tag-3");
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
 }
 
 TEST_CASE("Cyclic grammer test", "[general]")
 {
-    {
     Definition PARENT;
     Definition CHILD;
 
     PARENT <= seq(CHILD);
     CHILD  <= seq(PARENT);
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
 }
 
 TEST_CASE("Lambda action test", "[general]")
@@ -113,7 +97,6 @@ TEST_CASE("Lambda action test", "[general]")
 
 TEST_CASE("Calculator test", "[general]")
 {
-    {
     // Construct grammer
     Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
@@ -139,120 +122,106 @@ TEST_CASE("Calculator test", "[general]")
         return ret;
     };
 
-    SemanticActions<Any> actions;
-    actions[EXPRESSION] = reduce;
-    actions[TERM] = reduce;
-    actions[TERM_OPERATOR] = [](const char* s, size_t l) { return *s; };
-    actions[FACTOR_OPERATOR] = [](const char* s, size_t l) { return *s; };
-    actions[NUMBER] = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    EXPRESSION.action      = reduce;
+    TERM.action            = reduce;
+    TERM_OPERATOR.action   = [](const char* s, size_t l) { return *s; };
+    FACTOR_OPERATOR.action = [](const char* s, size_t l) { return *s; };
+    NUMBER.action          = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
     // Parse
     Any val;
-    auto ret = EXPRESSION.parse("1+2*3*(4-5+6)/7-8", actions, val);
+    auto ret = EXPRESSION.parse("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(ret == true);
     REQUIRE(val.get<long>() == -3);
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
 }
 
 TEST_CASE("Calculator test2", "[general]")
 {
-    {
-        // Parse syntax
-        auto syntax =
-            "  # Grammar for Calculator...\n                          "
-            "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
-            "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-            "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-            "  TERM_OPERATOR    <-  [-+]                              "
-            "  FACTOR_OPERATOR  <-  [/*]                              "
-            "  NUMBER           <-  [0-9]+                            "
-            ;
+    // Parse syntax
+    auto syntax =
+        "  # Grammar for Calculator...\n                          "
+        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
+        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
+        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
+        "  TERM_OPERATOR    <-  [-+]                              "
+        "  FACTOR_OPERATOR  <-  [/*]                              "
+        "  NUMBER           <-  [0-9]+                            "
+        ;
 
-        string start;
-        auto grammar = make_grammar(syntax, start);
-        auto& g = *grammar;
+    string start;
+    auto grammar = make_grammar(syntax, start);
+    auto& g = *grammar;
 
-        // Setup actions
-        SemanticActions<Any> a;
-
-        auto reduce = [](const vector<Any>& v) -> long {
-            long ret = v[0].get<long>();
-            for (auto i = 1u; i < v.size(); i += 2) {
-                auto num = v[i + 1].get<long>();
-                switch (v[i].get<char>()) {
-                    case '+': ret += num; break;
-                    case '-': ret -= num; break;
-                    case '*': ret *= num; break;
-                    case '/': ret /= num; break;
-                }
+    // Setup actions
+    auto reduce = [](const vector<Any>& v) -> long {
+        long ret = v[0].get<long>();
+        for (auto i = 1u; i < v.size(); i += 2) {
+            auto num = v[i + 1].get<long>();
+            switch (v[i].get<char>()) {
+                case '+': ret += num; break;
+                case '-': ret -= num; break;
+                case '*': ret *= num; break;
+                case '/': ret /= num; break;
             }
-            return ret;
-        };
+        }
+        return ret;
+    };
 
-        a[g["EXPRESSION"]]      = reduce;
-        a[g["TERM"]]            = reduce;
-        a[g["TERM_OPERATOR"]]   = [](const char* s, size_t l) { return *s; };
-        a[g["FACTOR_OPERATOR"]] = [](const char* s, size_t l) { return *s; };
-        a[g["NUMBER"]]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    g["EXPRESSION"].action      = reduce;
+    g["TERM"].action            = reduce;
+    g["TERM_OPERATOR"].action   = [](const char* s, size_t l) { return *s; };
+    g["FACTOR_OPERATOR"].action = [](const char* s, size_t l) { return *s; };
+    g["NUMBER"].action          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
-        // Parse
-        Any val;
-        auto ret = g[start].parse("1+2*3*(4-5+6)/7-8", a, val);
+    // Parse
+    Any val;
+    auto ret = g[start].parse("1+2*3*(4-5+6)/7-8", val);
 
-        REQUIRE(ret == true);
-        REQUIRE(val.get<long>() == -3);
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
+    REQUIRE(ret == true);
+    REQUIRE(val.get<long>() == -3);
 }
 
 TEST_CASE("Calculator test3", "[general]")
 {
-    {
-        // Parse syntax
-        auto parser = make_parser(
-            "  # Grammar for Calculator...\n                          "
-            "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
-            "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-            "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-            "  TERM_OPERATOR    <-  [-+]                              "
-            "  FACTOR_OPERATOR  <-  [/*]                              "
-            "  NUMBER           <-  [0-9]+                            "
-            );
+    // Parse syntax
+    auto parser = make_parser(
+        "  # Grammar for Calculator...\n                          "
+        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
+        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
+        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
+        "  TERM_OPERATOR    <-  [-+]                              "
+        "  FACTOR_OPERATOR  <-  [/*]                              "
+        "  NUMBER           <-  [0-9]+                            "
+        );
 
-        auto reduce = [](const vector<Any>& v) -> long {
-            long ret = v[0].get<long>();
-            for (auto i = 1u; i < v.size(); i += 2) {
-                auto num = v[i + 1].get<long>();
-                switch (v[i].get<char>()) {
-                    case '+': ret += num; break;
-                    case '-': ret -= num; break;
-                    case '*': ret *= num; break;
-                    case '/': ret /= num; break;
-                }
+    auto reduce = [](const vector<Any>& v) -> long {
+        long ret = v[0].get<long>();
+        for (auto i = 1u; i < v.size(); i += 2) {
+            auto num = v[i + 1].get<long>();
+            switch (v[i].get<char>()) {
+                case '+': ret += num; break;
+                case '-': ret -= num; break;
+                case '*': ret *= num; break;
+                case '/': ret /= num; break;
             }
-            return ret;
-        };
+        }
+        return ret;
+    };
 
-        // Setup actions
-        parser["EXPRESSION"]      = reduce;
-        parser["TERM"]            = reduce;
-        parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
-        parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
-        parser["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    // Setup actions
+    parser["EXPRESSION"]      = reduce;
+    parser["TERM"]            = reduce;
+    parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
+    parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
+    parser["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
-        // Parse
-        long val;
-        auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
+    // Parse
+    long val;
+    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
 
-        REQUIRE(ret == true);
-        REQUIRE(val == -3);
-    }
-
-    REQUIRE(VARINT_COUNT == 0);
+    REQUIRE(ret == true);
+    REQUIRE(val == -3);
 }
 
 TEST_CASE("PEG Grammar", "[peg]")
