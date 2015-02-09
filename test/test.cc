@@ -35,21 +35,40 @@ TEST_CASE("String capture test", "[general]")
 using namespace peglib;
 using namespace std;
 
-TEST_CASE("String capture test with match", "[general]")
+TEST_CASE("String capture test2", "[general]")
+{
+    {
+    vector<string> tags;
+
+    Definition ROOT, TAG, TAG_NAME, WS;
+    ROOT     <= seq(WS, zom(TAG));
+    TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
+    TAG_NAME <= oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
+    WS       <= zom(cls(" \t"));
+
+    auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+
+    REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "tag1");
+    REQUIRE(tags[1] == "tag:2");
+    REQUIRE(tags[2] == "tag-3");
+    }
+
+    REQUIRE(VARINT_COUNT == 0);
+}
+
+TEST_CASE("String capture test with embedded match action", "[general]")
 {
     {
     Definition ROOT, TAG, TAG_NAME, WS;
 
-    ROOT     = seq(WS, zom(TAG));
-    TAG      = seq(chr('['), TAG_NAME, chr(']'), WS);
-    TAG_NAME = oom(seq(npd(chr(']')), any()));
-    WS       = zom(cls(" \t"));
-
     vector<string> tags;
 
-    TAG_NAME.match = [&](const char* s, size_t l) {
-        tags.push_back(string(s, l));
-    };
+    ROOT     <= seq(WS, zom(TAG));
+    TAG      <= seq(chr('['), grp(TAG_NAME, [&](const char* s, size_t l) { tags.push_back(string(s, l)); }), chr(']'), WS);
+    TAG_NAME <= oom(seq(npd(chr(']')), any()));
+    WS       <= zom(cls(" \t"));
 
     auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
@@ -69,8 +88,8 @@ TEST_CASE("Cyclic grammer test", "[general]")
     Definition PARENT;
     Definition CHILD;
 
-    PARENT = seq(CHILD);
-    CHILD  = seq(PARENT);
+    PARENT <= seq(CHILD);
+    CHILD  <= seq(PARENT);
     }
 
     REQUIRE(VARINT_COUNT == 0);
@@ -98,16 +117,14 @@ TEST_CASE("Calculator test", "[general]")
     // Construct grammer
     Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
-    EXPRESSION      = seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
-    TERM            = seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
-    FACTOR          = cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
-    TERM_OPERATOR   = cls("+-");
-    FACTOR_OPERATOR = cls("*/");
-    NUMBER          = oom(cls("0-9"));
+    EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
+    TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
+    FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
+    TERM_OPERATOR   <= cls("+-");
+    FACTOR_OPERATOR <= cls("*/");
+    NUMBER          <= oom(cls("0-9"));
 
     // Setup actions
-    SemanticActions<Any> actions;
-
     auto reduce = [](const vector<Any>& v) -> long {
         long ret = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
@@ -122,6 +139,7 @@ TEST_CASE("Calculator test", "[general]")
         return ret;
     };
 
+    SemanticActions<Any> actions;
     actions[EXPRESSION] = reduce;
     actions[TERM] = reduce;
     actions[TERM_OPERATOR] = [](const char* s, size_t l) { return *s; };
@@ -174,11 +192,11 @@ TEST_CASE("Calculator test2", "[general]")
             return ret;
         };
 
-        a[g["EXPRESSION"]] = reduce;
-        a[g["TERM"]] = reduce;
-        a[g["TERM_OPERATOR"]] = [](const char* s, size_t l) { return *s; };
+        a[g["EXPRESSION"]]      = reduce;
+        a[g["TERM"]]            = reduce;
+        a[g["TERM_OPERATOR"]]   = [](const char* s, size_t l) { return *s; };
         a[g["FACTOR_OPERATOR"]] = [](const char* s, size_t l) { return *s; };
-        a[g["NUMBER"]] = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+        a[g["NUMBER"]]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
         // Parse
         Any val;
@@ -336,15 +354,15 @@ TEST_CASE("PEG IdentStart", "[peg]")
     REQUIRE(g["IdentStart"].parse("0") == false);
 }
 
-TEST_CASE("PEG IdentCont", "[peg]")
+TEST_CASE("PEG IdentRest", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["IdentCont"].parse("_") == true);
-    REQUIRE(g["IdentCont"].parse("a") == true);
-    REQUIRE(g["IdentCont"].parse("Z") == true);
-    REQUIRE(g["IdentCont"].parse("") == false);
-    REQUIRE(g["IdentCont"].parse(" ") == false);
-    REQUIRE(g["IdentCont"].parse("0") == true);
+    REQUIRE(g["IdentRest"].parse("_") == true);
+    REQUIRE(g["IdentRest"].parse("a") == true);
+    REQUIRE(g["IdentRest"].parse("Z") == true);
+    REQUIRE(g["IdentRest"].parse("") == false);
+    REQUIRE(g["IdentRest"].parse(" ") == false);
+    REQUIRE(g["IdentRest"].parse("0") == true);
 }
 
 TEST_CASE("PEG Literal", "[peg]")

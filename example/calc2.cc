@@ -26,18 +26,12 @@ class Calculator
 {
 public:
     Calculator() {
-        EXPRESSION      = seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
-        TERM            = seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
-        FACTOR          = cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
-        TERM_OPERATOR   = cls("+-");
-        FACTOR_OPERATOR = cls("*/");
-        NUMBER          = oom(cls("0-9"));
-
-        actions[EXPRESSION]      = reduce;
-        actions[TERM]            = reduce;
-        actions[TERM_OPERATOR]   = [](const char* s, size_t l) { return (char)*s; };
-        actions[FACTOR_OPERATOR] = [](const char* s, size_t l) { return (char)*s; };
-        actions[NUMBER]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+        EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
+        TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;
+        FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
+        TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t l) { return (char)*s; };
+        FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t l) { return (char)*s; };
+        NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
     }
 
     bool execute(const char* s, long& v) const {

@@ -553,12 +553,14 @@ class Grouping
 {
 public:
     Grouping(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
+    Grouping(const std::shared_ptr<Rule>& rule, std::function<void(const char* s, size_t l)> match) : rule_(rule), match_(match) {}
 
     template <typename T>
     Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
-    std::shared_ptr<Rule> rule_;
+    std::shared_ptr<Rule>                        rule_;
+    std::function<void(const char* s, size_t l)> match_;
 };
 
 class NonTerminal
@@ -892,8 +894,9 @@ public:
         return static_cast<void*>(this);
     }
 
-    void operator=(const std::shared_ptr<Rule>& rule) {
+    Definition& operator<=(const std::shared_ptr<Rule>& rule) {
         set_rule(rule);
+        return *this;
     }
 
     template <typename T>
@@ -915,8 +918,21 @@ public:
         return parse(s, strlen(s), sa, val);
     }
 
+    template <typename T>
+    bool parse(const char* s, size_t l, T& val) const {
+        SemanticValues<Any> sv;
+        auto m = rule_->parse<Any>(s, l, nullptr, &sv);
+        return m.ret && m.len == l;
+    }
+
+    template <typename T>
+    bool parse(const char* s, T& val) const {
+        return parse(s, strlen(s), val);
+    }
+
     bool parse(const char* s, size_t l) const {
-        auto m = rule_->parse<int>(s, l, nullptr, nullptr);
+        SemanticValues<Any> sv;
+        auto m = rule_->parse<Any>(s, l, nullptr, &sv);
         return m.ret && m.len == l;
     }
 
@@ -927,6 +943,12 @@ public:
     std::string name;
 
     std::function<void (const char* s, size_t l)> match;
+
+    template <typename F>
+    void operator,(F fn) {
+        action = fn;
+    }
+    SemanticActionAdaptor<Any> action;
 
 private:
     friend class DefinitionReference;
@@ -1027,7 +1049,11 @@ Match NotPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa,
 template <typename T>
 Match Grouping::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     assert(rule_);
-    return rule_->parse<T>(s, l, sa, sv);
+    auto m = rule_->parse<T>(s, l, sa, sv);
+    if (m.ret && match_) {
+        match_(s, m.len);
+    }
+    return m;
 }
 
 template <typename T>
@@ -1047,17 +1073,19 @@ Match NonTerminal::parse(const char* s, size_t l, const SemanticActions<T>* sa, 
             outer_->match(s, m.len);
         }
 
-        typedef std::function<T (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Action;
-        Action action;
-
-        if (sa) {
-            auto it = sa->find(outer_);
-            if (it != sa->end()) {
-                action = it->second;
-            }
-        }
-
         if (sv) {
+            typedef std::function<T (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Action;
+            Action action;
+
+            if (outer_->action) {
+                action = outer_->action;
+            } else if (sa) {
+                auto it = sa->find(outer_);
+                if (it != sa->end()) {
+                    action = it->second;
+                }
+            }
+
             sv->names.push_back(outer_->name);
             auto val = reduce<T>(s, m.len, chldsv->values, chldsv->names, action);
             sv->values.push_back(val);
@@ -1160,6 +1188,10 @@ inline std::shared_ptr<Rule> grp(const std::shared_ptr<Rule>& rule) {
     return std::make_shared<Rule>(Grouping(rule));
 }
 
+inline std::shared_ptr<Rule> grp(const std::shared_ptr<Rule>& rule, std::function<void (const char* s, size_t l)> match) {
+    return std::make_shared<Rule>(Grouping(rule, match));
+}
+
 inline std::shared_ptr<Rule> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
     return std::make_shared<Rule>(DefinitionReference(grammar, name));
 }
@@ -1175,52 +1207,52 @@ Grammar make_peg_grammar()
     Grammar g;
 
     // Setup PEG syntax parser
-    g["Grammar"]    = seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-    g["Definition"] = seq(g["Identifier"], g["LEFTARROW"], g["Expression"]);
+    g["Grammar"]    <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
+    g["Definition"] <= seq(g["Identifier"], g["LEFTARROW"], g["Expression"]);
 
-    g["Expression"] = seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
-    g["Sequence"]   = zom(g["Prefix"]);
-    g["Prefix"]     = seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
-    g["Suffix"]     = seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
-    g["Primary"]    = cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
-                          seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                          g["Literal"], g["Class"], g["DOT"]);
+    g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
+    g["Sequence"]   <= zom(g["Prefix"]);
+    g["Prefix"]     <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
+    g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
+    g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
+                           seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+                           g["Literal"], g["Class"], g["DOT"]);
 
-    g["Identifier"] = seq(g["IdentifierContent"], g["Spacing"]);
-    g["IdentifierContent"] = seq(g["IdentStart"], zom(g["IdentCont"]));
-    g["IdentStart"] = cls("a-zA-Z_");
-    g["IdentCont"]  = cho(g["IdentStart"], cls("0-9"));
+    g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
+    g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
+    g["IdentStart"] <= cls("a-zA-Z_");
+    g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
-    g["Literal"]    = cho(seq(cls("'"), g["SingleQuotesContent"], cls("'"), g["Spacing"]),
-                          seq(cls("\""), g["DoubleQuotesContent"], cls("\""), g["Spacing"]));
-    g["SingleQuotesContent"] = zom(seq(npd(cls("'")), g["Char"]));
-    g["DoubleQuotesContent"] = zom(seq(npd(cls("\"")), g["Char"]));
+    g["Literal"]    <= cho(seq(cls("'"), g["SQCont"], cls("'"), g["Spacing"]),
+                           seq(cls("\""), g["DQCont"], cls("\""), g["Spacing"]));
+    g["SQCont"]     <= zom(seq(npd(cls("'")), g["Char"]));
+    g["DQCont"]     <= zom(seq(npd(cls("\"")), g["Char"]));
 
-    g["Class"]      = seq(chr('['), g["ClassContent"], chr(']'), g["Spacing"]);
-    g["ClassContent"] = zom(seq(npd(chr(']')), g["Range"]));
+    g["Class"]      <= seq(chr('['), g["ClassCont"], chr(']'), g["Spacing"]);
+    g["ClassCont"]  <= zom(seq(npd(chr(']')), g["Range"]));
 
-    g["Range"]      = cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-    g["Char"]       = cho(seq(chr('\\'), cls("nrt'\"[]\\")),
-                          seq(chr('\\'), cls("0-2"), cls("0-7"), cls("0-7")),
-                          seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
-                          seq(npd(chr('\\')), any()));
+    g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
+    g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
+                           seq(chr('\\'), cls("0-2"), cls("0-7"), cls("0-7")),
+                           seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
+                           seq(npd(chr('\\')), any()));
 
-    g["LEFTARROW"]  = seq(lit("<-"), g["Spacing"]);
-    g["SLASH"]      = seq(chr('/'), g["Spacing"]);
-    g["AND"]        = seq(chr('&'), g["Spacing"]);
-    g["NOT"]        = seq(chr('!'), g["Spacing"]);
-    g["QUESTION"]   = seq(chr('?'), g["Spacing"]);
-    g["STAR"]       = seq(chr('*'), g["Spacing"]);
-    g["PLUS"]       = seq(chr('+'), g["Spacing"]);
-    g["OPEN"]       = seq(chr('('), g["Spacing"]);
-    g["CLOSE"]      = seq(chr(')'), g["Spacing"]);
-    g["DOT"]        = seq(chr('.'), g["Spacing"]);
+    g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+    g["SLASH"]      <= seq(chr('/'), g["Spacing"]);
+    g["AND"]        <= seq(chr('&'), g["Spacing"]);
+    g["NOT"]        <= seq(chr('!'), g["Spacing"]);
+    g["QUESTION"]   <= seq(chr('?'), g["Spacing"]);
+    g["STAR"]       <= seq(chr('*'), g["Spacing"]);
+    g["PLUS"]       <= seq(chr('+'), g["Spacing"]);
+    g["OPEN"]       <= seq(chr('('), g["Spacing"]);
+    g["CLOSE"]      <= seq(chr(')'), g["Spacing"]);
+    g["DOT"]        <= seq(chr('.'), g["Spacing"]);
 
-    g["Spacing"]    = zom(cho(g["Space"], g["Comment"]));
-    g["Comment"]    = seq(chr('#'), zom(seq(npd(g["EndOfLine"]), any())), g["EndOfLine"]);
-    g["Space"]      = cho(chr(' '), chr('\t'), g["EndOfLine"]);
-    g["EndOfLine"]  = cho(lit("\r\n"), chr('\n'), chr('\r'));
-    g["EndOfFile"]  = npd(any());
+    g["Spacing"]    <= zom(cho(g["Space"], g["Comment"]));
+    g["Comment"]    <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), any())), g["EndOfLine"]);
+    g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
+    g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
+    g["EndOfFile"]  <= npd(any());
 
     // Set definition names
     for (auto& x: g) {
@@ -1244,7 +1276,7 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
 
     sa[peg["Definition"]] = [&](const std::vector<Any>& v) {
         const auto& name = v[0].get<std::string>();
-        (*grammar)[name] = v[2].get<std::shared_ptr<Rule>>();
+        (*grammar)[name] <= v[2].get<std::shared_ptr<Rule>>();
         (*grammar)[name].name = name;
 
         if (start.empty()) {
@@ -1315,24 +1347,24 @@ std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
         }
     };
 
-    sa[peg["IdentifierContent"]] = [](const char*s, size_t l) {
+    sa[peg["IdentCont"]] = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
     sa[peg["Literal"]] = [](const std::vector<Any>& v) {
         return lit(v[0].get<std::string>().c_str());
     };
-    sa[peg["SingleQuotesContent"]] = [](const char*s, size_t l) {
+    sa[peg["SQCont"]] = [](const char*s, size_t l) {
         return std::string(s, l);
     };
-    sa[peg["DoubleQuotesContent"]] = [](const char*s, size_t l) {
+    sa[peg["DQCont"]] = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
     sa[peg["Class"]] = [](const std::vector<Any>& v) {
         return cls(v[0].get<std::string>().c_str());
     };
-    sa[peg["ClassContent"]] = [](const char*s, size_t l) {
+    sa[peg["ClassCont"]] = [](const char*s, size_t l) {
         return std::string(s, l);
     };
 
