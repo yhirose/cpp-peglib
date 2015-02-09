@@ -325,7 +325,7 @@ template <typename T>
 struct SemanticActions;
 
 template <typename T>
-struct SemanticStack;
+struct SemanticValues;
 
 /*
  * Match
@@ -373,7 +373,7 @@ public:
     Sequence(std::vector<std::shared_ptr<Rule>>&& rules) : rules_(std::move(rules)) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::vector<std::shared_ptr<Rule>> rules_;
@@ -402,7 +402,7 @@ public:
     PrioritizedChoice(std::vector<std::shared_ptr<Rule>>&& rules) : rules_(std::move(rules)) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::vector<std::shared_ptr<Rule>> rules_;
@@ -414,7 +414,7 @@ public:
     ZeroOrMore(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -426,7 +426,7 @@ public:
     OneOrMore(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -438,7 +438,7 @@ public:
     Option(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -450,7 +450,7 @@ public:
     AndPredicate(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -462,7 +462,7 @@ public:
     NotPredicate(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -474,7 +474,7 @@ public:
     LiteralString(const char* s) : lit_(s) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
@@ -494,7 +494,7 @@ public:
     CharacterClass(const char* chars) : chars_(chars) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
         if (l < 1) {
             return fail();
         }
@@ -526,7 +526,7 @@ public:
     Character(char ch) : ch_(ch) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
         if (l < 1 || s[0] != ch_) {
             return fail();
         }
@@ -541,7 +541,7 @@ class AnyCharacter
 {
 public:
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
         if (l < 1) {
             return fail();
         }
@@ -555,7 +555,7 @@ public:
     Grouping(const std::shared_ptr<Rule>& rule) : rule_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::shared_ptr<Rule> rule_;
@@ -567,13 +567,10 @@ public:
     NonTerminal(Definition* outer) : outer_(outer) {};
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     friend class Definition;
-
-    template<typename T, typename Action>
-    void reduce(SemanticStack<T>& ss, const char* s, size_t l, Action action) const;
 
     template<typename T, typename Action>
     T reduce(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n, Action action) const;
@@ -591,7 +588,7 @@ public:
         , name_(name) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     const std::map<std::string, Definition>& grammar_;
@@ -604,7 +601,7 @@ public:
     WeakHolder(const std::shared_ptr<Rule>& rule) : weak_(rule) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const;
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const;
 
 private:
     std::weak_ptr<Rule> weak_;
@@ -624,23 +621,23 @@ public:
     TRule(T&& val) : vt(std::move(val)) {}
 
     template <typename T>
-    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+    Match parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
         switch (vt.type_index) {
-            case 0: return vt.template get<Sequence>().template parse<T>(s, l, sa, ss);
-            case 1: return vt.template get<PrioritizedChoice>().template parse<T>(s, l, sa, ss);
-            case 2: return vt.template get<ZeroOrMore>().template parse<T>(s, l, sa, ss);
-            case 3: return vt.template get<OneOrMore>().template parse<T>(s, l, sa, ss);
-            case 4: return vt.template get<Option>().template parse<T>(s, l, sa, ss);
-            case 5: return vt.template get<AndPredicate>().template parse<T>(s, l, sa, ss);
-            case 6: return vt.template get<NotPredicate>().template parse<T>(s, l, sa, ss);
-            case 7: return vt.template get<LiteralString>().template parse<T>(s, l, sa, ss);
-            case 8: return vt.template get<CharacterClass>().template parse<T>(s, l, sa, ss);
-            case 9: return vt.template get<Character>().template parse<T>(s, l, sa, ss);
-            case 10: return vt.template get<AnyCharacter>().template parse<T>(s, l, sa, ss);
-            case 11: return vt.template get<Grouping>().template parse<T>(s, l, sa, ss);
-            case 12: return vt.template get<NonTerminal>().template parse<T>(s, l, sa, ss);
-            case 13: return vt.template get<DefinitionReference>().template parse<T>(s, l, sa, ss);
-            case 14: return vt.template get<WeakHolder>().template parse<T>(s, l, sa, ss);
+            case 0: return vt.template get<Sequence>().template parse<T>(s, l, sa, sv);
+            case 1: return vt.template get<PrioritizedChoice>().template parse<T>(s, l, sa, sv);
+            case 2: return vt.template get<ZeroOrMore>().template parse<T>(s, l, sa, sv);
+            case 3: return vt.template get<OneOrMore>().template parse<T>(s, l, sa, sv);
+            case 4: return vt.template get<Option>().template parse<T>(s, l, sa, sv);
+            case 5: return vt.template get<AndPredicate>().template parse<T>(s, l, sa, sv);
+            case 6: return vt.template get<NotPredicate>().template parse<T>(s, l, sa, sv);
+            case 7: return vt.template get<LiteralString>().template parse<T>(s, l, sa, sv);
+            case 8: return vt.template get<CharacterClass>().template parse<T>(s, l, sa, sv);
+            case 9: return vt.template get<Character>().template parse<T>(s, l, sa, sv);
+            case 10: return vt.template get<AnyCharacter>().template parse<T>(s, l, sa, sv);
+            case 11: return vt.template get<Grouping>().template parse<T>(s, l, sa, sv);
+            case 12: return vt.template get<NonTerminal>().template parse<T>(s, l, sa, sv);
+            case 13: return vt.template get<DefinitionReference>().template parse<T>(s, l, sa, sv);
+            case 14: return vt.template get<WeakHolder>().template parse<T>(s, l, sa, sv);
         }
 
         throw std::logic_error("couldn't find the internal data in the variant...");
@@ -849,11 +846,10 @@ struct SemanticActions : public std::map<void*, SemanticActionAdaptor<T>>
 };
 
 template <typename T>
-struct SemanticStack
+struct SemanticValues
 {
-    SemanticStack() : values(1), names(1) {}
-    std::vector<std::vector<std::string>> names;
-    std::vector<std::vector<T>> values;
+    std::vector<std::string> names;
+    std::vector<T>           values;
 };
 
 /*
@@ -902,13 +898,13 @@ public:
 
     template <typename T>
     bool parse(const char* s, size_t l, const SemanticActions<T>& sa, T& val) const {
-        SemanticStack<T> ss;
+        SemanticValues<T> sv;
 
-        auto m = rule_->parse<T>(s, l, &sa, &ss);
+        auto m = rule_->parse<T>(s, l, &sa, &sv);
         auto ret = m.ret && m.len == l;
 
-        if (ret && !ss.values.empty() && !ss.values[0].empty()) {
-            val = ss.values[0][0];
+        if (ret && !sv.values.empty()) {
+            val = sv.values[0];
         }
 
         return ret;
@@ -949,10 +945,10 @@ private:
  * Implementation
  */
 template <typename T>
-Match Sequence::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match Sequence::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     size_t i = 0;
     for (const auto& rule : rules_) {
-        auto m = rule->parse<T>(s + i, l - i, sa, ss);
+        auto m = rule->parse<T>(s + i, l - i, sa, sv);
         if (!m.ret) {
             return fail();
         }
@@ -962,9 +958,9 @@ Match Sequence::parse(const char* s, size_t l, const SemanticActions<T>* sa, Sem
 }
 
 template <typename T>
-Match PrioritizedChoice::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match PrioritizedChoice::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     for (const auto& rule : rules_) {
-        auto m = rule->parse<T>(s, l, sa, ss);
+        auto m = rule->parse<T>(s, l, sa, sv);
         if (m.ret) {
             return success(m.len);
         }
@@ -973,10 +969,10 @@ Match PrioritizedChoice::parse(const char* s, size_t l, const SemanticActions<T>
 }
 
 template <typename T>
-Match ZeroOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match ZeroOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     auto i = 0;
     while (l - i > 0) {
-        auto m = rule_->parse<T>(s + i, l - i, sa, ss);
+        auto m = rule_->parse<T>(s + i, l - i, sa, sv);
         if (!m.ret) {
             break;
         }
@@ -986,14 +982,14 @@ Match ZeroOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, S
 }
 
 template <typename T>
-Match OneOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
-    auto m = rule_->parse<T>(s, l, sa, ss);
+Match OneOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    auto m = rule_->parse<T>(s, l, sa, sv);
     if (!m.ret) {
         return fail();
     }
     auto i = m.len;
     while (l - i > 0) {
-        auto m = rule_->parse<T>(s + i, l - i, sa, ss);
+        auto m = rule_->parse<T>(s + i, l - i, sa, sv);
         if (!m.ret) {
             break;
         }
@@ -1003,14 +999,14 @@ Match OneOrMore::parse(const char* s, size_t l, const SemanticActions<T>* sa, Se
 }
 
 template <typename T>
-Match Option::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
-    auto m = rule_->parse<T>(s, l, sa, ss);
+Match Option::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    auto m = rule_->parse<T>(s, l, sa, sv);
     return success(m.ret ? m.len : 0);
 }
 
 template <typename T>
-Match AndPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
-    auto m = rule_->parse<T>(s, l, sa, ss);
+Match AndPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    auto m = rule_->parse<T>(s, l, sa, sv);
     if (m.ret) {
         return success(0);
     } else {
@@ -1019,8 +1015,8 @@ Match AndPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa,
 }
 
 template <typename T>
-Match NotPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
-    auto m = rule_->parse<T>(s, l, sa, ss);
+Match NotPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
+    auto m = rule_->parse<T>(s, l, sa, sv);
     if (m.ret) {
         return fail();
     } else {
@@ -1029,29 +1025,29 @@ Match NotPredicate::parse(const char* s, size_t l, const SemanticActions<T>* sa,
 }
 
 template <typename T>
-Match Grouping::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match Grouping::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     assert(rule_);
-    return rule_->parse<T>(s, l, sa, ss);
+    return rule_->parse<T>(s, l, sa, sv);
 }
 
 template <typename T>
-Match NonTerminal::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match NonTerminal::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     if (!rule_) {
         throw std::logic_error("Uninitialized definition rule was used...");
     }
 
-    if (ss) {
-        ss->values.push_back(std::vector<T>());
-        ss->names.push_back(std::vector<std::string>());
+    std::unique_ptr<SemanticValues<T>> chldsv;
+    if (sv) {
+        chldsv.reset(new SemanticValues<T>());
     }
 
-    auto m = rule_->parse<T>(s, l, sa, ss);
+    auto m = rule_->parse<T>(s, l, sa, chldsv.get());
     if (m.ret) {
         if (outer_->match) {
             outer_->match(s, m.len);
         }
 
-        typedef std::function<T(const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Action;
+        typedef std::function<T (const char* s, size_t l, const std::vector<T>& v, const std::vector<std::string>& n)> Action;
         Action action;
 
         if (sa) {
@@ -1061,23 +1057,14 @@ Match NonTerminal::parse(const char* s, size_t l, const SemanticActions<T>* sa, 
             }
         }
 
-        if (ss) {
-            reduce<T>(*ss, s, m.len, action);
+        if (sv) {
+            sv->names.push_back(outer_->name);
+            auto val = reduce<T>(s, m.len, chldsv->values, chldsv->names, action);
+            sv->values.push_back(val);
         }
     }
 
-    if (ss) {
-        ss->names.pop_back();
-        ss->values.pop_back();
-    }
-
     return m;
-}
-
-template<typename T, typename Action>
-void NonTerminal::reduce(SemanticStack<T>& ss, const char* s, size_t l, Action action) const {
-    ss.names[ss.names.size() - 2].push_back(outer_->name);
-    ss.values[ss.values.size() - 2].push_back(reduce<T>(s, l, ss.values.back(), ss.names.back(), action));
 }
 
 template<typename T, typename Action>
@@ -1092,16 +1079,16 @@ T NonTerminal::reduce(const char* s, size_t l, const std::vector<T>& v, const st
 }
 
 template <typename T>
-Match WeakHolder::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match WeakHolder::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     auto rule = weak_.lock();
     assert(rule);
-    return rule->parse<T>(s, l, sa, ss);
+    return rule->parse<T>(s, l, sa, sv);
 }
 
 template <typename T>
-Match DefinitionReference::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticStack<T>* ss) const {
+Match DefinitionReference::parse(const char* s, size_t l, const SemanticActions<T>* sa, SemanticValues<T>* sv) const {
     auto rule = grammar_.at(name_).rule_;
-    return rule->parse<T>(s, l, sa, ss);
+    return rule->parse<T>(s, l, sa, sv);
 }
 
 /*
