@@ -8,19 +8,11 @@
 TEST_CASE("String capture test", "[general]")
 {
     {
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
     auto parser = peglib::make_parser(
         "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   "
     );
-#else
-    auto parser = peglib::make_parser(R"(
-        ROOT      <-  _ ('[' TAG_NAME ']' _)*
-        TAG_NAME  <-  (!']' .)+
-        _         <-  [ \t]*
-    )");
-#endif
 
     std::vector<std::string> tags;
 
@@ -203,7 +195,6 @@ TEST_CASE("Calculator test3", "[general]")
 {
     {
         // Parse syntax
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
         auto parser = make_parser(
             "  # Grammar for Calculator...\n                          "
             "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
@@ -213,17 +204,6 @@ TEST_CASE("Calculator test3", "[general]")
             "  FACTOR_OPERATOR  <-  [/*]                              "
             "  NUMBER           <-  [0-9]+                            "
             );
-#else
-        auto parser = make_parser(R"(
-            # Grammar for Calculator...
-            EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
-            TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-            FACTOR           <-  NUMBER / '(' EXPRESSION ')'
-            TERM_OPERATOR    <-  [-+]
-            FACTOR_OPERATOR  <-  [/*]
-            NUMBER           <-  [0-9]+
-        )");
-#endif
 
         auto reduce = [](const vector<Any>& v) -> long {
             long ret = v[0].get<long>();
