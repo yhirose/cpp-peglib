@@ -67,6 +67,10 @@ public:
         delete content_;
     }
 
+    bool is_undefined() const {
+        return content_ == nullptr;
+    }
+
     template <typename T>
     T& get() {
         assert(content_);
