@@ -245,10 +245,15 @@ public:
     PrioritizedChoice(std::vector<std::shared_ptr<Rule>>&& rules) : rules_(std::move(rules)) {}
 
     Match parse(const char* s, size_t l, SemanticValues& sv) const {
+        auto sz = sv.values.size();
         for (const auto& rule : rules_) {
             auto m = rule->parse(s, l, sv);
             if (m.ret) {
                 return success(m.len);
+            }
+            while (sv.values.size() > sz) {
+                sv.values.pop_back();
+                sv.names.pop_back();
             }
         }
         return fail();

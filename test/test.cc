@@ -5,6 +5,11 @@
 #include <peglib.h>
 #include <iostream>
 
+TEST_CASE("Empty syntax test", "[general]")
+{
+    REQUIRE_THROWS(peglib::make_parser(""));
+}
+
 TEST_CASE("String capture test", "[general]")
 {
     auto parser = peglib::make_parser(
@@ -93,6 +98,35 @@ TEST_CASE("Lambda action test", "[general]")
     bool ret = parser.parse("hello");
     REQUIRE(ret == true);
     REQUIRE(ss == "hello");
+}
+
+TEST_CASE("Simple calculator test", "[general]")
+{
+    auto syntax =
+        " Additive  <- Multitive '+' Additive / Multitive "
+        " Multitive <- Primary '*' Multitive / Primary "
+        " Primary   <- '(' Additive ')' / Number "
+        " Number    <- [0-9]+ ";
+
+    auto parser = make_parser(syntax);
+
+    parser["Additive"] = [](const vector<Any>& v) {
+        return v.size() == 1 ? v[0] : v[0].get<int>() + v[1].get<int>();
+    };
+    parser["Multitive"] = [](const vector<Any>& v) {
+        return v.size() == 1 ? v[0] : v[0].get<int>() * v[1].get<int>();
+    };
+    parser["Primary"] = [](const vector<Any>& v) {
+        return v.size() == 1 ? v[0] : v[1];        
+    };
+    parser["Number"] = [](const char* s, size_t l) {
+        return atoi(s);
+    };
+
+    int val;
+    parser.parse("1+2*3", val);
+
+    REQUIRE(val == 7);
 }
 
 TEST_CASE("Calculator test", "[general]")
