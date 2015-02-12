@@ -3,14 +3,14 @@ cpp-peglib
 
 C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library.
 
-*cpp-peglib* tries to provide more expressive parsing experience than common regular expression libraries such as std::regex. It also keeps it in mind that users can easily start using it.
+*cpp-peglib* tries to provide more expressive parsing experience than common regular expression libraries such as std::regex. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
 
-The PEG syntax that *cpp-peglib* understands is described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf).
+The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf).
 
 How to use
 ----------
 
-What if we want to extract only tag names in brackets from ` [tag1] [tag2] [tag3] [tag4]... `? It's a bit hard to do it with `std::regex`. We have to write a loop logic, since it doesn't support [Repeated Captures](http://www.boost.org/doc/libs/1_57_0/libs/regex/doc/html/boost_regex/captures.html#boost_regex.captures.repeated_captures). PEG can handle it pretty easily.
+What if we want to extract only tag names in brackets from ` [tag1] [tag2] [tag3] [tag4]... `? It's a bit hard to do it with *std::regex*, since it doesn't support [Repeated Captures](http://www.boost.org/doc/libs/1_57_0/libs/regex/doc/html/boost_regex/captures.html#boost_regex.captures.repeated_captures). PEG can, however, handle the repetition pretty easily.
 
 PEG grammar for this task could be like this:
 
@@ -20,7 +20,7 @@ TAG_NAME  <-  (!']' .)+
 _         <-  [ \t]*
 ```
 
-Here is how to parse text with the PEG syntax and retreive tag names:
+Here is how to parse text with the PEG syntax and retrieve tag names:
 
 
 ```c++
@@ -131,14 +131,6 @@ _        = zom(cls(" \t"));
 auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 ```
 
-It is also possible to specify a *string match action* with a *grp* operator. The string match action doesn't affect the resular semantic action behavior.
-
-```c++
-ROOT     = seq(_, zom(seq(chr('['), grp(TAG_NAME, [&](const char* s, size_t l) { tags.push_back(string(s, l)); }), chr(']'), _)));
-TAG_NAME = oom(seq(npd(chr(']')), any()));
-_        = zom(cls(" \t"));
-```
-
 In fact, the PEG parser generator is made with the parser operators. You can see the code at `make_peg_grammar` function in `peglib.h`.
 
 The following are available operators:
@@ -182,6 +174,7 @@ Other C++ PEG parser libraries
 
 Thanks to the authors of the libraries that inspired *cpp-peglib*.
 
+ * [Boost Spirit X3](https://github.com/djowel/spirit_x3) - A set of C++ libraries for parsing and output generation implemented as Domain Specific Embedded Languages (DSEL) using Expression templates and Template Meta-Programming
  * [PEGTL](https://github.com/ColinH/PEGTL) - Parsing Expression Grammar Template Library
  * [lars::Parser](https://github.com/TheLartians/Parser) - A header-only linear-time c++ parsing expression grammar (PEG) parser generator supporting left-recursion and grammar ambiguity
 

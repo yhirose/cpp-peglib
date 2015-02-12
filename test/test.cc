@@ -40,7 +40,7 @@ TEST_CASE("String capture test2", "[general]")
 {
     vector<string> tags;
 
-    Definition ROOT, TAG, TAG_NAME, WS;
+    rule ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
     TAG_NAME <= oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
@@ -57,7 +57,7 @@ TEST_CASE("String capture test2", "[general]")
 
 TEST_CASE("String capture test with embedded match action", "[general]")
 {
-    Definition ROOT, TAG, TAG_NAME, WS;
+    rule ROOT, TAG, TAG_NAME, WS;
 
     vector<string> tags;
 
@@ -77,8 +77,8 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
 TEST_CASE("Cyclic grammer test", "[general]")
 {
-    Definition PARENT;
-    Definition CHILD;
+    rule PARENT;
+    rule CHILD;
 
     PARENT <= seq(CHILD);
     CHILD  <= seq(PARENT);
@@ -100,6 +100,25 @@ TEST_CASE("Lambda action test", "[general]")
     REQUIRE(ss == "hello");
 }
 
+TEST_CASE("Backtracking test", "[general]")
+{
+    auto parser = make_parser(
+       "  START <- PAT1 / PAT2  "
+       "  PAT1  <- HELLO ' One' "
+       "  PAT2  <- HELLO ' Two' "
+       "  HELLO <- 'Hello'      "
+    );
+
+    size_t count = 0;
+    parser["HELLO"] = [&](const char* s, size_t l) {
+        count++;
+    };
+
+    bool ret = parser.parse("Hello Two");
+    REQUIRE(ret == true);
+    REQUIRE(count == 2);
+}
+
 TEST_CASE("Simple calculator test", "[general]")
 {
     auto syntax =
@@ -110,15 +129,23 @@ TEST_CASE("Simple calculator test", "[general]")
 
     auto parser = make_parser(syntax);
 
-    parser["Additive"] = [](const vector<Any>& v) {
-        return v.size() == 1 ? v[0] : v[0].get<int>() + v[1].get<int>();
+    parser["Additive"] = {
+        // Default action
+        []() {},
+        // Action for the first choice
+        [](const vector<Any>& v) { return v[0].get<int>() + v[1].get<int>(); },
+        // Action for the second choice
+        [](const vector<Any>& v) { return v[0]; }
     };
+
     parser["Multitive"] = [](const vector<Any>& v) {
         return v.size() == 1 ? v[0] : v[0].get<int>() * v[1].get<int>();
     };
+
     parser["Primary"] = [](const vector<Any>& v) {
-        return v.size() == 1 ? v[0] : v[1];        
+        return v.size() == 1 ? v[0] : v[1];
     };
+
     parser["Number"] = [](const char* s, size_t l) {
         return atoi(s);
     };
@@ -132,7 +159,7 @@ TEST_CASE("Simple calculator test", "[general]")
 TEST_CASE("Calculator test", "[general]")
 {
     // Construct grammer
-    Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
+    rule EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
     EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
     TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
@@ -156,11 +183,11 @@ TEST_CASE("Calculator test", "[general]")
         return ret;
     };
 
-    EXPRESSION.action      = reduce;
-    TERM.action            = reduce;
-    TERM_OPERATOR.action   = [](const char* s, size_t l) { return *s; };
-    FACTOR_OPERATOR.action = [](const char* s, size_t l) { return *s; };
-    NUMBER.action          = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    EXPRESSION      = reduce;
+    TERM            = reduce;
+    TERM_OPERATOR   = [](const char* s, size_t l) { return *s; };
+    FACTOR_OPERATOR = [](const char* s, size_t l) { return *s; };
+    NUMBER          = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
     // Parse
     Any val;
@@ -202,11 +229,11 @@ TEST_CASE("Calculator test2", "[general]")
         return ret;
     };
 
-    g["EXPRESSION"].action      = reduce;
-    g["TERM"].action            = reduce;
-    g["TERM_OPERATOR"].action   = [](const char* s, size_t l) { return *s; };
-    g["FACTOR_OPERATOR"].action = [](const char* s, size_t l) { return *s; };
-    g["NUMBER"].action          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    g["EXPRESSION"]      = reduce;
+    g["TERM"]            = reduce;
+    g["TERM_OPERATOR"]   = [](const char* s, size_t l) { return *s; };
+    g["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return *s; };
+    g["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
     // Parse
     Any val;
