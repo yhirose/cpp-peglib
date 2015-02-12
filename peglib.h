@@ -115,15 +115,24 @@ public:
         return *this;
     }
 
-    operator const std::string&() const {
-        return get<std::string>();
-    }
-
-    operator std::string&() {
-        return get<std::string>();
-    }
-
     // TODO: Add more implecit cast operators
+    operator bool() const { return get<bool>(); }
+    operator char() const { return get<char>(); }
+    operator wchar_t() const { return get<wchar_t>(); }
+    operator char16_t() const { return get<char16_t>(); }
+    operator char32_t() const { return get<char32_t>(); }
+    operator unsigned char() const { return get<unsigned char>(); }
+    operator int() const { return get<int>(); }
+    operator unsigned int() const { return get<unsigned int>(); }
+    operator short() const { return get<short>(); }
+    operator unsigned short() const { return get<unsigned short>(); }
+    operator long() const { return get<long>(); }
+    operator unsigned long() const { return get<unsigned long>(); }
+    operator long long() const { return get<long long>(); }
+    operator unsigned long long() const { return get<unsigned long long>(); }
+    operator float() const { return get<float>(); }
+    operator double() const { return get<double>(); }
+    operator const std::string&() const { return get<std::string>(); }
 
 private:
     struct placeholder {
@@ -189,13 +198,16 @@ public:
 
     //Action(Action&& rhs) : fn_(std::move(rhs.fn_)) {}
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_null_pointer<F>::value>::type*& = enabler>
     Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
 
     template <typename F, typename std::enable_if<std::is_pointer<F>::value>::type*& = enabler>
     Action(F fn) : fn_(make_adaptor(fn, fn)) {}
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<std::is_null_pointer<F>::value>::type*& = enabler>
+    Action(F fn) {}
+
+    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_null_pointer<F>::value>::type*& = enabler>
     void operator=(F fn) {
         fn_ = make_adaptor(fn, &F::operator());
     }
@@ -204,6 +216,9 @@ public:
     void operator=(F fn) {
         fn_ = make_adaptor(fn, fn);
     }
+
+    template <typename F, typename std::enable_if<std::is_null_pointer<F>::value>::type*& = enabler>
+    void operator=(F fn) {}
 
     operator bool() const {
         return (bool)fn_;

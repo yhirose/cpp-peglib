@@ -131,7 +131,7 @@ TEST_CASE("Simple calculator test", "[general]")
 
     parser["Additive"] = {
         // Default action
-        []() {},
+        nullptr,
         // Action for the first choice
         [](const vector<Any>& v) { return v[0].get<int>() + v[1].get<int>(); },
         // Action for the second choice
@@ -139,7 +139,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     parser["Multitive"] = [](const vector<Any>& v) {
-        return v.size() == 1 ? v[0] : v[0].get<int>() * v[1].get<int>();
+        return v.size() == 1 ? int(v[0]) : v[0].get<int>() * v[1].get<int>();
     };
 
     parser["Primary"] = [](const vector<Any>& v) {

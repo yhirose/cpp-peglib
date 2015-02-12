@@ -97,7 +97,7 @@ assert(val == -3);
 
 It may be helpful to keep in mind that the action behavior is similar to the YACC semantic action model ($$, $1, $2, ...).
 
-In this example, the actions return values. These samentic values will be pushed up to the parent definition which can be referred to in the parent action `[](const vector<Any>& v)`. In other words, when a certain definition has been accepted, we can find all semantic values which are associated with the child definitions in `const vector<Any>& v`. The values are wrapped by peblib::Any class which is like `boost::any`. We can retrieve the value by using `get<T>` method where `T` is the actual type of the value. If no value is returned in an action, an undefined `Any` will be pushed up to the parent. Finally, the resulting value of the root definition is received in the out parameter of `parse` method in the parser. `long val` is the resulting value in this case.
+In this example, the actions return values. These samentic values will be pushed up to the parent definition which can be referred to in the parent action `[](const vector<Any>& v)`. In other words, when a certain definition has been accepted, we can find all semantic values which are associated with the child definitions in `const vector<Any>& v`. The values are wrapped by peglib::Any class which is like `boost::any`. We can retrieve the value by using `get<T>` method where `T` is the actual type of the value. If no value is returned in an action, an undefined `Any` will be pushed up to the parent. Finally, the resulting value of the root definition is received in the out parameter of `parse` method in the parser. `long val` is the resulting value in this case.
 
 Here are available user actions:
 
