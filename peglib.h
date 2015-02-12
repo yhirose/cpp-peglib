@@ -29,19 +29,16 @@ void* enabler;
 class Any
 {
 public:
-    Any() : content_(nullptr) {
-    }
+    Any() : content_(nullptr) {}
 
-    Any(const Any& rhs) : content_(rhs.clone()) {
-    }
+    Any(const Any& rhs) : content_(rhs.clone()) {}
 
     Any(Any&& rhs) : content_(rhs.content_) {
         rhs.content_ = nullptr;
     }
 
     template <typename T>
-    Any(const T& value) : content_(new holder<T>(value)) {
-    }
+    Any(const T& value) : content_(new holder<T>(value)) {}
 
     Any& operator=(const Any& rhs) {
         if (this != &rhs) {
@@ -388,7 +385,7 @@ public:
 class Sequence : public Ope
 {
 public:
-    Sequence(const Sequence& rhs) : rules_(rhs.rules_) {}
+    Sequence(const Sequence& rhs) : opes_(rhs.opes_) {}
 
 #if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
     // NOTE: Compiler Error C2797 on Visual Studio 2013
@@ -399,20 +396,20 @@ public:
     // generation. Visual Studio 2013 Update 3 reports this as an error."
     template <typename... Args>
     Sequence(const Args& ...args) {
-        rules_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
+        opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
     }
 #else
     template <typename... Args>
-    Sequence(const Args& ...args) : rules_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
+    Sequence(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
 #endif
 
-    Sequence(const std::vector<std::shared_ptr<Ope>>& rules) : rules_(rules) {}
-    Sequence(std::vector<std::shared_ptr<Ope>>&& rules) : rules_(std::move(rules)) {}
+    Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
+    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
         size_t i = 0;
-        for (const auto& rule : rules_) {
-            auto m = rule->parse(s + i, l - i, v);
+        for (const auto& ope : opes_) {
+            auto m = ope->parse(s + i, l - i, v);
             if (!m.ret) {
                 return fail();
             }
@@ -422,7 +419,7 @@ public:
     }
 
 private:
-    std::vector<std::shared_ptr<Ope>> rules_;
+    std::vector<std::shared_ptr<Ope>> opes_;
 };
 
 class PrioritizedChoice : public Ope
@@ -437,21 +434,21 @@ public:
     // generation. Visual Studio 2013 Update 3 reports this as an error."
     template <typename... Args>
     PrioritizedChoice(const Args& ...args) {
-        rules_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
+        opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
     }
 #else
     template <typename... Args>
-    PrioritizedChoice(const Args& ...args) : rules_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
+    PrioritizedChoice(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
 #endif
 
-    PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& rules) : rules_(rules) {}
-    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& rules) : rules_(std::move(rules)) {}
+    PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
+    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
         size_t id = 0;
-        for (const auto& rule : rules_) {
+        for (const auto& ope : opes_) {
             Values chldsv;
-            auto m = rule->parse(s, l, chldsv);
+            auto m = ope->parse(s, l, chldsv);
             if (m.ret) {
                 if (!chldsv.values.empty()) {
                     for (const auto& x: chldsv.values) {
@@ -468,21 +465,21 @@ public:
         return fail();
     }
 
-    size_t size() const { return rules_.size();  }
+    size_t size() const { return opes_.size();  }
 
 private:
-    std::vector<std::shared_ptr<Ope>> rules_;
+    std::vector<std::shared_ptr<Ope>> opes_;
 };
 
 class ZeroOrMore : public Ope
 {
 public:
-    ZeroOrMore(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
+    ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
         auto i = 0;
         while (l - i > 0) {
-            auto m = rule_->parse(s + i, l - i, v);
+            auto m = ope_->parse(s + i, l - i, v);
             if (!m.ret) {
                 break;
             }
@@ -492,22 +489,22 @@ public:
     }
 
 private:
-    std::shared_ptr<Ope> rule_;
+    std::shared_ptr<Ope> ope_;
 };
 
 class OneOrMore : public Ope
 {
 public:
-    OneOrMore(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
+    OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        auto m = rule_->parse(s, l, v);
+        auto m = ope_->parse(s, l, v);
         if (!m.ret) {
             return fail();
         }
         auto i = m.len;
         while (l - i > 0) {
-            auto m = rule_->parse(s + i, l - i, v);
+            auto m = ope_->parse(s + i, l - i, v);
             if (!m.ret) {
                 break;
             }
@@ -517,30 +514,30 @@ public:
     }
 
 private:
-    std::shared_ptr<Ope> rule_;
+    std::shared_ptr<Ope> ope_;
 };
 
 class Option : public Ope
 {
 public:
-    Option(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
+    Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        auto m = rule_->parse(s, l, v);
+        auto m = ope_->parse(s, l, v);
         return success(m.ret ? m.len : 0);
     }
 
 private:
-    std::shared_ptr<Ope> rule_;
+    std::shared_ptr<Ope> ope_;
 };
 
 class AndPredicate : public Ope
 {
 public:
-    AndPredicate(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
+    AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        auto m = rule_->parse(s, l, v);
+        auto m = ope_->parse(s, l, v);
         if (m.ret) {
             return success(0);
         } else {
@@ -549,16 +546,16 @@ public:
     }
 
 private:
-    std::shared_ptr<Ope> rule_;
+    std::shared_ptr<Ope> ope_;
 };
 
 class NotPredicate : public Ope
 {
 public:
-    NotPredicate(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
+    NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        auto m = rule_->parse(s, l, v);
+        auto m = ope_->parse(s, l, v);
         if (m.ret) {
             return fail();
         } else {
@@ -567,7 +564,7 @@ public:
     }
 
 private:
-    std::shared_ptr<Ope> rule_;
+    std::shared_ptr<Ope> ope_;
 };
 
 class LiteralString : public Ope
@@ -654,12 +651,12 @@ public:
 class Grouping : public Ope
 {
 public:
-    Grouping(const std::shared_ptr<Ope>& rule) : rule_(rule) {}
-    Grouping(const std::shared_ptr<Ope>& rule, std::function<void(const char* s, size_t l)> match) : rule_(rule), match_(match) {}
+    Grouping(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    Grouping(const std::shared_ptr<Ope>& ope, std::function<void(const char* s, size_t l)> match) : ope_(ope), match_(match) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        assert(rule_);
-        auto m = rule_->parse(s, l, v);
+        assert(ope_);
+        auto m = ope_->parse(s, l, v);
         if (m.ret && match_) {
             match_(s, m.len);
         }
@@ -667,19 +664,19 @@ public:
     }
 
 private:
-    std::shared_ptr<Ope>                        rule_;
+    std::shared_ptr<Ope>                        ope_;
     std::function<void(const char* s, size_t l)> match_;
 };
 
 class WeakHolder : public Ope
 {
 public:
-    WeakHolder(const std::shared_ptr<Ope>& rule) : weak_(rule) {}
+    WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
     Match parse_core(const char* s, size_t l, Values& v) const {
-        auto rule = weak_.lock();
-        assert(rule);
-        return rule->parse(s, l, v);
+        auto ope = weak_.lock();
+        assert(ope);
+        return ope->parse(s, l, v);
     }
 
 private:
@@ -712,24 +709,24 @@ public:
         holder_->outer_ = this;
     }
 
-    Definition(const std::shared_ptr<Ope>& rule)
+    Definition(const std::shared_ptr<Ope>& ope)
         : actions(1)
         , holder_(std::make_shared<Holder>(this))
     {
-        holder_->rule_ = rule;
+        holder_->ope_ = ope;
     }
 
     operator std::shared_ptr<Ope>() {
         return std::make_shared<WeakHolder>(holder_);
     }
 
-    Definition& operator<=(const std::shared_ptr<Ope>& rule) {
-        holder_->rule_ = rule;
+    Definition& operator<=(const std::shared_ptr<Ope>& ope) {
+        holder_->ope_ = ope;
         return *this;
     }
 
-    Definition& rule(const std::shared_ptr<Ope>& rule) {
-        holder_->rule_ = rule;
+    Definition& ope(const std::shared_ptr<Ope>& ope) {
+        holder_->ope_ = ope;
         return *this;
     }
 
@@ -792,12 +789,12 @@ private:
            : outer_(outer) {}
 
         Match parse_core(const char* s, size_t l, Values& v) const {
-            if (!rule_) {
-                throw std::logic_error("Uninitialized definition rule was used...");
+            if (!ope_) {
+                throw std::logic_error("Uninitialized definition ope was used...");
             }
 
             Values chldsv;
-            auto m = rule_->parse(s, l, chldsv);
+            auto m = ope_->parse(s, l, chldsv);
             if (m.ret) {
                 v.names.push_back(outer_->name);
 
@@ -826,8 +823,8 @@ private:
             }
         }
 
-        std::shared_ptr<Ope> rule_;
-        Definition*           outer_;
+        std::shared_ptr<Ope> ope_;
+        Definition*          outer_;
     };
 
     Definition& operator=(const Definition& rhs);
@@ -848,11 +845,9 @@ public:
         return grammar_.at(name_).holder_->parse(s, l, v);
     }
 
-    std::string name() const { return std::string(); };
-
 private:
     const std::map<std::string, Definition>& grammar_;
-    std::string name_;
+    const std::string                        name_;
 };
 
 typedef Definition rule;
@@ -870,24 +865,24 @@ std::shared_ptr<Ope> cho(Args&& ...args) {
     return std::make_shared<PrioritizedChoice>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<ZeroOrMore>(rule);
+inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<ZeroOrMore>(ope);
 }
 
-inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<OneOrMore>(rule);
+inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<OneOrMore>(ope);
 }
 
-inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<Option>(rule);
+inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<Option>(ope);
 }
 
-inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<AndPredicate>(rule);
+inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<AndPredicate>(ope);
 }
 
-inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<NotPredicate>(rule);
+inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<NotPredicate>(ope);
 }
 
 inline std::shared_ptr<Ope> lit(const char* lit) {
@@ -906,12 +901,12 @@ inline std::shared_ptr<Ope> any() {
     return std::make_shared<AnyCharacter>();
 }
 
-inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& rule) {
-    return std::make_shared<Grouping>(rule);
+inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<Grouping>(ope);
 }
 
-inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& rule, std::function<void (const char* s, size_t l)> match) {
-    return std::make_shared<Grouping>(rule, match);
+inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& ope, std::function<void (const char* s, size_t l)> match) {
+    return std::make_shared<Grouping>(ope, match);
 }
 
 inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
@@ -1006,51 +1001,51 @@ inline std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& st
     };
 
     peg["Expression"] = [&](const std::vector<Any>& v) {
-        std::vector<std::shared_ptr<Ope>> rules;
+        std::vector<std::shared_ptr<Ope>> opes;
         for (auto i = 0u; i < v.size(); i++) {
             if (!(i % 2)) {
-                rules.push_back(v[i].get<std::shared_ptr<Ope>>());
+                opes.push_back(v[i].get<std::shared_ptr<Ope>>());
             }
         }
-        return static_cast<std::shared_ptr<Ope>>(std::make_shared<PrioritizedChoice>(rules));
+        return static_cast<std::shared_ptr<Ope>>(std::make_shared<PrioritizedChoice>(opes));
     };
 
     peg["Sequence"] = [&](const std::vector<Any>& v) {
-        std::vector<std::shared_ptr<Ope>> rules;
+        std::vector<std::shared_ptr<Ope>> opes;
         for (const auto& x: v) {
-            rules.push_back(x.get<std::shared_ptr<Ope>>());
+            opes.push_back(x.get<std::shared_ptr<Ope>>());
         }
-        return static_cast<std::shared_ptr<Ope>>(std::make_shared<Sequence>(rules));
+        return static_cast<std::shared_ptr<Ope>>(std::make_shared<Sequence>(opes));
     };
 
     peg["Prefix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
-        std::shared_ptr<Ope> rule;
+        std::shared_ptr<Ope> ope;
         if (v.size() == 1) {
-            rule = v[0].get<std::shared_ptr<Ope>>();
+            ope = v[0].get<std::shared_ptr<Ope>>();
         } else {
             assert(v.size() == 2);
-            rule = v[1].get<std::shared_ptr<Ope>>();
+            ope = v[1].get<std::shared_ptr<Ope>>();
             if (n[0] == "AND") {
-                rule = apd(rule);
+                ope = apd(ope);
             } else { // "NOT"
-                rule = npd(rule);
+                ope = npd(ope);
             }
         }
-        return rule;
+        return ope;
     };
 
     peg["Suffix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
-        auto rule = v[0].get<std::shared_ptr<Ope>>();
+        auto ope = v[0].get<std::shared_ptr<Ope>>();
         if (v.size() == 1) {
-            return rule;
+            return ope;
         } else {
             assert(v.size() == 2);
             if (n[1] == "QUESTION") {
-                return opt(rule);
+                return opt(ope);
             } else if (n[1] == "STAR") {
-                return zom(rule);
+                return zom(ope);
             } else { // "PLUS"
-                return oom(rule);
+                return oom(ope);
             }
         }
     };
