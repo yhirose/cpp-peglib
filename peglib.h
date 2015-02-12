@@ -13,10 +13,10 @@
 #include <memory>
 #include <vector>
 #include <map>
-#include <set>
 #include <cassert>
 #include <cstring>
 #include <initializer_list>
+#include <iostream>
 
 namespace peglib {
 
@@ -352,18 +352,19 @@ private:
  */
 struct Match
 {
-    Match(bool _ret, size_t _len, size_t _id) : ret(_ret), len(_len), id(_id) {}
-    bool   ret;
-    size_t len;
-    size_t id;
+    bool              ret;
+    size_t            len;
+    size_t            choice;
+    const char*       ptr;
+    const std::string msg;
 };
 
-Match success(size_t len, size_t id = 0) {
-    return Match(true, len, id);
+Match success(size_t len, size_t choice = 0) {
+    return Match{ true, len, choice, nullptr, std::string() };
 }
 
-Match fail() {
-    return Match(false, 0, -1);
+Match fail(const char* ptr, std::string msg = std::string()) {
+    return Match{ false, 0, (size_t)-1, ptr, msg };
 }
 
 /*
@@ -411,7 +412,7 @@ public:
         for (const auto& ope : opes_) {
             auto m = ope->parse(s + i, l - i, v);
             if (!m.ret) {
-                return fail();
+                return fail(m.ptr, m.msg);
             }
             i += m.len;
         }
@@ -462,7 +463,7 @@ public:
             }
             id++;
         }
-        return fail();
+        return fail(s, "no choice candidate was matched");
     }
 
     size_t size() const { return opes_.size();  }
@@ -500,7 +501,7 @@ public:
     Match parse_core(const char* s, size_t l, Values& v) const {
         auto m = ope_->parse(s, l, v);
         if (!m.ret) {
-            return fail();
+            return fail(m.ptr, m.msg);
         }
         auto i = m.len;
         while (l - i > 0) {
@@ -541,7 +542,7 @@ public:
         if (m.ret) {
             return success(0);
         } else {
-            return fail();
+            return fail(m.ptr, m.msg);
         }
     }
 
@@ -557,7 +558,7 @@ public:
     Match parse_core(const char* s, size_t l, Values& v) const {
         auto m = ope_->parse(s, l, v);
         if (m.ret) {
-            return fail();
+            return fail(s);
         } else {
             return success(0);
         }
@@ -576,7 +577,7 @@ public:
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
-                return fail();
+                return fail(s);
             }
         }
         return success(i);
@@ -594,7 +595,7 @@ public:
     Match parse_core(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1) {
-            return fail();
+            return fail(s);
         }
         auto ch = s[0];
         auto i = 0u;
@@ -611,7 +612,7 @@ public:
                 i += 1;
             }
         }
-        return fail();
+        return fail(s);
     }
 
 private:
@@ -626,7 +627,7 @@ public:
     Match parse_core(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1 || s[0] != ch_) {
-            return fail();
+            return fail(s);
         }
         return success(1);
     }
@@ -641,7 +642,7 @@ public:
     Match parse_core(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1) {
-            return fail();
+            return fail(s);
         }
         return success(1);
     }
@@ -730,6 +731,11 @@ public:
         return *this;
     }
 
+    Match parse_with_match(const char* s, size_t l) const {
+        Values v;
+        return holder_->parse(s, l, v);
+    }
+
     template <typename T>
     bool parse(const char* s, size_t l, T& val) const {
         Values v;
@@ -800,7 +806,7 @@ private:
 
                 assert(!outer_->actions.empty());
 
-                auto id = m.id + 1;
+                auto id = m.choice + 1;
                 const auto& ac = (id < outer_->actions.size() && outer_->actions[id])
                     ? outer_->actions[id]
                     : outer_->actions[0];
@@ -979,7 +985,27 @@ inline Grammar make_peg_grammar()
     return g;
 }
 
-inline std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& start)
+inline std::pair<size_t, size_t> find_line(const char* s, const char* ptr) {
+    auto p = s;
+    auto col_ptr = p;
+    auto no = 1;
+
+    while (p < ptr) {
+        if (*p == '\n') {
+            no++;
+            col_ptr = p + 1;
+        }
+        p++;
+    }
+
+    auto col = p - col_ptr + 1;
+
+    return std::make_pair(no, col);
+}
+
+inline std::shared_ptr<Grammar> make_grammar(
+    const char* syntax, size_t syntax_len, std::string& start,
+    std::function<void (size_t, size_t, const std::string)> log = nullptr)
 {
     Grammar peg = make_peg_grammar();
 
@@ -988,7 +1014,7 @@ inline std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& st
     start.clear();
 
     // Setup actions
-    std::set<std::string> refs;
+    std::map<std::string, const char*> refs;
 
     peg["Definition"] = [&](const std::vector<Any>& v) {
         const auto& name = v[0].get<std::string>();
@@ -1051,9 +1077,16 @@ inline std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& st
     };
 
     peg["Primary"].actions = {
-        [&](const std::vector<Any>& v) { return v[0]; },
-        [&](const std::vector<Any>& v) { refs.insert(v[0]); return ref(*grammar, v[0]); },
-        [&](const std::vector<Any>& v) { return v[1]; }
+        [&](const std::vector<Any>& v) {
+            return v[0];
+        },
+        [&](const char* s, size_t l, const std::vector<Any>& v) {
+            refs[v[0]] = s;
+            return ref(*grammar, v[0]);
+        },
+        [&](const std::vector<Any>& v) {
+            return v[1];
+        }
     };
 
     peg["IdentCont"] = [](const char*s, size_t l) {
@@ -1081,16 +1114,35 @@ inline std::shared_ptr<Grammar> make_grammar(const char* syntax, std::string& st
         return any();
     };
 
-    if (peg["Grammar"].parse(syntax)) {
-        for (const auto& name : refs) {
-            if (grammar->find(name) == grammar->end()) {
-                return nullptr;
-            }
+    auto m = peg["Grammar"].parse_with_match(syntax, syntax_len);
+    if (!m.ret) {
+        if (log) {
+            auto line = find_line(syntax, m.ptr);
+            log(line.first, line.second, m.msg.empty() ? "syntax error" : m.msg);
         }
-        return grammar;
+        return nullptr;
     }
 
-    return nullptr;
+    for (const auto& x : refs) {
+        const auto& name = x.first;
+        auto ptr = x.second;
+        if (grammar->find(name) == grammar->end()) {
+            if (log) {
+                auto line = find_line(syntax, ptr);
+                log(line.first, line.second, "'" + name + "' is not defined.");
+            }
+            return nullptr;
+        }
+    }
+
+    return grammar;
+}
+
+inline std::shared_ptr<Grammar> make_grammar(
+    const char* syntax, std::string& start,
+    std::function<void (size_t, size_t, const std::string)> log = nullptr)
+{
+    return make_grammar(syntax, strlen(syntax), start, log);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1104,8 +1156,8 @@ public:
         return grammar_ != nullptr;
     }
 
-    bool load_syntax(const char* syntax) {
-        grammar_ = make_grammar(syntax, start_);
+    bool load_syntax(const char* s, size_t l, std::function<void (size_t, size_t, const std::string&)> log) {
+        grammar_ = make_grammar(s, l, start_, log);
         return grammar_ != nullptr;
     }
 
@@ -1145,11 +1197,15 @@ private:
     std::string              start_;
 };
 
-inline Parser make_parser(const char* syntax) {
+inline Parser make_parser(const char* s, size_t l, std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
     Parser parser;
-    if (!parser.load_syntax(syntax)) {
-        throw std::logic_error("PEG syntax error.");
-    }
+    parser.load_syntax(s, l, log);
+    return parser;
+}
+
+inline Parser make_parser(const char* s, std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
+    Parser parser;
+    parser.load_syntax(s, strlen(s), log);
     return parser;
 }
 
