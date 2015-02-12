@@ -51,7 +51,46 @@ assert(tags[2] == "tag-3");
 
 You may have a question regarding '(3) Setup an action'. When the parser recognizes the definition 'TAG_NAME', it calls back the action `[&](const char* s, size_t l)` where `const char* s, size_t l` refers to the matched string, so that the user could use the string for something else.
 
-We can do more with actions. A more complex example is here:
+We can do more with actions.
+
+```c++
+#include <peglib.h>
+#include <assert.h>
+
+using namespace peglib;
+using namespace std;
+
+int main(void) {
+  auto syntax = R"(
+  # Grammar for Calculator...
+  Additive  <- Multitive '+' Additive / Multitive
+  Multitive <- Primary '*' Multitive / Primary
+  Primary   <- '(' Additive ')' / Number
+  Number    <- [0-9]+
+  )";
+
+  auto parser = make_parser(syntax);
+
+  parser["Additive"] = {
+    nullptr, // Default action
+    [](const vector<Any>& v) { return (int)v[0] + (int)v[1]; }, // For 1st choice
+    [](const vector<Any>& v) { return v[0]; } // For 2nd choice
+  };
+  parser["Multitive"] = {
+    nullptr,
+    [](const vector<Any>& v) { return (int)v[0] * (int)v[1]; },
+    [](const vector<Any>& v) { return v[0]; }
+  };
+  parser["Primary"] = [](const vector<Any>& v) { return v.size() == 1 ? v[0] : v[1]; };
+  parser["Number"] = [](const char* s, size_t l) { return stoi(string(s, l), nullptr, 10); };
+
+  int val;
+  parser.parse("1+2*3", val);
+
+  assert(val == 7);
+}
+```
+A more complex example is here:
 
 ```c++
 // Calculator example
