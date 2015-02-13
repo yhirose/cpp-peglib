@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.31101.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "peglint", "peglint.vcxproj", "{F85B641A-7538-4809-8175-C528FF632CF6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F85B641A-7538-4809-8175-C528FF632CF6}.Debug|Win32.ActiveCfg = Debug|Win32
+		{F85B641A-7538-4809-8175-C528FF632CF6}.Debug|Win32.Build.0 = Debug|Win32
+		{F85B641A-7538-4809-8175-C528FF632CF6}.Release|Win32.ActiveCfg = Release|Win32
+		{F85B641A-7538-4809-8175-C528FF632CF6}.Release|Win32.Build.0 = Release|Win32
+		{1D09607B-E1C0-4D62-8AB4-9E2D2C2DC6E4}.Debug|Win32.ActiveCfg = Debug|Win32
+		{1D09607B-E1C0-4D62-8AB4-9E2D2C2DC6E4}.Debug|Win32.Build.0 = Debug|Win32
+		{1D09607B-E1C0-4D62-8AB4-9E2D2C2DC6E4}.Release|Win32.ActiveCfg = Release|Win32
+		{1D09607B-E1C0-4D62-8AB4-9E2D2C2DC6E4}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
