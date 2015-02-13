@@ -7,7 +7,9 @@
 
 TEST_CASE("Empty syntax test", "[general]")
 {
-    REQUIRE_THROWS(peglib::make_parser(""));
+    auto parser = peglib::make_parser("");
+    bool ret = parser;
+    REQUIRE(ret == false);
 }
 
 TEST_CASE("String capture test", "[general]")
