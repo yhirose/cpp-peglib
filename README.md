@@ -3,14 +3,14 @@ cpp-peglib
 
 C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library.
 
-*cpp-peglib* tries to provide more expressive parsing experience than common regular expression libraries such as std::regex. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
+*cpp-peglib* tries to provide more expressive parsing experience in a simple way. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
 
 The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf).
 
 How to use
 ----------
 
-What if we want to extract only tag names in brackets from ` [tag1] [tag2] [tag3] [tag4]... `? It's a bit hard to do it with *std::regex*, since it doesn't support [Repeated Captures](http://www.boost.org/doc/libs/1_57_0/libs/regex/doc/html/boost_regex/captures.html#boost_regex.captures.repeated_captures). PEG can, however, handle the repetition pretty easily.
+What if we want to extract only tag names in brackets from ` [tag1] [tag2] [tag3] [tag4]... `?
 
 PEG grammar for this task could be like this:
 
@@ -49,96 +49,9 @@ assert(tags[1] == "tag:2");
 assert(tags[2] == "tag-3");
 ```
 
-You may have a question regarding '(3) Setup an action'. When the parser recognizes the definition 'TAG_NAME', it calls back the action `[&](const char* s, size_t l)` where `const char* s, size_t l` refers to the matched string, so that the user could use the string for something else.
+This action `[&](const char* s, size_t l)` gives us the point and length of the matched string. 
 
-We can do more with actions.
-
-```c++
-#include <peglib.h>
-#include <assert.h>
-
-using namespace peglib;
-using namespace std;
-
-int main(void) {
-  auto syntax = R"(
-  # Grammar for Calculator...
-  Additive  <- Multitive '+' Additive / Multitive
-  Multitive <- Primary '*' Multitive / Primary
-  Primary   <- '(' Additive ')' / Number
-  Number    <- [0-9]+
-  )";
-
-  auto parser = make_parser(syntax);
-
-  parser["Additive"] = {
-    nullptr, // Default action
-    [](const vector<Any>& v) { return (int)v[0] + (int)v[1]; }, // For 1st choice
-    [](const vector<Any>& v) { return v[0]; } // For 2nd choice
-  };
-  parser["Multitive"] = {
-    nullptr,
-    [](const vector<Any>& v) { return (int)v[0] * (int)v[1]; },
-    [](const vector<Any>& v) { return v[0]; }
-  };
-  parser["Primary"] = [](const vector<Any>& v) { return v.size() == 1 ? v[0] : v[1]; };
-  parser["Number"] = [](const char* s, size_t l) { return stoi(string(s, l), nullptr, 10); };
-
-  int val;
-  parser.parse("1+2*3", val);
-
-  assert(val == 7);
-}
-```
-A more complex example is here:
-
-```c++
-// Calculator example
-using namespace peglib;
-using namespace std;
-
-auto parser = make_parser(R"(
-    # Grammar for Calculator...
-    EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
-    TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-    FACTOR           <-  NUMBER / '(' EXPRESSION ')'
-    TERM_OPERATOR    <-  [-+]
-    FACTOR_OPERATOR  <-  [/*]
-    NUMBER           <-  [0-9]+
-)");
-
-auto reduce = [](const vector<Any>& v) -> long {
-    long ret = v[0].get<long>();
-    for (auto i = 1u; i < v.size(); i += 2) {
-        auto num = v[i + 1].get<long>();
-        switch (v[i].get<char>()) {
-            case '+': ret += num; break;
-            case '-': ret -= num; break;
-            case '*': ret *= num; break;
-            case '/': ret /= num; break;
-        }
-    }
-    return ret;
-};
-
-parser["EXPRESSION"]      = reduce;
-parser["TERM"]            = reduce;
-parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
-parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
-parser["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
-
-long val;
-auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
-
-assert(ret == true);
-assert(val == -3);
-```
-
-It may be helpful to keep in mind that the action behavior is similar to the YACC semantic action model ($$, $1, $2, ...).
-
-In this example, the actions return values. These samentic values will be pushed up to the parent definition which can be referred to in the parent action `[](const vector<Any>& v)`. In other words, when a certain definition has been accepted, we can find all semantic values which are associated with the child definitions in `const vector<Any>& v`. The values are wrapped by peglib::Any class which is like `boost::any`. We can retrieve the value by using `get<T>` method where `T` is the actual type of the value. If no value is returned in an action, an undefined `Any` will be pushed up to the parent. Finally, the resulting value of the root definition is received in the out parameter of `parse` method in the parser. `long val` is the resulting value in this case.
-
-Here are available user actions:
+There are more actions available. Here is a complete list:
 
 ```c++
 [](const char* s, size_t l, const std::vector<peglib::Any>& v, const std::vector<std::string>& n)
@@ -149,7 +62,60 @@ Here are available user actions:
 []()
 ```
 
-`const std::vector<std::string>& n` holds names of child definitions that could be helpful when we want to check what are the actual child definitions.
+`const std::vector<peglib::Any>& v` contains semantic values. `peglib::Any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
+
+`const std::vector<std::string>& n` contains definition names of semantic values.
+
+This is a complete code of a simple calculator. It shows how to associate actions to definitions and set/get semantic values.
+
+```c++
+#include <peglib.h>
+#include <assert.h>
+
+using namespace peglib;
+using namespace std;
+
+int main(void) {
+    auto syntax = R"(
+        # Grammar for Calculator...
+        Additive  <- Multitive '+' Additive / Multitive
+        Multitive <- Primary '*' Multitive / Primary
+        Primary   <- '(' Additive ')' / Number
+        Number    <- [0-9]+
+    )";
+
+    auto parser = make_parser(syntax);
+
+    parser["Additive"] = {
+        nullptr,                                      // Default action
+        [](const vector<Any>& v) {
+            return v[0].get<int>() + v[1].get<int>(); // 1st choice
+        },
+        [](const vector<Any>& v) { return v[0]; }     // 2nd choice
+    };
+
+    parser["Multitive"] = {
+        nullptr,                                      // Default action
+        [](const vector<Any>& v) {
+            return v[0].get<int>() * v[1].get<int>(); // 1st choice
+        },
+        [](const vector<Any>& v) { return v[0]; }     // 2nd choice
+    };
+
+    parser["Primary"] = [](const vector<Any>& v) {
+        return v.size() == 1 ? v[0] : v[1];
+    };
+
+    parser["Number"] = [](const char* s, size_t l) -> long {
+        return stoi(string(s, l), nullptr, 10);
+    };
+
+    int val;
+    parser.parse("1+2*3", val);
+
+    assert(val == 7);
+}
+```
 
 Make a parser with parser operators
 -----------------------------------
@@ -194,6 +160,7 @@ Sample codes
 
   * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
   * [Calculator with parser operators](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
+  * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/peglint.cc)
 
 Tested Compilers
 ----------------
