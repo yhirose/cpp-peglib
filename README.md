@@ -49,7 +49,7 @@ assert(tags[1] == "tag:2");
 assert(tags[2] == "tag-3");
 ```
 
-This action `[&](const char* s, size_t l)` gives us the point and length of the matched string. 
+This action `[&](const char* s, size_t l)` gives a pointer and length of the matched string. 
 
 There are more actions available. Here is a complete list:
 
