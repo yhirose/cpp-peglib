@@ -20,22 +20,19 @@ int main(int argc, const char** argv)
     }
 
     // Check PEG grammar
-    cerr << "checking grammar file..." << endl;
+    auto syntax_path = argv[1];
 
-    MemoryMappedFile syntax(argv[1]);
+    MemoryMappedFile syntax(syntax_path);
     if (!syntax.is_open()) {
         cerr << "can't open the grammar file." << endl;
         return -1;
     }
 
-    auto parser = make_parser(syntax.data(), syntax.size(), [](size_t ln, size_t col, const string& msg) {
-        cerr << ln << ":" << col << ": " << msg << endl;
+    auto parser = make_parser(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
+        cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     });
 
-    if (parser) {
-        cerr << "success" << endl;
-    } else {
-        cerr << "invalid grammar file." << endl;
+    if (!parser) {
         return -1;
     }
 
@@ -44,22 +41,19 @@ int main(int argc, const char** argv)
     }
 
     // Check source
-    cerr << "checking source file..." << endl;
+    auto source_path = argv[2];
 
-    MemoryMappedFile source(argv[2]);
+    MemoryMappedFile source(source_path);
     if (!source.is_open()) {
         cerr << "can't open the source file." << endl;
         return -1;
     }
 
-    auto m = parser.lint(source.data(), source.size());
+    auto ret = parser.lint(source.data(), source.size(), true, [&](size_t ln, size_t col, const string& msg) {
+        cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
+    });
 
-    if (m.ret) {
-        cerr << "success" << endl;
-    } else {
-        auto info = line_info(source.data(), m.ptr);
-        cerr << info.first << ":" << info.second << ": syntax error" << endl;
-    }
+    return ret ? 0 : -1;
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix

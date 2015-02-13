@@ -751,33 +751,31 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, size_t l, T& val) const {
+    bool parse(const char* s, size_t l, T& val, bool exact = true) const {
         Values v;
-
-        const auto& rule = *holder_;
-        auto m = rule.parse(s, l, v);
-        auto ret = m.ret && m.len == l;
-
+        auto m = holder_->parse(s, l, v);
+        auto ret = m.ret && (!exact || m.len == l);
         if (ret && !v.values.empty() && !v.values.front().is_undefined()) {
             val = v.values[0].get<T>();
         }
-
         return ret;
     }
 
     template <typename T>
-    bool parse(const char* s, T& val) const {
-        return parse(s, strlen(s), val);
+    bool parse(const char* s, T& val, bool exact = true) const {
+        auto l = strlen(s);
+        return parse(s, l, val, exact);
     }
 
-    bool parse(const char* s, size_t l) const {
+    bool parse(const char* s, size_t l, bool exact = true) const {
         Values v;
         auto m = holder_->parse(s, l, v);
-        return m.ret && m.len == l;
+        return m.ret && (!exact || m.len == l);
     }
 
-    bool parse(const char* s) const {
-        return parse(s, strlen(s));
+    bool parse(const char* s, bool exact = true) const {
+        auto l = strlen(s);
+        return parse(s, l, exact);
     }
 
     Definition& operator=(Action ac) {
@@ -1250,12 +1248,25 @@ public:
         return parse(s, l);
     }
 
-    Match lint(const char* s, size_t l) const {
+    bool lint(const char* s, size_t l, bool exact,
+        std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
+
+        assert(grammar_);
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            return rule.parse_with_match(s, l);
+            auto m = rule.parse_with_match(s, l);
+            if (!m.ret) {
+                if (log) {
+                    auto line = line_info(s, m.ptr);
+                    log(line.first, line.second, m.msg.empty() ? "syntax error" : m.msg);
+                }
+            } else if (exact &&  m.len != l) {
+                auto line = line_info(s, s + m.len);
+                log(line.first, line.second, "garbage string at the end");
+            }
+            return m.ret && (!exact || m.len == l);
         }
-        return Match{ false, 0, (size_t)-1, s, "invalid grammar" };
+        return false;
     }
 
     Definition& operator[](const char* s) {
