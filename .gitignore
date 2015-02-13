@@ -30,3 +30,10 @@
 # Others
 *.dSYM
 *.swp
+Debug
+Release
+*.suo
+*.sdf
+*.user
+xcuserdata
+*.xcworkspace
