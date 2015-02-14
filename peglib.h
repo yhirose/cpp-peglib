@@ -84,7 +84,12 @@ public:
     >
     T& get() {
         assert(content_);
-        return dynamic_cast<holder<T>*>(content_)->value_;
+        auto p = dynamic_cast<holder<T>*>(content_);
+        assert(p);
+        if (!p) {
+            throw std::bad_cast();
+        }
+        return p->value_;
     }
 
     template <
@@ -101,7 +106,12 @@ public:
     >
     const T& get() const {
         assert(content_);
-        return dynamic_cast<holder<T>*>(content_)->value_;
+        auto p = dynamic_cast<holder<T>*>(content_);
+        assert(p);
+        if (!p) {
+            throw std::bad_cast();
+        }
+        return p->value_;
     }
 
     template <
