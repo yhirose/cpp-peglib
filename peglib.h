@@ -1018,178 +1018,201 @@ inline std::pair<size_t, size_t> line_info(const char* s, const char* ptr) {
     return std::make_pair(no, col);
 }
 
-inline std::string resolve_escape_sequence(const char*s, size_t l) {
-    std::string r;
-    r.reserve(l);
-    for (auto i = 0u; i < l; i++) {
-        auto ch = s[i];
-        if (ch == '\\') {
-            i++; 
-            switch (s[i]) {
-                case 'n':  r += '\n'; break;
-                case 'r':  r += '\r'; break;
-                case 't':  r += '\t'; break;
-                case '\'': r += '\''; break;
-                case '"':  r += '"';  break;
-                case '[':  r += '[';  break;
-                case ']':  r += ']';  break;
-                case '\\': r += '\\'; break;
-                default: {
-                    // TODO: Octal number support
-                    assert(false);
-                    break;
+class GrammarGenerator
+{
+public:
+    static GrammarGenerator& instance() {
+        static GrammarGenerator instance;
+        return instance;
+    }
+
+    std::shared_ptr<Grammar> perform(
+        const char*  syntax,
+        size_t       syntax_len,
+        std::string& start,
+        std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
+
+        auto grammar = std::make_shared<Grammar>();
+        start.clear();
+        std::map<std::string, const char*> refs;
+
+        peg["Definition"] = [&](const std::vector<Any>& v) {
+            const auto& name = v[0].get<std::string>();
+            (*grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
+            (*grammar)[name].name = name;
+
+            if (start.empty()) {
+                start = name;
+            }
+        };
+
+        peg["Primary"].actions = {
+            [&](const std::vector<Any>& v) {
+                return v[0];
+            },
+            [&](const char* s, size_t l, const std::vector<Any>& v) {
+                refs[v[0]] = s;
+                return ref(*grammar, v[0]);
+            },
+            [&](const std::vector<Any>& v) {
+                return v[1];
+            }
+        };
+
+        auto m = peg["Grammar"].parse_with_match(syntax, syntax_len);
+        if (!m.ret) {
+            if (log) {
+                auto line = line_info(syntax, m.ptr);
+                log(line.first, line.second, m.msg.empty() ? "syntax error" : m.msg);
+            }
+            return nullptr;
+        }
+
+        for (const auto& x : refs) {
+            const auto& name = x.first;
+            auto ptr = x.second;
+            if (grammar->find(name) == grammar->end()) {
+                if (log) {
+                    auto line = line_info(syntax, ptr);
+                    log(line.first, line.second, "'" + name + "' is not defined.");
+                }
+                return nullptr;
+            }
+        }
+
+        return grammar;
+    }
+
+private:
+    GrammarGenerator() : peg(make_peg_grammar()) {
+        initialize();
+    }
+
+    void initialize() {
+
+        peg["Expression"] = [&](const std::vector<Any>& v) {
+            if (v.size() == 1) {
+                return v[0].get<std::shared_ptr<Ope>>();
+            } else {
+                std::vector<std::shared_ptr<Ope>> opes;
+                for (auto i = 0u; i < v.size(); i++) {
+                    if (!(i % 2)) {
+                        opes.push_back(v[i].get<std::shared_ptr<Ope>>());
+                    }
+                }
+                const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
+                return ope;
+            }
+        };
+
+        peg["Sequence"] = [&](const std::vector<Any>& v) {
+            if (v.size() == 1) {
+                return v[0].get<std::shared_ptr<Ope>>();
+            } else {
+                std::vector<std::shared_ptr<Ope>> opes;
+                for (const auto& x: v) {
+                    opes.push_back(x.get<std::shared_ptr<Ope>>());
+                }
+                const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
+                return ope;
+            }
+        };
+
+        peg["Prefix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
+            std::shared_ptr<Ope> ope;
+            if (v.size() == 1) {
+                ope = v[0].get<std::shared_ptr<Ope>>();
+            } else {
+                assert(v.size() == 2);
+                ope = v[1].get<std::shared_ptr<Ope>>();
+                if (n[0] == "AND") {
+                    ope = apd(ope);
+                } else { // "NOT"
+                    ope = npd(ope);
                 }
             }
-        } else {
-            r += ch;
-        }
+            return ope;
+        };
+
+        peg["Suffix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
+            auto ope = v[0].get<std::shared_ptr<Ope>>();
+            if (v.size() == 1) {
+                return ope;
+            } else {
+                assert(v.size() == 2);
+                if (n[1] == "QUESTION") {
+                    return opt(ope);
+                } else if (n[1] == "STAR") {
+                    return zom(ope);
+                } else { // "PLUS"
+                    return oom(ope);
+                }
+            }
+        };
+
+        peg["IdentCont"] = [](const char*s, size_t l) {
+            return std::string(s, l);
+        };
+
+        peg["Literal"] = [](const std::vector<Any>& v) {
+            return lit(v[0]);
+        };
+        peg["SQCont"] = [this](const char*s, size_t l) {
+            return resolve_escape_sequence(s, l);
+        };
+        peg["DQCont"] = [this](const char*s, size_t l) {
+            return resolve_escape_sequence(s, l);
+        };
+
+        peg["Class"] = [](const std::vector<Any>& v) {
+            return cls(v[0]);
+        };
+        peg["ClassCont"] = [this](const char*s, size_t l) {
+            return resolve_escape_sequence(s, l);
+        };
+
+        peg["DOT"] = []() {
+            return any();
+        };
     }
-    return r;
-}
+
+    std::string resolve_escape_sequence(const char*s, size_t l) {
+        std::string r;
+        r.reserve(l);
+        for (auto i = 0u; i < l; i++) {
+            auto ch = s[i];
+            if (ch == '\\') {
+                i++; 
+                switch (s[i]) {
+                    case 'n':  r += '\n'; break;
+                    case 'r':  r += '\r'; break;
+                    case 't':  r += '\t'; break;
+                    case '\'': r += '\''; break;
+                    case '"':  r += '"';  break;
+                    case '[':  r += '[';  break;
+                    case ']':  r += ']';  break;
+                    case '\\': r += '\\'; break;
+                    default: {
+                        // TODO: Octal number support
+                        assert(false);
+                        break;
+                    }
+                }
+            } else {
+                r += ch;
+            }
+        }
+        return r;
+    }
+
+    Grammar peg;
+};
 
 inline std::shared_ptr<Grammar> make_grammar(
     const char* syntax, size_t syntax_len, std::string& start,
     std::function<void (size_t, size_t, const std::string&)> log = nullptr)
 {
-    Grammar peg = make_peg_grammar();
-
-    // Prepare output variables
-    auto grammar = std::make_shared<Grammar>();
-    start.clear();
-
-    // Setup actions
-    std::map<std::string, const char*> refs;
-
-    peg["Definition"] = [&](const std::vector<Any>& v) {
-        const auto& name = v[0].get<std::string>();
-        (*grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
-        (*grammar)[name].name = name;
-
-        if (start.empty()) {
-            start = name;
-        }
-    };
-
-    peg["Expression"] = [&](const std::vector<Any>& v) {
-        if (v.size() == 1) {
-            return v[0].get<std::shared_ptr<Ope>>();
-        } else {
-            std::vector<std::shared_ptr<Ope>> opes;
-            for (auto i = 0u; i < v.size(); i++) {
-                if (!(i % 2)) {
-                    opes.push_back(v[i].get<std::shared_ptr<Ope>>());
-                }
-            }
-            const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
-            return ope;
-        }
-    };
-
-    peg["Sequence"] = [&](const std::vector<Any>& v) {
-        if (v.size() == 1) {
-            return v[0].get<std::shared_ptr<Ope>>();
-        } else {
-            std::vector<std::shared_ptr<Ope>> opes;
-            for (const auto& x: v) {
-                opes.push_back(x.get<std::shared_ptr<Ope>>());
-            }
-            const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
-            return ope;
-        }
-    };
-
-    peg["Prefix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
-        std::shared_ptr<Ope> ope;
-        if (v.size() == 1) {
-            ope = v[0].get<std::shared_ptr<Ope>>();
-        } else {
-            assert(v.size() == 2);
-            ope = v[1].get<std::shared_ptr<Ope>>();
-            if (n[0] == "AND") {
-                ope = apd(ope);
-            } else { // "NOT"
-                ope = npd(ope);
-            }
-        }
-        return ope;
-    };
-
-    peg["Suffix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
-        auto ope = v[0].get<std::shared_ptr<Ope>>();
-        if (v.size() == 1) {
-            return ope;
-        } else {
-            assert(v.size() == 2);
-            if (n[1] == "QUESTION") {
-                return opt(ope);
-            } else if (n[1] == "STAR") {
-                return zom(ope);
-            } else { // "PLUS"
-                return oom(ope);
-            }
-        }
-    };
-
-    peg["Primary"].actions = {
-        [&](const std::vector<Any>& v) {
-            return v[0];
-        },
-        [&](const char* s, size_t l, const std::vector<Any>& v) {
-            refs[v[0]] = s;
-            return ref(*grammar, v[0]);
-        },
-        [&](const std::vector<Any>& v) {
-            return v[1];
-        }
-    };
-
-    peg["IdentCont"] = [](const char*s, size_t l) {
-        return std::string(s, l);
-    };
-
-    peg["Literal"] = [](const std::vector<Any>& v) {
-        return lit(v[0]);
-    };
-    peg["SQCont"] = [](const char*s, size_t l) {
-        return resolve_escape_sequence(s, l);
-    };
-    peg["DQCont"] = [](const char*s, size_t l) {
-        return resolve_escape_sequence(s, l);
-    };
-
-    peg["Class"] = [](const std::vector<Any>& v) {
-        return cls(v[0]);
-    };
-    peg["ClassCont"] = [](const char*s, size_t l) {
-        return resolve_escape_sequence(s, l);
-    };
-
-    peg["DOT"] = []() {
-        return any();
-    };
-
-    auto m = peg["Grammar"].parse_with_match(syntax, syntax_len);
-    if (!m.ret) {
-        if (log) {
-            auto line = line_info(syntax, m.ptr);
-            log(line.first, line.second, m.msg.empty() ? "syntax error" : m.msg);
-        }
-        return nullptr;
-    }
-
-    for (const auto& x : refs) {
-        const auto& name = x.first;
-        auto ptr = x.second;
-        if (grammar->find(name) == grammar->end()) {
-            if (log) {
-                auto line = line_info(syntax, ptr);
-                log(line.first, line.second, "'" + name + "' is not defined.");
-            }
-            return nullptr;
-        }
-    }
-
-    return grammar;
+    return GrammarGenerator::instance().perform(syntax, syntax_len, start, log);
 }
 
 inline std::shared_ptr<Grammar> make_grammar(
@@ -1210,7 +1233,10 @@ public:
         return grammar_ != nullptr;
     }
 
-    bool load_syntax(const char* s, size_t l, std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
+    bool load_syntax(
+        const char* s, size_t l,
+        std::function<void (size_t, size_t, const std::string&)> log = nullptr) {
+
         grammar_ = make_grammar(s, l, start_, log);
         return grammar_ != nullptr;
     }
