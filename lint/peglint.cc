@@ -9,7 +9,6 @@
 #include <iostream>
 #include "mmap.h"
 
-using namespace peglib;
 using namespace std;
 
 int main(int argc, const char** argv)
@@ -28,7 +27,7 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    auto parser = make_parser(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
+    peglib::peg parser(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     });
 

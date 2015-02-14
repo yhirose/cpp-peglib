@@ -23,24 +23,24 @@ namespace peglib {
 void* enabler;
 
 /*-----------------------------------------------------------------------------
- *  Any
+ *  any
  *---------------------------------------------------------------------------*/
 
-class Any
+class any
 {
 public:
-    Any() : content_(nullptr) {}
+    any() : content_(nullptr) {}
 
-    Any(const Any& rhs) : content_(rhs.clone()) {}
+    any(const any& rhs) : content_(rhs.clone()) {}
 
-    Any(Any&& rhs) : content_(rhs.content_) {
+    any(any&& rhs) : content_(rhs.content_) {
         rhs.content_ = nullptr;
     }
 
     template <typename T>
-    Any(const T& value) : content_(new holder<T>(value)) {}
+    any(const T& value) : content_(new holder<T>(value)) {}
 
-    Any& operator=(const Any& rhs) {
+    any& operator=(const any& rhs) {
         if (this != &rhs) {
             if (content_) {
                 delete content_;
@@ -50,7 +50,7 @@ public:
         return *this;
     }
 
-    Any& operator=(Any&& rhs) {
+    any& operator=(any&& rhs) {
         if (this != &rhs) {
             if (content_) {
                 delete content_;
@@ -62,7 +62,7 @@ public:
     }
 
     template <typename T>
-    Any& operator=(const T& value) {
+    any& operator=(const T& value) {
         if (content_) {
             delete content_;
         }
@@ -70,7 +70,7 @@ public:
         return *this;
     }
 
-    ~Any() {
+    ~any() {
         delete content_;
     }
 
@@ -80,7 +80,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<!std::is_same<T, Any>::value>::type*& = enabler
+        typename std::enable_if<!std::is_same<T, any>::value>::type*& = enabler
     >
     T& get() {
         assert(content_);
@@ -89,7 +89,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<std::is_same<T, Any>::value>::type*& = enabler
+        typename std::enable_if<std::is_same<T, any>::value>::type*& = enabler
     >
     T& get() {
         return *this;
@@ -97,7 +97,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<!std::is_same<T, Any>::value>::type*& = enabler
+        typename std::enable_if<!std::is_same<T, any>::value>::type*& = enabler
     >
     const T& get() const {
         assert(content_);
@@ -106,9 +106,9 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<std::is_same<T, Any>::value>::type*& = enabler
+        typename std::enable_if<std::is_same<T, any>::value>::type*& = enabler
     >
-    const Any& get() const {
+    const any& get() const {
         return *this;
     }
 
@@ -166,7 +166,7 @@ private:
 struct Values
 {
     std::vector<std::string> names;
-    std::vector<Any>         values;
+    std::vector<any>         values;
 };
 
 /*
@@ -176,17 +176,17 @@ template <
     typename R, typename F,
     typename std::enable_if<!std::is_void<R>::value>::type*& = enabler,
     typename... Args>
-Any call(F fn, Args&&... args) {
-    return Any(fn(std::forward<Args>(args)...));
+any call(F fn, Args&&... args) {
+    return any(fn(std::forward<Args>(args)...));
 }
 
 template <
     typename R, typename F,
     typename std::enable_if<std::is_void<R>::value>::type*& = enabler,
     typename... Args>
-Any call(F fn, Args&&... args) {
+any call(F fn, Args&&... args) {
     fn(std::forward<Args>(args)...);
-    return Any();
+    return any();
 }
 
 class Action
@@ -224,35 +224,35 @@ public:
         return (bool)fn_;
     }
 
-    Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) const {
+    any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) const {
         return fn_(s, l, v, n);
     }
 
 private:
     template <typename R>
     struct TypeAdaptor {
-        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> fn)
+        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> fn)
             : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_, s, l, v, n);
         }
-        std::function<R (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_s_l_v {
-        TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<Any>& v)> fn)
+        TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn)
             : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_, s, l, v);
         }
-        std::function<R (const char* s, size_t l, const std::vector<Any>& v)> fn_;
+        std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_s_l {
         TypeAdaptor_s_l(std::function<R (const char* s, size_t l)> fn) : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_, s, l);
         }
         std::function<R (const char* s, size_t l)> fn_;
@@ -260,50 +260,50 @@ private:
 
     template <typename R>
     struct TypeAdaptor_v_n {
-        TypeAdaptor_v_n(std::function<R (const std::vector<Any>& v, const std::vector<std::string>& n)> fn) : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        TypeAdaptor_v_n(std::function<R (const std::vector<any>& v, const std::vector<std::string>& n)> fn) : fn_(fn) {}
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_, v, n);
         }
-        std::function<R (const std::vector<Any>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const std::vector<any>& v, const std::vector<std::string>& n)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_v {
-        TypeAdaptor_v(std::function<R (const std::vector<Any>& v)> fn) : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        TypeAdaptor_v(std::function<R (const std::vector<any>& v)> fn) : fn_(fn) {}
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_, v);
         }
-        std::function<R (const std::vector<Any>& v)> fn_;
+        std::function<R (const std::vector<any>& v)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_empty {
         TypeAdaptor_empty(std::function<R ()> fn) : fn_(fn) {}
-        Any operator()(const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
             return call<R>(fn_);
         }
         std::function<R ()> fn_;
     };
 
-    typedef std::function<Any (const char* s, size_t l, const std::vector<Any>& v, const std::vector<std::string>& n)> Fty;
+    typedef std::function<any (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> Fty;
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<Any>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, const std::vector<std::string>& n) const) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<Any>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v, const std::vector<std::string>& n)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<Any>& v) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v) const) {
         return TypeAdaptor_s_l_v<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<Any>& v)) {
+    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v)) {
         return TypeAdaptor_s_l_v<R>(fn);
     }
 
@@ -318,22 +318,22 @@ private:
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<Any>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v, const std::vector<std::string>& n) const) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const std::vector<Any>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R (*mf)(const std::vector<any>& v, const std::vector<std::string>& n)) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<Any>& v) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v) const) {
         return TypeAdaptor_v<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const std::vector<Any>& v)) {
+    Fty make_adaptor(F fn, R (*mf)(const std::vector<any>& v)) {
         return TypeAdaptor_v<R>(fn);
     }
 
@@ -818,11 +818,11 @@ private:
     private:
         friend class Definition;
 
-        Any reduce(const char* s, size_t l, const Values& v, const Action& action) const {
+        any reduce(const char* s, size_t l, const Values& v, const Action& action) const {
             if (action) {
                 return action(s, l, v.values, v.names);
             } else if (v.values.empty()) {
-                return Any();
+                return any();
             } else {
                 return v.values.front();
             }
@@ -903,7 +903,7 @@ inline std::shared_ptr<Ope> chr(char c) {
     return std::make_shared<Character>(c);
 }
 
-inline std::shared_ptr<Ope> any() {
+inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
 }
 
@@ -923,68 +923,6 @@ inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
 
-typedef std::map<std::string, Definition> Grammar;
-
-inline Grammar make_peg_grammar()
-{
-    Grammar g;
-
-    // Setup PEG syntax parser
-    g["Grammar"]    <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-    g["Definition"] <= seq(g["Identifier"], g["LEFTARROW"], g["Expression"]);
-
-    g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
-    g["Sequence"]   <= zom(g["Prefix"]);
-    g["Prefix"]     <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
-    g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
-    g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
-                           seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                           g["Literal"], g["Class"], g["DOT"]);
-
-    g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
-    g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-    g["IdentStart"] <= cls("a-zA-Z_");
-    g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
-
-    g["Literal"]    <= cho(seq(cls("'"), g["SQCont"], cls("'"), g["Spacing"]),
-                           seq(cls("\""), g["DQCont"], cls("\""), g["Spacing"]));
-    g["SQCont"]     <= zom(seq(npd(cls("'")), g["Char"]));
-    g["DQCont"]     <= zom(seq(npd(cls("\"")), g["Char"]));
-
-    g["Class"]      <= seq(chr('['), g["ClassCont"], chr(']'), g["Spacing"]);
-    g["ClassCont"]  <= zom(seq(npd(chr(']')), g["Range"]));
-
-    g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-    g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
-                           seq(chr('\\'), cls("0-2"), cls("0-7"), cls("0-7")), // TODO: 0-2 should be 0-3. bug in the spec...
-                           seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
-                           seq(npd(chr('\\')), any()));
-
-    g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
-    g["SLASH"]      <= seq(chr('/'), g["Spacing"]);
-    g["AND"]        <= seq(chr('&'), g["Spacing"]);
-    g["NOT"]        <= seq(chr('!'), g["Spacing"]);
-    g["QUESTION"]   <= seq(chr('?'), g["Spacing"]);
-    g["STAR"]       <= seq(chr('*'), g["Spacing"]);
-    g["PLUS"]       <= seq(chr('+'), g["Spacing"]);
-    g["OPEN"]       <= seq(chr('('), g["Spacing"]);
-    g["CLOSE"]      <= seq(chr(')'), g["Spacing"]);
-    g["DOT"]        <= seq(chr('.'), g["Spacing"]);
-
-    g["Spacing"]    <= zom(cho(g["Space"], g["Comment"]));
-    g["Comment"]    <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), any())), g["EndOfLine"]);
-    g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
-    g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
-    g["EndOfFile"]  <= npd(any());
-
-    // Set definition names
-    for (auto& x: g) {
-        x.second.name = x.first;
-    }
-
-    return g;
-}
-
 inline std::pair<size_t, size_t> line_info(const char* s, const char* ptr) {
     auto p = s;
     auto col_ptr = p;
@@ -1003,24 +941,90 @@ inline std::pair<size_t, size_t> line_info(const char* s, const char* ptr) {
     return std::make_pair(no, col);
 }
 
+typedef std::map<std::string, Definition> Grammar;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
-class GrammarGenerator
+class PEGParser
 {
 public:
-    static std::shared_ptr<Grammar> perform(const char* s, size_t l, std::string& start, Log log) {
-        static GrammarGenerator instance;
-        return instance.perform_core(s, l, start, log);
+    static std::shared_ptr<Grammar> parse(const char* s, size_t l, std::string& start, Log log) {
+        static PEGParser instance;
+        return get().perform_core(s, l, start, log);
+    }
+
+    static Grammar& grammar() {
+        return get().g;
     }
 
 private:
-    GrammarGenerator() : peg(make_peg_grammar()) {
-        initialize();
+    static PEGParser& get() {
+        static PEGParser instance;
+        return instance;
     }
 
-    void initialize() {
+    PEGParser() {
+        make_grammar();
+        setup_actions();
+    }
 
-        peg["Expression"] = [&](const std::vector<Any>& v) {
+    void make_grammar() {
+        // Setup PEG syntax parser
+        g["Grammar"]    <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
+        g["Definition"] <= seq(g["Identifier"], g["LEFTARROW"], g["Expression"]);
+
+        g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
+        g["Sequence"]   <= zom(g["Prefix"]);
+        g["Prefix"]     <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
+        g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
+        g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
+                               seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+                               g["Literal"], g["Class"], g["DOT"]);
+
+        g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
+        g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
+        g["IdentStart"] <= cls("a-zA-Z_");
+        g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
+
+        g["Literal"]    <= cho(seq(cls("'"), g["SQCont"], cls("'"), g["Spacing"]),
+                               seq(cls("\""), g["DQCont"], cls("\""), g["Spacing"]));
+        g["SQCont"]     <= zom(seq(npd(cls("'")), g["Char"]));
+        g["DQCont"]     <= zom(seq(npd(cls("\"")), g["Char"]));
+
+        g["Class"]      <= seq(chr('['), g["ClassCont"], chr(']'), g["Spacing"]);
+        g["ClassCont"]  <= zom(seq(npd(chr(']')), g["Range"]));
+
+        g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
+        g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
+                               seq(chr('\\'), cls("0-2"), cls("0-7"), cls("0-7")), // TODO: 0-2 should be 0-3. bug in the spec...
+                               seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
+                               seq(npd(chr('\\')), dot()));
+
+        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+        g["SLASH"]      <= seq(chr('/'), g["Spacing"]);
+        g["AND"]        <= seq(chr('&'), g["Spacing"]);
+        g["NOT"]        <= seq(chr('!'), g["Spacing"]);
+        g["QUESTION"]   <= seq(chr('?'), g["Spacing"]);
+        g["STAR"]       <= seq(chr('*'), g["Spacing"]);
+        g["PLUS"]       <= seq(chr('+'), g["Spacing"]);
+        g["OPEN"]       <= seq(chr('('), g["Spacing"]);
+        g["CLOSE"]      <= seq(chr(')'), g["Spacing"]);
+        g["DOT"]        <= seq(chr('.'), g["Spacing"]);
+
+        g["Spacing"]    <= zom(cho(g["Space"], g["Comment"]));
+        g["Comment"]    <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())), g["EndOfLine"]);
+        g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
+        g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
+        g["EndOfFile"]  <= npd(dot());
+
+        // Set definition names
+        for (auto& x: g) {
+            x.second.name = x.first;
+        }
+    }
+
+    void setup_actions() {
+
+        g["Expression"] = [&](const std::vector<any>& v) {
             if (v.size() == 1) {
                 return v[0].get<std::shared_ptr<Ope>>();
             } else {
@@ -1035,7 +1039,7 @@ private:
             }
         };
 
-        peg["Sequence"] = [&](const std::vector<Any>& v) {
+        g["Sequence"] = [&](const std::vector<any>& v) {
             if (v.size() == 1) {
                 return v[0].get<std::shared_ptr<Ope>>();
             } else {
@@ -1048,7 +1052,7 @@ private:
             }
         };
 
-        peg["Prefix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
+        g["Prefix"] = [&](const std::vector<any>& v, const std::vector<std::string>& n) {
             std::shared_ptr<Ope> ope;
             if (v.size() == 1) {
                 ope = v[0].get<std::shared_ptr<Ope>>();
@@ -1064,7 +1068,7 @@ private:
             return ope;
         };
 
-        peg["Suffix"] = [&](const std::vector<Any>& v, const std::vector<std::string>& n) {
+        g["Suffix"] = [&](const std::vector<any>& v, const std::vector<std::string>& n) {
             auto ope = v[0].get<std::shared_ptr<Ope>>();
             if (v.size() == 1) {
                 return ope;
@@ -1080,29 +1084,29 @@ private:
             }
         };
 
-        peg["IdentCont"] = [](const char*s, size_t l) {
+        g["IdentCont"] = [](const char*s, size_t l) {
             return std::string(s, l);
         };
 
-        peg["Literal"] = [](const std::vector<Any>& v) {
+        g["Literal"] = [](const std::vector<any>& v) {
             return lit(v[0]);
         };
-        peg["SQCont"] = [this](const char*s, size_t l) {
+        g["SQCont"] = [this](const char*s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
-        peg["DQCont"] = [this](const char*s, size_t l) {
+        g["DQCont"] = [this](const char*s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
 
-        peg["Class"] = [](const std::vector<Any>& v) {
+        g["Class"] = [](const std::vector<any>& v) {
             return cls(v[0]);
         };
-        peg["ClassCont"] = [this](const char*s, size_t l) {
+        g["ClassCont"] = [this](const char*s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
 
-        peg["DOT"] = []() {
-            return any();
+        g["DOT"] = []() {
+            return dot();
         };
     }
 
@@ -1111,7 +1115,7 @@ private:
         start.clear();
         std::map<std::string, const char*> refs;
 
-        peg["Definition"] = [&](const std::vector<Any>& v) {
+        g["Definition"] = [&](const std::vector<any>& v) {
             const auto& name = v[0].get<std::string>();
             (*grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
             (*grammar)[name].name = name;
@@ -1121,20 +1125,20 @@ private:
             }
         };
 
-        peg["Primary"].actions = {
-            [&](const std::vector<Any>& v) {
+        g["Primary"].actions = {
+            [&](const std::vector<any>& v) {
                 return v[0];
             },
-            [&](const char* s, size_t l, const std::vector<Any>& v) {
+            [&](const char* s, size_t l, const std::vector<any>& v) {
                 refs[v[0]] = s;
                 return ref(*grammar, v[0]);
             },
-            [&](const std::vector<Any>& v) {
+            [&](const std::vector<any>& v) {
                 return v[1];
             }
         };
 
-        auto r = peg["Grammar"].parse(s, l);
+        auto r = g["Grammar"].parse(s, l);
         if (!r.ret) {
             if (log) {
                 auto line = line_info(s, r.ptr);
@@ -1188,23 +1192,23 @@ private:
         return r;
     }
 
-    Grammar peg;
+    Grammar g;
 };
 
 /*-----------------------------------------------------------------------------
- *  Parser
+ *  peg
  *---------------------------------------------------------------------------*/
 
-class Parser
+class peg
 {
 public:
-    Parser(const char* s, size_t l, Log log = nullptr) {
-        grammar_ = GrammarGenerator::perform(s, l, start_, log);
+    peg(const char* s, size_t l, Log log = nullptr) {
+        grammar_ = PEGParser::parse(s, l, start_, log);
     }
 
-    Parser(const char* s, Log log = nullptr) {
+    peg(const char* s, Log log = nullptr) {
         auto l = strlen(s);
-        grammar_ = GrammarGenerator::perform(s, l, start_, log);
+        grammar_ = PEGParser::parse(s, l, start_, log);
     }
 
     operator bool() {
@@ -1212,7 +1216,7 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, size_t l, T& out, bool exact = true) const {
+    bool match(const char* s, size_t l, T& out, bool exact = true) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, l, out);
@@ -1221,7 +1225,7 @@ public:
         return false;
     }
 
-    bool parse(const char* s, size_t l, bool exact = true) const {
+    bool match(const char* s, size_t l, bool exact = true) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, l);
@@ -1231,14 +1235,14 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, T& out, bool exact = true) const {
+    bool match(const char* s, T& out, bool exact = true) const {
         auto l = strlen(s);
-        return parse(s, l, out, exact);
+        return match(s, l, out, exact);
     }
 
-    bool parse(const char* s, bool exact = true) const {
+    bool match(const char* s, bool exact = true) const {
         auto l = strlen(s);
-        return parse(s, l, exact);
+        return match(s, l, exact);
     }
 
     bool lint(const char* s, size_t l, bool exact, Log log = nullptr) {

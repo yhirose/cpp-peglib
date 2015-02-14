@@ -31,7 +31,7 @@ int main(int argc, const char** argv)
 
     const char* s = argv[1];
 
-    auto reduce = [](const vector<Any>& v) -> long {
+    auto reduce = [](const vector<any>& v) -> long {
         auto result = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();

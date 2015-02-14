@@ -31,7 +31,7 @@ int main(int argc, const char** argv)
 
     const char* s = argv[1];
 
-    auto reduce = [](const vector<Any>& v) -> long {
+    auto reduce = [](const vector<any>& v) -> long {
         auto result = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -55,7 +55,7 @@ int main(int argc, const char** argv)
         "  NUMBER           <-  [0-9]+                            "
         ;
 
-    Parser parser(syntax);
+    peg parser(syntax);
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
@@ -64,7 +64,7 @@ int main(int argc, const char** argv)
     parser["NUMBER"]          = [](const char* s, size_t l) { return atol(s); };
 
     long val = 0;
-    if (parser.parse(s, val)) {
+    if (parser.match(s, val)) {
         cout << s << " = " << val << endl;
         return 0;
     }

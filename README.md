@@ -28,7 +28,7 @@ Here is how to parse text with the PEG syntax and retrieve tag names:
 #include "peglib.h"
 
 // (2) Make a parser
-auto parser = peglib::make_parser(R"(
+peglib::peg parser(R"(
     ROOT      <-  _ ('[' TAG_NAME ']' _)*
     TAG_NAME  <-  (!']' .)+
     _         <-  [ \t]*
@@ -41,7 +41,7 @@ parser["TAG_NAME"] = [&](const char* s, size_t l) {
 };
 
 // (4) Parse
-auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
+auto ret = parser.match(" [tag1] [tag:2] [tag-3] ");
 
 assert(ret     == true);
 assert(tags[0] == "tag1");
@@ -54,15 +54,15 @@ This action `[&](const char* s, size_t l)` gives a pointer and length of the mat
 There are more actions available. Here is a complete list:
 
 ```c++
-[](const char* s, size_t l, const std::vector<peglib::Any>& v, const std::vector<std::string>& n)
-[](const char* s, size_t l, const std::vector<peglib::Any>& v)
+[](const char* s, size_t l, const std::vector<peglib::any>& v, const std::vector<std::string>& n)
+[](const char* s, size_t l, const std::vector<peglib::any>& v)
 [](const char* s, size_t l)
-[](const std::vector<peglib::Any>& v, const std::vector<std::string>& n)
-[](const std::vector<peglib::Any>& v)
+[](const std::vector<peglib::any>& v, const std::vector<std::string>& n)
+[](const std::vector<peglib::any>& v)
 []()
 ```
 
-`const std::vector<peglib::Any>& v` contains semantic values. `peglib::Any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
+`const std::vector<peglib::any>& v` contains semantic values. `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
 
 `const std::vector<std::string>& n` contains definition names of semantic values.
 
@@ -84,34 +84,34 @@ int main(void) {
         Number    <- [0-9]+
     )";
 
-    auto parser = make_parser(syntax);
+    peg parser(syntax);
 
     parser["Additive"] = {
         nullptr,                                      // Default action
-        [](const vector<Any>& v) {
+        [](const vector<any>& v) {
             return v[0].get<int>() + v[1].get<int>(); // 1st choice
         },
-        [](const vector<Any>& v) { return v[0]; }     // 2nd choice
+        [](const vector<any>& v) { return v[0]; }     // 2nd choice
     };
 
     parser["Multitive"] = {
         nullptr,                                      // Default action
-        [](const vector<Any>& v) {
+        [](const vector<any>& v) {
             return v[0].get<int>() * v[1].get<int>(); // 1st choice
         },
-        [](const vector<Any>& v) { return v[0]; }     // 2nd choice
+        [](const vector<any>& v) { return v[0]; }     // 2nd choice
     };
 
-    parser["Primary"] = [](const vector<Any>& v) {
+    parser["Primary"] = [](const vector<any>& v) {
         return v.size() == 1 ? v[0] : v[1];
     };
 
-    parser["Number"] = [](const char* s, size_t l) -> long {
+    parser["Number"] = [](const char* s, size_t l) {
         return stoi(string(s, l), nullptr, 10);
     };
 
     int val;
-    parser.parse("1+2*3", val);
+    parser.match("1+2*3", val);
 
     assert(val == 7);
 }
@@ -130,13 +130,11 @@ vector<string> tags;
 
 Definition ROOT, TAG_NAME, _;
 ROOT     = seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME = oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
+TAG_NAME = oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
 _        = zom(cls(" \t"));
 
 auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 ```
-
-In fact, the PEG parser generator is made with the parser operators. You can see the code at `make_peg_grammar` function in `peglib.h`.
 
 The following are available operators:
 
@@ -153,7 +151,7 @@ The following are available operators:
 | lit      | Literal string     |
 | cls      | Character class    |
 | chr      | Character          |
-| any      | Any character      |
+| dot      | Any character      |
 
 Sample codes
 ------------

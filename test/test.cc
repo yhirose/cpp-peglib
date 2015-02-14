@@ -7,14 +7,14 @@
 
 TEST_CASE("Empty syntax test", "[general]")
 {
-    peglib::Parser parser("");
+    peglib::peg parser("");
     bool ret = parser;
     REQUIRE(ret == false);
 }
 
 TEST_CASE("String capture test", "[general]")
 {
-    peglib::Parser parser(
+    peglib::peg parser(
         "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   "
@@ -26,7 +26,7 @@ TEST_CASE("String capture test", "[general]")
         tags.push_back(std::string(s, l));
     };
 
-    auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
+    auto ret = parser.match(" [tag1] [tag:2] [tag-3] ");
 
     REQUIRE(ret == true);
     REQUIRE(tags.size() == 3);
@@ -45,7 +45,7 @@ TEST_CASE("String capture test2", "[general]")
     rule ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
-    TAG_NAME <= oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
+    TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
     WS       <= zom(cls(" \t"));
 
     auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
@@ -65,7 +65,7 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), grp(TAG_NAME, [&](const char* s, size_t l) { tags.push_back(string(s, l)); }), chr(']'), WS);
-    TAG_NAME <= oom(seq(npd(chr(']')), any()));
+    TAG_NAME <= oom(seq(npd(chr(']')), dot()));
     WS       <= zom(cls(" \t"));
 
     auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
@@ -88,7 +88,7 @@ TEST_CASE("Cyclic grammer test", "[general]")
 
 TEST_CASE("Lambda action test", "[general]")
 {
-    Parser parser(
+    peg parser(
        "  START <- (CHAR)* "
        "  CHAR  <- .       ");
 
@@ -97,14 +97,14 @@ TEST_CASE("Lambda action test", "[general]")
         ss += *s;
     };
 
-    bool ret = parser.parse("hello");
+    bool ret = parser.match("hello");
     REQUIRE(ret == true);
     REQUIRE(ss == "hello");
 }
 
 TEST_CASE("Backtracking test", "[general]")
 {
-    Parser parser(
+    peg parser(
        "  START <- PAT1 / PAT2  "
        "  PAT1  <- HELLO ' One' "
        "  PAT2  <- HELLO ' Two' "
@@ -116,7 +116,7 @@ TEST_CASE("Backtracking test", "[general]")
         count++;
     };
 
-    bool ret = parser.parse("Hello Two");
+    bool ret = parser.match("Hello Two");
     REQUIRE(ret == true);
     REQUIRE(count == 2);
 }
@@ -129,22 +129,22 @@ TEST_CASE("Simple calculator test", "[general]")
         " Primary   <- '(' Additive ')' / Number "
         " Number    <- [0-9]+ ";
 
-    Parser parser(syntax);
+    peg parser(syntax);
 
     parser["Additive"] = {
         // Default action
         nullptr,
         // Action for the first choice
-        [](const vector<Any>& v) { return v[0].get<int>() + v[1].get<int>(); },
+        [](const vector<any>& v) { return v[0].get<int>() + v[1].get<int>(); },
         // Action for the second choice
-        [](const vector<Any>& v) { return v[0]; }
+        [](const vector<any>& v) { return v[0]; }
     };
 
-    parser["Multitive"] = [](const vector<Any>& v) {
+    parser["Multitive"] = [](const vector<any>& v) {
         return v.size() == 1 ? int(v[0]) : v[0].get<int>() * v[1].get<int>();
     };
 
-    parser["Primary"] = [](const vector<Any>& v) {
+    parser["Primary"] = [](const vector<any>& v) {
         return v.size() == 1 ? v[0] : v[1];
     };
 
@@ -153,7 +153,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     int val;
-    parser.parse("1+2*3", val);
+    parser.match("1+2*3", val);
 
     REQUIRE(val == 7);
 }
@@ -171,7 +171,7 @@ TEST_CASE("Calculator test", "[general]")
     NUMBER          <= oom(cls("0-9"));
 
     // Setup actions
-    auto reduce = [](const vector<Any>& v) -> long {
+    auto reduce = [](const vector<any>& v) -> long {
         long ret = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -213,11 +213,11 @@ TEST_CASE("Calculator test2", "[general]")
         ;
 
     string start;
-    auto grammar = GrammarGenerator::perform(syntax, strlen(syntax), start, nullptr);
+    auto grammar = PEGParser::parse(syntax, strlen(syntax), start, nullptr);
     auto& g = *grammar;
 
     // Setup actions
-    auto reduce = [](const vector<Any>& v) -> long {
+    auto reduce = [](const vector<any>& v) -> long {
         long ret = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -248,7 +248,7 @@ TEST_CASE("Calculator test2", "[general]")
 TEST_CASE("Calculator test3", "[general]")
 {
     // Parse syntax
-    Parser parser(
+    peg parser(
         "  # Grammar for Calculator...\n                          "
         "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
@@ -258,7 +258,7 @@ TEST_CASE("Calculator test3", "[general]")
         "  NUMBER           <-  [0-9]+                            "
         );
 
-    auto reduce = [](const vector<Any>& v) -> long {
+    auto reduce = [](const vector<any>& v) -> long {
         long ret = v[0].get<long>();
         for (auto i = 1u; i < v.size(); i += 2) {
             auto num = v[i + 1].get<long>();
@@ -281,7 +281,7 @@ TEST_CASE("Calculator test3", "[general]")
 
     // Parse
     long val;
-    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
+    auto ret = parser.match("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(ret == true);
     REQUIRE(val == -3);
@@ -293,15 +293,19 @@ bool exact(Grammar& g, const char* d, const char* s) {
     return r.ret && r.len == l;
 }
 
+Grammar& make_peg_grammar() {
+    return PEGParser::grammar();
+}
+
 TEST_CASE("PEG Grammar", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Grammar", " Definition <- a / ( b c ) / d \n rule2 <- [a-zA-Z][a-z0-9-]+ ") == true);
 }
 
 TEST_CASE("PEG Definition", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Definition", "Definition <- a / (b c) / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition <- a / b c / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition ") == false);
@@ -312,7 +316,7 @@ TEST_CASE("PEG Definition", "[peg]")
 
 TEST_CASE("PEG Expression", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Expression", "a / (b c) / d ") == true);
     REQUIRE(exact(g, "Expression", "a / b c / d ") == true);
     REQUIRE(exact(g, "Expression", "a b ") == true);
@@ -323,7 +327,7 @@ TEST_CASE("PEG Expression", "[peg]")
 
 TEST_CASE("PEG Sequence", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Sequence", "a b c d ") == true);
     REQUIRE(exact(g, "Sequence", "") == true);
     REQUIRE(exact(g, "Sequence", "!") == false);
@@ -333,7 +337,7 @@ TEST_CASE("PEG Sequence", "[peg]")
 
 TEST_CASE("PEG Prefix", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Prefix", "&[a]") == true);
     REQUIRE(exact(g, "Prefix", "![']") == true);
     REQUIRE(exact(g, "Prefix", "-[']") == false);
@@ -343,7 +347,7 @@ TEST_CASE("PEG Prefix", "[peg]")
 
 TEST_CASE("PEG Suffix", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Suffix", "aaa ") == true);
     REQUIRE(exact(g, "Suffix", "aaa? ") == true);
     REQUIRE(exact(g, "Suffix", "aaa* ") == true);
@@ -356,7 +360,7 @@ TEST_CASE("PEG Suffix", "[peg]")
 
 TEST_CASE("PEG Primary", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Primary", "_Identifier0_ ") == true);
     REQUIRE(exact(g, "Primary", "_Identifier0_<-") == false);
     REQUIRE(exact(g, "Primary", "( _Identifier0_ _Identifier1_ )") == true);
@@ -372,7 +376,7 @@ TEST_CASE("PEG Primary", "[peg]")
 
 TEST_CASE("PEG Identifier", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Identifier", "_Identifier0_ ") == true);
     REQUIRE(exact(g, "Identifier", "0Identifier_ ") == false);
     REQUIRE(exact(g, "Identifier", "Iden|t ") == false);
@@ -383,7 +387,7 @@ TEST_CASE("PEG Identifier", "[peg]")
 
 TEST_CASE("PEG IdentStart", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "IdentStart", "_") == true);
     REQUIRE(exact(g, "IdentStart", "a") == true);
     REQUIRE(exact(g, "IdentStart", "Z") == true);
@@ -394,7 +398,7 @@ TEST_CASE("PEG IdentStart", "[peg]")
 
 TEST_CASE("PEG IdentRest", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "IdentRest", "_") == true);
     REQUIRE(exact(g, "IdentRest", "a") == true);
     REQUIRE(exact(g, "IdentRest", "Z") == true);
@@ -405,7 +409,7 @@ TEST_CASE("PEG IdentRest", "[peg]")
 
 TEST_CASE("PEG Literal", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Literal", "'abc' ") == true);
     REQUIRE(exact(g, "Literal", "'a\\nb\\tc' ") == true);
     REQUIRE(exact(g, "Literal", "'a\\277\tc' ") == true);
@@ -424,7 +428,7 @@ TEST_CASE("PEG Literal", "[peg]")
 
 TEST_CASE("PEG Class", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Class", "[]") == true);
     REQUIRE(exact(g, "Class", "[a]") == true);
     REQUIRE(exact(g, "Class", "[a-z]") == true);
@@ -444,7 +448,7 @@ TEST_CASE("PEG Class", "[peg]")
 
 TEST_CASE("PEG Range", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Range", "a") == true);
     REQUIRE(exact(g, "Range", "a-z") == true);
     REQUIRE(exact(g, "Range", "az") == false);
@@ -455,7 +459,7 @@ TEST_CASE("PEG Range", "[peg]")
 
 TEST_CASE("PEG Char", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Char", "\\n") == true);
     REQUIRE(exact(g, "Char", "\\r") == true);
     REQUIRE(exact(g, "Char", "\\t") == true);
@@ -488,7 +492,7 @@ TEST_CASE("PEG Char", "[peg]")
 
 TEST_CASE("PEG Operators", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "LEFTARROW", "<-") == true);
     REQUIRE(exact(g, "SLASH", "/ ") == true);
     REQUIRE(exact(g, "AND", "& ") == true);
@@ -503,7 +507,7 @@ TEST_CASE("PEG Operators", "[peg]")
 
 TEST_CASE("PEG Comment", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Comment", "# Comment.\n") == true);
     REQUIRE(exact(g, "Comment", "# Comment.") == false);
     REQUIRE(exact(g, "Comment", " ") == false);
@@ -512,7 +516,7 @@ TEST_CASE("PEG Comment", "[peg]")
 
 TEST_CASE("PEG Space", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "Space", " ") == true);
     REQUIRE(exact(g, "Space", "\t") == true);
     REQUIRE(exact(g, "Space", "\n") == true);
@@ -522,7 +526,7 @@ TEST_CASE("PEG Space", "[peg]")
 
 TEST_CASE("PEG EndOfLine", "[peg]")
 {
-    Grammar g = make_peg_grammar();
+    auto g = PEGParser::grammar();
     REQUIRE(exact(g, "EndOfLine", "\r\n") == true);
     REQUIRE(exact(g, "EndOfLine", "\n") == true);
     REQUIRE(exact(g, "EndOfLine", "\r") == true);
