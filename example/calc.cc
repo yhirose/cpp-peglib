@@ -55,7 +55,7 @@ int main(int argc, const char** argv)
         "  NUMBER           <-  [0-9]+                            "
         ;
 
-    Parser parser = make_parser(syntax);
+    Parser parser(syntax);
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;

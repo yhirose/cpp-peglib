@@ -7,14 +7,14 @@
 
 TEST_CASE("Empty syntax test", "[general]")
 {
-    auto parser = peglib::make_parser("");
+    peglib::Parser parser("");
     bool ret = parser;
     REQUIRE(ret == false);
 }
 
 TEST_CASE("String capture test", "[general]")
 {
-    auto parser = peglib::make_parser(
+    peglib::Parser parser(
         "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   "
@@ -48,9 +48,9 @@ TEST_CASE("String capture test2", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), any())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
     WS       <= zom(cls(" \t"));
 
-    auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+    auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
-    REQUIRE(ret == true);
+    REQUIRE(m.ret == true);
     REQUIRE(tags.size() == 3);
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
@@ -68,9 +68,9 @@ TEST_CASE("String capture test with embedded match action", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), any()));
     WS       <= zom(cls(" \t"));
 
-    auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+    auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
-    REQUIRE(ret == true);
+    REQUIRE(m.ret == true);
     REQUIRE(tags.size() == 3);
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
@@ -88,7 +88,7 @@ TEST_CASE("Cyclic grammer test", "[general]")
 
 TEST_CASE("Lambda action test", "[general]")
 {
-    auto parser = make_parser(
+    Parser parser(
        "  START <- (CHAR)* "
        "  CHAR  <- .       ");
 
@@ -104,7 +104,7 @@ TEST_CASE("Lambda action test", "[general]")
 
 TEST_CASE("Backtracking test", "[general]")
 {
-    auto parser = make_parser(
+    Parser parser(
        "  START <- PAT1 / PAT2  "
        "  PAT1  <- HELLO ' One' "
        "  PAT2  <- HELLO ' Two' "
@@ -129,7 +129,7 @@ TEST_CASE("Simple calculator test", "[general]")
         " Primary   <- '(' Additive ')' / Number "
         " Number    <- [0-9]+ ";
 
-    auto parser = make_parser(syntax);
+    Parser parser(syntax);
 
     parser["Additive"] = {
         // Default action
@@ -192,11 +192,11 @@ TEST_CASE("Calculator test", "[general]")
     NUMBER          = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
     // Parse
-    Any val;
-    auto ret = EXPRESSION.parse("1+2*3*(4-5+6)/7-8", val);
+    long val;
+    auto m = EXPRESSION.parse("1+2*3*(4-5+6)/7-8", val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val.get<long>() == -3);
+    REQUIRE(m.ret == true);
+    REQUIRE(val == -3);
 }
 
 TEST_CASE("Calculator test2", "[general]")
@@ -213,7 +213,7 @@ TEST_CASE("Calculator test2", "[general]")
         ;
 
     string start;
-    auto grammar = make_grammar(syntax, start);
+    auto grammar = GrammarGenerator::perform(syntax, strlen(syntax), start, nullptr);
     auto& g = *grammar;
 
     // Setup actions
@@ -238,17 +238,17 @@ TEST_CASE("Calculator test2", "[general]")
     g["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
 
     // Parse
-    Any val;
-    auto ret = g[start].parse("1+2*3*(4-5+6)/7-8", val);
+    long val;
+    auto m = g[start].parse("1+2*3*(4-5+6)/7-8", val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val.get<long>() == -3);
+    REQUIRE(m.ret == true);
+    REQUIRE(val == -3);
 }
 
 TEST_CASE("Calculator test3", "[general]")
 {
     // Parse syntax
-    auto parser = make_parser(
+    Parser parser(
         "  # Grammar for Calculator...\n                          "
         "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
@@ -287,249 +287,255 @@ TEST_CASE("Calculator test3", "[general]")
     REQUIRE(val == -3);
 }
 
+bool exact(Grammar& g, const char* d, const char* s) {
+    auto l = strlen(s);
+    auto r = g[d].parse(s, l);
+    return r.ret && r.len == l;
+}
+
 TEST_CASE("PEG Grammar", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Grammar"].parse(" Definition <- a / ( b c ) / d \n rule2 <- [a-zA-Z][a-z0-9-]+ ") == true);
+    REQUIRE(exact(g, "Grammar", " Definition <- a / ( b c ) / d \n rule2 <- [a-zA-Z][a-z0-9-]+ ") == true);
 }
 
 TEST_CASE("PEG Definition", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Definition"].parse("Definition <- a / (b c) / d ") == true);
-    REQUIRE(g["Definition"].parse("Definition <- a / b c / d ") == true);
-    REQUIRE(g["Definition"].parse("Definition ") == false);
-    REQUIRE(g["Definition"].parse(" ") == false);
-    REQUIRE(g["Definition"].parse("") == false);
-    REQUIRE(g["Definition"].parse("Definition = a / (b c) / d ") == false);
+    REQUIRE(exact(g, "Definition", "Definition <- a / (b c) / d ") == true);
+    REQUIRE(exact(g, "Definition", "Definition <- a / b c / d ") == true);
+    REQUIRE(exact(g, "Definition", "Definition ") == false);
+    REQUIRE(exact(g, "Definition", " ") == false);
+    REQUIRE(exact(g, "Definition", "") == false);
+    REQUIRE(exact(g, "Definition", "Definition = a / (b c) / d ") == false);
 }
 
 TEST_CASE("PEG Expression", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Expression"].parse("a / (b c) / d ") == true);
-    REQUIRE(g["Expression"].parse("a / b c / d ") == true);
-    REQUIRE(g["Expression"].parse("a b ") == true);
-    REQUIRE(g["Expression"].parse("") == true);
-    REQUIRE(g["Expression"].parse(" ") == false);
-    REQUIRE(g["Expression"].parse(" a b ") == false);
+    REQUIRE(exact(g, "Expression", "a / (b c) / d ") == true);
+    REQUIRE(exact(g, "Expression", "a / b c / d ") == true);
+    REQUIRE(exact(g, "Expression", "a b ") == true);
+    REQUIRE(exact(g, "Expression", "") == true);
+    REQUIRE(exact(g, "Expression", " ") == false);
+    REQUIRE(exact(g, "Expression", " a b ") == false);
 }
 
 TEST_CASE("PEG Sequence", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Sequence"].parse("a b c d ") == true);
-    REQUIRE(g["Sequence"].parse("") == true);
-    REQUIRE(g["Sequence"].parse("!") == false);
-    REQUIRE(g["Sequence"].parse("<-") == false);
-    REQUIRE(g["Sequence"].parse(" a") == false);
+    REQUIRE(exact(g, "Sequence", "a b c d ") == true);
+    REQUIRE(exact(g, "Sequence", "") == true);
+    REQUIRE(exact(g, "Sequence", "!") == false);
+    REQUIRE(exact(g, "Sequence", "<-") == false);
+    REQUIRE(exact(g, "Sequence", " a") == false);
 }
 
 TEST_CASE("PEG Prefix", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Prefix"].parse("&[a]") == true);
-    REQUIRE(g["Prefix"].parse("![']") == true);
-    REQUIRE(g["Prefix"].parse("-[']") == false);
-    REQUIRE(g["Prefix"].parse("") == false);
-    REQUIRE(g["Sequence"].parse(" a") == false);
+    REQUIRE(exact(g, "Prefix", "&[a]") == true);
+    REQUIRE(exact(g, "Prefix", "![']") == true);
+    REQUIRE(exact(g, "Prefix", "-[']") == false);
+    REQUIRE(exact(g, "Prefix", "") == false);
+    REQUIRE(exact(g, "Sequence", " a") == false);
 }
 
 TEST_CASE("PEG Suffix", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Suffix"].parse("aaa ") == true);
-    REQUIRE(g["Suffix"].parse("aaa? ") == true);
-    REQUIRE(g["Suffix"].parse("aaa* ") == true);
-    REQUIRE(g["Suffix"].parse("aaa+ ") == true);
-    REQUIRE(g["Suffix"].parse(". + ") == true);
-    REQUIRE(g["Suffix"].parse("?") == false);
-    REQUIRE(g["Suffix"].parse("") == false);
-    REQUIRE(g["Sequence"].parse(" a") == false);
+    REQUIRE(exact(g, "Suffix", "aaa ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa? ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa* ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa+ ") == true);
+    REQUIRE(exact(g, "Suffix", ". + ") == true);
+    REQUIRE(exact(g, "Suffix", "?") == false);
+    REQUIRE(exact(g, "Suffix", "") == false);
+    REQUIRE(exact(g, "Sequence", " a") == false);
 }
 
 TEST_CASE("PEG Primary", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Primary"].parse("_Identifier0_ ") == true);
-    REQUIRE(g["Primary"].parse("_Identifier0_<-") == false);
-    REQUIRE(g["Primary"].parse("( _Identifier0_ _Identifier1_ )") == true);
-    REQUIRE(g["Primary"].parse("'Literal String'") == true);
-    REQUIRE(g["Primary"].parse("\"Literal String\"") == true);
-    REQUIRE(g["Primary"].parse("[a-zA-Z]") == true);
-    REQUIRE(g["Primary"].parse(".") == true);
-    REQUIRE(g["Primary"].parse("") == false);
-    REQUIRE(g["Primary"].parse(" ") == false);
-    REQUIRE(g["Primary"].parse(" a") == false);
-    REQUIRE(g["Primary"].parse("") == false);
+    REQUIRE(exact(g, "Primary", "_Identifier0_ ") == true);
+    REQUIRE(exact(g, "Primary", "_Identifier0_<-") == false);
+    REQUIRE(exact(g, "Primary", "( _Identifier0_ _Identifier1_ )") == true);
+    REQUIRE(exact(g, "Primary", "'Literal String'") == true);
+    REQUIRE(exact(g, "Primary", "\"Literal String\"") == true);
+    REQUIRE(exact(g, "Primary", "[a-zA-Z]") == true);
+    REQUIRE(exact(g, "Primary", ".") == true);
+    REQUIRE(exact(g, "Primary", "") == false);
+    REQUIRE(exact(g, "Primary", " ") == false);
+    REQUIRE(exact(g, "Primary", " a") == false);
+    REQUIRE(exact(g, "Primary", "") == false);
 }
 
 TEST_CASE("PEG Identifier", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Identifier"].parse("_Identifier0_ ") == true);
-    REQUIRE(g["Identifier"].parse("0Identifier_ ") == false);
-    REQUIRE(g["Identifier"].parse("Iden|t ") == false);
-    REQUIRE(g["Identifier"].parse(" ") == false);
-    REQUIRE(g["Identifier"].parse(" a") == false);
-    REQUIRE(g["Identifier"].parse("") == false);
+    REQUIRE(exact(g, "Identifier", "_Identifier0_ ") == true);
+    REQUIRE(exact(g, "Identifier", "0Identifier_ ") == false);
+    REQUIRE(exact(g, "Identifier", "Iden|t ") == false);
+    REQUIRE(exact(g, "Identifier", " ") == false);
+    REQUIRE(exact(g, "Identifier", " a") == false);
+    REQUIRE(exact(g, "Identifier", "") == false);
 }
 
 TEST_CASE("PEG IdentStart", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["IdentStart"].parse("_") == true);
-    REQUIRE(g["IdentStart"].parse("a") == true);
-    REQUIRE(g["IdentStart"].parse("Z") == true);
-    REQUIRE(g["IdentStart"].parse("") == false);
-    REQUIRE(g["IdentStart"].parse(" ") == false);
-    REQUIRE(g["IdentStart"].parse("0") == false);
+    REQUIRE(exact(g, "IdentStart", "_") == true);
+    REQUIRE(exact(g, "IdentStart", "a") == true);
+    REQUIRE(exact(g, "IdentStart", "Z") == true);
+    REQUIRE(exact(g, "IdentStart", "") == false);
+    REQUIRE(exact(g, "IdentStart", " ") == false);
+    REQUIRE(exact(g, "IdentStart", "0") == false);
 }
 
 TEST_CASE("PEG IdentRest", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["IdentRest"].parse("_") == true);
-    REQUIRE(g["IdentRest"].parse("a") == true);
-    REQUIRE(g["IdentRest"].parse("Z") == true);
-    REQUIRE(g["IdentRest"].parse("") == false);
-    REQUIRE(g["IdentRest"].parse(" ") == false);
-    REQUIRE(g["IdentRest"].parse("0") == true);
+    REQUIRE(exact(g, "IdentRest", "_") == true);
+    REQUIRE(exact(g, "IdentRest", "a") == true);
+    REQUIRE(exact(g, "IdentRest", "Z") == true);
+    REQUIRE(exact(g, "IdentRest", "") == false);
+    REQUIRE(exact(g, "IdentRest", " ") == false);
+    REQUIRE(exact(g, "IdentRest", "0") == true);
 }
 
 TEST_CASE("PEG Literal", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Literal"].parse("'abc' ") == true);
-    REQUIRE(g["Literal"].parse("'a\\nb\\tc' ") == true);
-    REQUIRE(g["Literal"].parse("'a\\277\tc' ") == true);
-    REQUIRE(g["Literal"].parse("'a\\77\tc' ") == true);
-    REQUIRE(g["Literal"].parse("'a\\80\tc' ") == false);
-    REQUIRE(g["Literal"].parse("'\n' ") == true);
-    REQUIRE(g["Literal"].parse("'a\\'b' ") == true);
-    REQUIRE(g["Literal"].parse("'a'b' ") == false);
-    REQUIRE(g["Literal"].parse("'a\"'b' ") == false);
-    REQUIRE(g["Literal"].parse("\"'\\\"abc\\\"'\" ") == true);
-    REQUIRE(g["Literal"].parse("\"'\"abc\"'\" ") == false);
-    REQUIRE(g["Literal"].parse("abc") == false);
-    REQUIRE(g["Literal"].parse("") == false);
-    REQUIRE(g["Literal"].parse("日本語") == false);
+    REQUIRE(exact(g, "Literal", "'abc' ") == true);
+    REQUIRE(exact(g, "Literal", "'a\\nb\\tc' ") == true);
+    REQUIRE(exact(g, "Literal", "'a\\277\tc' ") == true);
+    REQUIRE(exact(g, "Literal", "'a\\77\tc' ") == true);
+    REQUIRE(exact(g, "Literal", "'a\\80\tc' ") == false);
+    REQUIRE(exact(g, "Literal", "'\n' ") == true);
+    REQUIRE(exact(g, "Literal", "'a\\'b' ") == true);
+    REQUIRE(exact(g, "Literal", "'a'b' ") == false);
+    REQUIRE(exact(g, "Literal", "'a\"'b' ") == false);
+    REQUIRE(exact(g, "Literal", "\"'\\\"abc\\\"'\" ") == true);
+    REQUIRE(exact(g, "Literal", "\"'\"abc\"'\" ") == false);
+    REQUIRE(exact(g, "Literal", "abc") == false);
+    REQUIRE(exact(g, "Literal", "") == false);
+    REQUIRE(exact(g, "Literal", "日本語") == false);
 }
 
 TEST_CASE("PEG Class", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Class"].parse("[]") == true);
-    REQUIRE(g["Class"].parse("[a]") == true);
-    REQUIRE(g["Class"].parse("[a-z]") == true);
-    REQUIRE(g["Class"].parse("[az]") == true);
-    REQUIRE(g["Class"].parse("[a-zA-Z-]") == true);
-    REQUIRE(g["Class"].parse("[a-zA-Z-0-9]") == true);
-    REQUIRE(g["Class"].parse("[a-]") == false);
-    REQUIRE(g["Class"].parse("[-a]") == true);
-    REQUIRE(g["Class"].parse("[") == false);
-    REQUIRE(g["Class"].parse("[a") == false);
-    REQUIRE(g["Class"].parse("]") == false);
-    REQUIRE(g["Class"].parse("a]") == false);
-    REQUIRE(g["Class"].parse("あ-ん") == false);
-    REQUIRE(g["Class"].parse("[-+]") == true);
-    REQUIRE(g["Class"].parse("[+-]") == false);
+    REQUIRE(exact(g, "Class", "[]") == true);
+    REQUIRE(exact(g, "Class", "[a]") == true);
+    REQUIRE(exact(g, "Class", "[a-z]") == true);
+    REQUIRE(exact(g, "Class", "[az]") == true);
+    REQUIRE(exact(g, "Class", "[a-zA-Z-]") == true);
+    REQUIRE(exact(g, "Class", "[a-zA-Z-0-9]") == true);
+    REQUIRE(exact(g, "Class", "[a-]") == false);
+    REQUIRE(exact(g, "Class", "[-a]") == true);
+    REQUIRE(exact(g, "Class", "[") == false);
+    REQUIRE(exact(g, "Class", "[a") == false);
+    REQUIRE(exact(g, "Class", "]") == false);
+    REQUIRE(exact(g, "Class", "a]") == false);
+    REQUIRE(exact(g, "Class", "あ-ん") == false);
+    REQUIRE(exact(g, "Class", "[-+]") == true);
+    REQUIRE(exact(g, "Class", "[+-]") == false);
 }
 
 TEST_CASE("PEG Range", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Range"].parse("a") == true);
-    REQUIRE(g["Range"].parse("a-z") == true);
-    REQUIRE(g["Range"].parse("az") == false);
-    REQUIRE(g["Range"].parse("") == false);
-    REQUIRE(g["Range"].parse("a-") == false);
-    REQUIRE(g["Range"].parse("-a") == false);
+    REQUIRE(exact(g, "Range", "a") == true);
+    REQUIRE(exact(g, "Range", "a-z") == true);
+    REQUIRE(exact(g, "Range", "az") == false);
+    REQUIRE(exact(g, "Range", "") == false);
+    REQUIRE(exact(g, "Range", "a-") == false);
+    REQUIRE(exact(g, "Range", "-a") == false);
 }
 
 TEST_CASE("PEG Char", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Char"].parse("\\n") == true);
-    REQUIRE(g["Char"].parse("\\r") == true);
-    REQUIRE(g["Char"].parse("\\t") == true);
-    REQUIRE(g["Char"].parse("\\'") == true);
-    REQUIRE(g["Char"].parse("\\\"") == true);
-    REQUIRE(g["Char"].parse("\\[") == true);
-    REQUIRE(g["Char"].parse("\\]") == true);
-    REQUIRE(g["Char"].parse("\\\\") == true);
-    REQUIRE(g["Char"].parse("\\000") == true);
-    REQUIRE(g["Char"].parse("\\277") == true);
-    REQUIRE(g["Char"].parse("\\377") == false);
-    REQUIRE(g["Char"].parse("\\087") == false);
-    REQUIRE(g["Char"].parse("\\079") == false);
-    REQUIRE(g["Char"].parse("\\00") == true);
-    REQUIRE(g["Char"].parse("\\77") == true);
-    REQUIRE(g["Char"].parse("\\80") == false);
-    REQUIRE(g["Char"].parse("\\08") == false);
-    REQUIRE(g["Char"].parse("\\0") == true);
-    REQUIRE(g["Char"].parse("\\7") == true);
-    REQUIRE(g["Char"].parse("\\8") == false);
-    REQUIRE(g["Char"].parse("a") == true);
-    REQUIRE(g["Char"].parse(".") == true);
-    REQUIRE(g["Char"].parse("0") == true);
-    REQUIRE(g["Char"].parse("\\") == false);
-    REQUIRE(g["Char"].parse(" ") == true);
-    REQUIRE(g["Char"].parse("  ") == false);
-    REQUIRE(g["Char"].parse("") == false);
-    REQUIRE(g["Char"].parse("あ") == false);
+    REQUIRE(exact(g, "Char", "\\n") == true);
+    REQUIRE(exact(g, "Char", "\\r") == true);
+    REQUIRE(exact(g, "Char", "\\t") == true);
+    REQUIRE(exact(g, "Char", "\\'") == true);
+    REQUIRE(exact(g, "Char", "\\\"") == true);
+    REQUIRE(exact(g, "Char", "\\[") == true);
+    REQUIRE(exact(g, "Char", "\\]") == true);
+    REQUIRE(exact(g, "Char", "\\\\") == true);
+    REQUIRE(exact(g, "Char", "\\000") == true);
+    REQUIRE(exact(g, "Char", "\\277") == true);
+    REQUIRE(exact(g, "Char", "\\377") == false);
+    REQUIRE(exact(g, "Char", "\\087") == false);
+    REQUIRE(exact(g, "Char", "\\079") == false);
+    REQUIRE(exact(g, "Char", "\\00") == true);
+    REQUIRE(exact(g, "Char", "\\77") == true);
+    REQUIRE(exact(g, "Char", "\\80") == false);
+    REQUIRE(exact(g, "Char", "\\08") == false);
+    REQUIRE(exact(g, "Char", "\\0") == true);
+    REQUIRE(exact(g, "Char", "\\7") == true);
+    REQUIRE(exact(g, "Char", "\\8") == false);
+    REQUIRE(exact(g, "Char", "a") == true);
+    REQUIRE(exact(g, "Char", ".") == true);
+    REQUIRE(exact(g, "Char", "0") == true);
+    REQUIRE(exact(g, "Char", "\\") == false);
+    REQUIRE(exact(g, "Char", " ") == true);
+    REQUIRE(exact(g, "Char", "  ") == false);
+    REQUIRE(exact(g, "Char", "") == false);
+    REQUIRE(exact(g, "Char", "あ") == false);
 }
 
 TEST_CASE("PEG Operators", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["LEFTARROW"].parse("<-") == true);
-    REQUIRE(g["SLASH"].parse("/ ") == true);
-    REQUIRE(g["AND"].parse("& ") == true);
-    REQUIRE(g["NOT"].parse("! ") == true);
-    REQUIRE(g["QUESTION"].parse("? ") == true);
-    REQUIRE(g["STAR"].parse("* ") == true);
-    REQUIRE(g["PLUS"].parse("+ ") == true);
-    REQUIRE(g["OPEN"].parse("( ") == true);
-    REQUIRE(g["CLOSE"].parse(") ") == true);
-    REQUIRE(g["DOT"].parse(". ") == true);
+    REQUIRE(exact(g, "LEFTARROW", "<-") == true);
+    REQUIRE(exact(g, "SLASH", "/ ") == true);
+    REQUIRE(exact(g, "AND", "& ") == true);
+    REQUIRE(exact(g, "NOT", "! ") == true);
+    REQUIRE(exact(g, "QUESTION", "? ") == true);
+    REQUIRE(exact(g, "STAR", "* ") == true);
+    REQUIRE(exact(g, "PLUS", "+ ") == true);
+    REQUIRE(exact(g, "OPEN", "( ") == true);
+    REQUIRE(exact(g, "CLOSE", ") ") == true);
+    REQUIRE(exact(g, "DOT", ". ") == true);
 }
 
 TEST_CASE("PEG Comment", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Comment"].parse("# Comment.\n") == true);
-    REQUIRE(g["Comment"].parse("# Comment.") == false);
-    REQUIRE(g["Comment"].parse(" ") == false);
-    REQUIRE(g["Comment"].parse("a") == false);
+    REQUIRE(exact(g, "Comment", "# Comment.\n") == true);
+    REQUIRE(exact(g, "Comment", "# Comment.") == false);
+    REQUIRE(exact(g, "Comment", " ") == false);
+    REQUIRE(exact(g, "Comment", "a") == false);
 }
 
 TEST_CASE("PEG Space", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["Space"].parse(" ") == true);
-    REQUIRE(g["Space"].parse("\t") == true);
-    REQUIRE(g["Space"].parse("\n") == true);
-    REQUIRE(g["Space"].parse("") == false);
-    REQUIRE(g["Space"].parse("a") == false);
+    REQUIRE(exact(g, "Space", " ") == true);
+    REQUIRE(exact(g, "Space", "\t") == true);
+    REQUIRE(exact(g, "Space", "\n") == true);
+    REQUIRE(exact(g, "Space", "") == false);
+    REQUIRE(exact(g, "Space", "a") == false);
 }
 
 TEST_CASE("PEG EndOfLine", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["EndOfLine"].parse("\r\n") == true);
-    REQUIRE(g["EndOfLine"].parse("\n") == true);
-    REQUIRE(g["EndOfLine"].parse("\r") == true);
-    REQUIRE(g["EndOfLine"].parse(" ") == false);
-    REQUIRE(g["EndOfLine"].parse("") == false);
-    REQUIRE(g["EndOfLine"].parse("a") == false);
+    REQUIRE(exact(g, "EndOfLine", "\r\n") == true);
+    REQUIRE(exact(g, "EndOfLine", "\n") == true);
+    REQUIRE(exact(g, "EndOfLine", "\r") == true);
+    REQUIRE(exact(g, "EndOfLine", " ") == false);
+    REQUIRE(exact(g, "EndOfLine", "") == false);
+    REQUIRE(exact(g, "EndOfLine", "a") == false);
 }
 
 TEST_CASE("PEG EndOfFile", "[peg]")
 {
     Grammar g = make_peg_grammar();
-    REQUIRE(g["EndOfFile"].parse("") == true);
-    REQUIRE(g["EndOfFile"].parse(" ") == false);
+    REQUIRE(exact(g, "EndOfFile", "") == true);
+    REQUIRE(exact(g, "EndOfFile", " ") == false);
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix
