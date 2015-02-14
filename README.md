@@ -129,9 +129,11 @@ using namespace std;
 vector<string> tags;
 
 Definition ROOT, TAG_NAME, _;
-ROOT     = seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME = oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
-_        = zom(cls(" \t"));
+ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
+TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) {
+                tags.push_back(string(s, l));
+            };
+_        <= zom(cls(" \t"));
 
 auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 ```
