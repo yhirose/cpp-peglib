@@ -64,7 +64,7 @@ int main(int argc, const char** argv)
     parser["NUMBER"]          = [](const char* s, size_t l) { return atol(s); };
 
     long val = 0;
-    if (parser.match(s, val)) {
+    if (parser.parse(s, val)) {
         cout << s << " = " << val << endl;
         return 0;
     }

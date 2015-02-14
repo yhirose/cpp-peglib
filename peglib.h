@@ -1226,7 +1226,7 @@ public:
     }
 
     template <typename T>
-    bool match(const char* s, size_t l, T& out, bool exact = true) const {
+    bool parse(const char* s, size_t l, T& out, bool exact = true) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, l, out);
@@ -1235,7 +1235,7 @@ public:
         return false;
     }
 
-    bool match(const char* s, size_t l, bool exact = true) const {
+    bool parse(const char* s, size_t l, bool exact = true) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, l);
@@ -1245,14 +1245,14 @@ public:
     }
 
     template <typename T>
-    bool match(const char* s, T& out, bool exact = true) const {
+    bool parse(const char* s, T& out, bool exact = true) const {
         auto l = strlen(s);
-        return match(s, l, out, exact);
+        return parse(s, l, out, exact);
     }
 
-    bool match(const char* s, bool exact = true) const {
+    bool parse(const char* s, bool exact = true) const {
         auto l = strlen(s);
-        return match(s, l, exact);
+        return parse(s, l, exact);
     }
 
     bool lint(const char* s, size_t l, bool exact, Log log = nullptr) {

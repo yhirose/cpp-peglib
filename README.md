@@ -41,7 +41,7 @@ parser["TAG_NAME"] = [&](const char* s, size_t l) {
 };
 
 // (4) Parse
-auto ret = parser.match(" [tag1] [tag:2] [tag-3] ");
+auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
 
 assert(ret     == true);
 assert(tags[0] == "tag1");
@@ -111,7 +111,7 @@ int main(void) {
     };
 
     int val;
-    parser.match("1+2*3", val);
+    parser.parse("1+2*3", val);
 
     assert(val == 7);
 }

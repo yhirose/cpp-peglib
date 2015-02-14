@@ -26,7 +26,7 @@ TEST_CASE("String capture test", "[general]")
         tags.push_back(std::string(s, l));
     };
 
-    auto ret = parser.match(" [tag1] [tag:2] [tag-3] ");
+    auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
 
     REQUIRE(ret == true);
     REQUIRE(tags.size() == 3);
@@ -97,7 +97,7 @@ TEST_CASE("Lambda action test", "[general]")
         ss += *s;
     };
 
-    bool ret = parser.match("hello");
+    bool ret = parser.parse("hello");
     REQUIRE(ret == true);
     REQUIRE(ss == "hello");
 }
@@ -116,7 +116,7 @@ TEST_CASE("Backtracking test", "[general]")
         count++;
     };
 
-    bool ret = parser.match("Hello Two");
+    bool ret = parser.parse("Hello Two");
     REQUIRE(ret == true);
     REQUIRE(count == 2);
 }
@@ -153,7 +153,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     int val;
-    parser.match("1+2*3", val);
+    parser.parse("1+2*3", val);
 
     REQUIRE(val == 7);
 }
@@ -281,7 +281,7 @@ TEST_CASE("Calculator test3", "[general]")
 
     // Parse
     long val;
-    auto ret = parser.match("1+2*3*(4-5+6)/7-8", val);
+    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(ret == true);
     REQUIRE(val == -3);
