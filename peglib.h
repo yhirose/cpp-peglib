@@ -351,9 +351,9 @@ private:
 };
 
 /*
- * Match
+ * Result
  */
-struct Match
+struct Result
 {
     bool              ret;
     size_t            len;
@@ -362,12 +362,12 @@ struct Match
     const std::string msg;
 };
 
-Match success(size_t len, size_t choice = 0) {
-    return Match{ true, len, choice, nullptr, std::string() };
+Result success(size_t len, size_t choice = 0) {
+    return Result{ true, len, choice, nullptr, std::string() };
 }
 
-Match fail(const char* ptr, std::string msg = std::string(), std::string name = std::string()) {
-    return Match{ false, 0, (size_t)-1, ptr, msg };
+Result fail(const char* ptr, std::string msg = std::string(), std::string name = std::string()) {
+    return Result{ false, 0, (size_t)-1, ptr, msg };
 }
 
 /*
@@ -377,7 +377,7 @@ class Ope
 {
 public:
     virtual ~Ope() {};
-    virtual Match parse(const char* s, size_t l, Values& v) const = 0;
+    virtual Result parse(const char* s, size_t l, Values& v) const = 0;
 };
 
 class Sequence : public Ope
@@ -404,7 +404,7 @@ public:
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         size_t i = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
@@ -447,7 +447,7 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         size_t id = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
@@ -480,7 +480,7 @@ class ZeroOrMore : public Ope
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         auto i = 0;
         while (l - i > 0) {
             const auto& rule = *ope_;
@@ -502,7 +502,7 @@ class OneOrMore : public Ope
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         auto m = ope_->parse(s, l, v);
         if (!m.ret) {
             auto msg = m.msg;
@@ -532,7 +532,7 @@ class Option : public Ope
 public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         const auto& rule = *ope_;
         auto m = rule.parse(s, l, v);
         return success(m.ret ? m.len : 0);
@@ -547,7 +547,7 @@ class AndPredicate : public Ope
 public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         const auto& rule = *ope_;
         auto m = rule.parse(s, l, v);
         if (m.ret) {
@@ -566,7 +566,7 @@ class NotPredicate : public Ope
 public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         const auto& rule = *ope_;
         auto m = rule.parse(s, l, v);
         if (m.ret) {
@@ -585,7 +585,7 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
@@ -604,7 +604,7 @@ class CharacterClass : public Ope
 public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -636,7 +636,7 @@ class Character : public Ope
 public:
     Character(char ch) : ch_(ch) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1 || s[0] != ch_) {
             return fail(s);
@@ -651,7 +651,7 @@ private:
 class AnyCharacter : public Ope
 {
 public:
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -667,7 +667,7 @@ public:
     Grouping(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
     Grouping(const std::shared_ptr<Ope>& ope, std::function<void(const char* s, size_t l)> match) : ope_(ope), match_(match) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         assert(ope_);
         const auto& rule = *ope_;
         auto m = rule.parse(s, l, v);
@@ -687,7 +687,7 @@ class WeakHolder : public Ope
 public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
@@ -745,7 +745,7 @@ public:
         return *this;
     }
 
-    Match parse_with_match(const char* s, size_t l) const {
+    Result parse_with_match(const char* s, size_t l) const {
         Values v;
         return holder_->parse(s, l, v);
     }
@@ -807,7 +807,7 @@ private:
         Holder(Definition* outer)
            : outer_(outer) {}
 
-        Match parse(const char* s, size_t l, Values& v) const {
+        Result parse(const char* s, size_t l, Values& v) const {
             if (!ope_) {
                 throw std::logic_error("Uninitialized definition ope was used...");
             }
@@ -861,7 +861,7 @@ public:
         : grammar_(grammar)
         , name_(name) {}
 
-    Match parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v) const {
         const auto& rule = *grammar_.at(name_).holder_;
         return rule.parse(s, l, v);
     }
