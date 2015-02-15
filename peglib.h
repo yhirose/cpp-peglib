@@ -357,6 +357,11 @@ private:
 };
 
 /*
+ * Match action
+ */
+typedef std::function<void (const char* s, size_t l, size_t i)> MatchAction;
+
+/*
  * Result
  */
 struct Result
@@ -665,25 +670,27 @@ public:
 
 };
 
-class Grouping : public Ope
+class Capture : public Ope
 {
 public:
-    Grouping(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
-    Grouping(const std::shared_ptr<Ope>& ope, std::function<void(const char* s, size_t l)> match) : ope_(ope), match_(match) {}
+    Capture(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci)
+        : ope_(ope), match_action_(ma), capture_id(ci) {}
 
     Result parse(const char* s, size_t l, Values& v, any& c) const {
         assert(ope_);
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
-        if (r.ret && match_) {
-            match_(s, r.len);
+        if (r.ret && match_action_) {
+            match_action_(s, r.len, capture_id);
         }
         return r;
     }
 
 private:
-    std::shared_ptr<Ope>                        ope_;
-    std::function<void(const char* s, size_t l)> match_;
+    std::shared_ptr<Ope> ope_;
+    MatchAction          match_action_;
+    size_t               capture_id;
 };
 
 class WeakHolder : public Ope
@@ -914,12 +921,12 @@ inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
 }
 
-inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Grouping>(ope);
+inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci) {
+    return std::make_shared<Capture>(ope, ma, ci);
 }
 
-inline std::shared_ptr<Ope> grp(const std::shared_ptr<Ope>& ope, std::function<void (const char* s, size_t l)> match) {
-    return std::make_shared<Grouping>(ope, match);
+inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma) {
+    return std::make_shared<Capture>(ope, ma, (size_t)-1);
 }
 
 inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
@@ -954,9 +961,9 @@ typedef std::function<void (size_t, size_t, const std::string&)> Log;
 class PEGParser
 {
 public:
-    static std::shared_ptr<Grammar> parse(const char* s, size_t l, std::string& start, Log log) {
+    static std::shared_ptr<Grammar> parse(const char* s, size_t l, std::string& start, MatchAction ma, Log log) {
         static PEGParser instance;
-        return get().perform_core(s, l, start, log);
+        return get().perform_core(s, l, start, ma, log);
     }
 
     // For debuging purpose
@@ -976,9 +983,13 @@ private:
     }
 
     struct Context {
-        std::shared_ptr<Grammar>           grammar = std::make_shared<Grammar>();
+        std::shared_ptr<Grammar>           grammar;
         std::string                        start;
-        std::map<std::string, const char*> refs;
+        MatchAction                        match_action;
+        std::map<std::string, const char*> references;
+        size_t                             capture_count;
+
+        Context() : grammar(std::make_shared<Grammar>()), capture_count(0) {}
     };
 
     void make_grammar() {
@@ -992,6 +1003,7 @@ private:
         g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
         g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+                               seq(g["CAPTUREOPEN"], g["Expression"], g["CAPTURECLOSE"]),
                                g["Literal"], g["Class"], g["DOT"]);
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
@@ -1029,6 +1041,9 @@ private:
         g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
         g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
         g["EndOfFile"]  <= npd(dot());
+
+        g["CAPTUREOPEN"]  <= seq(chr('<'), g["Spacing"]);
+        g["CAPTURECLOSE"] <= seq(chr('>'), g["Spacing"]);
 
         // Set definition names
         for (auto& x: g) {
@@ -1117,11 +1132,17 @@ private:
             },
             [&](const char* s, size_t l, const std::vector<any>& v, any& c) {
                 Context& cxt = *c.get<Context*>();
-                cxt.refs[v[0]] = s;
+                cxt.references[v[0]] = s;
                 return ref(*cxt.grammar, v[0]);
             },
             [&](const std::vector<any>& v) {
                 return v[1];
+            },
+            // Capture
+            [&](const std::vector<any>& v, any& c) {
+                Context& cxt = *c.get<Context*>();
+                auto ope = v[1].get<std::shared_ptr<Ope>>();
+                return cap(ope, cxt.match_action, ++cxt.capture_count);
             }
         };
 
@@ -1157,9 +1178,11 @@ private:
         };
     }
 
-    std::shared_ptr<Grammar> perform_core(const char* s, size_t l, std::string& start, Log log) {
-        Values v;
+    std::shared_ptr<Grammar> perform_core(const char* s, size_t l, std::string& start, MatchAction ma, Log log) {
         Context cxt;
+        cxt.match_action = ma;
+
+        Values v;
         any c = &cxt;
         auto r = g["Grammar"].parse(s, l, v, c);
 
@@ -1171,7 +1194,7 @@ private:
             return nullptr;
         }
 
-        for (const auto& x : cxt.refs) {
+        for (const auto& x : cxt.references) {
             const auto& name = x.first;
             auto ptr = x.second;
             if (cxt.grammar->find(name) == cxt.grammar->end()) {
@@ -1228,13 +1251,27 @@ private:
 class peg
 {
 public:
+    peg() = default;
+
     peg(const char* s, size_t l, Log log = nullptr) {
-        grammar_ = PEGParser::parse(s, l, start_, log);
+        grammar_ = PEGParser::parse(
+            s, l,
+            start_,
+            [&](const char* s, size_t l, size_t i) {
+                if (match_action) match_action(s, l, i);
+            },
+            log);
     }
 
     peg(const char* s, Log log = nullptr) {
         auto l = strlen(s);
-        grammar_ = PEGParser::parse(s, l, start_, log);
+        grammar_ = PEGParser::parse(
+            s, l,
+            start_,
+            [&](const char* s, size_t l, size_t i) {
+                if (match_action) match_action(s, l, i);
+            },
+            log);
     }
 
     operator bool() {
@@ -1251,6 +1288,12 @@ public:
         return false;
     }
 
+    template <typename T>
+    bool parse(const char* s, T& out, bool exact = true) const {
+        auto l = strlen(s);
+        return parse(s, l, out, exact);
+    }
+
     bool parse(const char* s, size_t l, bool exact = true) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
@@ -1260,15 +1303,34 @@ public:
         return false;
     }
 
-    template <typename T>
-    bool parse(const char* s, T& out, bool exact = true) const {
-        auto l = strlen(s);
-        return parse(s, l, out, exact);
-    }
-
     bool parse(const char* s, bool exact = true) const {
         auto l = strlen(s);
         return parse(s, l, exact);
+    }
+
+    bool search(const char* s, size_t l, size_t& mpos, size_t& mlen) const {
+        const auto& rule = (*grammar_)[start_];
+        if (grammar_ != nullptr) {
+            size_t pos = 0;
+            while (pos < l) {
+                size_t len = l - pos;
+                auto r = rule.parse(s + pos, len);
+                if (r.ret) {
+                    mpos = pos;
+                    mlen = r.len;
+                    return true;
+                }
+                pos++;
+            }
+        }
+        mpos = 0;
+        mlen = 0;
+        return false;
+    }
+
+    bool search(const char* s, size_t& mpos, size_t& mlen) const {
+        auto l = strlen(s);
+        return search(s, l, mpos, mlen);
     }
 
     bool lint(const char* s, size_t l, bool exact, Log log = nullptr) {
@@ -1294,10 +1356,226 @@ public:
         return (*grammar_)[s];
     }
 
+    MatchAction match_action;
+
 private:
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
 };
+
+/*-----------------------------------------------------------------------------
+ *  Utilities
+ *---------------------------------------------------------------------------*/
+
+struct match
+{
+    struct Item {
+        const char* s;
+        size_t      l;
+        size_t      id;
+
+        size_t length() const { return l; }
+        std::string str() const { return std::string(s, l); }
+    };
+
+    std::vector<Item> matches; 
+
+    typedef std::vector<Item>::iterator iterator;
+    typedef std::vector<Item>::const_iterator const_iterator;
+    
+    bool empty() const {
+        return matches.empty();
+    }
+
+    size_t size() const {
+        return matches.size();
+    }
+
+    size_t length(size_t n = 0) {
+        return matches[n].length();
+    }
+
+    std::string str(size_t n = 0) const {
+        return matches[n].str();
+    }
+
+    const Item& operator[](size_t n) const {
+        return matches[n];
+    }
+
+    iterator begin() {
+        return matches.begin();
+    }
+    
+    iterator end() {
+        return matches.end();
+    }
+    
+    const_iterator begin() const {
+        return matches.cbegin();
+    }
+    
+    const_iterator end() const {
+        return matches.cend();
+    }
+};
+
+inline bool peg_match(const char* syntax, const char* s, match& m) {
+    m.matches.clear();
+
+    peg pg(syntax);
+    pg.match_action = [&](const char* s, size_t l, size_t i) {
+        m.matches.push_back(match::Item{ s, l, i });
+    };
+
+    auto ret = pg.parse(s);
+    if (ret) {
+        auto l = strlen(s);
+        m.matches.insert(m.matches.begin(), match::Item{ s, l, 0 });
+    }
+
+    return ret;
+}
+
+inline bool peg_match(const char* syntax, const char* s) {
+    peg pg(syntax);
+    return pg.parse(s);
+}
+
+inline bool peg_search(peg& pg, const char* s, size_t l, match& m) {
+    m.matches.clear();
+
+    pg.match_action = [&](const char* s, size_t l, size_t i) {
+        m.matches.push_back(match::Item{ s, l, i });
+    };
+
+    size_t mpos, mlen;
+    auto ret = pg.search(s, l, mpos, mlen);
+    if (ret) {
+        m.matches.insert(m.matches.begin(), match::Item{ s + mpos, mlen, 0 });
+        return true;
+    }
+
+    return false;
+}
+
+inline bool peg_search(peg& pg, const char* s, match& m) {
+    auto l = strlen(s);
+    return peg_search(pg, s, l, m);
+}
+
+inline bool peg_search(const char* syntax, const char* s, size_t l, match& m) {
+    peg pg(syntax);
+    return peg_search(pg, s, l, m);
+}
+
+inline bool peg_search(const char* syntax, const char* s, match& m) {
+    peg pg(syntax);
+    auto l = strlen(s);
+    return peg_search(pg, s, l, m);
+}
+
+class peg_token_iterator : public std::iterator<std::forward_iterator_tag, match>
+{
+public:
+    peg_token_iterator()
+        : s_(nullptr)
+        , l_(0)
+        , pos_(std::numeric_limits<size_t>::max()) {}
+
+    peg_token_iterator(const char* syntax, const char* s)
+        : peg_(syntax)
+        , s_(s)
+        , l_(strlen(s))
+        , pos_(0) {
+        peg_.match_action = [&](const char* s, size_t l, size_t i) {
+            m_.matches.push_back(match::Item{ s, l, i });
+        };
+        search();
+    }
+
+    peg_token_iterator(const peg_token_iterator& rhs)
+        : peg_(rhs.peg_)
+        , s_(rhs.s_)
+        , l_(rhs.l_)
+        , pos_(rhs.pos_)
+        , m_(rhs.m_) {}
+
+    peg_token_iterator& operator++() {
+        search();
+        return *this;
+    }
+
+    peg_token_iterator operator++(int) {
+        auto it = *this;
+        search();
+        return it;
+    }
+
+    match& operator*() {
+        return m_;
+    }
+
+    match* operator->() {
+        return &m_;
+    }
+
+    bool operator==(const peg_token_iterator& rhs) {
+        return pos_ == rhs.pos_;
+    }
+
+    bool operator!=(const peg_token_iterator& rhs) {
+        return pos_ != rhs.pos_;
+    }
+
+private:
+    void search() {
+        m_.matches.clear();
+        size_t mpos, mlen;
+        if (peg_.search(s_ + pos_, l_ - pos_, mpos, mlen)) {
+            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0 });
+            pos_ += mpos + mlen;
+        } else {
+            pos_ = std::numeric_limits<size_t>::max();
+        }
+    }
+
+    peg         peg_;
+    const char* s_;
+    size_t      l_;
+    size_t      pos_;
+    match       m_;
+};
+
+struct peg_token_range {
+    typedef peg_token_iterator iterator;
+    typedef const peg_token_iterator const_iterator;
+
+    peg_token_range(const char* syntax, const char* s)
+        : beg_iter(peg_token_iterator(syntax, s))
+        , end_iter() {}
+
+    iterator begin() {
+        return beg_iter;
+    }
+
+    iterator end() {
+        return end_iter;
+    }
+
+    const_iterator cbegin() const {
+        return beg_iter;
+    }
+
+    const_iterator cend() const {
+        return end_iter;
+    }
+
+private:
+    peg_token_iterator beg_iter;
+    peg_token_iterator end_iter;
+};
+
 
 } // namespace peglib
 

@@ -10,72 +10,20 @@ The PEG syntax is well described on page 2 in the [document](http://pdos.csail.m
 How to use
 ----------
 
-What if we want to extract only tag names in brackets from ` [tag1] [tag2] [tag3] [tag4]... `?
-
-PEG grammar for this task could be like this:
-
-```
-ROOT      <-  _ ('[' TAG_NAME ']' _)*
-TAG_NAME  <-  (!']' .)+
-_         <-  [ \t]*
-```
-
-Here is how to parse text with the PEG syntax and retrieve tag names:
-
+This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar and handle semantic values.
 
 ```c++
-// (1) Include the header file
-#include "peglib.h"
-
-// (2) Make a parser
-peglib::peg parser(R"(
-    ROOT      <-  _ ('[' TAG_NAME ']' _)*
-    TAG_NAME  <-  (!']' .)+
-    _         <-  [ \t]*
-)");
-
-// (3) Setup an action
-std::vector<std::string> tags;
-parser["TAG_NAME"] = [&](const char* s, size_t l) {
-    tags.push_back(std::string(s, l));
-};
-
-// (4) Parse
-auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
-
-assert(ret     == true);
-assert(tags[0] == "tag1");
-assert(tags[1] == "tag:2");
-assert(tags[2] == "tag-3");
-```
-
-This action `[&](const char* s, size_t l)` gives a pointer and length of the matched string. 
-
-There are more actions available. Here is a complete list:
-
-```c++
-[](const char* s, size_t l, const std::vector<peglib::any>& v, any& c)
-[](const char* s, size_t l, const std::vector<peglib::any>& v)
-[](const char* s, size_t l)
-[](const std::vector<peglib::any>& v, any& c)
-[](const std::vector<peglib::any>& v)
-[]()
-```
-
-`const std::vector<peglib::any>& v` contains semantic values. `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
-
-`any& c` is a context data which can be used by the user for whatever purposes. 
-
-This is a complete code of a simple calculator. It shows how to associate actions to definitions and set/get semantic values.
-
-```c++
-#include <peglib.h>
 #include <assert.h>
+
+// (1) Include the header file
+#include <peglib.h>
 
 using namespace peglib;
 using namespace std;
 
 int main(void) {
+
+    // (2) Make a parser
     auto syntax = R"(
         # Grammar for Calculator...
         Additive  <- Multitive '+' Additive / Multitive
@@ -86,6 +34,7 @@ int main(void) {
 
     peg parser(syntax);
 
+    // (3) Setup an action
     parser["Additive"] = {
         nullptr,                                      // Default action
         [](const vector<any>& v) {
@@ -110,10 +59,90 @@ int main(void) {
         return stoi(string(s, l), nullptr, 10);
     };
 
+    // (4) Parse
     int val;
     parser.parse("1+2*3", val);
 
     assert(val == 7);
+}
+```
+
+Here is a complete list of available actions:
+
+```c++
+[](const char* s, size_t l, const std::vector<peglib::any>& v, any& c)
+[](const char* s, size_t l, const std::vector<peglib::any>& v)
+[](const char* s, size_t l)
+[](const std::vector<peglib::any>& v, any& c)
+[](const std::vector<peglib::any>& v)
+[]()
+```
+
+`const char* s, size_t l` gives a pointer and length of the matched string.
+
+`const std::vector<peglib::any>& v` contains semantic values. `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
+
+`any& c` is a context data which can be used by the user for whatever purposes.
+
+Simple interface
+----------------
+
+*cpp-peglib* provides std::regex-like simple interface for trivial tasks.
+
+In the following example, `< ... >` means the *capture* operator. `peglib::peg_match` tries to capture strings in the `< ... >` operator and store them into `peglib::match` object.
+
+```c++
+peglib::match m;
+auto ret = peglib::peg_match(
+    R"(
+        ROOT      <-  _ ('[' < TAG_NAME > ']' _)*
+        TAG_NAME  <-  (!']' .)+
+        _         <-  [ \t]*
+    )",
+    " [tag1] [tag:2] [tag-3] ",
+    m);
+
+assert(ret == true);
+assert(m.size() == 4);
+assert(m.str(1) == "tag1");
+assert(m.str(2) == "tag:2");
+assert(m.str(3) == "tag-3");
+```
+
+There are some ways to *search* a peg pattern in a document.
+
+```c++
+using namespace peglib;
+
+auto syntax = R"(
+ROOT <- '[' < [a-z0-9]+ > ']'
+)";
+
+auto s = " [tag1] [tag2] [tag3] ";
+
+// peglib::peg_search
+peg pg(syntax);
+size_t pos = 0;
+auto l = strlen(s);
+match m;
+while (peg_search(pg, s + pos, l - pos, m)) {
+  cout << m.str()  << endl; // entire match
+  cout << m.str(1) << endl; // submatch #1
+  pos += m.length();
+}
+
+// peglib::peg_token_iterator
+peg_token_iterator it(syntax, s);
+while (it != peg_token_iterator()) {
+  cout << it->str()  << endl; // entire match
+  cout << it->str(1) << endl; // submatch #1
+  ++it;
+}
+
+// peglib::peg_token_range
+for (auto& m: peg_token_range(syntax, s)) {
+  cout << m.str()  << endl; // entire match
+  cout << m.str(1) << endl; // submatch #1
 }
 ```
 
@@ -144,7 +173,6 @@ The following are available operators:
 |:---------|:-------------------|
 | seq      | Sequence           |
 | cho      | Prioritized Choice |
-| grp      | Grouping           |
 | zom      | Zero or More       |
 | oom      | One or More        |
 | opt      | Optional           |

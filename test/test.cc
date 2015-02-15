@@ -35,6 +35,23 @@ TEST_CASE("String capture test", "[general]")
     REQUIRE(tags[2] == "tag-3");
 }
 
+TEST_CASE("String capture test with match", "[general]")
+{
+    peglib::match m;
+    auto ret = peglib::peg_match(
+        "  ROOT      <-  _ ('[' < TAG_NAME > ']' _)*  "
+        "  TAG_NAME  <-  (!']' .)+                "
+        "  _         <-  [ \t]*                   ",
+        " [tag1] [tag:2] [tag-3] ",
+        m);
+
+    REQUIRE(ret == true);
+    REQUIRE(m.size() == 4);
+    REQUIRE(m.str(1) == "tag1");
+    REQUIRE(m.str(2) == "tag:2");
+    REQUIRE(m.str(3) == "tag-3");
+}
+
 using namespace peglib;
 using namespace std;
 
@@ -64,7 +81,10 @@ TEST_CASE("String capture test with embedded match action", "[general]")
     vector<string> tags;
 
     ROOT     <= seq(WS, zom(TAG));
-    TAG      <= seq(chr('['), grp(TAG_NAME, [&](const char* s, size_t l) { tags.push_back(string(s, l)); }), chr(']'), WS);
+    TAG      <= seq(chr('['),
+                    cap(TAG_NAME, [&](const char* s, size_t l, size_t id) { tags.push_back(string(s, l)); }),
+                    chr(']'),
+                    WS);
     TAG_NAME <= oom(seq(npd(chr(']')), dot()));
     WS       <= zom(cls(" \t"));
 
@@ -213,7 +233,7 @@ TEST_CASE("Calculator test2", "[general]")
         ;
 
     string start;
-    auto grammar = PEGParser::parse(syntax, strlen(syntax), start, nullptr);
+    auto grammar = PEGParser::parse(syntax, strlen(syntax), start, nullptr, nullptr);
     auto& g = *grammar;
 
     // Setup actions
