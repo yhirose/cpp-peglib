@@ -173,11 +173,7 @@ private:
 /*
 * Semantic values
 */
-struct Values
-{
-    std::vector<std::string> names;
-    std::vector<any>         values;
-};
+typedef std::vector<any> Values;
 
 /*
  * Semantic action
@@ -234,26 +230,26 @@ public:
         return (bool)fn_;
     }
 
-    any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) const {
-        return fn_(s, l, v, n);
+    any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) const {
+        return fn_(s, l, v, c);
     }
 
 private:
     template <typename R>
     struct TypeAdaptor {
-        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> fn)
+        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<any>& v, any& c)> fn)
             : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
-            return call<R>(fn_, s, l, v, n);
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
+            return call<R>(fn_, s, l, v, c);
         }
-        std::function<R (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const char* s, size_t l, const std::vector<any>& v, any& c)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_s_l_v {
         TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn)
             : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
             return call<R>(fn_, s, l, v);
         }
         std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn_;
@@ -262,7 +258,7 @@ private:
     template <typename R>
     struct TypeAdaptor_s_l {
         TypeAdaptor_s_l(std::function<R (const char* s, size_t l)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
             return call<R>(fn_, s, l);
         }
         std::function<R (const char* s, size_t l)> fn_;
@@ -270,17 +266,17 @@ private:
 
     template <typename R>
     struct TypeAdaptor_v_n {
-        TypeAdaptor_v_n(std::function<R (const std::vector<any>& v, const std::vector<std::string>& n)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
-            return call<R>(fn_, v, n);
+        TypeAdaptor_v_n(std::function<R (const std::vector<any>& v, any& c)> fn) : fn_(fn) {}
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
+            return call<R>(fn_, v, c);
         }
-        std::function<R (const std::vector<any>& v, const std::vector<std::string>& n)> fn_;
+        std::function<R (const std::vector<any>& v, any& c)> fn_;
     };
 
     template <typename R>
     struct TypeAdaptor_v {
         TypeAdaptor_v(std::function<R (const std::vector<any>& v)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
             return call<R>(fn_, v);
         }
         std::function<R (const std::vector<any>& v)> fn_;
@@ -289,21 +285,21 @@ private:
     template <typename R>
     struct TypeAdaptor_empty {
         TypeAdaptor_empty(std::function<R ()> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n) {
+        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
             return call<R>(fn_);
         }
         std::function<R ()> fn_;
     };
 
-    typedef std::function<any (const char* s, size_t l, const std::vector<any>& v, const std::vector<std::string>& n)> Fty;
+    typedef std::function<any (const char* s, size_t l, const std::vector<any>& v, any& c)> Fty;
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, any& c) const) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v, any& c)) {
         return TypeAdaptor<R>(fn);
     }
 
@@ -328,12 +324,12 @@ private:
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v, const std::vector<std::string>& n) const) {
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v, any& c) const) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const std::vector<any>& v, const std::vector<std::string>& n)) {
+    Fty make_adaptor(F fn, R (*mf)(const std::vector<any>& v, any& c)) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
@@ -387,7 +383,7 @@ class Ope
 {
 public:
     virtual ~Ope() {};
-    virtual Result parse(const char* s, size_t l, Values& v) const = 0;
+    virtual Result parse(const char* s, size_t l, Values& v, any& c) const = 0;
 };
 
 class Sequence : public Ope
@@ -414,11 +410,11 @@ public:
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         size_t i = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
-            auto r = rule.parse(s + i, l - i, v);
+            auto r = rule.parse(s + i, l - i, v, c);
             if (!r.ret) {
                 auto err = r.err;
                 if (err.empty()) {
@@ -457,19 +453,16 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         size_t id = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
             Values chldsv;
-            auto r = rule.parse(s, l, chldsv);
+            auto r = rule.parse(s, l, chldsv, c);
             if (r.ret) {
-                if (!chldsv.values.empty()) {
-                    for (const auto& x: chldsv.values) {
-                        v.values.push_back(x);
-                    }
-                    for (const auto& x: chldsv.names) {
-                        v.names.push_back(x);
+                if (!chldsv.empty()) {
+                    for (const auto& x: chldsv) {
+                        v.push_back(x);
                     }
                 }
                 return success(r.len, id);
@@ -490,11 +483,11 @@ class ZeroOrMore : public Ope
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         auto i = 0;
         while (l - i > 0) {
             const auto& rule = *ope_;
-            auto r = rule.parse(s + i, l - i, v);
+            auto r = rule.parse(s + i, l - i, v, c);
             if (!r.ret) {
                 break;
             }
@@ -512,9 +505,9 @@ class OneOrMore : public Ope
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, v);
+        auto r = rule.parse(s, l, v, c);
         if (!r.ret) {
             auto err = r.err;
             if (err.empty()) {
@@ -525,7 +518,7 @@ public:
         auto i = r.len;
         while (l - i > 0) {
             const auto& rule = *ope_;
-            auto r = rule.parse(s + i, l - i, v);
+            auto r = rule.parse(s + i, l - i, v, c);
             if (!r.ret) {
                 break;
             }
@@ -543,9 +536,9 @@ class Option : public Ope
 public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, v);
+        auto r = rule.parse(s, l, v, c);
         return success(r.ret ? r.len : 0);
     }
 
@@ -558,9 +551,9 @@ class AndPredicate : public Ope
 public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, v);
+        auto r = rule.parse(s, l, v, c);
         if (r.ret) {
             return success(0);
         } else {
@@ -577,9 +570,9 @@ class NotPredicate : public Ope
 public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, v);
+        auto r = rule.parse(s, l, v, c);
         if (r.ret) {
             return fail(s);
         } else {
@@ -596,7 +589,7 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
@@ -615,7 +608,7 @@ class CharacterClass : public Ope
 public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -647,7 +640,7 @@ class Character : public Ope
 public:
     Character(char ch) : ch_(ch) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1 || s[0] != ch_) {
             return fail(s);
@@ -662,7 +655,7 @@ private:
 class AnyCharacter : public Ope
 {
 public:
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -678,10 +671,10 @@ public:
     Grouping(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
     Grouping(const std::shared_ptr<Ope>& ope, std::function<void(const char* s, size_t l)> match) : ope_(ope), match_(match) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         assert(ope_);
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, v);
+        auto r = rule.parse(s, l, v, c);
         if (r.ret && match_) {
             match_(s, r.len);
         }
@@ -698,11 +691,11 @@ class WeakHolder : public Ope
 public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
-        return rule.parse(s, l, v);
+        return rule.parse(s, l, v, c);
     }
 
 private:
@@ -751,12 +744,17 @@ public:
         return *this;
     }
 
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
+        return holder_->parse(s, l, v, c);
+    }
+
     template <typename T>
     Result parse(const char* s, size_t l, T& val) const {
         Values v;
-        auto r = holder_->parse(s, l, v);
-        if (r.ret && !v.values.empty() && !v.values.front().is_undefined()) {
-            val = v.values[0].get<T>();
+        any c;
+        auto r = holder_->parse(s, l, v, c);
+        if (r.ret && !v.empty() && !v.front().is_undefined()) {
+            val = v[0].get<T>();
         }
         return r;
     }
@@ -770,7 +768,8 @@ public:
     Result parse(const char* s) const {
         auto l = strlen(s);
         Values v;
-        return holder_->parse(s, l, v);
+        any c;
+        return holder_->parse(s, l, v, c);
     }
 
     Definition& operator=(Action ac) {
@@ -802,17 +801,15 @@ private:
         Holder(Definition* outer)
            : outer_(outer) {}
 
-        Result parse(const char* s, size_t l, Values& v) const {
+        Result parse(const char* s, size_t l, Values& v, any& c) const {
             if (!ope_) {
                 throw std::logic_error("Uninitialized definition ope was used...");
             }
 
             const auto& rule = *ope_;
             Values chldsv;
-            auto r = rule.parse(s, l, chldsv);
+            auto r = rule.parse(s, l, chldsv, c);
             if (r.ret) {
-                v.names.push_back(outer_->name);
-
                 assert(!outer_->actions.empty());
 
                 auto id = r.choice + 1;
@@ -820,7 +817,7 @@ private:
                     ? outer_->actions[id]
                     : outer_->actions[0];
 
-                v.values.push_back(reduce(s, r.len, chldsv, ac));
+                v.push_back(reduce(s, r.len, chldsv, c, ac));
             }
             return r;
         }
@@ -828,13 +825,13 @@ private:
     private:
         friend class Definition;
 
-        any reduce(const char* s, size_t l, const Values& v, const Action& action) const {
+        any reduce(const char* s, size_t l, const Values& v, any& c, const Action& action) const {
             if (action) {
-                return action(s, l, v.values, v.names);
-            } else if (v.values.empty()) {
+                return action(s, l, v, c);
+            } else if (v.empty()) {
                 return any();
             } else {
-                return v.values.front();
+                return v.front();
             }
         }
 
@@ -856,9 +853,9 @@ public:
         : grammar_(grammar)
         , name_(name) {}
 
-    Result parse(const char* s, size_t l, Values& v) const {
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
         const auto& rule = *grammar_.at(name_).holder_;
-        return rule.parse(s, l, v);
+        return rule.parse(s, l, v, c);
     }
 
 private:
@@ -962,6 +959,7 @@ public:
         return get().perform_core(s, l, start, log);
     }
 
+    // For debuging purpose
     static Grammar& grammar() {
         return get().g;
     }
@@ -976,6 +974,12 @@ private:
         make_grammar();
         setup_actions();
     }
+
+    struct Context {
+        std::shared_ptr<Grammar>           grammar = std::make_shared<Grammar>();
+        std::string                        start;
+        std::map<std::string, const char*> refs;
+    };
 
     void make_grammar() {
         // Setup PEG syntax parser
@@ -1033,6 +1037,17 @@ private:
     }
 
     void setup_actions() {
+        g["Definition"] = [&](const std::vector<any>& v, any& c) {
+            Context& cxt = *c.get<Context*>();
+
+            const auto& name = v[0].get<std::string>();
+            (*cxt.grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
+            (*cxt.grammar)[name].name = name;
+
+            if (cxt.start.empty()) {
+                cxt.start = name;
+            }
+        };
 
         g["Expression"] = [&](const std::vector<any>& v) {
             if (v.size() == 1) {
@@ -1062,35 +1077,51 @@ private:
             }
         };
 
-        g["Prefix"] = [&](const std::vector<any>& v, const std::vector<std::string>& n) {
+        g["Prefix"] = [&](const std::vector<any>& v, any& c) {
             std::shared_ptr<Ope> ope;
             if (v.size() == 1) {
                 ope = v[0].get<std::shared_ptr<Ope>>();
             } else {
                 assert(v.size() == 2);
+                auto tok = v[0].get<char>();
                 ope = v[1].get<std::shared_ptr<Ope>>();
-                if (n[0] == "AND") {
+                if (tok == '&') {
                     ope = apd(ope);
-                } else { // "NOT"
+                } else { // '!'
                     ope = npd(ope);
                 }
             }
             return ope;
         };
 
-        g["Suffix"] = [&](const std::vector<any>& v, const std::vector<std::string>& n) {
+        g["Suffix"] = [&](const std::vector<any>& v, any& c) {
             auto ope = v[0].get<std::shared_ptr<Ope>>();
             if (v.size() == 1) {
                 return ope;
             } else {
                 assert(v.size() == 2);
-                if (n[1] == "QUESTION") {
+                auto tok = v[1].get<char>();
+                if (tok == '?') {
                     return opt(ope);
-                } else if (n[1] == "STAR") {
+                } else if (tok == '*') {
                     return zom(ope);
-                } else { // "PLUS"
+                } else { // '+'
                     return oom(ope);
                 }
+            }
+        };
+
+        g["Primary"].actions = {
+            [&](const std::vector<any>& v) {
+                return v[0];
+            },
+            [&](const char* s, size_t l, const std::vector<any>& v, any& c) {
+                Context& cxt = *c.get<Context*>();
+                cxt.refs[v[0]] = s;
+                return ref(*cxt.grammar, v[0]);
+            },
+            [&](const std::vector<any>& v) {
+                return v[1];
             }
         };
 
@@ -1115,40 +1146,23 @@ private:
             return resolve_escape_sequence(s, l);
         };
 
+        g["AND"]      = [](const char*s, size_t l) { return *s; };
+        g["NOT"]      = [](const char*s, size_t l) { return *s; };
+        g["QUESTION"] = [](const char*s, size_t l) { return *s; };
+        g["STAR"]     = [](const char*s, size_t l) { return *s; };
+        g["PLUS"]     = [](const char*s, size_t l) { return *s; };
+
         g["DOT"] = []() {
             return dot();
         };
     }
 
     std::shared_ptr<Grammar> perform_core(const char* s, size_t l, std::string& start, Log log) {
-        auto grammar = std::make_shared<Grammar>();
-        start.clear();
-        std::map<std::string, const char*> refs;
+        Values v;
+        Context cxt;
+        any c = &cxt;
+        auto r = g["Grammar"].parse(s, l, v, c);
 
-        g["Definition"] = [&](const std::vector<any>& v) {
-            const auto& name = v[0].get<std::string>();
-            (*grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
-            (*grammar)[name].name = name;
-
-            if (start.empty()) {
-                start = name;
-            }
-        };
-
-        g["Primary"].actions = {
-            [&](const std::vector<any>& v) {
-                return v[0];
-            },
-            [&](const char* s, size_t l, const std::vector<any>& v) {
-                refs[v[0]] = s;
-                return ref(*grammar, v[0]);
-            },
-            [&](const std::vector<any>& v) {
-                return v[1];
-            }
-        };
-
-        auto r = g["Grammar"].parse(s, l);
         if (!r.ret) {
             if (log) {
                 auto line = line_info(s, r.ptr);
@@ -1157,10 +1171,10 @@ private:
             return nullptr;
         }
 
-        for (const auto& x : refs) {
+        for (const auto& x : cxt.refs) {
             const auto& name = x.first;
             auto ptr = x.second;
-            if (grammar->find(name) == grammar->end()) {
+            if (cxt.grammar->find(name) == cxt.grammar->end()) {
                 if (log) {
                     auto line = line_info(s, ptr);
                     log(line.first, line.second, "'" + name + "' is not defined.");
@@ -1169,7 +1183,9 @@ private:
             }
         }
 
-        return grammar;
+        start = cxt.start;
+
+        return cxt.grammar;
     }
 
     std::string resolve_escape_sequence(const char*s, size_t l) {

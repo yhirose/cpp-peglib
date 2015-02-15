@@ -46,7 +46,7 @@ int main(int argc, const char** argv)
         return result;
     };
 
-    Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
+    rule EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
     EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
     TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;

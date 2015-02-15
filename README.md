@@ -54,17 +54,17 @@ This action `[&](const char* s, size_t l)` gives a pointer and length of the mat
 There are more actions available. Here is a complete list:
 
 ```c++
-[](const char* s, size_t l, const std::vector<peglib::any>& v, const std::vector<std::string>& n)
+[](const char* s, size_t l, const std::vector<peglib::any>& v, any& c)
 [](const char* s, size_t l, const std::vector<peglib::any>& v)
 [](const char* s, size_t l)
-[](const std::vector<peglib::any>& v, const std::vector<std::string>& n)
+[](const std::vector<peglib::any>& v, any& c)
 [](const std::vector<peglib::any>& v)
 []()
 ```
 
 `const std::vector<peglib::any>& v` contains semantic values. `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
 
-`const std::vector<std::string>& n` contains definition names of semantic values.
+`any& c` is a context data which can be used by the user for whatever purposes. 
 
 This is a complete code of a simple calculator. It shows how to associate actions to definitions and set/get semantic values.
 
