@@ -53,9 +53,11 @@ int main(void) {
         [](const vector<any>& v) { return v[0]; }     // 2nd choice
     };
 
+    /* This action is not necessary.
     parser["Primary"] = [](const vector<any>& v) {
-        return v.size() == 1 ? v[0] : v[1];
+        return v[0];
     };
+    */
 
     parser["Number"] = [](const char* s, size_t l) {
         return stoi(string(s, l), nullptr, 10);
@@ -63,9 +65,9 @@ int main(void) {
 
     // (4) Parse
     int val;
-    parser.parse("1+2*3", val);
+    parser.parse("(1+2)*3", val);
 
-    assert(val == 7);
+    assert(val == 9);
 }
 ```
 

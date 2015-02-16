@@ -164,18 +164,14 @@ TEST_CASE("Simple calculator test", "[general]")
         return v.size() == 1 ? v[0].get<int>() : v[0].get<int>() * v[1].get<int>();
     };
 
-    parser["Primary"] = [](const vector<any>& v) {
-        return v.size() == 1 ? v[0] : v[1];
-    };
-
     parser["Number"] = [](const char* s, size_t l) {
         return atoi(s);
     };
 
     int val;
-    parser.parse("1+2*3", val);
+    parser.parse("(1+2)*3", val);
 
-    REQUIRE(val == 7);
+    REQUIRE(val == 9);
 }
 
 TEST_CASE("Calculator test", "[general]")
