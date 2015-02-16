@@ -84,12 +84,32 @@ Here is a complete list of available actions:
 
 `any& c` is a context data which can be used by the user for whatever purposes.
 
+In the following example, `<` and ` >` are the *capture* operators. Each capture operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+
+```c++
+auto syntax = R"(
+    ROOT  <- _ TOKEN (',' _ TOKEN)*
+    TOKEN <- < [a-z0-9]+ > _
+    _     <- [ \t\r\n]*
+)";
+
+peg pg(syntax);
+
+pg["TOKEN"] = [](const char* s, size_t l, const vector<any>& v) {
+    auto b = v[0].get<const char*>(); // '<'
+    auto e = v[1].get<const char*>(); // '>'
+    auto token = string(b, e - b);    // 'token' doesn't include trailing whitespaces
+};
+
+auto ret = pg.parse(" token1, token2 ");
+```
+
 Simple interface
 ----------------
 
 *cpp-peglib* provides std::regex-like simple interface for trivial tasks.
 
-In the following example, `< ... >` means the *capture* operator. `peglib::peg_match` tries to capture strings in the `< ... >` operator and store them into `peglib::match` object.
+`peglib::peg_match` tries to capture strings in the `< ... >` operator and store them into `peglib::match` object.
 
 ```c++
 peglib::match m;

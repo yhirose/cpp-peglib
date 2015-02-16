@@ -161,7 +161,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     parser["Multitive"] = [](const vector<any>& v) {
-        return v.size() == 1 ? int(v[0]) : v[0].get<int>() * v[1].get<int>();
+        return v.size() == 1 ? v[0].get<int>() : v[0].get<int>() * v[1].get<int>();
     };
 
     parser["Primary"] = [](const vector<any>& v) {

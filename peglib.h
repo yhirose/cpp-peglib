@@ -122,28 +122,6 @@ public:
         return *this;
     }
 
-    operator bool() const { return get<bool>(); }
-    operator char() const { return get<char>(); }
-    operator wchar_t() const { return get<wchar_t>(); }
-    operator unsigned char() const { return get<unsigned char>(); }
-    operator int() const { return get<int>(); }
-    operator unsigned int() const { return get<unsigned int>(); }
-    operator short() const { return get<short>(); }
-    operator unsigned short() const { return get<unsigned short>(); }
-    operator long() const { return get<long>(); }
-    operator unsigned long() const { return get<unsigned long>(); }
-    operator long long() const { return get<long long>(); }
-    operator unsigned long long() const { return get<unsigned long long>(); }
-    operator float() const { return get<float>(); }
-    operator double() const { return get<double>(); }
-    operator const std::string&() const { return get<std::string>(); }
-
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
-#else
-    operator char16_t() const { return get<char16_t>(); }
-    operator char32_t() const { return get<char32_t>(); }
-#endif
-
 private:
     struct placeholder {
         virtual ~placeholder() {};
@@ -693,6 +671,15 @@ private:
     size_t               capture_id;
 };
 
+class Anchor : public Ope
+{
+public:
+    Result parse(const char* s, size_t l, Values& v, any& c) const {
+        return success(0);
+    }
+
+};
+
 class WeakHolder : public Ope
 {
 public:
@@ -929,6 +916,10 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma)
     return std::make_shared<Capture>(ope, ma, (size_t)-1);
 }
 
+inline std::shared_ptr<Ope> anc() {
+    return std::make_shared<Anchor>();
+}
+
 inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
     return std::make_shared<DefinitionReference>(grammar, name);
 }
@@ -1132,46 +1123,50 @@ private:
             },
             [&](const char* s, size_t l, const std::vector<any>& v, any& c) {
                 Context& cxt = *c.get<Context*>();
-                cxt.references[v[0]] = s;
-                return ref(*cxt.grammar, v[0]);
+                const auto& ident = v[0].get<std::string>();
+                cxt.references[ident] = s; // for error handling
+                return ref(*cxt.grammar, ident);
             },
             [&](const std::vector<any>& v) {
                 return v[1];
             },
             // Capture
-            [&](const std::vector<any>& v, any& c) {
+            [&](const char* s, size_t l, const std::vector<any>& v, any& c) {
                 Context& cxt = *c.get<Context*>();
                 auto ope = v[1].get<std::shared_ptr<Ope>>();
-                return cap(ope, cxt.match_action, ++cxt.capture_count);
+                return seq(
+                    ref(*cxt.grammar, "%ANCHOR%"),
+                    cap(ope, cxt.match_action, ++cxt.capture_count),
+                    ref(*cxt.grammar, "%ANCHOR%"));
             }
         };
 
-        g["IdentCont"] = [](const char*s, size_t l) {
+        g["IdentCont"] = [](const char* s, size_t l) {
             return std::string(s, l);
         };
 
         g["Literal"] = [](const std::vector<any>& v) {
-            return lit(v[0]);
+            return lit(v[0].get<std::string>());
         };
-        g["SQCont"] = [this](const char*s, size_t l) {
+        g["SQCont"] = [this](const char* s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
-        g["DQCont"] = [this](const char*s, size_t l) {
+        g["DQCont"] = [this](const char* s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
 
         g["Class"] = [](const std::vector<any>& v) {
-            return cls(v[0]);
+            return cls(v[0].get<std::string>());
         };
-        g["ClassCont"] = [this](const char*s, size_t l) {
+        g["ClassCont"] = [this](const char* s, size_t l) {
             return resolve_escape_sequence(s, l);
         };
 
-        g["AND"]      = [](const char*s, size_t l) { return *s; };
-        g["NOT"]      = [](const char*s, size_t l) { return *s; };
-        g["QUESTION"] = [](const char*s, size_t l) { return *s; };
-        g["STAR"]     = [](const char*s, size_t l) { return *s; };
-        g["PLUS"]     = [](const char*s, size_t l) { return *s; };
+        g["AND"]      = [](const char* s, size_t l) { return *s; };
+        g["NOT"]      = [](const char* s, size_t l) { return *s; };
+        g["QUESTION"] = [](const char* s, size_t l) { return *s; };
+        g["STAR"]     = [](const char* s, size_t l) { return *s; };
+        g["PLUS"]     = [](const char* s, size_t l) { return *s; };
 
         g["DOT"] = []() {
             return dot();
@@ -1194,10 +1189,12 @@ private:
             return nullptr;
         }
 
+        auto& grammar = *cxt.grammar;
+
         for (const auto& x : cxt.references) {
             const auto& name = x.first;
             auto ptr = x.second;
-            if (cxt.grammar->find(name) == cxt.grammar->end()) {
+            if (grammar.find(name) == grammar.end()) {
                 if (log) {
                     auto line = line_info(s, ptr);
                     log(line.first, line.second, "'" + name + "' is not defined.");
@@ -1208,10 +1205,13 @@ private:
 
         start = cxt.start;
 
+        grammar["%ANCHOR%"] <= anc();
+        grammar["%ANCHOR%"] = [](const char* s, size_t l) { return s; };
+
         return cxt.grammar;
     }
 
-    std::string resolve_escape_sequence(const char*s, size_t l) {
+    std::string resolve_escape_sequence(const char* s, size_t l) {
         std::string r;
         r.reserve(l);
 
@@ -1364,7 +1364,7 @@ private:
 };
 
 /*-----------------------------------------------------------------------------
- *  Utilities
+ *  Simple interface
  *---------------------------------------------------------------------------*/
 
 struct match
