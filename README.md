@@ -5,7 +5,9 @@ C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 *cpp-peglib* tries to provide more expressive parsing experience in a simple way. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
 
-The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf).
+The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf). *cpp-peglib* also supports the following additional syntax for now:
+
+  * `<` and `>` (Capture operators)
 
 How to use
 ----------
@@ -84,7 +86,7 @@ Here is a complete list of available actions:
 
 `any& c` is a context data which can be used by the user for whatever purposes.
 
-In the following example, `<` and ` >` are the *capture* operators. Each capture operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+The following example uses `<` and ` >` operators. They are the *capture* operators. Each capture operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
 ```c++
 auto syntax = R"(
