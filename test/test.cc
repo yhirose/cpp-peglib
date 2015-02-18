@@ -76,7 +76,7 @@ TEST_CASE("String capture test2", "[general]")
 
 TEST_CASE("String capture test3", "[general]")
 {
-   auto syntax = 
+   auto syntax =
        " ROOT  <- _ TOKEN*                "
        " TOKEN <- '[' < (!']' .)+ > ']' _ "
        " _     <- [ \t\r\n]*              "
@@ -86,8 +86,8 @@ TEST_CASE("String capture test3", "[general]")
 
    std::vector<std::string> tags;
 
-   pg["TOKEN"] = [&](const char* s, size_t l, const vector<any>& v) {
-      tags.push_back(std::string(s, l));
+   pg["TOKEN"] = [&](const char* s, size_t l) {
+       tags.push_back(std::string(s, l));
    };
 
    auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
@@ -145,6 +145,23 @@ TEST_CASE("Lambda action test", "[general]")
     bool ret = parser.parse("hello");
     REQUIRE(ret == true);
     REQUIRE(ss == "hello");
+}
+
+TEST_CASE("Skip token test", "[general]")
+{
+    peglib::peg parser(
+        "  ROOT  <-  _ ITEM (',' _ ITEM _)* "
+        "  ITEM  <-  ([a-z])+  "
+        "  ~_    <-  [ \t]*    "
+    );
+
+    parser["ROOT"] = [&](const vector<any>& v) {
+        REQUIRE(v.size() == 2);
+    };
+
+    auto ret = parser.parse(" item1, item2 ");
+
+    REQUIRE(ret == true);
 }
 
 TEST_CASE("Backtracking test", "[general]")

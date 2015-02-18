@@ -153,12 +153,12 @@ private:
 */
 struct SemanticValues
 {
-	std::vector<any>         values;
-   //std::vector<std::string> names;
-   const char*              s;
-	size_t                   l;
+    std::vector<any>         values;
+    //std::vector<std::string> names;
+    const char*              s;
+    size_t                   l;
 
-   SemanticValues() : s(nullptr), l(0) {}
+    SemanticValues() : s(nullptr), l(0) {}
 };
 
 /*
@@ -724,11 +724,13 @@ class Definition
 public:
     Definition()
        : actions(1)
+       , ignore(false)
        , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
         , actions(1)
+        , ignore(false)
         , holder_(rhs.holder_)
     {
         holder_->outer_ = this;
@@ -737,6 +739,7 @@ public:
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
         , actions(1)
+        , ignore(rhs.ignore)
         , holder_(std::move(rhs.holder_))
     {
         holder_->outer_ = this;
@@ -744,6 +747,7 @@ public:
 
     Definition(const std::shared_ptr<Ope>& ope)
         : actions(1)
+        , ignore(false)
         , holder_(std::make_shared<Holder>(this))
     {
         holder_->ope_ = ope;
@@ -803,8 +807,14 @@ public:
         return *this;
     }
 
+    Definition& operator~() {
+        ignore = true;
+        return *this;
+    }
+
     std::string         name;
     std::vector<Action> actions;
+    bool                ignore;
 
 private:
     friend class DefinitionReference;
@@ -823,7 +833,7 @@ private:
             const auto& rule = *ope_;
             SemanticValues chldsv;
             auto r = rule.parse(s, l, chldsv, c);
-            if (r.ret) {
+            if (r.ret && !outer_->ignore) {
                 assert(!outer_->actions.empty());
 
                 auto id = r.choice + 1;
@@ -1011,7 +1021,7 @@ private:
     void make_grammar() {
         // Setup PEG syntax parser
         g["Grammar"]    <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-        g["Definition"] <= seq(g["Identifier"], g["LEFTARROW"], g["Expression"]);
+        g["Definition"] <= seq(opt(g["IGNORE"]), g["Identifier"], g["LEFTARROW"], g["Expression"]);
 
         g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
         g["Sequence"]   <= zom(g["Prefix"]);
@@ -1031,7 +1041,7 @@ private:
         g["Literal"]    <= cho(seq(cls("'"), anc(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
                                seq(cls("\""), anc(zom(seq(npd(cls("\"")), g["Char"]))), cls("\""), g["Spacing"]));
 
-        g["Class"] <= seq(chr('['), anc(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
+        g["Class"]      <= seq(chr('['), anc(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
         g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
@@ -1040,7 +1050,7 @@ private:
                                seq(npd(chr('\\')), dot()));
 
         g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
-        g["SLASH"]      <= seq(chr('/'), g["Spacing"]);
+        ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
         g["QUESTION"]   <= seq(chr('?'), g["Spacing"]);
@@ -1062,6 +1072,10 @@ private:
         g["BeginCap"]   <= seq(lit("$<"), g["Spacing"]);
         g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
 
+        g["IGNORE"]     <= chr('~');
+
+        g["Action"]     <= seq(chr('{'), anc(zom(npd(chr('}')))), chr('}'), g["Spacing"]);
+
         // Set definition names
         for (auto& x: g) {
             x.second.name = x.first;
@@ -1072,9 +1086,16 @@ private:
         g["Definition"] = [&](const std::vector<any>& v, any& c) {
             Context& cxt = *c.get<Context*>();
 
-            const auto& name = v[0].get<std::string>();
-            (*cxt.grammar)[name] <= v[2].get<std::shared_ptr<Ope>>();
-            (*cxt.grammar)[name].name = name;
+            auto ignore = (v.size() == 4);
+            auto baseId = ignore ? 1 : 0;
+
+            const auto& name = v[baseId].get<std::string>();
+            auto ope = v[baseId + 2].get<std::shared_ptr<Ope>>();
+
+            auto& def = (*cxt.grammar)[name];
+            def <= ope;
+            def.name = name;
+            def.ignore = ignore;
 
             if (cxt.start.empty()) {
                 cxt.start = name;
@@ -1087,9 +1108,7 @@ private:
             } else {
                 std::vector<std::shared_ptr<Ope>> opes;
                 for (auto i = 0u; i < v.size(); i++) {
-                    if (!(i % 2)) {
-                        opes.push_back(v[i].get<std::shared_ptr<Ope>>());
-                    }
+                    opes.push_back(v[i].get<std::shared_ptr<Ope>>());
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
                 return ope;

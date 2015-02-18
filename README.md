@@ -7,8 +7,9 @@ C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
-  * `<` ... `>` (Anchor operators)
-  * `$<` ... `>` (Capture operators)
+  * `<` ... `>` (Anchor operator)
+  * `$<` ... `>` (Capture operator)
+  * `~` (Ignore operator)
 
 How to use
 ----------
@@ -106,6 +107,22 @@ pg["TOKEN"] = [](const char* s, size_t l, const vector<any>& v) {
 };
 
 auto ret = pg.parse(" token1, token2 ");
+```
+
+We can ignore unnecessary semantic values from the list by using `~` operator.
+
+```c++
+peglib::peg parser(
+    "  ROOT  <-  _ ITEM (',' _ ITEM _)* "
+    "  ITEM  <-  ([a-z])+  "
+    "  ~_    <-  [ \t]*    "
+);
+
+parser["ROOT"] = [&](const vector<any>& v) {
+    assert(v.size() == 2); // should be 2 instead of 5.
+};
+
+auto ret = parser.parse(" item1, item2 ");
 ```
 
 Simple interface
