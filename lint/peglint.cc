@@ -27,11 +27,11 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    peglib::peg parser(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
+    peglib::peg peg(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     });
 
-    if (!parser) {
+    if (!peg) {
         return -1;
     }
 
@@ -48,9 +48,13 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    auto ret = parser.lint(source.data(), source.size(), true, [&](size_t ln, size_t col, const string& msg) {
+    auto ret = peg.lint(source.data(), source.size(), true, [&](size_t ln, size_t col, const string& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     });
+
+    if (ret) {
+        peg.parse(source.data(), source.size());
+    }
 
     return ret ? 0 : -1;
 }

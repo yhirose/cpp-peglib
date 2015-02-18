@@ -7,7 +7,8 @@ C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
-  * `<` and `>` (Capture operators)
+  * `<` ... `>` (Anchor operators)
+  * `$<` ... `>` (Capture operators)
 
 How to use
 ----------
@@ -88,7 +89,7 @@ Here is a complete list of available actions:
 
 `any& c` is a context data which can be used by the user for whatever purposes.
 
-The following example uses `<` and ` >` operators. They are the *capture* operators. Each capture operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+The following example uses `<` and ` >` operators. They are the *anchor* operators. Each anchor operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
 ```c++
 auto syntax = R"(
@@ -100,9 +101,8 @@ auto syntax = R"(
 peg pg(syntax);
 
 pg["TOKEN"] = [](const char* s, size_t l, const vector<any>& v) {
-    auto b = v[0].get<const char*>(); // '<'
-    auto e = v[1].get<const char*>(); // '>'
-    auto token = string(b, e - b);    // 'token' doesn't include trailing whitespaces
+    // 'token' doesn't include trailing whitespaces
+    auto token = string(s, l);
 };
 
 auto ret = pg.parse(" token1, token2 ");
@@ -113,13 +113,13 @@ Simple interface
 
 *cpp-peglib* provides std::regex-like simple interface for trivial tasks.
 
-`peglib::peg_match` tries to capture strings in the `< ... >` operator and store them into `peglib::match` object.
+`peglib::peg_match` tries to capture strings in the `$< ... >` operator and store them into `peglib::match` object.
 
 ```c++
 peglib::match m;
 auto ret = peglib::peg_match(
     R"(
-        ROOT      <-  _ ('[' < TAG_NAME > ']' _)*
+        ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*
         TAG_NAME  <-  (!']' .)+
         _         <-  [ \t]*
     )",
@@ -139,7 +139,7 @@ There are some ways to *search* a peg pattern in a document.
 using namespace peglib;
 
 auto syntax = R"(
-ROOT <- '[' < [a-z0-9]+ > ']'
+ROOT <- '[' $< [a-z0-9]+ > ']'
 )";
 
 auto s = " [tag1] [tag2] [tag3] ";
@@ -206,6 +206,8 @@ The following are available operators:
 | cls      | Character class    |
 | chr      | Character          |
 | dot      | Any character      |
+| anc      | Anchor character   |
+| cap      | Capture character  |
 
 Sample codes
 ------------

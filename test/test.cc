@@ -39,7 +39,7 @@ TEST_CASE("String capture test with match", "[general]")
 {
     peglib::match m;
     auto ret = peglib::peg_match(
-        "  ROOT      <-  _ ('[' < TAG_NAME > ']' _)*  "
+        "  ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   ",
         " [tag1] [tag:2] [tag-3] ",
@@ -72,6 +72,31 @@ TEST_CASE("String capture test2", "[general]")
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
     REQUIRE(tags[2] == "tag-3");
+}
+
+TEST_CASE("String capture test3", "[general]")
+{
+   auto syntax = 
+       " ROOT  <- _ TOKEN*                "
+       " TOKEN <- '[' < (!']' .)+ > ']' _ "
+       " _     <- [ \t\r\n]*              "
+       ;
+
+   peg pg(syntax);
+
+   std::vector<std::string> tags;
+
+   pg["TOKEN"] = [&](const char* s, size_t l, const vector<any>& v) {
+      tags.push_back(std::string(s, l));
+   };
+
+   auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
+
+   REQUIRE(ret == true);
+   REQUIRE(tags.size() == 3);
+   REQUIRE(tags[0] == "tag1");
+   REQUIRE(tags[1] == "tag:2");
+   REQUIRE(tags[2] == "tag-3");
 }
 
 TEST_CASE("String capture test with embedded match action", "[general]")

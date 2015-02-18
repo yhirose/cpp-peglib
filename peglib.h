@@ -151,7 +151,15 @@ private:
 /*
 * Semantic values
 */
-typedef std::vector<any> Values;
+struct SemanticValues
+{
+	std::vector<any>         values;
+   //std::vector<std::string> names;
+   const char*              s;
+	size_t                   l;
+
+   SemanticValues() : s(nullptr), l(0) {}
+};
 
 /*
  * Semantic action
@@ -366,7 +374,7 @@ class Ope
 {
 public:
     virtual ~Ope() {};
-    virtual Result parse(const char* s, size_t l, Values& v, any& c) const = 0;
+    virtual Result parse(const char* s, size_t l, SemanticValues& v, any& c) const = 0;
 };
 
 class Sequence : public Ope
@@ -393,7 +401,7 @@ public:
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         size_t i = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
@@ -436,18 +444,20 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         size_t id = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
-            Values chldsv;
+            SemanticValues chldsv;
             auto r = rule.parse(s, l, chldsv, c);
             if (r.ret) {
-                if (!chldsv.empty()) {
-                    for (const auto& x: chldsv) {
-                        v.push_back(x);
-                    }
+                //assert(chldsv.values.size() == chldsv.names.size());
+                if (!chldsv.values.empty()) {
+                    v.values.insert(v.values.end(), chldsv.values.begin(), chldsv.values.end());
+                    //v.names.insert(v.names.end(), chldsv.names.begin(), chldsv.names.end());
                 }
+                v.s = chldsv.s;
+                v.l = chldsv.l;
                 return success(r.len, id);
             }
             id++;
@@ -466,7 +476,7 @@ class ZeroOrMore : public Ope
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         auto i = 0;
         while (l - i > 0) {
             const auto& rule = *ope_;
@@ -488,7 +498,7 @@ class OneOrMore : public Ope
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
         if (!r.ret) {
@@ -519,7 +529,7 @@ class Option : public Ope
 public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
         return success(r.ret ? r.len : 0);
@@ -534,7 +544,7 @@ class AndPredicate : public Ope
 public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
         if (r.ret) {
@@ -553,7 +563,7 @@ class NotPredicate : public Ope
 public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
         if (r.ret) {
@@ -572,7 +582,7 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
@@ -591,7 +601,7 @@ class CharacterClass : public Ope
 public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -623,7 +633,7 @@ class Character : public Ope
 public:
     Character(char ch) : ch_(ch) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1 || s[0] != ch_) {
             return fail(s);
@@ -638,7 +648,7 @@ private:
 class AnyCharacter : public Ope
 {
 public:
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         // TODO: UTF8 support
         if (l < 1) {
             return fail(s);
@@ -651,11 +661,10 @@ public:
 class Capture : public Ope
 {
 public:
-    Capture(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
     Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci)
         : ope_(ope), match_action_(ma), capture_id(ci) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         assert(ope_);
         const auto& rule = *ope_;
         auto r = rule.parse(s, l, v, c);
@@ -674,10 +683,21 @@ private:
 class Anchor : public Ope
 {
 public:
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
-        return success(0);
+    Anchor(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
+        assert(ope_);
+        const auto& rule = *ope_;
+        auto r = rule.parse(s, l, v, c);
+        if (r.ret) {
+            v.s = s;
+            v.l = r.len;
+        }
+        return r;
     }
 
+private:
+    std::shared_ptr<Ope> ope_;
 };
 
 class WeakHolder : public Ope
@@ -685,7 +705,7 @@ class WeakHolder : public Ope
 public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
@@ -738,17 +758,17 @@ public:
         return *this;
     }
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         return holder_->parse(s, l, v, c);
     }
 
     template <typename T>
     Result parse(const char* s, size_t l, T& val) const {
-        Values v;
+        SemanticValues v;
         any c;
         auto r = holder_->parse(s, l, v, c);
-        if (r.ret && !v.empty() && !v.front().is_undefined()) {
-            val = v[0].get<T>();
+        if (r.ret && !v.values.empty() && !v.values.front().is_undefined()) {
+            val = v.values[0].get<T>();
         }
         return r;
     }
@@ -761,7 +781,7 @@ public:
 
     Result parse(const char* s) const {
         auto l = strlen(s);
-        Values v;
+        SemanticValues v;
         any c;
         return holder_->parse(s, l, v, c);
     }
@@ -795,13 +815,13 @@ private:
         Holder(Definition* outer)
            : outer_(outer) {}
 
-        Result parse(const char* s, size_t l, Values& v, any& c) const {
+        Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
             if (!ope_) {
                 throw std::logic_error("Uninitialized definition ope was used...");
             }
 
             const auto& rule = *ope_;
-            Values chldsv;
+            SemanticValues chldsv;
             auto r = rule.parse(s, l, chldsv, c);
             if (r.ret) {
                 assert(!outer_->actions.empty());
@@ -811,7 +831,12 @@ private:
                     ? outer_->actions[id]
                     : outer_->actions[0];
 
-                v.push_back(reduce(s, r.len, chldsv, c, ac));
+                auto ts = chldsv.s ? chldsv.s : s;
+                auto tl = chldsv.s ? chldsv.l : r.len;
+                auto sv = reduce(ts, tl, chldsv, c, ac);
+
+                v.values.push_back(sv);
+                //v.names.push_back(outer_->name);
             }
             return r;
         }
@@ -819,13 +844,13 @@ private:
     private:
         friend class Definition;
 
-        any reduce(const char* s, size_t l, const Values& v, any& c, const Action& action) const {
+        any reduce(const char* s, size_t l, const SemanticValues& v, any& c, const Action& action) const {
             if (action) {
-                return action(s, l, v, c);
-            } else if (v.empty()) {
+                return action(s, l, v.values, c);
+            } else if (v.values.empty()) {
                 return any();
             } else {
-                return v.front();
+                return v.values.front();
             }
         }
 
@@ -847,7 +872,7 @@ public:
         : grammar_(grammar)
         , name_(name) {}
 
-    Result parse(const char* s, size_t l, Values& v, any& c) const {
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
         const auto& rule = *grammar_.at(name_).holder_;
         return rule.parse(s, l, v, c);
     }
@@ -916,8 +941,8 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma)
     return std::make_shared<Capture>(ope, ma, (size_t)-1);
 }
 
-inline std::shared_ptr<Ope> anc() {
-    return std::make_shared<Anchor>();
+inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<Anchor>(ope);
 }
 
 inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
@@ -994,7 +1019,8 @@ private:
         g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
         g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                               seq(g["CAPTUREOPEN"], g["Expression"], g["CAPTURECLOSE"]),
+                               seq(g["Begin"], g["Expression"], g["End"]),
+                               seq(g["BeginCap"], g["Expression"], g["EndCap"]),
                                g["Literal"], g["Class"], g["DOT"]);
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
@@ -1002,13 +1028,10 @@ private:
         g["IdentStart"] <= cls("a-zA-Z_");
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
-        g["Literal"]    <= cho(seq(cls("'"), g["SQCont"], cls("'"), g["Spacing"]),
-                               seq(cls("\""), g["DQCont"], cls("\""), g["Spacing"]));
-        g["SQCont"]     <= zom(seq(npd(cls("'")), g["Char"]));
-        g["DQCont"]     <= zom(seq(npd(cls("\"")), g["Char"]));
+        g["Literal"]    <= cho(seq(cls("'"), anc(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
+                               seq(cls("\""), anc(zom(seq(npd(cls("\"")), g["Char"]))), cls("\""), g["Spacing"]));
 
-        g["Class"]      <= seq(chr('['), g["ClassCont"], chr(']'), g["Spacing"]);
-        g["ClassCont"]  <= zom(seq(npd(chr(']')), g["Range"]));
+        g["Class"] <= seq(chr('['), anc(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
         g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
@@ -1033,8 +1056,11 @@ private:
         g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
         g["EndOfFile"]  <= npd(dot());
 
-        g["CAPTUREOPEN"]  <= seq(chr('<'), g["Spacing"]);
-        g["CAPTURECLOSE"] <= seq(chr('>'), g["Spacing"]);
+        g["Begin"]      <= seq(chr('<'), g["Spacing"]);
+        g["End"]        <= seq(chr('>'), g["Spacing"]);
+
+        g["BeginCap"]   <= seq(lit("$<"), g["Spacing"]);
+        g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
 
         // Set definition names
         for (auto& x: g) {
@@ -1130,36 +1156,27 @@ private:
             [&](const std::vector<any>& v) {
                 return v[1];
             },
+            // Anchor
+            [&](const std::vector<any>& v) {
+                auto ope = v[1].get<std::shared_ptr<Ope>>();
+                return anc(ope);
+            },
             // Capture
-            [&](const char* s, size_t l, const std::vector<any>& v, any& c) {
+            [&](const std::vector<any>& v, any& c) {
                 Context& cxt = *c.get<Context*>();
                 auto ope = v[1].get<std::shared_ptr<Ope>>();
-                return seq(
-                    ref(*cxt.grammar, "%ANCHOR%"),
-                    cap(ope, cxt.match_action, ++cxt.capture_count),
-                    ref(*cxt.grammar, "%ANCHOR%"));
+                return cap(ope, cxt.match_action, ++cxt.capture_count);
             }
         };
 
         g["IdentCont"] = [](const char* s, size_t l) {
             return std::string(s, l);
         };
-
-        g["Literal"] = [](const std::vector<any>& v) {
-            return lit(v[0].get<std::string>());
+        g["Literal"] = [this](const char* s, size_t l) {
+            return lit(resolve_escape_sequence(s, l));
         };
-        g["SQCont"] = [this](const char* s, size_t l) {
-            return resolve_escape_sequence(s, l);
-        };
-        g["DQCont"] = [this](const char* s, size_t l) {
-            return resolve_escape_sequence(s, l);
-        };
-
-        g["Class"] = [](const std::vector<any>& v) {
-            return cls(v[0].get<std::string>());
-        };
-        g["ClassCont"] = [this](const char* s, size_t l) {
-            return resolve_escape_sequence(s, l);
+        g["Class"] = [this](const char* s, size_t l) {
+            return cls(resolve_escape_sequence(s, l));
         };
 
         g["AND"]      = [](const char* s, size_t l) { return *s; };
@@ -1168,16 +1185,14 @@ private:
         g["STAR"]     = [](const char* s, size_t l) { return *s; };
         g["PLUS"]     = [](const char* s, size_t l) { return *s; };
 
-        g["DOT"] = []() {
-            return dot();
-        };
+        g["DOT"] = []() { return dot(); };
     }
 
     std::shared_ptr<Grammar> perform_core(const char* s, size_t l, std::string& start, MatchAction ma, Log log) {
         Context cxt;
         cxt.match_action = ma;
 
-        Values v;
+        SemanticValues v;
         any c = &cxt;
         auto r = g["Grammar"].parse(s, l, v, c);
 
@@ -1204,9 +1219,6 @@ private:
         }
 
         start = cxt.start;
-
-        grammar["%ANCHOR%"] <= anc();
-        grammar["%ANCHOR%"] = [](const char* s, size_t l) { return s; };
 
         return cxt.grammar;
     }
@@ -1345,7 +1357,7 @@ public:
                 }
             } else if (exact && r.len != l) {
                 auto line = line_info(s, s + r.len);
-                log(line.first, line.second, "garbage string at the end");
+                log(line.first, line.second, "syntax error");
             }
             return r.ret && (!exact || r.len == l);
         }
