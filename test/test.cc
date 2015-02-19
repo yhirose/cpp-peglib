@@ -151,7 +151,7 @@ TEST_CASE("Skip token test", "[general]")
 {
     peglib::peg parser(
         "  ROOT  <-  _ ITEM (',' _ ITEM _)* "
-        "  ITEM  <-  ([a-z])+  "
+        "  ITEM  <-  ([a-z0-9])+  "
         "  ~_    <-  [ \t]*    "
     );
 
