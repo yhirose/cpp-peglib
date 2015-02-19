@@ -5,8 +5,8 @@
 //  MIT License
 //
 
-#ifndef _CPPEXPATLIB_PEGLIB_H_
-#define _CPPEXPATLIB_PEGLIB_H_
+#ifndef _CPPPEGLIB_PEGLIB_H_
+#define _CPPPEGLIB_PEGLIB_H_
 
 #include <functional>
 #include <string>
