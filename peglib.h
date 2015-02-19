@@ -155,7 +155,7 @@ private:
 struct SemanticValues
 {
     std::vector<any>         values;
-    //std::vector<std::string> names;
+    std::vector<std::string> names;
     const char*              s;
     size_t                   l;
 
@@ -217,17 +217,37 @@ public:
         return (bool)fn_;
     }
 
-    any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) const {
+    any operator()(const char* s, size_t l, const SemanticValues& v, any& c) const {
         return fn_(s, l, v, c);
     }
 
 private:
     template <typename R>
     struct TypeAdaptor {
-        TypeAdaptor(std::function<R (const char* s, size_t l, const std::vector<any>& v, any& c)> fn)
+        TypeAdaptor(std::function<R (const SemanticValues& v)> fn)
             : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
-            return call<R>(fn_, s, l, v, c);
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, v);
+        }
+        std::function<R (const SemanticValues& v)> fn_;
+    };
+
+    template <typename R>
+    struct TypeAdaptor_c {
+        TypeAdaptor_c(std::function<R (const SemanticValues& v, any& c)> fn)
+            : fn_(fn) {}
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, v, c);
+        }
+        std::function<R (const SemanticValues& v, any& c)> fn_;
+    };
+
+    template <typename R>
+    struct TypeAdaptor_s_l_v_c {
+        TypeAdaptor_s_l_v_c(std::function<R (const char* s, size_t l, const std::vector<any>& v, any& c)> fn)
+            : fn_(fn) {}
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, s, l, v.values, c);
         }
         std::function<R (const char* s, size_t l, const std::vector<any>& v, any& c)> fn_;
     };
@@ -236,8 +256,8 @@ private:
     struct TypeAdaptor_s_l_v {
         TypeAdaptor_s_l_v(std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn)
             : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
-            return call<R>(fn_, s, l, v);
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, s, l, v.values);
         }
         std::function<R (const char* s, size_t l, const std::vector<any>& v)> fn_;
     };
@@ -245,7 +265,7 @@ private:
     template <typename R>
     struct TypeAdaptor_s_l {
         TypeAdaptor_s_l(std::function<R (const char* s, size_t l)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
             return call<R>(fn_, s, l);
         }
         std::function<R (const char* s, size_t l)> fn_;
@@ -254,8 +274,8 @@ private:
     template <typename R>
     struct TypeAdaptor_v_n {
         TypeAdaptor_v_n(std::function<R (const std::vector<any>& v, any& c)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
-            return call<R>(fn_, v, c);
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, v.values, c);
         }
         std::function<R (const std::vector<any>& v, any& c)> fn_;
     };
@@ -263,8 +283,8 @@ private:
     template <typename R>
     struct TypeAdaptor_v {
         TypeAdaptor_v(std::function<R (const std::vector<any>& v)> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
-            return call<R>(fn_, v);
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
+            return call<R>(fn_, v.values);
         }
         std::function<R (const std::vector<any>& v)> fn_;
     };
@@ -272,27 +292,57 @@ private:
     template <typename R>
     struct TypeAdaptor_empty {
         TypeAdaptor_empty(std::function<R ()> fn) : fn_(fn) {}
-        any operator()(const char* s, size_t l, const std::vector<any>& v, any& c) {
+        any operator()(const char* s, size_t l, const SemanticValues& v, any& c) {
             return call<R>(fn_);
         }
         std::function<R ()> fn_;
     };
 
-    typedef std::function<any (const char* s, size_t l, const std::vector<any>& v, any& c)> Fty;
+    typedef std::function<any (const char* s, size_t l, const SemanticValues& v, any& c)> Fty;
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& v) const) {
+        return TypeAdaptor<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& v)) {
+        return TypeAdaptor<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R(*mf)(const SemanticValues& v)) {
+        return TypeAdaptor<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& v, any& c) const) {
+        return TypeAdaptor_c<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& v, any& c)) {
+        return TypeAdaptor_c<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R(*mf)(const SemanticValues& v, any& c)) {
+        return TypeAdaptor_c<R>(fn);
+    }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, any& c) const) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_s_l_v_c<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, any& c)) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_s_l_v_c<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v, any& c)) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_s_l_v_c<R>(fn);
     }
 
     template<typename F, typename R>
@@ -482,10 +532,10 @@ public:
             SemanticValues chldsv;
             auto r = rule.parse(s, l, chldsv, c);
             if (r.ret) {
-                //assert(chldsv.values.size() == chldsv.names.size());
+                assert(chldsv.values.size() == chldsv.names.size());
                 if (!chldsv.values.empty()) {
                     v.values.insert(v.values.end(), chldsv.values.begin(), chldsv.values.end());
-                    //v.names.insert(v.names.end(), chldsv.names.begin(), chldsv.names.end());
+                    v.names.insert(v.names.end(), chldsv.names.begin(), chldsv.names.end());
                 }
                 v.s = chldsv.s;
                 v.l = chldsv.l;
@@ -868,16 +918,16 @@ private:
                 assert(!outer_->actions.empty());
 
                 auto id = r.choice + 1;
-                const auto& ac = (id < outer_->actions.size() && outer_->actions[id])
+                const auto& action = (id < outer_->actions.size() && outer_->actions[id])
                     ? outer_->actions[id]
                     : outer_->actions[0];
 
                 auto ts = chldsv.s ? chldsv.s : s;
                 auto tl = chldsv.s ? chldsv.l : r.len;
-                auto sv = reduce(ts, tl, chldsv, c, ac);
+                auto sv = reduce(ts, tl, chldsv, c, action);
 
                 v.values.push_back(sv);
-                //v.names.push_back(outer_->name);
+                v.names.push_back(outer_->name);
             }
             return r;
         }
@@ -887,7 +937,7 @@ private:
 
         any reduce(const char* s, size_t l, const SemanticValues& v, any& c, const Action& action) const {
             if (action) {
-                return action(s, l, v.values, c);
+                return action(s, l, v, c);
             } else if (v.values.empty()) {
                 return any();
             } else {

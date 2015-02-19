@@ -82,6 +82,8 @@ Here is a complete list of available actions:
 [](const std::vector<peglib::any>& v, any& c)
 [](const std::vector<peglib::any>& v)
 []()
+[](const SemanticValues& v, any& c)
+[](const SemanticValues& v)
 ```
 
 `const char* s, size_t l` gives a pointer and length of the matched string.
@@ -90,7 +92,19 @@ Here is a complete list of available actions:
 
 `any& c` is a context data which can be used by the user for whatever purposes.
 
-The following example uses `<` and ` >` operators. They are the *anchor* operators. Each anchor operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+`const SemanticValues&` is also available. `SemanticValues` structure contains all of above information as well as the vector of definition names of semantic values.
+
+```c++
+struct SemanticValues
+{
+    std::vector<any>         values; // Semantic value
+    std::vector<std::string> names;  // Definition name
+    const char*              s;      // Token start
+    size_t                   l;      // Token length
+};
+```
+
+The following example uses `<` ... ` >` operators. They are the *anchor* operators. Each anchor operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
 ```c++
 auto syntax = R"(
