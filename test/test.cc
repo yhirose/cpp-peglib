@@ -183,6 +183,18 @@ TEST_CASE("Backtracking test", "[general]")
     REQUIRE(count == 2);
 }
 
+TEST_CASE("mutable lambda test", "[general]")
+{
+    vector<string> vec;
+
+    peg pg("ROOT <- 'mutable lambda test'"); 
+
+    // This test makes sure if the following code can be compiled.
+    pg["TOKEN"] = [=](const char* s, size_t l) mutable {
+        vec.push_back(string(s, l));
+    };
+}
+
 TEST_CASE("Simple calculator test", "[general]")
 {
     auto syntax =

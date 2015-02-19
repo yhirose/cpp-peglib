@@ -285,12 +285,22 @@ private:
     }
 
     template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v, any& c)) {
+        return TypeAdaptor<R>(fn);
+    }
+
+    template<typename F, typename R>
     Fty make_adaptor(F fn, R(*mf)(const char*, size_t, const std::vector<any>& v, any& c)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v) const) {
+        return TypeAdaptor_s_l_v<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t, const std::vector<any>& v)) {
         return TypeAdaptor_s_l_v<R>(fn);
     }
 
@@ -305,12 +315,22 @@ private:
     }
 
     template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t)) {
+        return TypeAdaptor_s_l<R>(fn);
+    }
+
+    template<typename F, typename R>
     Fty make_adaptor(F fn, R (*mf)(const char*, size_t)) {
         return TypeAdaptor_s_l<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v, any& c) const) {
+        return TypeAdaptor_v_n<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v, any& c)) {
         return TypeAdaptor_v_n<R>(fn);
     }
 
@@ -325,12 +345,22 @@ private:
     }
 
     template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)(const std::vector<any>& v)) {
+        return TypeAdaptor_v<R>(fn);
+    }
+
+    template<typename F, typename R>
     Fty make_adaptor(F fn, R (*mf)(const std::vector<any>& v)) {
         return TypeAdaptor_v<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)() const) {
+        return TypeAdaptor_empty<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::*mf)()) {
         return TypeAdaptor_empty<R>(fn);
     }
 
