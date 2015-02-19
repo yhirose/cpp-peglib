@@ -6,10 +6,21 @@
 //
 
 #include <peglib.h>
-#include <iostream>
-#include "mmap.h"
+#include <fstream>
 
 using namespace std;
+
+bool read_file(const char* path, vector<char>& buff)
+{
+    ifstream ifs(path, ios::in | ios::binary);
+    if (ifs.fail()) {
+        return false;
+    }
+
+    buff.resize(ifs.seekg(0, ios::end).tellg());
+    ifs.seekg(0, ios::beg).read(&buff[0], static_cast<streamsize>(buff.size()));
+    return true;
+}
 
 int main(int argc, const char** argv)
 {
@@ -21,8 +32,8 @@ int main(int argc, const char** argv)
     // Check PEG grammar
     auto syntax_path = argv[1];
 
-    MemoryMappedFile syntax(syntax_path);
-    if (!syntax.is_open()) {
+    vector<char> syntax;
+    if (!read_file(syntax_path, syntax)) {
         cerr << "can't open the grammar file." << endl;
         return -1;
     }
@@ -42,8 +53,8 @@ int main(int argc, const char** argv)
     // Check source
     auto source_path = argv[2];
 
-    MemoryMappedFile source(source_path);
-    if (!source.is_open()) {
+    vector<char> source;
+    if (!read_file(source_path, source)) {
         cerr << "can't open the source file." << endl;
         return -1;
     }

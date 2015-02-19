@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <string>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <map>
