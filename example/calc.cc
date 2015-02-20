@@ -15,12 +15,13 @@ using namespace std;
 //
 //  PEG syntax:
 //
-//      EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
+//      EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
 //      TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-//      FACTOR           <-  NUMBER / '(' EXPRESSION ')'
-//      TERM_OPERATOR    <-  [-+]
-//      FACTOR_OPERATOR  <-  [/*]
-//      NUMBER           <-  [0-9]+
+//      FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
+//      TERM_OPERATOR    <-  < [-+] > _
+//      FACTOR_OPERATOR  <-  < [/*] > _
+//      NUMBER           <-  < [0-9]+ > _
+//      ~_               <-  [ \t\r\n]*
 //
 int main(int argc, const char** argv)
 {
@@ -47,12 +48,13 @@ int main(int argc, const char** argv)
     };
 
     const char* syntax =
-        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
+        "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-        "  TERM_OPERATOR    <-  [-+]                              "
-        "  FACTOR_OPERATOR  <-  [/*]                              "
-        "  NUMBER           <-  [0-9]+                            "
+        "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
+        "  TERM_OPERATOR    <-  < [-+] > _                        "
+        "  FACTOR_OPERATOR  <-  < [/*] > _                        "
+        "  NUMBER           <-  < [0-9]+ > _                      "
+        "  ~_               <-  [ \t\r\n]*                        "
         ;
 
     peg parser(syntax);

@@ -241,10 +241,10 @@ The following are available operators:
 | cap      | Capture character   |
 | usr      | User defiend parser |
 
-Hybrid Parser
--------------
+Adjust definitions
+------------------
 
-It's even possible to mix parser grammar with parser operaters.
+It's possible to add and override definitions with parser operaters.
 
 ```c++
 auto syntax = R"(
