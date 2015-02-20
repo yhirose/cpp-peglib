@@ -224,21 +224,54 @@ auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
 The following are available operators:
 
-| Operator | Description        |
-|:---------|:-------------------|
-| seq      | Sequence           |
-| cho      | Prioritized Choice |
-| zom      | Zero or More       |
-| oom      | One or More        |
-| opt      | Optional           |
-| apd      | And predicate      |
-| npd      | Not predicate      |
-| lit      | Literal string     |
-| cls      | Character class    |
-| chr      | Character          |
-| dot      | Any character      |
-| anc      | Anchor character   |
-| cap      | Capture character  |
+| Operator |     Description     |
+| :------- | :------------------ |
+| seq      | Sequence            |
+| cho      | Prioritized Choice  |
+| zom      | Zero or More        |
+| oom      | One or More         |
+| opt      | Optional            |
+| apd      | And predicate       |
+| npd      | Not predicate       |
+| lit      | Literal string      |
+| cls      | Character class     |
+| chr      | Character           |
+| dot      | Any character       |
+| anc      | Anchor character    |
+| cap      | Capture character   |
+| usr      | User defiend parser |
+
+Hybrid Parser
+-------------
+
+It's even possible to mix parser grammar with parser operaters.
+
+```c++
+auto syntax = R"(
+    ROOT <- _ 'Hello' _ NAME '!' _
+)";
+
+Rules rules = {
+    {
+        "NAME", usr([](const char* s, size_t l, SemanticValues& v, any& c) {
+            static vector<string> names = { "PEG", "BNF" };
+            for (const auto& n: names) {
+                if (n.size() <= l && !n.compare(0, n.size(), s, n.size())) {
+                    return success(n.size());
+                }
+            }
+            return fail(s);
+        })
+    },
+    {
+        "~_", zom(cls(" \t\r\n"))
+    }
+};
+
+peg g = peg(syntax, rules);
+
+assert(g.parse(" Hello BNF! "));
+```
 
 Sample codes
 ------------

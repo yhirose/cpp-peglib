@@ -781,6 +781,22 @@ private:
     std::shared_ptr<Ope> ope_;
 };
 
+typedef std::function<Result (const char* s, size_t l, SemanticValues& v, any& c)> Parser;
+
+class User : public Ope
+{
+public:
+    User(Parser fn) : fn_(fn) {}
+
+    Result parse(const char* s, size_t l, SemanticValues& v, any& c) const {
+        assert(fn_);
+        return fn_(s, l, v, c);
+    }
+
+private:
+    std::function<Result (const char* s, size_t l, SemanticValues& v, any& c)> fn_;
+};
+
 class WeakHolder : public Ope
 {
 public:
@@ -1038,6 +1054,10 @@ inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Anchor>(ope);
 }
 
+inline std::shared_ptr<Ope> usr(std::function<Result (const char* s, size_t l, SemanticValues& v, any& c)> fn) {
+    return std::make_shared<User>(fn);
+}
+
 inline std::shared_ptr<Ope> ref(const std::map<std::string, Definition>& grammar, const std::string& name) {
     return std::make_shared<DefinitionReference>(grammar, name);
 }
@@ -1067,12 +1087,32 @@ inline std::pair<size_t, size_t> line_info(const char* s, const char* ptr) {
 typedef std::map<std::string, Definition> Grammar;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
+typedef std::map<std::string, std::shared_ptr<Ope>> Rules;
+
 class PEGParser
 {
 public:
-    static std::shared_ptr<Grammar> parse(const char* s, size_t l, std::string& start, MatchAction ma, Log log) {
+    static std::shared_ptr<Grammar> parse(
+        const char*  s,
+        size_t       l,
+        const Rules& rules,
+        std::string& start,
+        MatchAction  ma,
+        Log          log)
+    {
         static PEGParser instance;
-        return get().perform_core(s, l, start, ma, log);
+        return get().perform_core(s, l, rules, start, ma, log);
+    }
+
+    static std::shared_ptr<Grammar> parse(
+        const char*  s,
+        size_t       l,
+        std::string& start,
+        MatchAction  ma,
+        Log          log)
+    {
+        Rules dummy;
+        return parse(s, l, dummy, start, ma, log);
     }
 
     // For debuging purpose
@@ -1290,7 +1330,14 @@ private:
         g["DOT"] = []() { return dot(); };
     }
 
-    std::shared_ptr<Grammar> perform_core(const char* s, size_t l, std::string& start, MatchAction ma, Log log) {
+    std::shared_ptr<Grammar> perform_core(
+        const char*  s,
+        size_t       l,
+        const Rules& rules,
+        std::string& start,
+        MatchAction  ma,
+        Log          log)
+    {
         Context cxt;
         cxt.match_action = ma;
 
@@ -1308,6 +1355,25 @@ private:
 
         auto& grammar = *cxt.grammar;
 
+        // User provided rules
+        for (const auto& x: rules) {
+            auto name = x.first;
+
+            bool ignore = false;
+            if (!name.empty() && name[0] == '~') {
+                ignore = true;
+                name.erase(0, 1);
+            }
+
+            if (!name.empty()) {
+                auto& def = grammar[name];
+                def <= x.second;
+                def.name = name;
+                def.ignore = ignore;
+            }
+        }
+
+        // Check missing definitions
         for (const auto& x : cxt.references) {
             const auto& name = x.first;
             auto ptr = x.second;
@@ -1367,9 +1433,9 @@ class peg
 public:
     peg() = default;
 
-    peg(const char* s, size_t l, Log log = nullptr) {
+    peg(const char* s, size_t l, const Rules& rules, Log log = nullptr) {
         grammar_ = PEGParser::parse(
-            s, l,
+            s, l, rules,
             start_,
             [&](const char* s, size_t l, size_t i) {
                 if (match_action) match_action(s, l, i);
@@ -1377,16 +1443,14 @@ public:
             log);
     }
 
-    peg(const char* s, Log log = nullptr) {
-        auto l = strlen(s);
-        grammar_ = PEGParser::parse(
-            s, l,
-            start_,
-            [&](const char* s, size_t l, size_t i) {
-                if (match_action) match_action(s, l, i);
-            },
-            log);
-    }
+    peg(const char* s, const Rules& rules, Log log = nullptr)
+        : peg(s, strlen(s), rules, log) {}
+
+    peg(const char* s, size_t l, Log log = nullptr)
+        : peg(s, l, Rules(), log) {}
+
+    peg(const char* s, Log log = nullptr)
+        : peg(s, strlen(s), Rules(), log) {}
 
     operator bool() {
         return grammar_ != nullptr;
