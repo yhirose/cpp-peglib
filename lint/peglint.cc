@@ -17,7 +17,7 @@ bool read_file(const char* path, vector<char>& buff)
         return false;
     }
 
-    buff.resize(ifs.seekg(0, ios::end).tellg());
+    buff.resize(static_cast<unsigned int>(ifs.seekg(0, ios::end).tellg()));
     ifs.seekg(0, ios::beg).read(&buff[0], static_cast<streamsize>(buff.size()));
     return true;
 }
