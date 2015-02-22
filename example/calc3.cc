@@ -47,9 +47,7 @@ struct ast_ope : public ast_node
     };
 
     static shared_ptr<ast_node> create(const SemanticValues& sv) {
-        if (sv.empty()) {
-            return nullptr;
-        }
+        assert(!sv.empty());
         return SemanticValues::reduce(
             sv.begin() + 1,
             sv.end(),

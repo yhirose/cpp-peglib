@@ -278,7 +278,8 @@ Sample codes
 ------------
 
   * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
-  * [Calculator with parser operators](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
+  * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
+  * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
   * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/peglint.cc)
 
 Tested Compilers
