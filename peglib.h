@@ -167,6 +167,8 @@ struct SemanticValues : protected std::vector<SemanticValue>
     SemanticValues() : s(nullptr), l(0) {}
 
     typedef SemanticValue T;
+    using std::vector<T>::iterator;
+    using std::vector<T>::const_iterator;
     using std::vector<T>::size;
     using std::vector<T>::empty;
     using std::vector<T>::assign;
@@ -185,6 +187,15 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::erase;
     using std::vector<T>::clear;
     using std::vector<T>::swap;
+
+    template <typename T, typename U, typename V>
+    static U reduce(T i, T end, U val, V f){
+        if (i == end) {
+            return val;
+        }
+        std::tie(val, i) = f(val, i);
+        return reduce(i, end, val, f);
+    };
 };
 
 /*
