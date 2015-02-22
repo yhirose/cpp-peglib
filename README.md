@@ -40,24 +40,24 @@ int main(void) {
 
     // (3) Setup an action
     parser["Additive"] = {
-        nullptr,                                      // Default action
-        [](const vector<any>& v) {
-            return v[0].get<int>() + v[1].get<int>(); // 1st choice
+        nullptr,                                                // Default action
+        [](const SemanticValues& sv) {
+            return sv[0].val.get<int>() + sv[1].val.get<int>(); // 1st choice
         },
-        [](const vector<any>& v) { return v[0]; }     // 2nd choice
+        [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
     };
 
     parser["Multitive"] = {
-        nullptr,                                      // Default action
-        [](const vector<any>& v) {
-            return v[0].get<int>() * v[1].get<int>(); // 1st choice
+        nullptr,                                                // Default action
+        [](const SemanticValues& sv) {
+            return sv[0].val.get<int>() * sv[1].val.get<int>(); // 1st choice
         },
-        [](const vector<any>& v) { return v[0]; }     // 2nd choice
+        [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
     };
 
     /* This action is not necessary.
-    parser["Primary"] = [](const vector<any>& v) {
-        return v[0];
+    parser["Primary"] = [](const SemanticValues& sv) {
+        return sv[0];
     };
     */
 
@@ -76,33 +76,34 @@ int main(void) {
 Here is a complete list of available actions:
 
 ```c++
-[](const char* s, size_t l, const std::vector<peglib::any>& v, any& c)
-[](const char* s, size_t l, const std::vector<peglib::any>& v)
+[](const SemanticValues& sv, any& dt)
+[](const SemanticValues& sv)
 [](const char* s, size_t l)
-[](const std::vector<peglib::any>& v, any& c)
-[](const std::vector<peglib::any>& v)
 []()
-[](const SemanticValues& v, any& c)
-[](const SemanticValues& v)
 ```
 
-`const char* s, size_t l` gives a pointer and length of the matched string.
-
-`const std::vector<peglib::any>& v` contains semantic values. `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
-
-`any& c` is a context data which can be used by the user for whatever purposes.
-
-`const SemanticValues&` is also available. `SemanticValues` structure contains all of above information as well as the vector of definition names of semantic values.
+`const SemanticValues& sv` contains semantic values. `SemanticValues` structure is defined as follows.
 
 ```c++
-struct SemanticValues
-{
-    std::vector<any>         values; // Semantic value
-    std::vector<std::string> names;  // Definition name
-    const char*              s;      // Token start
-    size_t                   l;      // Token length
+struct SemanticValue {
+    peglib::any val;  // Semantic value
+    std::string name; // Definition name for the sematic value
+    const char* s;    // Token start for the semantic value
+    size_t      l;    // Token length for the semantic value
 };
+
+struct SemanticValues : protected std::vector<SemanticValue>
+{
+    const char* s; // Token start
+    size_t      l; // Token length
+}
 ```
+
+`peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
+
+`const char* s, size_t l` gives a pointer and length of the matched string. This is same as `sv.s` and `sv.l`.
+
+`any& dt` is a data object which can be used by the user for whatever purposes.
 
 The following example uses `<` ... ` >` operators. They are the *anchor* operators. Each anchor operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
@@ -115,7 +116,7 @@ auto syntax = R"(
 
 peg pg(syntax);
 
-pg["TOKEN"] = [](const char* s, size_t l, const vector<any>& v) {
+pg["TOKEN"] = [](const char* s, size_t l) {
     // 'token' doesn't include trailing whitespaces
     auto token = string(s, l);
 };
@@ -132,8 +133,8 @@ peglib::peg parser(
     "  ~_    <-  [ \t]*    "
 );
 
-parser["ROOT"] = [&](const vector<any>& v) {
-    assert(v.size() == 2); // should be 2 instead of 5.
+parser["ROOT"] = [&](const SemanticValues& sv) {
+    assert(sv.size() == 2); // should be 2 instead of 5.
 };
 
 auto ret = parser.parse(" item1, item2 ");
@@ -253,7 +254,7 @@ auto syntax = R"(
 
 Rules rules = {
     {
-        "NAME", usr([](const char* s, size_t l, SemanticValues& v, any& c) {
+        "NAME", usr([](const char* s, size_t l, SemanticValues& sv, any& c) {
             static vector<string> names = { "PEG", "BNF" };
             for (const auto& n: names) {
                 if (n.size() <= l && !n.compare(0, n.size(), s, n.size())) {

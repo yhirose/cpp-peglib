@@ -31,11 +31,11 @@ int main(int argc, const char** argv)
 
     const char* s = argv[1];
 
-    auto reduce = [](const vector<any>& v) -> long {
-        auto result = v[0].get<long>();
-        for (auto i = 1u; i < v.size(); i += 2) {
-            auto num = v[i + 1].get<long>();
-            auto ope = v[i].get<char>();
+    auto reduce = [](const SemanticValues& sv) -> long {
+        auto result = sv[0].val.get<long>();
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = sv[i + 1].val.get<long>();
+            auto ope = sv[i].val.get<char>();
             switch (ope) {
                 case '+': result += num; break;
                 case '-': result -= num; break;

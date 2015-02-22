@@ -155,8 +155,8 @@ TEST_CASE("Skip token test", "[general]")
         "  ~_    <-  [ \t]*    "
     );
 
-    parser["ROOT"] = [&](const vector<any>& v) {
-        REQUIRE(v.size() == 2);
+    parser["ROOT"] = [&](const SemanticValues& sv) {
+        REQUIRE(sv.size() == 2);
     };
 
     auto ret = parser.parse(" item1, item2 ");
@@ -209,13 +209,13 @@ TEST_CASE("Simple calculator test", "[general]")
         // Default action
         nullptr,
         // Action for the first choice
-        [](const vector<any>& v) { return v[0].get<int>() + v[1].get<int>(); },
+        [](const SemanticValues& sv) { return sv[0].val.get<int>() + sv[1].val.get<int>(); },
         // Action for the second choice
-        [](const vector<any>& v) { return v[0]; }
+        [](const SemanticValues& sv) { return sv[0]; }
     };
 
-    parser["Multitive"] = [](const vector<any>& v) {
-        return v.size() == 1 ? v[0].get<int>() : v[0].get<int>() * v[1].get<int>();
+    parser["Multitive"] = [](const SemanticValues& sv) {
+        return sv.size() == 1 ? sv[0].val.get<int>() : sv[0].val.get<int>() * sv[1].val.get<int>();
     };
 
     parser["Number"] = [](const char* s, size_t l) {
@@ -241,11 +241,11 @@ TEST_CASE("Calculator test", "[general]")
     NUMBER          <= oom(cls("0-9"));
 
     // Setup actions
-    auto reduce = [](const vector<any>& v) -> long {
-        long ret = v[0].get<long>();
-        for (auto i = 1u; i < v.size(); i += 2) {
-            auto num = v[i + 1].get<long>();
-            switch (v[i].get<char>()) {
+    auto reduce = [](const SemanticValues& sv) -> long {
+        long ret = sv[0].val.get<long>();
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = sv[i + 1].val.get<long>();
+            switch (sv[i].val.get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -287,11 +287,11 @@ TEST_CASE("Calculator test2", "[general]")
     auto& g = *grammar;
 
     // Setup actions
-    auto reduce = [](const vector<any>& v) -> long {
-        long ret = v[0].get<long>();
-        for (auto i = 1u; i < v.size(); i += 2) {
-            auto num = v[i + 1].get<long>();
-            switch (v[i].get<char>()) {
+    auto reduce = [](const SemanticValues& sv) -> long {
+        long ret = sv[0].val.get<long>();
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = sv[i + 1].val.get<long>();
+            switch (sv[i].val.get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -328,11 +328,11 @@ TEST_CASE("Calculator test3", "[general]")
         "  NUMBER           <-  [0-9]+                            "
         );
 
-    auto reduce = [](const vector<any>& v) -> long {
-        long ret = v[0].get<long>();
-        for (auto i = 1u; i < v.size(); i += 2) {
-            auto num = v[i + 1].get<long>();
-            switch (v[i].get<char>()) {
+    auto reduce = [](const SemanticValues& sv) -> long {
+        long ret = sv[0].val.get<long>();
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = sv[i + 1].val.get<long>();
+            switch (sv[i].val.get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
