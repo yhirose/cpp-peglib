@@ -212,7 +212,7 @@ any call(F fn, Args&&... args) {
 
 template <
     typename R, typename F,
-    typename std::enable_if<std::is_same<R, any>::value>::type*& = enabler,
+    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, any>::value>::type*& = enabler,
     typename... Args>
 any call(F fn, Args&&... args) {
     return fn(std::forward<Args>(args)...);
@@ -220,7 +220,7 @@ any call(F fn, Args&&... args) {
 
 template <
     typename R, typename F,
-    typename std::enable_if<std::is_same<R, SemanticValue>::value>::type*& = enabler,
+    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, SemanticValue>::value>::type*& = enabler,
     typename... Args>
 any call(F fn, Args&&... args) {
     return fn(std::forward<Args>(args)...).val;
@@ -228,7 +228,10 @@ any call(F fn, Args&&... args) {
 
 template <
     typename R, typename F,
-    typename std::enable_if<!std::is_void<R>::value && !std::is_same<R, any>::value && !std::is_same<R, SemanticValue>::value>::type*& = enabler,
+    typename std::enable_if<
+        !std::is_void<R>::value &&
+        !std::is_same<typename std::remove_cv<R>::type, any>::value &&
+        !std::is_same<typename std::remove_cv<R>::type, SemanticValue>::value>::type*& = enabler,
     typename... Args>
 any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
