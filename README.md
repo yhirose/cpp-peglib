@@ -10,6 +10,7 @@ The PEG syntax is well described on page 2 in the [document](http://pdos.csail.m
   * `<` ... `>` (Anchor operator)
   * `$<` ... `>` (Capture operator)
   * `~` (Ignore operator)
+  * `\x??` (Hex number char)
 
 How to use
 ----------

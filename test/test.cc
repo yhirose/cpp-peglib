@@ -183,6 +183,17 @@ TEST_CASE("Backtracking test", "[general]")
     REQUIRE(count == 2);
 }
 
+TEST_CASE("Octal/Hex value test", "[general]")
+{
+    peglib::peg parser(
+        " ROOT <- '\132\x7a' "
+    );
+
+    auto ret = parser.parse("Zz");
+
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("mutable lambda test", "[general]")
 {
     vector<string> vec;
@@ -539,8 +550,8 @@ TEST_CASE("PEG Char", "[peg]")
     REQUIRE(exact(g, "Char", "\\]") == true);
     REQUIRE(exact(g, "Char", "\\\\") == true);
     REQUIRE(exact(g, "Char", "\\000") == true);
-    REQUIRE(exact(g, "Char", "\\277") == true);
-    REQUIRE(exact(g, "Char", "\\377") == false);
+    REQUIRE(exact(g, "Char", "\\377") == true);
+    REQUIRE(exact(g, "Char", "\\477") == false);
     REQUIRE(exact(g, "Char", "\\087") == false);
     REQUIRE(exact(g, "Char", "\\079") == false);
     REQUIRE(exact(g, "Char", "\\00") == true);

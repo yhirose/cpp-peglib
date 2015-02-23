@@ -1119,8 +1119,9 @@ private:
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
         g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
-                               seq(chr('\\'), cls("0-2"), cls("0-7"), cls("0-7")), // TODO: 0-2 should be 0-3. bug in the spec...
+                               seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
                                seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
+                               seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
                                seq(npd(chr('\\')), dot()));
 
         g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
@@ -1342,6 +1343,58 @@ private:
         return cxt.grammar;
     }
 
+    bool is_hex(char c, int& v) {
+        if ('0' <= c && c <= '9') {
+            v = c - '0';
+            return true;
+        } else if ('a' <= c && c <= 'f') {
+            v = c - 'a' + 10;
+            return true;
+        } else if ('A' <= c && c <= 'F') {
+            v = c - 'A' + 10;
+            return true;
+        }
+        return false;
+    }
+
+    bool is_digit(char c, int& v) {
+        if ('0' <= c && c <= '9') {
+            v = c - '0';
+            return true;
+        }
+        return false;
+    }
+
+    std::tuple<char, int> parse_hex_number(const char* s, size_t l, size_t i) {
+        char ret = 0;
+        int n;
+        if (i < l && is_hex(s[i], n)) {
+            ret = n;
+            if (i + 1 < l && is_hex(s[i + 1], n)) {
+                ret = ret * 16 + n;
+                i++;
+            }
+        }
+        return std::make_tuple(ret, i);
+    }
+
+    std::tuple<char, int> parse_octal_number(const char* s, size_t l, size_t i) {
+        char ret = 0;
+        int n;
+        if (i < l && is_digit(s[i], n)) {
+            ret = n;
+            if (i + 1 < l && is_digit(s[i + 1], n)) {
+                ret = ret * 8 + n;
+                i++;
+                if (i + 1 < l && is_digit(s[i + 1], n)) {
+                    ret = ret * 8 + n;
+                    i++;
+                }
+            }
+        }
+        return std::make_tuple(ret, i);
+    }
+
     std::string resolve_escape_sequence(const char* s, size_t l) {
         std::string r;
         r.reserve(l);
@@ -1359,9 +1412,13 @@ private:
                     case '[':  r += '[';  break;
                     case ']':  r += ']';  break;
                     case '\\': r += '\\'; break;
+                    case 'x': {
+                        std::tie(ch, i) = parse_hex_number(s, l, i + 1);
+                        r += ch;
+                        break;
+                    }
                     default: {
-                        // TODO: Octal number support
-                        assert(false);
+                        std::tie(ch, i) = parse_octal_number(s, l, i + 1);
                         break;
                     }
                 }
