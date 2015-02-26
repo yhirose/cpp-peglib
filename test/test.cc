@@ -151,13 +151,10 @@ TEST_CASE("Visit test", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), dot()));
     WS       <= zom(cls(" \t"));
 
-    std::vector<void*>                defs;
-    std::unordered_map<void*, size_t> ids;
-    DefinitionIDs defIds(defs, ids);
-
+    DefinitionIDs defIds;
     ROOT.accept(defIds);
 
-    REQUIRE(defs.size() == 4);
+    REQUIRE(defIds.ids.size() == 4);
 }
 
 TEST_CASE("Lambda action test", "[general]")

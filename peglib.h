@@ -394,21 +394,12 @@ typedef std::function<void (const char* s, size_t l, size_t i)> MatchAction;
 /*
  * Result
  */
-struct Result
-{
-    bool        ret;
-    size_t      len;
-    size_t      choice;
-    const char* ptr;
-    const char* err; // TODO: should be `int`.
-};
-
-Result success(size_t len, size_t choice = 0) {
-    return Result{ true, len, choice, nullptr, nullptr };
+bool success(int len) {
+    return len != -1;
 }
 
-Result fail(const char* ptr, const char* err = nullptr) {
-    return Result{ false, 0, (size_t)-1, ptr, err };
+bool fail(int len) {
+    return len == -1;
 }
 
 /*
@@ -416,10 +407,18 @@ Result fail(const char* ptr, const char* err = nullptr) {
  */
 struct Context
 {
-    std::vector<void*>                           defs;
-    std::unordered_map<void*, size_t>            ids;
+    const char*                                  s;
+    size_t                                       l;
+
+    size_t                                       def_count;
+    std::vector<char>                            index;
+
     std::vector<std::shared_ptr<SemanticValues>> stack;
     size_t                                       stack_size;
+
+    size_t                                       choice;
+    const char*                                  error_ptr;
+    const char*                                  msg; // TODO: should be `int`.
 
     Context() : stack_size(0){}
 
@@ -449,7 +448,7 @@ public:
     struct Visitor;
 
     virtual ~Ope() {};
-    virtual Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const = 0;
+    virtual int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
 };
 
@@ -477,21 +476,20 @@ public:
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         size_t i = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
-            auto r = rule.parse(s + i, l - i, sv, c, dt);
-            if (!r.ret) {
-                auto err = r.err;
-                if (!err) {
-                    err = "missing an element in the 'sequence'";
+            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            if (fail(len)) {
+                if (!c.msg) {
+                    c.msg = "missing an element in the 'sequence'";
                 }
-                return fail(r.ptr, err);
+                return -1;
             }
-            i += r.len;
+            i += len;
         }
-        return success(i);
+        return i;
     }
 
     void accept(Visitor& v) override;
@@ -522,26 +520,29 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         size_t id = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
             //SemanticValues chldsv;
             auto& chldsv = c.push();
-            auto r = rule.parse(s, l, chldsv, c, dt);
-            if (r.ret) {
+            auto len = rule.parse(s, l, chldsv, c, dt);
+            if (len != -1) {
                 if (!chldsv.empty()) {
                     sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 }
                 sv.s = chldsv.s;
                 sv.l = chldsv.l;
                 c.pop();
-                return success(r.len, id);
+                c.choice = id;
+                return len;
             }
             id++;
             c.pop();
         }
-        return fail(s, "nothing was matched in the 'prioritized choice'");
+        c.error_ptr = s;
+        c.msg = "nothing was matched in the 'prioritized choice'";
+        return -1;
     }
 
     void accept(Visitor& v) override;
@@ -557,17 +558,17 @@ class ZeroOrMore : public Ope
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         auto i = 0;
         while (l - i > 0) {
             const auto& rule = *ope_;
-            auto r = rule.parse(s + i, l - i, sv, c, dt);
-            if (!r.ret) {
+            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            if (fail(len)) {
                 break;
             }
-            i += r.len;
+            i += len;
         }
-        return success(i);
+        return i;
     }
 
     void accept(Visitor& v) override;
@@ -581,26 +582,25 @@ class OneOrMore : public Ope
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        if (!r.ret) {
-            auto err = r.err;
-            if (!err) {
-                err = "nothing occurred in the 'one-or-more'";
+        auto len = rule.parse(s, l, sv, c, dt);
+        if (fail(len)) {
+            if (!c.msg) {
+                c.msg = "nothing occurred in the 'one-or-more'";
             }
-            return fail(r.ptr, r.err);
+            return -1;
         }
-        auto i = r.len;
+        auto i = len;
         while (l - i > 0) {
             const auto& rule = *ope_;
-            auto r = rule.parse(s + i, l - i, sv, c, dt);
-            if (!r.ret) {
+            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            if (fail(len)) {
                 break;
             }
-            i += r.len;
+            i += len;
         }
-        return success(i);
+        return i;
     }
 
     void accept(Visitor& v) override;
@@ -614,10 +614,10 @@ class Option : public Ope
 public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        return success(r.ret ? r.len : 0);
+        auto len = rule.parse(s, l, sv, c, dt);
+        return success(len) ? len : 0;
     }
 
     void accept(Visitor& v) override;
@@ -631,13 +631,13 @@ class AndPredicate : public Ope
 public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        if (r.ret) {
-            return success(0);
+        auto len = rule.parse(s, l, sv, c, dt);
+        if (success(len)) {
+            return 0;
         } else {
-            return fail(r.ptr, r.err);
+            return -1;
         }
     }
 
@@ -652,13 +652,14 @@ class NotPredicate : public Ope
 public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        if (r.ret) {
-            return fail(s);
+        auto len = rule.parse(s, l, sv, c, dt);
+        if (success(len)) {
+            c.error_ptr = s;
+            return -1;
         } else {
-            return success(0);
+            return 0;
         }
     }
 
@@ -673,14 +674,15 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= l || s[i] != lit_[i]) {
-                return fail(s);
+                c.error_ptr = s;
+                return -1;
             }
         }
-        return success(i);
+        return i;
     }
 
     void accept(Visitor& v) override;
@@ -694,27 +696,29 @@ class CharacterClass : public Ope
 public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (l < 1) {
-            return fail(s);
+            c.error_ptr = s;
+            return -1;
         }
         auto ch = s[0];
         auto i = 0u;
         while (i < chars_.size()) {
             if (i + 2 < chars_.size() && chars_[i + 1] == '-') {
                 if (chars_[i] <= ch && ch <= chars_[i + 2]) {
-                    return success(1);
+                    return 1;
                 }
                 i += 3;
             } else {
                 if (chars_[i] == ch) {
-                    return success(1);
+                    return 1;
                 }
                 i += 1;
             }
         }
-        return fail(s);
+        c.error_ptr = s;
+        return -1;
     }
 
     void accept(Visitor& v) override;
@@ -728,12 +732,13 @@ class Character : public Ope
 public:
     Character(char ch) : ch_(ch) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (l < 1 || s[0] != ch_) {
-            return fail(s);
+            c.error_ptr = s;
+            return -1;
         }
-        return success(1);
+        return 1;
     }
 
     void accept(Visitor& v) override;
@@ -745,12 +750,13 @@ public:
 class AnyCharacter : public Ope
 {
 public:
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (l < 1) {
-            return fail(s);
+            c.error_ptr = s;
+            return -1;
         }
-        return success(1);
+        return 1;
     }
 
     void accept(Visitor& v) override;
@@ -762,14 +768,14 @@ public:
     Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci)
         : ope_(ope), match_action_(ma), capture_id(ci) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         assert(ope_);
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        if (r.ret && match_action_) {
-            match_action_(s, r.len, capture_id);
+        auto len = rule.parse(s, l, sv, c, dt);
+        if (success(len) && match_action_) {
+            match_action_(s, len, capture_id);
         }
-        return r;
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -785,15 +791,15 @@ class Anchor : public Ope
 public:
     Anchor(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         assert(ope_);
         const auto& rule = *ope_;
-        auto r = rule.parse(s, l, sv, c, dt);
-        if (r.ret) {
+        auto len = rule.parse(s, l, sv, c, dt);
+        if (success(len)) {
             sv.s = s;
-            sv.l = r.len;
+            sv.l = len;
         }
-        return r;
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -802,14 +808,14 @@ public:
     std::shared_ptr<Ope> ope_;
 };
 
-typedef std::function<Result (const char* s, size_t l, SemanticValues& sv, any& dt)> Parser;
+typedef std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> Parser;
 
 class User : public Ope
 {
 public:
     User(Parser fn) : fn_(fn) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         assert(fn_);
         return fn_(s, l, sv, dt);
     }
@@ -817,7 +823,7 @@ public:
     void accept(Visitor& v) override;
 
 //private:
-    std::function<Result (const char* s, size_t l, SemanticValues& sv, any& dt)> fn_;
+    std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> fn_;
 };
 
 class WeakHolder : public Ope
@@ -825,7 +831,7 @@ class WeakHolder : public Ope
 public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
@@ -846,22 +852,14 @@ public:
     Holder(Definition* outer)
        : outer_(outer) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
 //private:
     friend class Definition;
 
-    any reduce(const SemanticValues& sv, any& dt, const Action& action) const {
-        if (action) {
-            return action(sv, dt);
-        } else if (sv.empty()) {
-            return any();
-        } else {
-            return sv.front().val;
-        }
-    }
+    any reduce(const SemanticValues& sv, any& dt, const Action& action) const;
 
     std::shared_ptr<Ope> ope_;
     Definition*          outer_;
@@ -875,7 +873,7 @@ public:
         : grammar_(grammar)
         , name_(name) {}
 
-    Result parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
+    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
@@ -893,93 +891,77 @@ private:
  */
 struct Ope::Visitor
 {
-    virtual void visit(const Sequence& ope) = 0;
-    virtual void visit(const PrioritizedChoice& ope) = 0;
-    virtual void visit(const ZeroOrMore& ope) = 0;
-    virtual void visit(const OneOrMore& ope) = 0;
-    virtual void visit(const Option& ope) = 0;
-    virtual void visit(const AndPredicate& ope) = 0;
-    virtual void visit(const NotPredicate& ope) = 0;
-    virtual void visit(const LiteralString& ope) = 0;
-    virtual void visit(const CharacterClass& ope) = 0;
-    virtual void visit(const Character& ope) = 0;
-    virtual void visit(const AnyCharacter& ope) = 0;
-    virtual void visit(const Capture& ope) = 0;
-    virtual void visit(const Anchor& ope) = 0;
-    virtual void visit(const User& ope) = 0;
-    virtual void visit(const WeakHolder& ope) = 0;
-    virtual void visit(const Holder& ope) = 0;
-    virtual void visit(const DefinitionReference& ope) = 0;
+    virtual void visit(Sequence& ope) = 0;
+    virtual void visit(PrioritizedChoice& ope) = 0;
+    virtual void visit(ZeroOrMore& ope) = 0;
+    virtual void visit(OneOrMore& ope) = 0;
+    virtual void visit(Option& ope) = 0;
+    virtual void visit(AndPredicate& ope) = 0;
+    virtual void visit(NotPredicate& ope) = 0;
+    virtual void visit(LiteralString& ope) = 0;
+    virtual void visit(CharacterClass& ope) = 0;
+    virtual void visit(Character& ope) = 0;
+    virtual void visit(AnyCharacter& ope) = 0;
+    virtual void visit(Capture& ope) = 0;
+    virtual void visit(Anchor& ope) = 0;
+    virtual void visit(User& ope) = 0;
+    virtual void visit(WeakHolder& ope) = 0;
+    virtual void visit(Holder& ope) = 0;
+    virtual void visit(DefinitionReference& ope) = 0;
 };
 
 struct DefinitionIDs : public Ope::Visitor
 {
-    DefinitionIDs(
-        std::vector<void*>&                defs,
-        std::unordered_map<void*, size_t>& ids)
-        : defs_(defs), ids_(ids) {}
-
-    void visit(const Sequence& ope) override {
+    void visit(Sequence& ope) override {
         for (auto ope: ope.opes_) {
             ope->accept(*this);
         }
     }
-    void visit(const PrioritizedChoice& ope) override {
+    void visit(PrioritizedChoice& ope) override {
         for (auto ope: ope.opes_) {
             ope->accept(*this);
         }
     }
-    void visit(const ZeroOrMore& ope) override {
+    void visit(ZeroOrMore& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const OneOrMore& ope) override {
+    void visit(OneOrMore& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const Option& ope) override {
+    void visit(Option& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const AndPredicate& ope) override {
+    void visit(AndPredicate& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const NotPredicate& ope) override {
+    void visit(NotPredicate& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const LiteralString& ope) override {
+    void visit(LiteralString& ope) override {
     }
-    void visit(const CharacterClass& ope) override {
+    void visit(CharacterClass& ope) override {
     }
-    void visit(const Character& ope) override {
+    void visit(Character& ope) override {
     }
-    void visit(const AnyCharacter& ope) override {
+    void visit(AnyCharacter& ope) override {
     }
-    void visit(const Capture& ope) override {
+    void visit(Capture& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const Anchor& ope) override {
+    void visit(Anchor& ope) override {
         ope.ope_->accept(*this);
     }
-    void visit(const User& ope) override {
+    void visit(User& ope) override {
     }
-    void visit(const WeakHolder& ope) override {
+    void visit(WeakHolder& ope) override {
         ope.weak_.lock()->accept(*this);
     }
-    void visit(const Holder& ope) override {
-        auto p = (void*)&ope.outer_;
-        if (ids_.find(p) != ids_.end()) {
-            return;
-        }
-        auto id = defs_.size();
-        defs_.push_back(p);
-        ids_[p] = id;
-        ope.ope_->accept(*this);
-    }
-    void visit(const DefinitionReference& ope) override {
+    void visit(Holder& ope) override;
+    void visit(DefinitionReference& ope) override {
         ope.get_rule()->accept(*this);
     }
 
-private:
-    std::vector<void*>&                defs_;
-    std::unordered_map<void*, size_t>& ids_;
+    std::unordered_map<void*, size_t> ids;
 };
 
 /*
@@ -988,6 +970,13 @@ private:
 class Definition
 {
 public:
+    struct Result {
+        bool        ret;
+        int         len;
+        const char* error_ptr;
+        const char* msg;
+    };
+
     Definition()
        : actions(1)
        , ignore(false)
@@ -1029,10 +1018,18 @@ public:
     }
 
     Result parse_core(const char* s, size_t l, SemanticValues& sv, any& dt) const {
-        Context c;
-        DefinitionIDs defIds(c.defs, c.ids);
+        DefinitionIDs defIds;
         holder_->accept(defIds);
-        return holder_->parse(s, l, sv, c, dt);
+
+        Context c;
+        c.s = s;
+        c.l = l;
+        c.def_count = defIds.ids.size();
+        c.index.resize(c.def_count * (l + 1));
+
+        auto len = holder_->parse(s, l, sv, c, dt);
+
+        return Result { success(len), len, c.error_ptr, c.msg };
     }
 
     Result parse(const char* s, size_t l, SemanticValues& sv, any& dt) const {
@@ -1094,6 +1091,7 @@ public:
     }
 
     std::string         name;
+    size_t              id;
     std::vector<Action> actions;
     bool                ignore;
 
@@ -1112,25 +1110,32 @@ typedef Definition rule;
  * Implementations
  */
 
-inline Result Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
+inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
     if (!ope_) {
         throw std::logic_error("Uninitialized definition ope was used...");
     }
 
+    auto col = s - c.s;
+    auto def_id = outer_->id;
+#if 0 // Packrat
+    auto x = c.index[c.def_count * col + def_id];
+    //std::cout << "col:" << col << " id:" << def_id << " cache:" << (int)x << std::endl;
+#endif
+
     const auto& rule = *ope_;
     auto& chldsv = c.push();
-    auto r = rule.parse(s, l, chldsv, c, dt);
-    if (r.ret && !outer_->ignore) {
+    auto len = rule.parse(s, l, chldsv, c, dt);
+    if (success(len) && !outer_->ignore) {
         assert(!outer_->actions.empty());
 
-        auto id = r.choice + 1;
-        const auto& action = (id < outer_->actions.size() && outer_->actions[id])
-            ? outer_->actions[id]
+        auto i = c.choice + 1; // Index 0 is for the default action
+        const auto& action = (i < outer_->actions.size() && outer_->actions[i])
+            ? outer_->actions[i]
             : outer_->actions[0];
 
         if (!chldsv.s) {
             chldsv.s = s;
-            chldsv.l = r.len;
+            chldsv.l = len;
         }
 
         sv.emplace_back(
@@ -1140,15 +1145,31 @@ inline Result Holder::parse(const char* s, size_t l, SemanticValues& sv, Context
             0);
     }
     c.pop();
-    return r;
+    
+#if 0 // Packrat
+    c.index[c.def_count * col + def_id] = success(len) ? 1 : 2;
+#endif
+
+    return len;
 }
 
-Result DefinitionReference::parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
+inline any Holder::reduce(const SemanticValues& sv, any& dt, const Action& action) const {
+    if (action) {
+        return action(sv, dt);
+    } else if (sv.empty()) {
+        return any();
+    } else {
+        return sv.front().val;
+    }
+}
+
+inline int DefinitionReference::parse(
+    const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
     const auto& rule = *get_rule();
     return rule.parse(s, l, sv, c, dt);
 }
 
-std::shared_ptr<Ope> DefinitionReference::get_rule() const {
+inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
     if (!rule_) {
         std::call_once(init_, [this]() {
             rule_ = grammar_.at(name_).holder_;
@@ -1175,6 +1196,17 @@ inline void User::accept(Visitor& v) { v.visit(*this); }
 inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
 inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
+
+inline void DefinitionIDs::visit(Holder& ope) {
+    auto p = (void*)ope.outer_;
+    if (ids.find(p) != ids.end()) {
+        return;
+    }
+    auto id = ids.size();
+    ids[p] = id;
+    ope.outer_->id = id;
+    ope.ope_->accept(*this);
+}
 
 /*
  * Factories
@@ -1237,7 +1269,7 @@ inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Anchor>(ope);
 }
 
-inline std::shared_ptr<Ope> usr(std::function<Result (const char* s, size_t l, SemanticValues& sv, any& dt)> fn) {
+inline std::shared_ptr<Ope> usr(std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> fn) {
     return std::make_shared<User>(fn);
 }
 
@@ -1249,12 +1281,12 @@ inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
 
-inline std::pair<size_t, size_t> line_info(const char* s, const char* ptr) {
-    auto p = s;
+inline std::pair<size_t, size_t> line_info(const char* beg, const char* cur) {
+    auto p = beg;
     auto col_ptr = p;
     auto no = 1;
 
-    while (p < ptr) {
+    while (p < cur) {
         if (*p == '\n') {
             no++;
             col_ptr = p + 1;
@@ -1529,8 +1561,8 @@ private:
 
         if (!r.ret) {
             if (log) {
-                auto line = line_info(s, r.ptr);
-                log(line.first, line.second, r.err ? "syntax error" : r.err);
+                auto line = line_info(s, r.error_ptr);
+                log(line.first, line.second, r.msg ? "syntax error" : r.msg);
             }
             return nullptr;
         }
@@ -1733,7 +1765,7 @@ public:
                 auto r = rule.parse(s + pos, len);
                 if (r.ret) {
                     mpos = pos;
-                    mlen = r.len;
+                    mlen = len;
                     return true;
                 }
                 pos++;
@@ -1756,8 +1788,8 @@ public:
             auto r = rule.parse(s, l);
             if (!r.ret) {
                 if (log) {
-                    auto line = line_info(s, r.ptr);
-                    log(line.first, line.second, r.err ? "syntax error" : r.err);
+                    auto line = line_info(s, r.error_ptr);
+                    log(line.first, line.second, r.msg ? "syntax error" : r.msg);
                 }
             } else if (exact && r.len != l) {
                 auto line = line_info(s, s + r.len);
