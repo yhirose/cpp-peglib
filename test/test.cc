@@ -5,6 +5,17 @@
 #include <peglib.h>
 #include <iostream>
 
+TEST_CASE("Simple syntax test", "[general]")
+{
+    peglib::peg parser(
+        " ROOT <- _ "
+        " _ <- ' ' "
+    );
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("Empty syntax test", "[general]")
 {
     peglib::peg parser("");
@@ -131,6 +142,24 @@ TEST_CASE("Cyclic grammer test", "[general]")
     CHILD  <= seq(PARENT);
 }
 
+TEST_CASE("Visit test", "[general]")
+{
+    rule ROOT, TAG, TAG_NAME, WS;
+
+    ROOT     <= seq(WS, zom(TAG));
+    TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
+    TAG_NAME <= oom(seq(npd(chr(']')), dot()));
+    WS       <= zom(cls(" \t"));
+
+    std::vector<void*>                defs;
+    std::unordered_map<void*, size_t> ids;
+    DefinitionIDs defIds(defs, ids);
+
+    ROOT.accept(defIds);
+
+    REQUIRE(defs.size() == 4);
+}
+
 TEST_CASE("Lambda action test", "[general]")
 {
     peg parser(
@@ -180,7 +209,7 @@ TEST_CASE("Backtracking test", "[general]")
 
     bool ret = parser.parse("Hello Two");
     REQUIRE(ret == true);
-    REQUIRE(count == 2);
+    REQUIRE(count == 1); // Skip second time
 }
 
 TEST_CASE("Octal/Hex value test", "[general]")
@@ -274,7 +303,7 @@ TEST_CASE("Calculator test", "[general]")
 
     // Parse
     long val;
-    auto m = EXPRESSION.parse("1+2*3*(4-5+6)/7-8", val);
+    auto m = EXPRESSION.parse_with_value("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(m.ret == true);
     REQUIRE(val == -3);
@@ -320,7 +349,7 @@ TEST_CASE("Calculator test2", "[general]")
 
     // Parse
     long val;
-    auto m = g[start].parse("1+2*3*(4-5+6)/7-8", val);
+    auto m = g[start].parse_with_value("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(m.ret == true);
     REQUIRE(val == -3);

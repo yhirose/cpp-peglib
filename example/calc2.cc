@@ -56,7 +56,7 @@ int main(int argc, const char** argv)
     NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t l) { return atol(s); };
 
     long val = 0;
-    if (EXPRESSION.parse(s, val).ret) {
+    if (EXPRESSION.parse_with_value(s, val).ret) {
         cout << s << " = " << val << endl;
         return 0;
     }
