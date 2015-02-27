@@ -20,6 +20,25 @@
 #include <initializer_list>
 #include <iostream>
 
+// From http://stackoverflow.com/questions/7222143/unordered-map-hash-function-c#answer-7222201
+template <class T>
+inline void hash_combine(std::size_t & seed, const T & v) {
+    std::hash<T> hasher;
+    seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+namespace std {
+    template<typename S, typename T>
+    struct hash<pair<S, T>> {
+        inline size_t operator()(const pair<S, T> & v) const {
+            size_t seed = 0;
+            ::hash_combine(seed, v.first);
+            ::hash_combine(seed, v.second);
+            return seed;
+        }
+    };
+}
+
 namespace peglib {
 
 void* enabler;
@@ -154,7 +173,7 @@ private:
 * Semantic values
 */
 struct SemanticValue {
-    SemanticValue(any&& _val, const char* _name, const char* _s, size_t _l)
+    SemanticValue(const any& _val, const char* _name, const char* _s, size_t _l)
         : val(_val), name(_name), s(_s), l(_l) {}
 
     any         val;
@@ -410,17 +429,69 @@ struct Context
     const char*                                  s;
     size_t                                       l;
 
-    size_t                                       def_count;
-    std::vector<char>                            index;
-
-    std::vector<std::shared_ptr<SemanticValues>> stack;
-    size_t                                       stack_size;
-
     size_t                                       choice;
     const char*                                  error_ptr;
     const char*                                  msg; // TODO: should be `int`.
 
-    Context() : stack_size(0){}
+    size_t                                       def_count;
+    std::vector<bool>                            cache_register;
+    std::vector<bool>                            cache_success;
+
+    std::unordered_map<std::pair<size_t, size_t>, std::pair<int, any>> cache_result;
+
+    std::vector<std::shared_ptr<SemanticValues>> stack;
+    size_t                                       stack_size;
+
+    mutable size_t                               hit;
+    mutable size_t                               miss;
+
+    Context(const char* _s, size_t _l, size_t _def_count, bool packrat = true)
+        : s(_s)
+        , l(_l)
+        , def_count(_def_count)
+        , cache_register(packrat ? def_count * (l + 1) : 0)
+        , cache_success(packrat ? def_count * (l + 1) : 0)
+        , stack_size(0)
+        , hit(0)
+        , miss(0)
+    {
+    }
+
+    ~Context() {
+        //std::cout << "hit:" << hit << " miss:" << miss << std::endl;
+    }
+
+    void packrat(const char* s, size_t def_id, int& len, any& val, std::function<void (int&, any&)> fn) {
+        if (cache_register.empty()) {
+            fn(len, val);
+            return;
+        }
+
+        auto col = s - this->s;
+        auto has_cache = cache_register[def_count * col + def_id];
+
+        if (has_cache) {
+            hit++;
+            if (cache_success[def_count * col + def_id]) {
+                const auto& key = std::make_pair((int)(s - this->s), def_id);
+                std::tie(len, val) = cache_result[key];
+                return;
+            } else {
+                len = -1;
+                return;
+            }
+        } else {
+            miss++;
+            fn(len, val);
+            cache_register[def_count * col + def_id] = true;
+            cache_success[def_count * col + def_id] = success(len);
+            if (success(len)) {
+                const auto& key = std::make_pair((int)(s - this->s), def_id);
+                cache_result[key] = std::make_pair(len, val);
+            }
+            return;
+        }
+    }
 
     SemanticValues& push() {
         assert(stack_size <= stack.size());
@@ -1021,14 +1092,8 @@ public:
         DefinitionIDs defIds;
         holder_->accept(defIds);
 
-        Context c;
-        c.s = s;
-        c.l = l;
-        c.def_count = defIds.ids.size();
-        c.index.resize(c.def_count * (l + 1));
-
+        Context c(s, l, defIds.ids.size());
         auto len = holder_->parse(s, l, sv, c, dt);
-
         return Result { success(len), len, c.error_ptr, c.msg };
     }
 
@@ -1115,40 +1180,35 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
         throw std::logic_error("Uninitialized definition ope was used...");
     }
 
-    auto col = s - c.s;
-    auto def_id = outer_->id;
-#if 0 // Packrat
-    auto x = c.index[c.def_count * col + def_id];
-    //std::cout << "col:" << col << " id:" << def_id << " cache:" << (int)x << std::endl;
-#endif
+    int len;
+    any val;
+    c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
+        auto& chldsv = c.push();
 
-    const auto& rule = *ope_;
-    auto& chldsv = c.push();
-    auto len = rule.parse(s, l, chldsv, c, dt);
-    if (success(len) && !outer_->ignore) {
-        assert(!outer_->actions.empty());
+        const auto& rule = *ope_;
+        len = rule.parse(s, l, chldsv, c, dt);
+        if (success(len) && !outer_->ignore) {
+            assert(!outer_->actions.empty());
 
-        auto i = c.choice + 1; // Index 0 is for the default action
-        const auto& action = (i < outer_->actions.size() && outer_->actions[i])
-            ? outer_->actions[i]
-            : outer_->actions[0];
+            auto i = c.choice + 1; // Index 0 is for the default action
+            const auto& action = (i < outer_->actions.size() && outer_->actions[i])
+                ? outer_->actions[i]
+                : outer_->actions[0];
 
-        if (!chldsv.s) {
-            chldsv.s = s;
-            chldsv.l = len;
+            if (!chldsv.s) {
+                chldsv.s = s;
+                chldsv.l = len;
+            }
+
+            val = reduce(chldsv, dt, action);
         }
 
-        sv.emplace_back(
-            reduce(chldsv, dt, action),
-            outer_->name.c_str(),
-            nullptr,
-            0);
+        c.pop();
+    });
+
+    if (success(len) && !outer_->ignore) {
+        sv.emplace_back(val, outer_->name.c_str(), nullptr, 0);
     }
-    c.pop();
-    
-#if 0 // Packrat
-    c.index[c.def_count * col + def_id] = success(len) ? 1 : 2;
-#endif
 
     return len;
 }
@@ -1627,7 +1687,7 @@ private:
         return false;
     }
 
-    std::tuple<char, int> parse_hex_number(const char* s, size_t l, size_t i) {
+    std::pair<char, int> parse_hex_number(const char* s, size_t l, size_t i) {
         char ret = 0;
         int n;
         if (i < l && is_hex(s[i], n)) {
@@ -1637,10 +1697,10 @@ private:
                 i++;
             }
         }
-        return std::make_tuple(ret, i);
+        return std::make_pair(ret, i);
     }
 
-    std::tuple<char, int> parse_octal_number(const char* s, size_t l, size_t i) {
+    std::pair<char, int> parse_octal_number(const char* s, size_t l, size_t i) {
         char ret = 0;
         int n;
         if (i < l && is_digit(s[i], n)) {
@@ -1654,7 +1714,7 @@ private:
                 }
             }
         }
-        return std::make_tuple(ret, i);
+        return std::make_pair(ret, i);
     }
 
     std::string resolve_escape_sequence(const char* s, size_t l) {
