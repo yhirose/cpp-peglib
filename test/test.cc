@@ -252,7 +252,12 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
-        return sv.size() == 1 ? sv[0].val.get<int>() : sv[0].val.get<int>() * sv[1].val.get<int>();
+        switch (sv.choice) {
+        case 0:  // Action for the first choice
+            return sv[0].val.get<int>() * sv[1].val.get<int>();
+        default: // Action for the second choice
+            return sv[0].val.get<int>();
+        }
     };
 
     parser["Number"] = [](const char* s, size_t l) {

@@ -12,6 +12,8 @@ The PEG syntax is well described on page 2 in the [document](http://pdos.csail.m
   * `~` (Ignore operator)
   * `\x??` (Hex number char)
 
+This library is a [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parser which supports the linear-time parsing.
+
 How to use
 ----------
 
@@ -48,12 +50,13 @@ int main(void) {
         [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
     };
 
-    parser["Multitive"] = {
-        nullptr,                                                // Default action
-        [](const SemanticValues& sv) {
-            return sv[0].val.get<int>() * sv[1].val.get<int>(); // 1st choice
-        },
-        [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
+    parser["Multitive"] = [](const SemanticValues& sv) {
+        switch (sv.choice) {
+        case 0:  // 1st choice
+            return sv[0].val.get<int>() * sv[1].val.get<int>();
+        default: // 2nd choice
+            return sv[0].val.get<int>();
+        }
     };
 
     /* This action is not necessary.
@@ -95,8 +98,9 @@ struct SemanticValue {
 
 struct SemanticValues : protected std::vector<SemanticValue>
 {
-    const char* s; // Token start
-    size_t      l; // Token length
+    const char* s;      // Token start
+    size_t      l;      // Token length
+    size_t      choice; // Choice number (0 based index)
 }
 ```
 
@@ -292,7 +296,6 @@ Tested Compilers
 TODO
 ----
 
-  * Linear-time parsing (Packrat parsing)
   * Optimization of grammars
   * Unicode support
 

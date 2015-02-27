@@ -186,8 +186,9 @@ struct SemanticValues : protected std::vector<SemanticValue>
 {
     const char* s;
     size_t      l;
+    size_t      choice;
 
-    SemanticValues() : s(nullptr), l(0) {}
+    SemanticValues() : s(nullptr), l(0), choice(0) {}
 
     typedef SemanticValue T;
     using std::vector<T>::iterator;
@@ -429,7 +430,6 @@ struct Context
     const char*                                  s;
     size_t                                       l;
 
-    size_t                                       choice;
     const char*                                  error_ptr;
     const char*                                  msg; // TODO: should be `int`.
 
@@ -604,8 +604,8 @@ public:
                 }
                 sv.s = chldsv.s;
                 sv.l = chldsv.l;
+                sv.choice = id;
                 c.pop();
-                c.choice = id;
                 return len;
             }
             id++;
@@ -1190,7 +1190,7 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
         if (success(len) && !outer_->ignore) {
             assert(!outer_->actions.empty());
 
-            auto i = c.choice + 1; // Index 0 is for the default action
+            auto i = chldsv.choice + 1; // Index 0 is for the default action
             const auto& action = (i < outer_->actions.size() && outer_->actions[i])
                 ? outer_->actions[i]
                 : outer_->actions[0];
