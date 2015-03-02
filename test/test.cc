@@ -204,7 +204,7 @@ TEST_CASE("Backtracking test", "[general]")
         count++;
     };
 
-    bool ret = parser.parse("Hello Two");
+    bool ret = parser.parse("Hello Two", true, true);
     REQUIRE(ret == true);
     REQUIRE(count == 1); // Skip second time
 }
