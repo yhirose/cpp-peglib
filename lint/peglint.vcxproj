@@ -26,7 +26,6 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F85B641A-7538-4809-8175-C528FF632CF6}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>sample</RootNamespace>
     <ProjectName>peglint</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
