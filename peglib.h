@@ -1034,14 +1034,16 @@ public:
     };
 
     Definition()
-       : actions(1)
-       , ignore(false)
-       , holder_(std::make_shared<Holder>(this)) {}
+        : actions(1)
+        , ignore(false)
+        , packrat(false)
+        , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
         , actions(1)
         , ignore(false)
+        , packrat(false)
         , holder_(rhs.holder_)
     {
         holder_->outer_ = this;
@@ -1051,6 +1053,7 @@ public:
         : name(std::move(rhs.name))
         , actions(1)
         , ignore(rhs.ignore)
+        , packrat(rhs.packrat)
         , holder_(std::move(rhs.holder_))
     {
         holder_->outer_ = this;
@@ -1059,6 +1062,7 @@ public:
     Definition(const std::shared_ptr<Ope>& ope)
         : actions(1)
         , ignore(false)
+        , packrat(false)
         , holder_(std::make_shared<Holder>(this))
     {
         holder_->ope_ = ope;
@@ -1073,36 +1077,32 @@ public:
         return *this;
     }
 
-    Result parse_core(const char* s, size_t l, SemanticValues& sv, any& dt, bool packrat) const {
-        DefinitionIDs defIds;
-        holder_->accept(defIds);
-
-        Context c(s, l, defIds.ids.size(), packrat);
-        auto len = holder_->parse(s, l, sv, c, dt);
-        return Result { success(len), len, c.error_ptr, c.msg };
-    }
-
-    Result parse(const char* s, size_t l, any& dt, bool packrat = false) const {
-        SemanticValues sv;
-        return parse_core(s, l, sv, dt, packrat);
-    }
-
-    Result parse(const char* s, size_t l, bool packrat = false) const {
+    Result parse(const char* s, size_t l) const {
         SemanticValues sv;
         any dt;
-        return parse_core(s, l, sv, dt, packrat);
+        return parse_core(s, l, sv, dt);
     }
 
-    Result parse(const char* s, bool packrat = false) const {
+    Result parse(const char* s) const {
         auto l = strlen(s);
-        return parse(s, l, packrat);
+        return parse(s, l);
+    }
+
+    Result parse_with_data(const char* s, size_t l, any& dt) const {
+        SemanticValues sv;
+        return parse_core(s, l, sv, dt);
+    }
+
+    Result parse_with_data(const char* s, any& dt) const {
+        auto l = strlen(s);
+        return parse_with_data(s, l, dt);
     }
 
     template <typename T>
-    Result parse_with_value(const char* s, size_t l, T& val, bool packrat = false) const {
+    Result parse_with_value(const char* s, size_t l, T& val) const {
         SemanticValues sv;
         any dt;
-        auto r = parse_core(s, l, sv, dt, packrat);
+        auto r = parse_core(s, l, sv, dt);
         if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
             val = sv[0].val.get<T>();
         }
@@ -1110,9 +1110,9 @@ public:
     }
 
     template <typename T>
-    Result parse_with_value(const char* s, T& val, bool packrat = false) const {
+    Result parse_with_value(const char* s, T& val) const {
         auto l = strlen(s);
-        return parse_with_value(s, l, val, packrat);
+        return parse_with_value(s, l, val);
     }
 
     Definition& operator=(Action ac) {
@@ -1145,12 +1145,22 @@ public:
     size_t              id;
     std::vector<Action> actions;
     bool                ignore;
+    bool                packrat;
 
 private:
     friend class DefinitionReference;
 
     Definition& operator=(const Definition& rhs);
     Definition& operator=(Definition&& rhs);
+
+    Result parse_core(const char* s, size_t l, SemanticValues& sv, any& dt) const {
+        DefinitionIDs defIds;
+        holder_->accept(defIds);
+
+        Context c(s, l, defIds.ids.size(), packrat);
+        auto len = holder_->parse(s, l, sv, c, dt);
+        return Result { success(len), len, c.error_ptr, c.msg };
+    }
 
     std::shared_ptr<Holder> holder_;
 };
@@ -1602,7 +1612,7 @@ private:
         data.match_action = ma;
 
         any dt = &data;
-        auto r = g["Grammar"].parse(s, l, dt, false);
+        auto r = g["Grammar"].parse_with_data(s, l, dt);
 
         if (!r.ret) {
             if (log) {
@@ -1771,62 +1781,76 @@ public:
         return grammar_ != nullptr;
     }
 
-    template <typename T>
-    bool parse(const char* s, size_t l, T& out, bool exact = true, bool packrat = false) const {
+    bool parse(const char* s, size_t l) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_with_value(s, l, out, packrat);
-            return r.ret && (!exact || r.len == l);
+            auto r = rule.parse(s, l);
+            return r.ret && r.len == l;
+        }
+        return false;
+    }
+
+    bool parse(const char* s) const {
+        auto l = strlen(s);
+        return parse(s, l);
+    }
+
+    bool parse_with_data(const char* s, size_t l, any& dt) const {
+        if (grammar_ != nullptr) {
+            const auto& rule = (*grammar_)[start_];
+            auto r = rule.parse_with_data(s, l, dt);
+            return r.ret && r.len == l;
+        }
+        return false;
+    }
+
+    bool parse_with_data(const char* s, any& dt) const {
+        auto l = strlen(s);
+        return parse_with_data(s, l, dt);
+    }
+
+    template <typename T>
+    bool parse_with_value(const char* s, size_t l, T& out) const {
+        if (grammar_ != nullptr) {
+            const auto& rule = (*grammar_)[start_];
+            auto r = rule.parse_with_value(s, l, out);
+            return r.ret && r.len == l;
         }
         return false;
     }
 
     template <typename T>
-    bool parse(const char* s, T& out, bool exact = true, bool packrat = false) const {
+    bool parse_with_value(const char* s, T& out) const {
         auto l = strlen(s);
-        return parse(s, l, out, exact, packrat);
+        return parse_with_value(s, l, out);
     }
 
-    bool parse(const char* s, size_t l, bool exact = true, bool packrat = false) const {
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, l, packrat);
-            return r.ret && (!exact || r.len == l);
-        }
-        return false;
-    }
-
-    bool parse(const char* s, bool exact = true, bool packrat = false) const {
-        auto l = strlen(s);
-        return parse(s, l, exact, packrat);
-    }
-
-    bool lint(const char* s, size_t l, bool exact, bool packrat, any& dt, Log log) {
+    bool lint(const char* s, size_t l, Log log) {
         assert(grammar_);
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, l, dt, packrat);
+            auto r = rule.parse(s, l);
             if (!r.ret) {
                 if (log) {
                     auto line = line_info(s, r.error_ptr);
                     log(line.first, line.second, r.msg ? "syntax error" : r.msg);
                 }
-            } else if (exact && r.len != l) {
+            } else if (r.len != l) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
             }
-            return r.ret && (!exact || r.len == l);
+            return r.ret;
         }
         return false;
     }
 
-    bool search(const char* s, size_t l, size_t& mpos, size_t& mlen, bool packrat = false) const {
+    bool search(const char* s, size_t l, size_t& mpos, size_t& mlen) const {
         const auto& rule = (*grammar_)[start_];
         if (grammar_ != nullptr) {
             size_t pos = 0;
             while (pos < l) {
                 size_t len = l - pos;
-                auto r = rule.parse(s + pos, len, packrat);
+                auto r = rule.parse(s + pos, len);
                 if (r.ret) {
                     mpos = pos;
                     mlen = len;
@@ -1840,13 +1864,20 @@ public:
         return false;
     }
 
-    bool search(const char* s, size_t& mpos, size_t& mlen, bool packrat) const {
+    bool search(const char* s, size_t& mpos, size_t& mlen) const {
         auto l = strlen(s);
-        return search(s, l, mpos, mlen, packrat);
+        return search(s, l, mpos, mlen);
     }
 
     Definition& operator[](const char* s) {
         return (*grammar_)[s];
+    }
+
+    void packrat_parsing(bool sw) {
+        if (grammar_ != nullptr) {
+            auto& rule = (*grammar_)[start_];
+            rule.packrat = sw;
+        }
     }
 
     MatchAction match_action;

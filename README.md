@@ -12,7 +12,7 @@ The PEG syntax is well described on page 2 in the [document](http://pdos.csail.m
   * `~` (Ignore operator)
   * `\x??` (Hex number char)
 
-This library is a [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parser which supports the linear-time parsing.
+This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
 How to use
 ----------
@@ -41,6 +41,8 @@ int main(void) {
 
     peg parser(syntax);
 
+    parser.packrat_parsing(true); // Enable packrat parsing
+
     // (3) Setup an action
     parser["Additive"] = {
         nullptr,                                                // Default action
@@ -59,19 +61,13 @@ int main(void) {
         }
     };
 
-    /* This action is not necessary.
-    parser["Primary"] = [](const SemanticValues& sv) {
-        return sv[0];
-    };
-    */
-
     parser["Number"] = [](const char* s, size_t l) {
         return stoi(string(s, l), nullptr, 10);
     };
 
     // (4) Parse
     int val;
-    parser.parse("(1+2)*3", val);
+    parser.parse_with_value("(1+2)*3", val);
 
     assert(val == 9);
 }

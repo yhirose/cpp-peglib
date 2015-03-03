@@ -76,9 +76,9 @@ TEST_CASE("String capture test2", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
     WS       <= zom(cls(" \t"));
 
-    auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+    auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
-    REQUIRE(m.ret == true);
+    REQUIRE(r.ret == true);
     REQUIRE(tags.size() == 3);
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
@@ -124,9 +124,9 @@ TEST_CASE("String capture test with embedded match action", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), dot()));
     WS       <= zom(cls(" \t"));
 
-    auto m = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+    auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
-    REQUIRE(m.ret == true);
+    REQUIRE(r.ret == true);
     REQUIRE(tags.size() == 3);
     REQUIRE(tags[0] == "tag1");
     REQUIRE(tags[1] == "tag:2");
@@ -204,7 +204,9 @@ TEST_CASE("Backtracking test", "[general]")
         count++;
     };
 
-    bool ret = parser.parse("Hello Two", true, true);
+    parser.packrat_parsing(true);
+
+    bool ret = parser.parse("Hello Two");
     REQUIRE(ret == true);
     REQUIRE(count == 1); // Skip second time
 }
@@ -265,7 +267,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     int val;
-    parser.parse("(1+2)*3", val);
+    parser.parse_with_value("(1+2)*3", val);
 
     REQUIRE(val == 9);
 }
@@ -305,9 +307,9 @@ TEST_CASE("Calculator test", "[general]")
 
     // Parse
     long val;
-    auto m = EXPRESSION.parse_with_value("1+2*3*(4-5+6)/7-8", val);
+    auto r = EXPRESSION.parse_with_value("1+2*3*(4-5+6)/7-8", val);
 
-    REQUIRE(m.ret == true);
+    REQUIRE(r.ret == true);
     REQUIRE(val == -3);
 }
 
@@ -351,9 +353,9 @@ TEST_CASE("Calculator test2", "[general]")
 
     // Parse
     long val;
-    auto m = g[start].parse_with_value("1+2*3*(4-5+6)/7-8", val);
+    auto r = g[start].parse_with_value("1+2*3*(4-5+6)/7-8", val);
 
-    REQUIRE(m.ret == true);
+    REQUIRE(r.ret == true);
     REQUIRE(val == -3);
 }
 
@@ -393,7 +395,7 @@ TEST_CASE("Calculator test3", "[general]")
 
     // Parse
     long val;
-    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
+    auto ret = parser.parse_with_value("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(ret == true);
     REQUIRE(val == -3);

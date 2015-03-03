@@ -108,7 +108,7 @@ int main(int argc, const char** argv)
     parser["NUMBER"]          = ast_num::create;
 
     shared_ptr<ast_node> ast;
-    if (parser.parse(s, ast)) {
+    if (parser.parse_with_value(s, ast)) {
         cout << s << " = " << ast->eval() << endl;
         return 0;
     }

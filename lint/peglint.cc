@@ -61,9 +61,7 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    peglib::any dt;
-    auto ret = peg.lint(source.data(), source.size(), true, false, dt,
-        [&](size_t ln, size_t col, const string& msg) {
+    auto ret = peg.lint(source.data(), source.size(), [&](size_t ln, size_t col, const string& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     });
 
