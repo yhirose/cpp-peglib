@@ -155,6 +155,9 @@ private:
 * Semantic values
 */
 struct SemanticValue {
+    SemanticValue()
+        : s(nullptr), l(0) {}
+
     SemanticValue(const any& _val, const char* _name, const char* _s, size_t _l)
         : val(_val), name(_name), s(_s), l(_l) {}
 
@@ -166,6 +169,10 @@ struct SemanticValue {
     template <typename T>
     const T& get() const {
         return val.get<T>();
+    }
+
+    std::string str() const {
+        return std::string(s, l);
     }
 
     any         val;
@@ -181,6 +188,13 @@ struct SemanticValues : protected std::vector<SemanticValue>
     size_t      choice;
 
     SemanticValues() : s(nullptr), l(0), choice(0) {}
+
+    std::string str(size_t i = 0) const {
+        if (i > 0) {
+            return (*this)[i].str();
+        }
+        return std::string(s, l);
+    }
 
     typedef SemanticValue T;
     using std::vector<T>::iterator;
@@ -206,14 +220,34 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::emplace;
     using std::vector<T>::emplace_back;
 
-    template <typename T, typename U, typename V>
-    static U reduce(T i, T end, U val, V f){
+    template <typename T, typename U, typename F>
+    static U reduce(T i, T end, U val, F f) {
         if (i == end) {
             return val;
         }
         std::tie(val, i) = f(val, i);
         return reduce(i, end, val, f);
     };
+
+    template <typename F>
+    auto map(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
+        vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
+        for (const auto& v: *this) {
+            r.push_back(f(v));
+        }
+        return r;
+    }
+
+    template <typename It, typename F>
+    auto map(It beg, It end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
+        vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
+        auto it = beg;
+        while (it != end) {
+            r.push_back(f(*it));
+            ++it;
+        }
+        return r;
+    }
 };
 
 /*
@@ -261,8 +295,6 @@ public:
     Action() = default;
 
     Action(const Action& rhs) : fn_(rhs.fn_) {}
-
-    //Action(Action&& rhs) : fn_(std::move(rhs.fn_)) {}
 
     template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
     Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
@@ -429,25 +461,25 @@ struct Context
     std::vector<bool>                            cache_register;
     std::vector<bool>                            cache_success;
 
-    std::map<std::pair<size_t, size_t>, std::tuple<int, any, any>> cache_result;
+    std::map<std::pair<size_t, size_t>, std::tuple<int, any>> cache_result;
 
     std::vector<std::shared_ptr<SemanticValues>> stack;
     size_t                                       stack_size;
 
-    Context(const char* _s, size_t _l, size_t _def_count, bool packrat)
+    Context(const char* _s, size_t _l, size_t _def_count, bool enablePackratParsing)
         : s(_s)
         , l(_l)
         , def_count(_def_count)
-        , cache_register(packrat ? def_count * (l + 1) : 0)
-        , cache_success(packrat ? def_count * (l + 1) : 0)
+        , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
+        , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , stack_size(0)
     {
     }
 
     template <typename T>
-    void packrat(const char* s, size_t def_id, int& len, any& val, any& dt, T fn) {
+    void packrat(const char* s, size_t def_id, int& len, any& val, T fn) {
         if (cache_register.empty()) {
-            fn(len, val, dt);
+            fn(len, val);
             return;
         }
 
@@ -457,19 +489,19 @@ struct Context
         if (has_cache) {
             if (cache_success[def_count * col + def_id]) {
                 const auto& key = std::make_pair((int)(s - this->s), def_id);
-                std::tie(len, val, dt) = cache_result[key];
+                std::tie(len, val) = cache_result[key];
                 return;
             } else {
                 len = -1;
                 return;
             }
         } else {
-            fn(len, val, dt);
+            fn(len, val);
             cache_register[def_count * col + def_id] = true;
             cache_success[def_count * col + def_id] = success(len);
             if (success(len)) {
                 const auto& key = std::make_pair((int)(s - this->s), def_id);
-                cache_result[key] = std::make_tuple(len, val, dt);
+                cache_result[key] = std::make_pair(len, val);
             }
             return;
         }
@@ -1035,15 +1067,15 @@ public:
 
     Definition()
         : actions(1)
-        , ignore(false)
-        , packrat(false)
+        , ignoreSemanticValue(false)
+        , enablePackratParsing(false)
         , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
         , actions(1)
-        , ignore(false)
-        , packrat(false)
+        , ignoreSemanticValue(false)
+        , enablePackratParsing(false)
         , holder_(rhs.holder_)
     {
         holder_->outer_ = this;
@@ -1052,8 +1084,8 @@ public:
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
         , actions(1)
-        , ignore(rhs.ignore)
-        , packrat(rhs.packrat)
+        , ignoreSemanticValue(rhs.ignoreSemanticValue)
+        , enablePackratParsing(rhs.enablePackratParsing)
         , holder_(std::move(rhs.holder_))
     {
         holder_->outer_ = this;
@@ -1061,8 +1093,8 @@ public:
 
     Definition(const std::shared_ptr<Ope>& ope)
         : actions(1)
-        , ignore(false)
-        , packrat(false)
+        , ignoreSemanticValue(false)
+        , enablePackratParsing(false)
         , holder_(std::make_shared<Holder>(this))
     {
         holder_->ope_ = ope;
@@ -1133,7 +1165,7 @@ public:
     }
 
     Definition& operator~() {
-        ignore = true;
+        ignoreSemanticValue = true;
         return *this;
     }
 
@@ -1141,13 +1173,15 @@ public:
         holder_->accept(v);
     }
 
-    std::string         name;
-    size_t              id;
-    std::vector<Action> actions;
-    bool                ignore;
-    bool                packrat;
+    std::string                  name;
+    size_t                       id;
+
+    std::vector<Action>          actions;
     std::function<void(any& dt)> before;
     std::function<void(any& dt)> after;
+
+    bool                         ignoreSemanticValue;
+    bool                         enablePackratParsing;
 
 private:
     friend class DefinitionReference;
@@ -1159,7 +1193,7 @@ private:
         DefinitionIDs defIds;
         holder_->accept(defIds);
 
-        Context c(s, l, defIds.ids.size(), packrat);
+        Context c(s, l, defIds.ids.size(), enablePackratParsing);
         auto len = holder_->parse(s, l, sv, c, dt);
         return Result { success(len), len, c.error_ptr, c.msg };
     }
@@ -1183,7 +1217,7 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
     const char* ancs = s;
     size_t      ancl = l;
 
-    c.packrat(s, outer_->id, len, val, dt, [&](int& len, any& val, any& dt) {
+    c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
         auto& chldsv = c.push();
 
         if (outer_->before) {
@@ -1193,7 +1227,7 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
         const auto& rule = *ope_;
         len = rule.parse(s, l, chldsv, c, dt);
         ancl = len;
-        if (success(len) && !outer_->ignore) {
+        if (success(len) && !outer_->ignoreSemanticValue) {
             assert(!outer_->actions.empty());
 
             auto i = chldsv.choice + 1; // Index 0 is for the default action
@@ -1219,7 +1253,7 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
         c.pop();
     });
 
-    if (success(len) && !outer_->ignore) {
+    if (success(len) && !outer_->ignoreSemanticValue) {
         sv.emplace_back(val, outer_->name.c_str(), ancs, ancl);
     }
 
@@ -1505,7 +1539,7 @@ private:
             auto& def = (*data.grammar)[name];
             def <= ope;
             def.name = name;
-            def.ignore = ignore;
+            def.ignoreSemanticValue = ignore;
 
             if (data.start.empty()) {
                 data.start = name;
@@ -1656,7 +1690,7 @@ private:
                 auto& def = grammar[name];
                 def <= x.second;
                 def.name = name;
-                def.ignore = ignore;
+                def.ignoreSemanticValue = ignore;
             }
         }
 
@@ -1826,7 +1860,7 @@ public:
 
     bool parse_with_data(const char* s, any& dt, Log log = nullptr) const {
         auto l = strlen(s);
-        return parse_with_data(s, l, dt);
+        return parse_with_data(s, l, dt, log);
     }
 
     template <typename T>
@@ -1878,7 +1912,7 @@ public:
     void packrat_parsing(bool sw) {
         if (grammar_ != nullptr) {
             auto& rule = (*grammar_)[start_];
-            rule.packrat = sw;
+            rule.enablePackratParsing = sw;
         }
     }
 
