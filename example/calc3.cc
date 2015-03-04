@@ -51,7 +51,7 @@ struct ast_ope : public ast_node
         return SemanticValues::reduce(
             sv.begin() + 1,
             sv.end(),
-            sv[0].val.get<shared_ptr<ast_node>>(),
+            sv[0].get<shared_ptr<ast_node>>(),
             [](shared_ptr<ast_node> r, SemanticValues::const_iterator i) {
                 auto ope = (i++)->val.get<char>();
                 auto nd = (i++)->val.get<shared_ptr<ast_node>>();

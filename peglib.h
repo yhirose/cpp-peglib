@@ -158,6 +158,16 @@ struct SemanticValue {
     SemanticValue(const any& _val, const char* _name, const char* _s, size_t _l)
         : val(_val), name(_name), s(_s), l(_l) {}
 
+    template <typename T>
+    T& get() {
+        return val.get<T>();
+    }
+
+    template <typename T>
+    const T& get() const {
+        return val.get<T>();
+    }
+
     any         val;
     const char* name;
     const char* s;
