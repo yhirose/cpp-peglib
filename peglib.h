@@ -248,6 +248,16 @@ struct SemanticValues : protected std::vector<SemanticValue>
         }
         return r;
     }
+
+    template <typename T>
+    auto map() const -> vector<T> {
+        return this->map([](const SemanticValue& v) { return v.get<T>(); });
+    }
+
+    template <typename T, typename It>
+    auto map(It beg, It end) const -> vector<T> {
+        return this->map(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
+    }
 };
 
 /*
