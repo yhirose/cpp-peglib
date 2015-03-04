@@ -9,8 +9,9 @@ The PEG syntax is well described on page 2 in the [document](http://pdos.csail.m
 
   * `<` ... `>` (Anchor operator)
   * `$<` ... `>` (Capture operator)
+  * `$name<` ... `>` (Named capture operator)
   * `~` (Ignore operator)
-  * `\x??` (Hex number char)
+  * `\x20` (Hex number char)
 
 This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
@@ -294,16 +295,6 @@ TODO
 
   * Optimization of grammars
   * Unicode support
-
-Other C++ PEG parser libraries
-------------------------------
-
-Thanks to the authors of the libraries that inspired *cpp-peglib*.
-
- * [Boost Spirit X3](https://github.com/djowel/spirit_x3) - A set of C++ libraries for parsing and output generation implemented as Domain Specific Embedded Languages (DSEL) using Expression templates and Template Meta-Programming
- * [PEGTL](https://github.com/ColinH/PEGTL) - Parsing Expression Grammar Template Library
- * [lars::Parser](https://github.com/TheLartians/Parser) - A header-only linear-time c++ parsing expression grammar (PEG) parser generator supporting left-recursion and grammar ambiguity
-
 
 License
 -------
