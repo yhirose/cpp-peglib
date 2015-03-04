@@ -401,7 +401,7 @@ private:
 /*
  * Match action
  */
-typedef std::function<void (const char* s, size_t l, size_t i)> MatchAction;
+typedef std::function<void (const char* s, size_t l, size_t id, const std::string& name)> MatchAction;
 
 /*
  * Result
@@ -429,13 +429,10 @@ struct Context
     std::vector<bool>                            cache_register;
     std::vector<bool>                            cache_success;
 
-    std::map<std::pair<size_t, size_t>, std::pair<int, any>> cache_result;
+    std::map<std::pair<size_t, size_t>, std::tuple<int, any, any>> cache_result;
 
     std::vector<std::shared_ptr<SemanticValues>> stack;
     size_t                                       stack_size;
-
-    mutable size_t                               hit;
-    mutable size_t                               miss;
 
     Context(const char* _s, size_t _l, size_t _def_count, bool packrat)
         : s(_s)
@@ -444,19 +441,13 @@ struct Context
         , cache_register(packrat ? def_count * (l + 1) : 0)
         , cache_success(packrat ? def_count * (l + 1) : 0)
         , stack_size(0)
-        , hit(0)
-        , miss(0)
     {
     }
 
-    ~Context() {
-        //std::cout << "hit:" << hit << " miss:" << miss << std::endl;
-    }
-
     template <typename T>
-    void packrat(const char* s, size_t def_id, int& len, any& val, T fn) {
+    void packrat(const char* s, size_t def_id, int& len, any& val, any& dt, T fn) {
         if (cache_register.empty()) {
-            fn(len, val);
+            fn(len, val, dt);
             return;
         }
 
@@ -464,23 +455,21 @@ struct Context
         auto has_cache = cache_register[def_count * col + def_id];
 
         if (has_cache) {
-            hit++;
             if (cache_success[def_count * col + def_id]) {
                 const auto& key = std::make_pair((int)(s - this->s), def_id);
-                std::tie(len, val) = cache_result[key];
+                std::tie(len, val, dt) = cache_result[key];
                 return;
             } else {
                 len = -1;
                 return;
             }
         } else {
-            miss++;
-            fn(len, val);
+            fn(len, val, dt);
             cache_register[def_count * col + def_id] = true;
             cache_success[def_count * col + def_id] = success(len);
             if (success(len)) {
                 const auto& key = std::make_pair((int)(s - this->s), def_id);
-                cache_result[key] = std::make_pair(len, val);
+                cache_result[key] = std::make_tuple(len, val, dt);
             }
             return;
         }
@@ -831,15 +820,15 @@ public:
 class Capture : public Ope
 {
 public:
-    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci)
-        : ope_(ope), match_action_(ma), capture_id(ci) {}
+    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t n, const std::string& s)
+        : ope_(ope), match_action_(ma), id(n), name(s) {}
 
     int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
         assert(ope_);
         const auto& rule = *ope_;
         auto len = rule.parse(s, l, sv, c, dt);
         if (success(len) && match_action_) {
-            match_action_(s, len, capture_id);
+            match_action_(s, len, id, name);
         }
         return len;
     }
@@ -849,7 +838,8 @@ public:
 //private:
     std::shared_ptr<Ope> ope_;
     MatchAction          match_action_;
-    size_t               capture_id;
+    size_t               id;
+    std::string          name;
 };
 
 class Anchor : public Ope
@@ -1156,6 +1146,8 @@ public:
     std::vector<Action> actions;
     bool                ignore;
     bool                packrat;
+    std::function<void(any& dt)> before;
+    std::function<void(any& dt)> after;
 
 private:
     friend class DefinitionReference;
@@ -1188,11 +1180,19 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
 
     int len;
     any val;
-    c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
+    const char* ancs = s;
+    size_t      ancl = l;
+
+    c.packrat(s, outer_->id, len, val, dt, [&](int& len, any& val, any& dt) {
         auto& chldsv = c.push();
+
+        if (outer_->before) {
+            outer_->before(dt);
+        }
 
         const auto& rule = *ope_;
         len = rule.parse(s, l, chldsv, c, dt);
+        ancl = len;
         if (success(len) && !outer_->ignore) {
             assert(!outer_->actions.empty());
 
@@ -1201,7 +1201,10 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
                 ? outer_->actions[i]
                 : outer_->actions[0];
 
-            if (!chldsv.s) {
+            if (chldsv.s) {
+                ancs = chldsv.s;
+                ancl = chldsv.l;
+            } else {
                 chldsv.s = s;
                 chldsv.l = len;
             }
@@ -1209,11 +1212,15 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
             val = reduce(chldsv, dt, action);
         }
 
+        if (outer_->after) {
+            outer_->after(dt);
+        }
+
         c.pop();
     });
 
     if (success(len) && !outer_->ignore) {
-        sv.emplace_back(val, outer_->name.c_str(), nullptr, 0);
+        sv.emplace_back(val, outer_->name.c_str(), ancs, ancl);
     }
 
     return len;
@@ -1323,12 +1330,12 @@ inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
 }
 
-inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t ci) {
-    return std::make_shared<Capture>(ope, ma, ci);
+inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t n, const std::string& s) {
+    return std::make_shared<Capture>(ope, ma, n, s);
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma, (size_t)-1);
+    return std::make_shared<Capture>(ope, ma, (size_t)-1, std::string());
 }
 
 inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
@@ -1474,7 +1481,7 @@ private:
         g["Begin"]      <= seq(chr('<'), g["Spacing"]);
         g["End"]        <= seq(chr('>'), g["Spacing"]);
 
-        g["BeginCap"]   <= seq(lit("$<"), g["Spacing"]);
+        g["BeginCap"]   <= seq(chr('$'), anc(opt(g["Identifier"])), chr('<'), g["Spacing"]);
         g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
 
         g["IGNORE"]     <= chr('~');
@@ -1586,8 +1593,9 @@ private:
             // Capture
             [&](const SemanticValues& sv, any& dt) {
                 Data& data = *dt.get<Data*>();
+                auto name = std::string(sv[0].s, sv[0].l);
                 auto ope = sv[1].val.get<std::shared_ptr<Ope>>();
-                return cap(ope, data.match_action, ++data.capture_count);
+                return cap(ope, data.match_action, ++data.capture_count, name);
             }
         };
 
@@ -1772,8 +1780,8 @@ public:
         grammar_ = PEGParser::parse(
             s, l, rules,
             start_,
-            [&](const char* s, size_t l, size_t i) {
-                if (match_action) match_action(s, l, i);
+            [&](const char* s, size_t l, size_t id, const std::string& name) {
+                if (match_action) match_action(s, l, id, name);
             },
             log);
     }
@@ -1791,67 +1799,51 @@ public:
         return grammar_ != nullptr;
     }
 
-    bool parse(const char* s, size_t l) const {
+    bool parse(const char* s, size_t l, Log log = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, l);
+            output_log(s, l, log, r);
             return r.ret && r.len == l;
         }
         return false;
     }
 
-    bool parse(const char* s) const {
+    bool parse(const char* s, Log log = nullptr) const {
         auto l = strlen(s);
-        return parse(s, l);
+        return parse(s, l, log);
     }
 
-    bool parse_with_data(const char* s, size_t l, any& dt) const {
+    bool parse_with_data(const char* s, size_t l, any& dt, Log log = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse_with_data(s, l, dt);
+            output_log(s, l, log, r);
             return r.ret && r.len == l;
         }
         return false;
     }
 
-    bool parse_with_data(const char* s, any& dt) const {
+    bool parse_with_data(const char* s, any& dt, Log log = nullptr) const {
         auto l = strlen(s);
         return parse_with_data(s, l, dt);
     }
 
     template <typename T>
-    bool parse_with_value(const char* s, size_t l, T& out) const {
+    bool parse_with_value(const char* s, size_t l, T& out, Log log = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse_with_value(s, l, out);
+            output_log(s, l, log, r);
             return r.ret && r.len == l;
         }
         return false;
     }
 
     template <typename T>
-    bool parse_with_value(const char* s, T& out) const {
+    bool parse_with_value(const char* s, T& out, Log log = nullptr) const {
         auto l = strlen(s);
-        return parse_with_value(s, l, out);
-    }
-
-    bool lint(const char* s, size_t l, Log log) {
-        assert(grammar_);
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, l);
-            if (!r.ret) {
-                if (log) {
-                    auto line = line_info(s, r.error_ptr);
-                    log(line.first, line.second, r.msg ? "syntax error" : r.msg);
-                }
-            } else if (r.len != l) {
-                auto line = line_info(s, s + r.len);
-                log(line.first, line.second, "syntax error");
-            }
-            return r.ret;
-        }
-        return false;
+        return parse_with_value(s, l, out, log);
     }
 
     bool search(const char* s, size_t l, size_t& mpos, size_t& mlen) const {
@@ -1893,6 +1885,18 @@ public:
     MatchAction match_action;
 
 private:
+    void output_log(const char* s, size_t l, Log log, const Definition::Result& r) const {
+        if (log) {
+            if (!r.ret) {
+                auto line = line_info(s, r.error_ptr);
+                log(line.first, line.second, r.msg ? "syntax error" : r.msg);
+            } else if (r.len != l) {
+                auto line = line_info(s, s + r.len);
+                log(line.first, line.second, "syntax error");
+            }
+        }
+    }
+
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
 };
@@ -1907,6 +1911,7 @@ struct match
         const char* s;
         size_t      l;
         size_t      id;
+        std::string name;
 
         size_t length() const { return l; }
         std::string str() const { return std::string(s, l); }
@@ -1952,20 +1957,56 @@ struct match
     const_iterator end() const {
         return matches.cend();
     }
+
+    std::vector<size_t> named_capture(const std::string& name) const {
+        std::vector<size_t> ret;
+        for (auto i = 0u; i < matches.size(); i++) {
+            if (matches[i].name == name) {
+                ret.push_back(i);
+            }
+        }
+        return ret;
+    }
+
+    std::map<std::string, std::vector<size_t>> named_captures() const {
+        std::map<std::string, std::vector<size_t>> ret;
+        for (auto i = 0u; i < matches.size(); i++) {
+            ret[matches[i].name].push_back(i);
+        }
+        return ret;
+    }
+
+    std::vector<size_t> indexed_capture(size_t id) const {
+        std::vector<size_t> ret;
+        for (auto i = 0u; i < matches.size(); i++) {
+            if (matches[i].id == id) {
+                ret.push_back(i);
+            }
+        }
+        return ret;
+    }
+
+    std::map<size_t, std::vector<size_t>> indexed_captures() const {
+        std::map<size_t, std::vector<size_t>> ret;
+        for (auto i = 0u; i < matches.size(); i++) {
+            ret[matches[i].id].push_back(i);
+        }
+        return ret;
+    }
 };
 
 inline bool peg_match(const char* syntax, const char* s, match& m) {
     m.matches.clear();
 
     peg pg(syntax);
-    pg.match_action = [&](const char* s, size_t l, size_t i) {
-        m.matches.push_back(match::Item{ s, l, i });
+    pg.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
+        m.matches.push_back(match::Item{ s, l, id, name });
     };
 
     auto ret = pg.parse(s);
     if (ret) {
         auto l = strlen(s);
-        m.matches.insert(m.matches.begin(), match::Item{ s, l, 0 });
+        m.matches.insert(m.matches.begin(), match::Item{ s, l, 0, std::string() });
     }
 
     return ret;
@@ -1979,14 +2020,14 @@ inline bool peg_match(const char* syntax, const char* s) {
 inline bool peg_search(peg& pg, const char* s, size_t l, match& m) {
     m.matches.clear();
 
-    pg.match_action = [&](const char* s, size_t l, size_t i) {
-        m.matches.push_back(match::Item{ s, l, i });
+    pg.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
+        m.matches.push_back(match::Item{ s, l, id, name });
     };
 
     size_t mpos, mlen;
     auto ret = pg.search(s, l, mpos, mlen);
     if (ret) {
-        m.matches.insert(m.matches.begin(), match::Item{ s + mpos, mlen, 0 });
+        m.matches.insert(m.matches.begin(), match::Item{ s + mpos, mlen, 0, std::string() });
         return true;
     }
 
@@ -2022,8 +2063,8 @@ public:
         , s_(s)
         , l_(strlen(s))
         , pos_(0) {
-        peg_.match_action = [&](const char* s, size_t l, size_t i) {
-            m_.matches.push_back(match::Item{ s, l, i });
+        peg_.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
+            m_.matches.push_back(match::Item{ s, l, id, name });
         };
         search();
     }

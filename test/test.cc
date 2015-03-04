@@ -110,6 +110,25 @@ TEST_CASE("String capture test3", "[general]")
    REQUIRE(tags[2] == "tag-3");
 }
 
+TEST_CASE("Named capture test", "[general]")
+{
+    peglib::match m;
+
+    auto ret = peglib::peg_match(
+        "  ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*  "
+        "  TAG_NAME  <-  (!']' .)+                "
+        "  _         <-  [ \t]*                   ",
+        " [tag1] [tag:2] [tag-3] ",
+        m);
+
+    auto cap = m.named_capture("test");
+
+    REQUIRE(ret == true);
+    REQUIRE(m.size() == 4);
+    REQUIRE(cap.size() == 3);
+    REQUIRE(m.str(cap[2]) == "tag-3");
+}
+
 TEST_CASE("String capture test with embedded match action", "[general]")
 {
     rule ROOT, TAG, TAG_NAME, WS;
@@ -118,7 +137,9 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['),
-                    cap(TAG_NAME, [&](const char* s, size_t l, size_t id) { tags.push_back(string(s, l)); }),
+                    cap(TAG_NAME, [&](const char* s, size_t l, size_t id, const std::string& name) {
+                        tags.push_back(string(s, l));
+                    }),
                     chr(']'),
                     WS);
     TAG_NAME <= oom(seq(npd(chr(']')), dot()));
