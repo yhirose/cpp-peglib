@@ -1183,15 +1183,11 @@ public:
         holder_->accept(v);
     }
 
-    std::string                  name;
-    size_t                       id;
-
-    std::vector<Action>          actions;
-    std::function<void(any& dt)> before;
-    std::function<void(any& dt)> after;
-
-    bool                         ignoreSemanticValue;
-    bool                         enablePackratParsing;
+    std::string         name;
+    size_t              id;
+    std::vector<Action> actions;
+    bool                ignoreSemanticValue;
+    bool                enablePackratParsing;
 
 private:
     friend class DefinitionReference;
@@ -1230,10 +1226,6 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
     c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
         auto& chldsv = c.push();
 
-        if (outer_->before) {
-            outer_->before(dt);
-        }
-
         const auto& rule = *ope_;
         len = rule.parse(s, l, chldsv, c, dt);
         ancl = len;
@@ -1254,10 +1246,6 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
             }
 
             val = reduce(chldsv, dt, action);
-        }
-
-        if (outer_->after) {
-            outer_->after(dt);
         }
 
         c.pop();
