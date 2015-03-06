@@ -229,24 +229,18 @@ struct SemanticValues : protected std::vector<SemanticValue>
         return r;
     }
 
-    template <typename It, typename F>
-    auto map(It beg, It end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
+    template <typename F>
+    auto map(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
-        auto it = beg;
-        while (it != end) {
-            r.push_back(f(*it));
-            ++it;
+        end = std::min(end, size());
+        for (size_t i = beg; i < end; i++) {
+            r.push_back(f((*this)[i]));
         }
         return r;
     }
 
     template <typename T>
-    auto map() const -> vector<T> {
-        return this->map([](const SemanticValue& v) { return v.get<T>(); });
-    }
-
-    template <typename T, typename It>
-    auto map(It beg, It end) const -> vector<T> {
+    auto map(size_t beg = 0, size_t end = -1) const -> vector<T> {
         return this->map(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
     }
 };
