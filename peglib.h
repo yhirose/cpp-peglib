@@ -220,15 +220,6 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::emplace;
     using std::vector<T>::emplace_back;
 
-    template <typename T, typename U, typename F>
-    static U reduce(T i, T end, U val, F f) {
-        if (i == end) {
-            return val;
-        }
-        std::tie(val, i) = f(val, i);
-        return reduce(i, end, val, f);
-    };
-
     template <typename F>
     auto map(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;

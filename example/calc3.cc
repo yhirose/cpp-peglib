@@ -24,6 +24,15 @@ using namespace std;
 //      ~_               <-  [ \t\r\n]*
 //
 
+template <typename T, typename U, typename F>
+static U reduce(T i, T end, U val, F f) {
+    if (i == end) {
+        return val;
+    }
+    std::tie(val, i) = f(val, i);
+    return reduce(i, end, val, f);
+};
+
 struct ast_node
 {
     virtual ~ast_node() = default;
@@ -48,7 +57,7 @@ struct ast_ope : public ast_node
 
     static shared_ptr<ast_node> create(const SemanticValues& sv) {
         assert(!sv.empty());
-        return SemanticValues::reduce(
+        return reduce(
             sv.begin() + 1,
             sv.end(),
             sv[0].get<shared_ptr<ast_node>>(),
