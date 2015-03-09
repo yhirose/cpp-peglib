@@ -48,7 +48,7 @@ int main(void) {
     parser["Additive"] = {
         nullptr,                                                // Default action
         [](const SemanticValues& sv) {
-            return sv[0].val.get<int>() + sv[1].val.get<int>(); // 1st choice
+            return sv[0].get<int>() + sv[1].get<int>(); // 1st choice
         },
         [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
     };
@@ -56,19 +56,19 @@ int main(void) {
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice) {
         case 0:  // 1st choice
-            return sv[0].val.get<int>() * sv[1].val.get<int>();
+            return sv[0].get<int>() * sv[1].get<int>();
         default: // 2nd choice
-            return sv[0].val.get<int>();
+            return sv[0].get<int>();
         }
     };
 
-    parser["Number"] = [](const char* s, size_t l) {
-        return stoi(string(s, l), nullptr, 10);
+    parser["Number"] = [](const char* s, size_t n) {
+        return stoi(string(s, n), nullptr, 10);
     };
 
     // (4) Parse
     int val;
-    parser.parse_with_value("(1+2)*3", val);
+    parser.parse("(1+2)*3", val);
 
     assert(val == 9);
 }
@@ -79,7 +79,7 @@ Here is a complete list of available actions:
 ```c++
 [](const SemanticValues& sv, any& dt)
 [](const SemanticValues& sv)
-[](const char* s, size_t l)
+[](const char* s, size_t n)
 []()
 ```
 
@@ -90,20 +90,20 @@ struct SemanticValue {
     peglib::any val;  // Semantic value
     std::string name; // Definition name for the sematic value
     const char* s;    // Token start for the semantic value
-    size_t      l;    // Token length for the semantic value
+    size_t      n;    // Token length for the semantic value
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
 {
     const char* s;      // Token start
-    size_t      l;      // Token length
+    size_t      n;      // Token length
     size_t      choice; // Choice number (0 based index)
 }
 ```
 
 `peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
 
-`const char* s, size_t l` gives a pointer and length of the matched string. This is same as `sv.s` and `sv.l`.
+`const char* s, size_t n` gives a pointer and length of the matched string. This is same as `sv.s` and `sv.n`.
 
 `any& dt` is a data object which can be used by the user for whatever purposes.
 
@@ -118,9 +118,9 @@ auto syntax = R"(
 
 peg pg(syntax);
 
-pg["TOKEN"] = [](const char* s, size_t l) {
+pg["TOKEN"] = [](const char* s, size_t n) {
     // 'token' doesn't include trailing whitespaces
-    auto token = string(s, l);
+    auto token = string(s, n);
 };
 
 auto ret = pg.parse(" token1, token2 ");
@@ -181,9 +181,9 @@ auto s = " [tag1] [tag2] [tag3] ";
 // peglib::peg_search
 peg pg(syntax);
 size_t pos = 0;
-auto l = strlen(s);
+auto n = strlen(s);
 match m;
-while (peg_search(pg, s + pos, l - pos, m)) {
+while (peg_search(pg, s + pos, n - pos, m)) {
   cout << m.str()  << endl; // entire match
   cout << m.str(1) << endl; // submatch #1
   pos += m.length();
@@ -217,8 +217,8 @@ vector<string> tags;
 
 Definition ROOT, TAG_NAME, _;
 ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) {
-                tags.push_back(string(s, l));
+TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t n) {
+                tags.push_back(string(s, n));
             };
 _        <= zom(cls(" \t"));
 
@@ -256,10 +256,10 @@ auto syntax = R"(
 
 Rules rules = {
     {
-        "NAME", usr([](const char* s, size_t l, SemanticValues& sv, any& c) {
+        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) {
             static vector<string> names = { "PEG", "BNF" };
             for (const auto& n: names) {
-                if (n.size() <= l && !n.compare(0, n.size(), s, n.size())) {
+                if (n.size() <= n && !n.compare(0, n.size(), s, n.size())) {
                     return success(n.size());
                 }
             }

@@ -156,10 +156,10 @@ private:
 */
 struct SemanticValue {
     SemanticValue()
-        : s(nullptr), l(0) {}
+        : s(nullptr), n(0) {}
 
-    SemanticValue(const any& _val, const char* _name, const char* _s, size_t _l)
-        : val(_val), name(_name), s(_s), l(_l) {}
+    SemanticValue(const any& _val, const char* _name, const char* _s, size_t _n)
+        : val(_val), name(_name), s(_s), n(_n) {}
 
     template <typename T>
     T& get() {
@@ -172,28 +172,28 @@ struct SemanticValue {
     }
 
     std::string str() const {
-        return std::string(s, l);
+        return std::string(s, n);
     }
 
     any         val;
     const char* name;
     const char* s;
-    size_t      l;
+    size_t      n;
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
 {
     const char* s;
-    size_t      l;
+    size_t      n;
     size_t      choice;
 
-    SemanticValues() : s(nullptr), l(0), choice(0) {}
+    SemanticValues() : s(nullptr), n(0), choice(0) {}
 
     std::string str(size_t i = 0) const {
         if (i > 0) {
             return (*this)[i].str();
         }
-        return std::string(s, l);
+        return std::string(s, n);
     }
 
     typedef SemanticValue T;
@@ -344,11 +344,11 @@ private:
 
     template <typename R>
     struct TypeAdaptor_s_l {
-        TypeAdaptor_s_l(std::function<R (const char* s, size_t l)> fn) : fn_(fn) {}
+        TypeAdaptor_s_l(std::function<R (const char* s, size_t n)> fn) : fn_(fn) {}
         any operator()(const SemanticValues& sv, any& dt) {
-            return call<R>(fn_, sv.s, sv.l);
+            return call<R>(fn_, sv.s, sv.n);
         }
-        std::function<R (const char* s, size_t l)> fn_;
+        std::function<R (const char* s, size_t n)> fn_;
     };
 
     template <typename R>
@@ -428,7 +428,7 @@ private:
 /*
  * Match action
  */
-typedef std::function<void (const char* s, size_t l, size_t id, const std::string& name)> MatchAction;
+typedef std::function<void (const char* s, size_t n, size_t id, const std::string& name)> MatchAction;
 
 /*
  * Result
@@ -512,7 +512,7 @@ struct Context
             sv.clear();
         }
         sv.s = nullptr;
-        sv.l = 0;
+        sv.n = 0;
         return sv;
     }
 
@@ -530,7 +530,7 @@ public:
     struct Visitor;
 
     virtual ~Ope() {};
-    virtual int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const = 0;
+    virtual int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
 };
 
@@ -558,11 +558,11 @@ public:
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         size_t i = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
-            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (!c.msg) {
                     c.msg = "missing an element in the 'sequence'";
@@ -602,19 +602,18 @@ public:
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         size_t id = 0;
         for (const auto& ope : opes_) {
             const auto& rule = *ope;
-            //SemanticValues chldsv;
             auto& chldsv = c.push();
-            auto len = rule.parse(s, l, chldsv, c, dt);
+            auto len = rule.parse(s, n, chldsv, c, dt);
             if (len != -1) {
                 if (!chldsv.empty()) {
                     sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 }
                 sv.s = chldsv.s;
-                sv.l = chldsv.l;
+                sv.n = chldsv.n;
                 sv.choice = id;
                 c.pop();
                 return len;
@@ -640,11 +639,11 @@ class ZeroOrMore : public Ope
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         auto i = 0;
-        while (l - i > 0) {
+        while (n - i > 0) {
             const auto& rule = *ope_;
-            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 break;
             }
@@ -664,9 +663,9 @@ class OneOrMore : public Ope
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         if (fail(len)) {
             if (!c.msg) {
                 c.msg = "nothing occurred in the 'one-or-more'";
@@ -674,9 +673,9 @@ public:
             return -1;
         }
         auto i = len;
-        while (l - i > 0) {
+        while (n - i > 0) {
             const auto& rule = *ope_;
-            auto len = rule.parse(s + i, l - i, sv, c, dt);
+            auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 break;
             }
@@ -696,9 +695,9 @@ class Option : public Ope
 public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         return success(len) ? len : 0;
     }
 
@@ -713,9 +712,9 @@ class AndPredicate : public Ope
 public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             return 0;
         } else {
@@ -734,9 +733,9 @@ class NotPredicate : public Ope
 public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             c.error_ptr = s;
             return -1;
@@ -756,10 +755,10 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         auto i = 0u;
         for (; i < lit_.size(); i++) {
-            if (i >= l || s[i] != lit_[i]) {
+            if (i >= n || s[i] != lit_[i]) {
                 c.error_ptr = s;
                 return -1;
             }
@@ -778,9 +777,9 @@ class CharacterClass : public Ope
 public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
-        if (l < 1) {
+        if (n < 1) {
             c.error_ptr = s;
             return -1;
         }
@@ -814,9 +813,9 @@ class Character : public Ope
 public:
     Character(char ch) : ch_(ch) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
-        if (l < 1 || s[0] != ch_) {
+        if (n < 1 || s[0] != ch_) {
             c.error_ptr = s;
             return -1;
         }
@@ -832,9 +831,9 @@ public:
 class AnyCharacter : public Ope
 {
 public:
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
-        if (l < 1) {
+        if (n < 1) {
             c.error_ptr = s;
             return -1;
         }
@@ -850,10 +849,10 @@ public:
     Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t n, const std::string& s)
         : ope_(ope), match_action_(ma), id(n), name(s) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         assert(ope_);
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         if (success(len) && match_action_) {
             match_action_(s, len, id, name);
         }
@@ -874,13 +873,13 @@ class Anchor : public Ope
 public:
     Anchor(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         assert(ope_);
         const auto& rule = *ope_;
-        auto len = rule.parse(s, l, sv, c, dt);
+        auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             sv.s = s;
-            sv.l = len;
+            sv.n = len;
         }
         return len;
     }
@@ -891,22 +890,22 @@ public:
     std::shared_ptr<Ope> ope_;
 };
 
-typedef std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> Parser;
+typedef std::function<int (const char* s, size_t n, SemanticValues& sv, any& dt)> Parser;
 
 class User : public Ope
 {
 public:
     User(Parser fn) : fn_(fn) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         assert(fn_);
-        return fn_(s, l, sv, dt);
+        return fn_(s, n, sv, dt);
     }
 
     void accept(Visitor& v) override;
 
 //private:
-    std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> fn_;
+    std::function<int (const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
 };
 
 class WeakHolder : public Ope
@@ -914,11 +913,11 @@ class WeakHolder : public Ope
 public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override {
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
-        return rule.parse(s, l, sv, c, dt);
+        return rule.parse(s, n, sv, c, dt);
     }
 
     void accept(Visitor& v) override;
@@ -935,7 +934,7 @@ public:
     Holder(Definition* outer)
        : outer_(outer) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
@@ -956,7 +955,7 @@ public:
         : grammar_(grammar)
         , name_(name) {}
 
-    int parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const override;
+    int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
@@ -1104,32 +1103,32 @@ public:
         return *this;
     }
 
-    Result parse(const char* s, size_t l) const {
+    Result parse(const char* s, size_t n) const {
         SemanticValues sv;
         any dt;
-        return parse_core(s, l, sv, dt);
+        return parse_core(s, n, sv, dt);
     }
 
     Result parse(const char* s) const {
-        auto l = strlen(s);
-        return parse(s, l);
+        auto n = strlen(s);
+        return parse(s, n);
     }
 
-    Result parse_with_data(const char* s, size_t l, any& dt) const {
+    Result parse(const char* s, size_t n, any& dt) const {
         SemanticValues sv;
-        return parse_core(s, l, sv, dt);
+        return parse_core(s, n, sv, dt);
     }
 
-    Result parse_with_data(const char* s, any& dt) const {
-        auto l = strlen(s);
-        return parse_with_data(s, l, dt);
+    Result parse(const char* s, any& dt) const {
+        auto n = strlen(s);
+        return parse(s, n, dt);
     }
 
     template <typename T>
-    Result parse_with_value(const char* s, size_t l, T& val) const {
+    Result parse_and_get_value(const char* s, size_t n, T& val) const {
         SemanticValues sv;
         any dt;
-        auto r = parse_core(s, l, sv, dt);
+        auto r = parse_core(s, n, sv, dt);
         if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
             val = sv[0].val.get<T>();
         }
@@ -1137,9 +1136,25 @@ public:
     }
 
     template <typename T>
-    Result parse_with_value(const char* s, T& val) const {
-        auto l = strlen(s);
-        return parse_with_value(s, l, val);
+    Result parse_and_get_value(const char* s, T& val) const {
+        auto n = strlen(s);
+        return parse_and_get_value(s, n, val);
+    }
+
+    template <typename T>
+    Result parse_and_get_value(const char* s, size_t n, any& dt, T& val) const {
+        SemanticValues sv;
+        auto r = parse_core(s, n, sv, dt);
+        if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
+            val = sv[0].val.get<T>();
+        }
+        return r;
+    }
+
+    template <typename T>
+    Result parse_and_get_value(const char* s, any& dt, T& val) const {
+        auto n = strlen(s);
+        return parse_and_get_value(s, n, dt, val);
     }
 
     Definition& operator=(Action ac) {
@@ -1180,12 +1195,12 @@ private:
     Definition& operator=(const Definition& rhs);
     Definition& operator=(Definition&& rhs);
 
-    Result parse_core(const char* s, size_t l, SemanticValues& sv, any& dt) const {
+    Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt) const {
         DefinitionIDs defIds;
         holder_->accept(defIds);
 
-        Context c(s, l, defIds.ids.size(), enablePackratParsing);
-        auto len = holder_->parse(s, l, sv, c, dt);
+        Context c(s, n, defIds.ids.size(), enablePackratParsing);
+        auto len = holder_->parse(s, n, sv, c, dt);
         return Result { success(len), len, c.error_ptr, c.msg };
     }
 
@@ -1198,7 +1213,7 @@ typedef Definition rule;
  * Implementations
  */
 
-inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
+inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     if (!ope_) {
         throw std::logic_error("Uninitialized definition ope was used...");
     }
@@ -1206,14 +1221,14 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
     int len;
     any val;
     const char* ancs = s;
-    size_t      ancl = l;
+    size_t      ancn = n;
 
     c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
         auto& chldsv = c.push();
 
         const auto& rule = *ope_;
-        len = rule.parse(s, l, chldsv, c, dt);
-        ancl = len;
+        len = rule.parse(s, n, chldsv, c, dt);
+        ancn = len;
         if (success(len) && !outer_->ignoreSemanticValue) {
             assert(!outer_->actions.empty());
 
@@ -1224,10 +1239,10 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
 
             if (chldsv.s) {
                 ancs = chldsv.s;
-                ancl = chldsv.l;
+                ancn = chldsv.n;
             } else {
                 chldsv.s = s;
-                chldsv.l = len;
+                chldsv.n = len;
             }
 
             val = reduce(chldsv, dt, action);
@@ -1237,7 +1252,7 @@ inline int Holder::parse(const char* s, size_t l, SemanticValues& sv, Context& c
     });
 
     if (success(len) && !outer_->ignoreSemanticValue) {
-        sv.emplace_back(val, outer_->name.c_str(), ancs, ancl);
+        sv.emplace_back(val, outer_->name.c_str(), ancs, ancn);
     }
 
     return len;
@@ -1254,9 +1269,9 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt, const Action& actio
 }
 
 inline int DefinitionReference::parse(
-    const char* s, size_t l, SemanticValues& sv, Context& c, any& dt) const {
+    const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     const auto& rule = *get_rule();
-    return rule.parse(s, l, sv, c, dt);
+    return rule.parse(s, n, sv, c, dt);
 }
 
 inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
@@ -1359,7 +1374,7 @@ inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Anchor>(ope);
 }
 
-inline std::shared_ptr<Ope> usr(std::function<int (const char* s, size_t l, SemanticValues& sv, any& dt)> fn) {
+inline std::shared_ptr<Ope> usr(std::function<int (const char* s, size_t n, SemanticValues& sv, any& dt)> fn) {
     return std::make_shared<User>(fn);
 }
 
@@ -1399,25 +1414,25 @@ class PEGParser
 public:
     static std::shared_ptr<Grammar> parse(
         const char*  s,
-        size_t       l,
+        size_t       n,
         const Rules& rules,
         std::string& start,
         MatchAction  ma,
         Log          log)
     {
         static PEGParser instance;
-        return get().perform_core(s, l, rules, start, ma, log);
+        return get().perform_core(s, n, rules, start, ma, log);
     }
 
     static std::shared_ptr<Grammar> parse(
         const char*  s,
-        size_t       l,
+        size_t       n,
         std::string& start,
         MatchAction  ma,
         Log          log)
     {
         Rules dummy;
-        return parse(s, l, dummy, start, ma, log);
+        return parse(s, n, dummy, start, ma, log);
     }
 
     // For debuging purpose
@@ -1555,7 +1570,7 @@ private:
             }
         };
 
-        g["Prefix"] = [&](const SemanticValues& sv, any& dt) {
+        g["Prefix"] = [&](const SemanticValues& sv) {
             std::shared_ptr<Ope> ope;
             if (sv.size() == 1) {
                 ope = sv[0].val.get<std::shared_ptr<Ope>>();
@@ -1572,7 +1587,7 @@ private:
             return ope;
         };
 
-        g["Suffix"] = [&](const SemanticValues& sv, any& dt) {
+        g["Suffix"] = [&](const SemanticValues& sv) {
             auto ope = sv[0].val.get<std::shared_ptr<Ope>>();
             if (sv.size() == 1) {
                 return ope;
@@ -1610,34 +1625,34 @@ private:
             // Capture
             [&](const SemanticValues& sv, any& dt) {
                 Data& data = *dt.get<Data*>();
-                auto name = std::string(sv[0].s, sv[0].l);
+                auto name = std::string(sv[0].s, sv[0].n);
                 auto ope = sv[1].val.get<std::shared_ptr<Ope>>();
                 return cap(ope, data.match_action, ++data.capture_count, name);
             }
         };
 
-        g["IdentCont"] = [](const char* s, size_t l) {
-            return std::string(s, l);
+        g["IdentCont"] = [](const char* s, size_t n) {
+            return std::string(s, n);
         };
-        g["Literal"] = [this](const char* s, size_t l) {
-            return lit(resolve_escape_sequence(s, l));
+        g["Literal"] = [this](const char* s, size_t n) {
+            return lit(resolve_escape_sequence(s, n));
         };
-        g["Class"] = [this](const char* s, size_t l) {
-            return cls(resolve_escape_sequence(s, l));
+        g["Class"] = [this](const char* s, size_t n) {
+            return cls(resolve_escape_sequence(s, n));
         };
 
-        g["AND"]      = [](const char* s, size_t l) { return *s; };
-        g["NOT"]      = [](const char* s, size_t l) { return *s; };
-        g["QUESTION"] = [](const char* s, size_t l) { return *s; };
-        g["STAR"]     = [](const char* s, size_t l) { return *s; };
-        g["PLUS"]     = [](const char* s, size_t l) { return *s; };
+        g["AND"]      = [](const char* s, size_t n) { return *s; };
+        g["NOT"]      = [](const char* s, size_t n) { return *s; };
+        g["QUESTION"] = [](const char* s, size_t n) { return *s; };
+        g["STAR"]     = [](const char* s, size_t n) { return *s; };
+        g["PLUS"]     = [](const char* s, size_t n) { return *s; };
 
         g["DOT"] = []() { return dot(); };
     }
 
     std::shared_ptr<Grammar> perform_core(
         const char*  s,
-        size_t       l,
+        size_t       n,
         const Rules& rules,
         std::string& start,
         MatchAction  ma,
@@ -1647,7 +1662,7 @@ private:
         data.match_action = ma;
 
         any dt = &data;
-        auto r = g["Grammar"].parse_with_data(s, l, dt);
+        auto r = g["Grammar"].parse(s, n, dt);
 
         if (!r.ret) {
             if (log) {
@@ -1717,29 +1732,29 @@ private:
         return false;
     }
 
-    std::pair<char, int> parse_hex_number(const char* s, size_t l, size_t i) {
+    std::pair<char, int> parse_hex_number(const char* s, size_t n, size_t i) {
         char ret = 0;
-        int n;
-        if (i < l && is_hex(s[i], n)) {
+        int val;
+        if (i < n && is_hex(s[i], val)) {
             ret = n;
-            if (i + 1 < l && is_hex(s[i + 1], n)) {
-                ret = ret * 16 + n;
+            if (i + 1 < n && is_hex(s[i + 1], val)) {
+                ret = ret * 16 + val;
                 i++;
             }
         }
         return std::make_pair(ret, i);
     }
 
-    std::pair<char, int> parse_octal_number(const char* s, size_t l, size_t i) {
+    std::pair<char, int> parse_octal_number(const char* s, size_t n, size_t i) {
         char ret = 0;
-        int n;
-        if (i < l && is_digit(s[i], n)) {
+        int val;
+        if (i < n && is_digit(s[i], val)) {
             ret = n;
-            if (i + 1 < l && is_digit(s[i + 1], n)) {
-                ret = ret * 8 + n;
+            if (i + 1 < n && is_digit(s[i + 1], val)) {
+                ret = ret * 8 + val;
                 i++;
-                if (i + 1 < l && is_digit(s[i + 1], n)) {
-                    ret = ret * 8 + n;
+                if (i + 1 < n && is_digit(s[i + 1], val)) {
+                    ret = ret * 8 + val;
                     i++;
                 }
             }
@@ -1747,11 +1762,11 @@ private:
         return std::make_pair(ret, i);
     }
 
-    std::string resolve_escape_sequence(const char* s, size_t l) {
+    std::string resolve_escape_sequence(const char* s, size_t n) {
         std::string r;
-        r.reserve(l);
+        r.reserve(n);
 
-        for (auto i = 0u; i < l; i++) {
+        for (auto i = 0u; i < n; i++) {
             auto ch = s[i];
             if (ch == '\\') {
                 i++;
@@ -1765,12 +1780,12 @@ private:
                     case ']':  r += ']';  break;
                     case '\\': r += '\\'; break;
                     case 'x': {
-                        std::tie(ch, i) = parse_hex_number(s, l, i + 1);
+                        std::tie(ch, i) = parse_hex_number(s, n, i + 1);
                         r += ch;
                         break;
                     }
                     default: {
-                        std::tie(ch, i) = parse_octal_number(s, l, i + 1);
+                        std::tie(ch, i) = parse_octal_number(s, n, i + 1);
                         break;
                     }
                 }
@@ -1793,82 +1808,119 @@ class peg
 public:
     peg() = default;
 
-    peg(const char* s, size_t l, const Rules& rules, Log log = nullptr) {
-        grammar_ = PEGParser::parse(
-            s, l, rules,
-            start_,
-            [&](const char* s, size_t l, size_t id, const std::string& name) {
-                if (match_action) match_action(s, l, id, name);
-            },
-            log);
+    peg(const char* s, size_t n, const Rules& rules) {
+        load_grammar(s, n, rules);
     }
 
-    peg(const char* s, const Rules& rules, Log log = nullptr)
-        : peg(s, strlen(s), rules, log) {}
+    peg(const char* s, const Rules& rules)
+        : peg(s, strlen(s), rules) {}
 
-    peg(const char* s, size_t l, Log log = nullptr)
-        : peg(s, l, Rules(), log) {}
+    peg(const char* s, size_t n)
+        : peg(s, n, Rules()) {}
 
-    peg(const char* s, Log log = nullptr)
-        : peg(s, strlen(s), Rules(), log) {}
+    peg(const char* s)
+        : peg(s, strlen(s), Rules()) {}
 
     operator bool() {
         return grammar_ != nullptr;
     }
 
-    bool parse(const char* s, size_t l, Log log = nullptr) const {
+    bool load_grammar(const char* s, size_t n, const Rules& rules) {
+        grammar_ = PEGParser::parse(
+            s, n, rules,
+            start_,
+            [&](const char* s, size_t n, size_t id, const std::string& name) {
+                if (match_action) match_action(s, n, id, name);
+            },
+            log);
+
+        return grammar_ != nullptr;
+    }
+
+    bool load_grammar(const char* s, size_t n) {
+        return load_grammar(s, n, Rules());
+    }
+
+    bool load_grammar(const char* s, const Rules& rules) {
+        auto n = strlen(s);
+        return load_grammar(s, n, rules);
+    }
+
+    bool load_grammar(const char* s) {
+        auto n = strlen(s);
+        return load_grammar(s, n);
+    }
+
+    bool parse_n(const char* s, size_t n) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, l);
-            output_log(s, l, log, r);
-            return r.ret && r.len == l;
+            auto r = rule.parse(s, n);
+            output_log(s, n, log, r);
+            return r.ret && r.len == n;
         }
         return false;
     }
 
-    bool parse(const char* s, Log log = nullptr) const {
-        auto l = strlen(s);
-        return parse(s, l, log);
+    bool parse(const char* s) const {
+        auto n = strlen(s);
+        return parse_n(s, n);
     }
 
-    bool parse_with_data(const char* s, size_t l, any& dt, Log log = nullptr) const {
+    bool parse_n(const char* s, size_t n, any& dt) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_with_data(s, l, dt);
-            output_log(s, l, log, r);
-            return r.ret && r.len == l;
+            auto r = rule.parse(s, n, dt);
+            output_log(s, n, log, r);
+            return r.ret && r.len == n;
         }
         return false;
     }
 
-    bool parse_with_data(const char* s, any& dt, Log log = nullptr) const {
-        auto l = strlen(s);
-        return parse_with_data(s, l, dt, log);
+    bool parse(const char* s, any& dt) const {
+        auto n = strlen(s);
+        return parse_n(s, n, dt);
     }
 
     template <typename T>
-    bool parse_with_value(const char* s, size_t l, T& out, Log log = nullptr) const {
+    bool parse_n(const char* s, size_t n, T& val) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_with_value(s, l, out);
-            output_log(s, l, log, r);
-            return r.ret && r.len == l;
+            auto r = rule.parse_and_get_value(s, n, val);
+            output_log(s, n, log, r);
+            return r.ret && r.len == n;
         }
         return false;
     }
 
     template <typename T>
-    bool parse_with_value(const char* s, T& out, Log log = nullptr) const {
-        auto l = strlen(s);
-        return parse_with_value(s, l, out, log);
+    bool parse(const char* s, T& val) const {
+        auto n = strlen(s);
+        return parse_n(s, n, val);
     }
 
-    bool search(const char* s, size_t l, size_t& mpos, size_t& mlen) const {
+    template <typename T>
+    bool parse_n(const char* s, size_t n, any& dt, T& val) const {
+        if (grammar_ != nullptr) {
+            const auto& rule = (*grammar_)[start_];
+            auto r = rule.parse_and_get_value(s, n, dt, val);
+            output_log(s, n, log, r);
+            return r.ret && r.len == n;
+        }
+        return false;
+    }
+
+    template <typename T>
+    bool parse(const char* s, any& dt, T& val) const {
+        auto n = strlen(s);
+        return parse_n(s, n, dt, val);
+    }
+
+    bool search(const char* s, size_t n, size_t& mpos, size_t& mlen) const {
         const auto& rule = (*grammar_)[start_];
         if (grammar_ != nullptr) {
             size_t pos = 0;
-            while (pos < l) {
-                size_t len = l - pos;
+            while (pos < n) {
+                size_t len = n - pos;
                 auto r = rule.parse(s + pos, len);
                 if (r.ret) {
                     mpos = pos;
@@ -1884,8 +1936,8 @@ public:
     }
 
     bool search(const char* s, size_t& mpos, size_t& mlen) const {
-        auto l = strlen(s);
-        return search(s, l, mpos, mlen);
+        auto n = strlen(s);
+        return search(s, n, mpos, mlen);
     }
 
     Definition& operator[](const char* s) {
@@ -1900,14 +1952,15 @@ public:
     }
 
     MatchAction match_action;
+    Log         log;
 
 private:
-    void output_log(const char* s, size_t l, Log log, const Definition::Result& r) const {
+    void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
         if (log) {
             if (!r.ret) {
                 auto line = line_info(s, r.error_ptr);
                 log(line.first, line.second, r.msg ? "syntax error" : r.msg);
-            } else if (r.len != l) {
+            } else if (r.len != n) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
             }
@@ -1926,12 +1979,12 @@ struct match
 {
     struct Item {
         const char* s;
-        size_t      l;
+        size_t      n;
         size_t      id;
         std::string name;
 
-        size_t length() const { return l; }
-        std::string str() const { return std::string(s, l); }
+        size_t length() const { return n; }
+        std::string str() const { return std::string(s, n); }
     };
 
     std::vector<Item> matches;
@@ -2016,14 +2069,14 @@ inline bool peg_match(const char* syntax, const char* s, match& m) {
     m.matches.clear();
 
     peg pg(syntax);
-    pg.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, l, id, name });
+    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
+        m.matches.push_back(match::Item{ s, n, id, name });
     };
 
     auto ret = pg.parse(s);
     if (ret) {
-        auto l = strlen(s);
-        m.matches.insert(m.matches.begin(), match::Item{ s, l, 0, std::string() });
+        auto n = strlen(s);
+        m.matches.insert(m.matches.begin(), match::Item{ s, n, 0, std::string() });
     }
 
     return ret;
@@ -2034,15 +2087,15 @@ inline bool peg_match(const char* syntax, const char* s) {
     return pg.parse(s);
 }
 
-inline bool peg_search(peg& pg, const char* s, size_t l, match& m) {
+inline bool peg_search(peg& pg, const char* s, size_t n, match& m) {
     m.matches.clear();
 
-    pg.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, l, id, name });
+    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
+        m.matches.push_back(match::Item{ s, n, id, name });
     };
 
     size_t mpos, mlen;
-    auto ret = pg.search(s, l, mpos, mlen);
+    auto ret = pg.search(s, n, mpos, mlen);
     if (ret) {
         m.matches.insert(m.matches.begin(), match::Item{ s + mpos, mlen, 0, std::string() });
         return true;
@@ -2052,19 +2105,19 @@ inline bool peg_search(peg& pg, const char* s, size_t l, match& m) {
 }
 
 inline bool peg_search(peg& pg, const char* s, match& m) {
-    auto l = strlen(s);
-    return peg_search(pg, s, l, m);
+    auto n = strlen(s);
+    return peg_search(pg, s, n, m);
 }
 
-inline bool peg_search(const char* syntax, const char* s, size_t l, match& m) {
+inline bool peg_search(const char* syntax, const char* s, size_t n, match& m) {
     peg pg(syntax);
-    return peg_search(pg, s, l, m);
+    return peg_search(pg, s, n, m);
 }
 
 inline bool peg_search(const char* syntax, const char* s, match& m) {
     peg pg(syntax);
-    auto l = strlen(s);
-    return peg_search(pg, s, l, m);
+    auto n = strlen(s);
+    return peg_search(pg, s, n, m);
 }
 
 class peg_token_iterator : public std::iterator<std::forward_iterator_tag, match>
@@ -2080,8 +2133,8 @@ public:
         , s_(s)
         , l_(strlen(s))
         , pos_(0) {
-        peg_.match_action = [&](const char* s, size_t l, size_t id, const std::string& name) {
-            m_.matches.push_back(match::Item{ s, l, id, name });
+        peg_.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
+            m_.matches.push_back(match::Item{ s, n, id, name });
         };
         search();
     }

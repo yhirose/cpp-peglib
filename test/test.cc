@@ -33,8 +33,8 @@ TEST_CASE("String capture test", "[general]")
 
     std::vector<std::string> tags;
 
-    parser["TAG_NAME"] = [&](const char* s, size_t l) {
-        tags.push_back(std::string(s, l));
+    parser["TAG_NAME"] = [&](const char* s, size_t n) {
+        tags.push_back(std::string(s, n));
     };
 
     auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
@@ -73,7 +73,7 @@ TEST_CASE("String capture test2", "[general]")
     rule ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
-    TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t l) { tags.push_back(string(s, l)); };
+    TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t n) { tags.push_back(string(s, n)); };
     WS       <= zom(cls(" \t"));
 
     auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
@@ -97,8 +97,8 @@ TEST_CASE("String capture test3", "[general]")
 
    std::vector<std::string> tags;
 
-   pg["TOKEN"] = [&](const char* s, size_t l) {
-       tags.push_back(std::string(s, l));
+   pg["TOKEN"] = [&](const char* s, size_t n) {
+       tags.push_back(std::string(s, n));
    };
 
    auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
@@ -137,8 +137,8 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['),
-                    cap(TAG_NAME, [&](const char* s, size_t l, size_t id, const std::string& name) {
-                        tags.push_back(string(s, l));
+                    cap(TAG_NAME, [&](const char* s, size_t n, size_t id, const std::string& name) {
+                        tags.push_back(string(s, n));
                     }),
                     chr(']'),
                     WS);
@@ -185,7 +185,7 @@ TEST_CASE("Lambda action test", "[general]")
        "  CHAR  <- .       ");
 
     string ss;
-    parser["CHAR"] = [&](const char* s, size_t l) {
+    parser["CHAR"] = [&](const char* s, size_t n) {
         ss += *s;
     };
 
@@ -221,7 +221,7 @@ TEST_CASE("Backtracking test", "[general]")
     );
 
     size_t count = 0;
-    parser["HELLO"] = [&](const char* s, size_t l) {
+    parser["HELLO"] = [&](const char* s, size_t n) {
         count++;
     };
 
@@ -250,8 +250,8 @@ TEST_CASE("mutable lambda test", "[general]")
     peg pg("ROOT <- 'mutable lambda test'"); 
 
     // This test makes sure if the following code can be compiled.
-    pg["TOKEN"] = [=](const char* s, size_t l) mutable {
-        vec.push_back(string(s, l));
+    pg["TOKEN"] = [=](const char* s, size_t n) mutable {
+        vec.push_back(string(s, n));
     };
 }
 
@@ -283,12 +283,12 @@ TEST_CASE("Simple calculator test", "[general]")
         }
     };
 
-    parser["Number"] = [](const char* s, size_t l) {
+    parser["Number"] = [](const char* s, size_t n) {
         return atoi(s);
     };
 
     int val;
-    parser.parse_with_value("(1+2)*3", val);
+    parser.parse("(1+2)*3", val);
 
     REQUIRE(val == 9);
 }
@@ -322,13 +322,13 @@ TEST_CASE("Calculator test", "[general]")
 
     EXPRESSION      = reduce;
     TERM            = reduce;
-    TERM_OPERATOR   = [](const char* s, size_t l) { return *s; };
-    FACTOR_OPERATOR = [](const char* s, size_t l) { return *s; };
-    NUMBER          = [&](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    TERM_OPERATOR   = [](const char* s, size_t n) { return *s; };
+    FACTOR_OPERATOR = [](const char* s, size_t n) { return *s; };
+    NUMBER          = [&](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
 
     // Parse
     long val;
-    auto r = EXPRESSION.parse_with_value("1+2*3*(4-5+6)/7-8", val);
+    auto r = EXPRESSION.parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(r.ret == true);
     REQUIRE(val == -3);
@@ -368,13 +368,13 @@ TEST_CASE("Calculator test2", "[general]")
 
     g["EXPRESSION"]      = reduce;
     g["TERM"]            = reduce;
-    g["TERM_OPERATOR"]   = [](const char* s, size_t l) { return *s; };
-    g["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return *s; };
-    g["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    g["TERM_OPERATOR"]   = [](const char* s, size_t n) { return *s; };
+    g["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return *s; };
+    g["NUMBER"]          = [](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
 
     // Parse
     long val;
-    auto r = g[start].parse_with_value("1+2*3*(4-5+6)/7-8", val);
+    auto r = g[start].parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(r.ret == true);
     REQUIRE(val == -3);
@@ -410,22 +410,22 @@ TEST_CASE("Calculator test3", "[general]")
     // Setup actions
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
-    parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
-    parser["NUMBER"]          = [](const char* s, size_t l) { return stol(string(s, l), nullptr, 10); };
+    parser["TERM_OPERATOR"]   = [](const char* s, size_t n) { return (char)*s; };
+    parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return (char)*s; };
+    parser["NUMBER"]          = [](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
 
     // Parse
     long val;
-    auto ret = parser.parse_with_value("1+2*3*(4-5+6)/7-8", val);
+    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
 
     REQUIRE(ret == true);
     REQUIRE(val == -3);
 }
 
 bool exact(Grammar& g, const char* d, const char* s) {
-    auto l = strlen(s);
-    auto r = g[d].parse(s, l);
-    return r.ret && r.len == l;
+    auto n = strlen(s);
+    auto r = g[d].parse(s, n);
+    return r.ret && r.len == n;
 }
 
 Grammar& make_peg_grammar() {

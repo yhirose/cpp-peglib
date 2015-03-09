@@ -40,11 +40,18 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    peglib::peg peg(syntax.data(), syntax.size(), [&](size_t ln, size_t col, const string& msg) {
-        cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
-    });
+    peglib::peg peg;
 
-    if (!peg) {
+    bool firstError = true;
+    peg.log = [&](size_t ln, size_t col, const string& msg) {
+        if (firstError) {
+            firstError = false;
+            cerr << "# PEG grammar syntax error" << endl;
+        }
+        cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
+    };
+
+    if (!peg.load_grammar(syntax.data(), syntax.size())) {
         return -1;
     }
 
@@ -61,15 +68,20 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    auto ret = peg.parse(source.data(), source.size(), [&](size_t ln, size_t col, const string& msg) {
-        cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
-    });
+    firstError = true;
+    peg.log = [&](size_t ln, size_t col, const string& msg) {
+        if (firstError) {
+            firstError = false;
+            cerr << "# Source syntax error" << endl;
+        }
+        cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
+    };
 
-    if (ret) {
-        peg.parse(source.data(), source.size());
+    if (!peg.parse_n(source.data(), source.size())) {
+        return -1;
     }
 
-    return ret ? 0 : -1;
+    return 0;
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix

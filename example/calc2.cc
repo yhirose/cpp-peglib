@@ -51,12 +51,12 @@ int main(int argc, const char** argv)
     EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
     TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;
     FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
-    TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t l) { return (char)*s; };
-    FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t l) { return (char)*s; };
-    NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t l) { return atol(s); };
+    TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t n) { return (char)*s; };
+    FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t n) { return (char)*s; };
+    NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t n) { return atol(s); };
 
     long val = 0;
-    if (EXPRESSION.parse_with_value(s, val).ret) {
+    if (EXPRESSION.parse_and_get_value(s, val).ret) {
         cout << s << " = " << val << endl;
         return 0;
     }

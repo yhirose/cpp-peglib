@@ -61,9 +61,9 @@ int main(int argc, const char** argv)
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return (char)*s; };
-    parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return (char)*s; };
-    parser["NUMBER"]          = [](const char* s, size_t l) { return atol(s); };
+    parser["TERM_OPERATOR"]   = [](const char* s, size_t n) { return (char)*s; };
+    parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return (char)*s; };
+    parser["NUMBER"]          = [](const char* s, size_t n) { return atol(s); };
 
     long val = 0;
     if (parser.parse(s, val)) {

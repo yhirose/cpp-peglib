@@ -81,7 +81,7 @@ struct ast_num : public ast_node
 
     long eval() override { return num_; };
 
-    static shared_ptr<ast_node> create(const char* s, size_t l) {
+    static shared_ptr<ast_node> create(const char* s, size_t n) {
         return make_shared<ast_num>(atol(s));
     }
 
@@ -112,12 +112,12 @@ int main(int argc, const char** argv)
 
     parser["EXPRESSION"]      = ast_ope::create;
     parser["TERM"]            = ast_ope::create;
-    parser["TERM_OPERATOR"]   = [](const char* s, size_t l) { return *s; };
-    parser["FACTOR_OPERATOR"] = [](const char* s, size_t l) { return *s; };
+    parser["TERM_OPERATOR"]   = [](const char* s, size_t n) { return *s; };
+    parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return *s; };
     parser["NUMBER"]          = ast_num::create;
 
     shared_ptr<ast_node> ast;
-    if (parser.parse_with_value(s, ast)) {
+    if (parser.parse(s, ast)) {
         cout << s << " = " << ast->eval() << endl;
         return 0;
     }
