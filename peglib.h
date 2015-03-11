@@ -189,13 +189,6 @@ struct SemanticValues : protected std::vector<SemanticValue>
 
     SemanticValues() : s(nullptr), n(0), choice(0) {}
 
-    std::string str(size_t i = 0) const {
-        if (i > 0) {
-            return (*this)[i].str();
-        }
-        return std::string(s, n);
-    }
-
     typedef SemanticValue T;
     using std::vector<T>::iterator;
     using std::vector<T>::const_iterator;
