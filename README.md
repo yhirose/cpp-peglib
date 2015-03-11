@@ -21,16 +21,14 @@ How to use
 This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar and handle semantic values.
 
 ```c++
-#include <assert.h>
-
 // (1) Include the header file
 #include <peglib.h>
+#include <assert.h>
 
 using namespace peglib;
 using namespace std;
 
 int main(void) {
-
     // (2) Make a parser
     auto syntax = R"(
         # Grammar for Calculator...
@@ -42,22 +40,20 @@ int main(void) {
 
     peg parser(syntax);
 
-    parser.packrat_parsing(true); // Enable packrat parsing
-
     // (3) Setup an action
     parser["Additive"] = {
-        nullptr,                                                // Default action
+        nullptr,                                        // Default action
         [](const SemanticValues& sv) {
-            return sv[0].get<int>() + sv[1].get<int>(); // 1st choice
+            return sv[0].get<int>() + sv[1].get<int>(); // "Multitive '+' Additive"
         },
-        [](const SemanticValues& sv) { return sv[0]; }          // 2nd choice
+        [](const SemanticValues& sv) { return sv[0]; }  // "Multitive"
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice) {
-        case 0:  // 1st choice
+        case 0:  // "Multitive '+' Additive"
             return sv[0].get<int>() * sv[1].get<int>();
-        default: // 2nd choice
+        default: // "Multitive"
             return sv[0].get<int>();
         }
     };
@@ -67,6 +63,8 @@ int main(void) {
     };
 
     // (4) Parse
+    parser.packrat_parsing(true); // Enable packrat parsing.
+
     int val;
     parser.parse("(1+2)*3", val);
 

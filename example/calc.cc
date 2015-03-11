@@ -12,25 +12,12 @@
 using namespace peglib;
 using namespace std;
 
-//
-//  PEG syntax:
-//
-//      EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
-//      TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-//      FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
-//      TERM_OPERATOR    <-  < [-+] > _
-//      FACTOR_OPERATOR  <-  < [/*] > _
-//      NUMBER           <-  < [0-9]+ > _
-//      ~_               <-  [ \t\r\n]*
-//
 int main(int argc, const char** argv)
 {
     if (argc < 2 || string("--help") == argv[1]) {
         cout << "usage: calc [formula]" << endl;
         return 1;
     }
-
-    const char* s = argv[1];
 
     auto reduce = [](const SemanticValues& sv) -> long {
         auto result = sv[0].get<long>();
@@ -47,7 +34,7 @@ int main(int argc, const char** argv)
         return result;
     };
 
-    const char* syntax =
+    peg parser(
         "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
         "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
@@ -55,9 +42,7 @@ int main(int argc, const char** argv)
         "  FACTOR_OPERATOR  <-  < [/*] > _                        "
         "  NUMBER           <-  < [0-9]+ > _                      "
         "  ~_               <-  [ \t\r\n]*                        "
-        ;
-
-    peg parser(syntax);
+        );
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
@@ -65,9 +50,10 @@ int main(int argc, const char** argv)
     parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return (char)*s; };
     parser["NUMBER"]          = [](const char* s, size_t n) { return atol(s); };
 
+    auto expr = argv[1];
     long val = 0;
-    if (parser.parse(s, val)) {
-        cout << s << " = " << val << endl;
+    if (parser.parse(expr, val)) {
+        cout << expr << " = " << val << endl;
         return 0;
     }
 

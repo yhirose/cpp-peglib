@@ -29,8 +29,6 @@ int main(int argc, const char** argv)
         return 1;
     }
 
-    const char* s = argv[1];
-
     auto reduce = [](const SemanticValues& sv) -> long {
         auto result = sv[0].get<long>();
         for (auto i = 1u; i < sv.size(); i += 2) {
@@ -55,9 +53,10 @@ int main(int argc, const char** argv)
     FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t n) { return (char)*s; };
     NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t n) { return atol(s); };
 
+    auto expr = argv[1];
     long val = 0;
-    if (EXPRESSION.parse_and_get_value(s, val).ret) {
-        cout << s << " = " << val << endl;
+    if (EXPRESSION.parse_and_get_value(expr, val).ret) {
+        cout << expr << " = " << val << endl;
         return 0;
     }
 
