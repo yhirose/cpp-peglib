@@ -42,12 +42,7 @@ int main(int argc, const char** argv)
 
     peglib::peg peg;
 
-    bool firstError = true;
     peg.log = [&](size_t ln, size_t col, const string& msg) {
-        if (firstError) {
-            firstError = false;
-            cerr << "# PEG grammar syntax error" << endl;
-        }
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
@@ -68,13 +63,8 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    firstError = true;
     peg.log = [&](size_t ln, size_t col, const string& msg) {
-        if (firstError) {
-            firstError = false;
-            cerr << "# Source syntax error" << endl;
-        }
-        cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
+        cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
     if (!peg.parse_n(source.data(), source.size())) {
