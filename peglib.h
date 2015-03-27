@@ -23,7 +23,7 @@
 
 namespace peglib {
 
-void* enabler;
+extern void* enabler;
 
 /*-----------------------------------------------------------------------------
  *  any
@@ -426,11 +426,11 @@ typedef std::function<void (const char* s, size_t n, size_t id, const std::strin
 /*
  * Result
  */
-bool success(int len) {
+inline bool success(int len) {
     return len != -1;
 }
 
-bool fail(int len) {
+inline bool fail(int len) {
     return len == -1;
 }
 
