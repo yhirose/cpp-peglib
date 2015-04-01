@@ -189,6 +189,13 @@ struct SemanticValues : protected std::vector<SemanticValue>
 
     SemanticValues() : s(nullptr), n(0), choice(0) {}
 
+    std::string str(size_t i = 0) const {
+        if (i > 0) {
+            return (*this)[i].str();
+        }
+        return std::string(s, n);
+    }
+
     typedef SemanticValue T;
     using std::vector<T>::iterator;
     using std::vector<T>::const_iterator;
@@ -442,8 +449,9 @@ struct Context
     const char*                                  s;
     size_t                                       l;
 
-    const char*                                  error_ptr;
-    const char*                                  msg; // TODO: should be `int`.
+    const char*                                  error_pos;
+    const char*                                  message_pos;
+    std::string                                  message; // TODO: should be `int`.
 
     size_t                                       def_count;
     std::vector<bool>                            cache_register;
@@ -457,6 +465,8 @@ struct Context
     Context(const char* _s, size_t _l, size_t _def_count, bool enablePackratParsing)
         : s(_s)
         , l(_l)
+        , error_pos(nullptr)
+        , message_pos(nullptr)
         , def_count(_def_count)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
@@ -512,6 +522,10 @@ struct Context
     void pop() {
         stack_size--;
     }
+
+    void set_error_pos(const char* s) {
+        if (error_pos < s) error_pos = s;
+    }
 };
 
 /*
@@ -557,9 +571,6 @@ public:
             const auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                if (!c.msg) {
-                    c.msg = "missing an element in the 'sequence'";
-                }
                 return -1;
             }
             i += len;
@@ -614,8 +625,6 @@ public:
             id++;
             c.pop();
         }
-        c.error_ptr = s;
-        c.msg = "nothing was matched in the 'prioritized choice'";
         return -1;
     }
 
@@ -660,9 +669,6 @@ public:
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (fail(len)) {
-            if (!c.msg) {
-                c.msg = "nothing occurred in the 'one-or-more'";
-            }
             return -1;
         }
         auto i = len;
@@ -728,11 +734,13 @@ public:
 
     int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
+        auto error_pos = c.error_pos;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
-            c.error_ptr = s;
+            c.set_error_pos(s);
             return -1;
         } else {
+            c.error_pos = error_pos;
             return 0;
         }
     }
@@ -752,7 +760,7 @@ public:
         auto i = 0u;
         for (; i < lit_.size(); i++) {
             if (i >= n || s[i] != lit_[i]) {
-                c.error_ptr = s;
+                c.set_error_pos(s);
                 return -1;
             }
         }
@@ -773,7 +781,7 @@ public:
     int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (n < 1) {
-            c.error_ptr = s;
+            c.set_error_pos(s);
             return -1;
         }
         auto ch = s[0];
@@ -791,7 +799,7 @@ public:
                 i += 1;
             }
         }
-        c.error_ptr = s;
+        c.set_error_pos(s);
         return -1;
     }
 
@@ -809,7 +817,7 @@ public:
     int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (n < 1 || s[0] != ch_) {
-            c.error_ptr = s;
+            c.set_error_pos(s);
             return -1;
         }
         return 1;
@@ -827,7 +835,7 @@ public:
     int parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         // TODO: UTF8 support
         if (n < 1) {
-            c.error_ptr = s;
+            c.set_error_pos(s);
             return -1;
         }
         return 1;
@@ -1046,10 +1054,11 @@ class Definition
 {
 public:
     struct Result {
-        bool        ret;
-        int         len;
-        const char* error_ptr;
-        const char* msg;
+        bool              ret;
+        int               len;
+        const char*       error_pos;
+        const char*       message_pos;
+        const std::string message;
     };
 
     Definition()
@@ -1176,11 +1185,12 @@ public:
         holder_->accept(v);
     }
 
-    std::string         name;
-    size_t              id;
-    std::vector<Action> actions;
-    bool                ignoreSemanticValue;
-    bool                enablePackratParsing;
+    std::string                   name;
+    size_t                        id;
+    std::vector<Action>           actions;
+    std::function<std::string ()> error_message;
+    bool                          ignoreSemanticValue;
+    bool                          enablePackratParsing;
 
 private:
     friend class DefinitionReference;
@@ -1194,7 +1204,7 @@ private:
 
         Context c(s, n, defIds.ids.size(), enablePackratParsing);
         auto len = holder_->parse(s, n, sv, c, dt);
-        return Result { success(len), len, c.error_ptr, c.msg };
+        return Result{ success(len), len, c.error_pos, c.message_pos, c.message };
     }
 
     std::shared_ptr<Holder> holder_;
@@ -1246,6 +1256,11 @@ inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c
 
     if (success(len) && !outer_->ignoreSemanticValue) {
         sv.emplace_back(val, outer_->name.c_str(), ancs, ancn);
+    }
+
+    if (fail(len) && outer_->error_message && !c.message_pos) {
+        c.message_pos = s;
+        c.message = outer_->error_message();
     }
 
     return len;
@@ -1379,8 +1394,8 @@ inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
 
-inline std::pair<size_t, size_t> line_info(const char* beg, const char* cur) {
-    auto p = beg;
+inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
+    auto p = start;
     auto col_ptr = p;
     auto no = 1;
 
@@ -1659,8 +1674,8 @@ private:
 
         if (!r.ret) {
             if (log) {
-                auto line = line_info(s, r.error_ptr);
-                log(line.first, line.second, r.msg ? "syntax error" : r.msg);
+                auto line = line_info(s, r.error_pos);
+                log(line.first, line.second, r.message.empty() ? "syntax error" : r.message);
             }
             return nullptr;
         }
@@ -1951,8 +1966,8 @@ private:
     void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
         if (log) {
             if (!r.ret) {
-                auto line = line_info(s, r.error_ptr);
-                log(line.first, line.second, r.msg ? "syntax error" : r.msg);
+                auto line = line_info(s, r.error_pos);
+                log(line.first, line.second, r.message.empty() ? "syntax error" : r.message);
             } else if (r.len != n) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
