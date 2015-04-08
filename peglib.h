@@ -1,4 +1,4 @@
-//
+﻿//
 //  peglib.h
 //
 //  Copyright (c) 2015 Yuji Hirose. All rights reserved.
@@ -477,7 +477,7 @@ struct Context
     template <typename T>
     void packrat(const char* s, size_t def_id, int& len, any& val, T fn) {
         if (cache_register.empty()) {
-            fn(len, val);
+            fn(val);
             return;
         }
 
@@ -494,7 +494,7 @@ struct Context
                 return;
             }
         } else {
-            fn(len, val);
+            fn(val);
             cache_register[def_count * col + def_id] = true;
             cache_success[def_count * col + def_id] = success(len);
             if (success(len)) {
@@ -1226,7 +1226,7 @@ inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c
     const char* ancs = s;
     size_t      ancn = n;
 
-    c.packrat(s, outer_->id, len, val, [&](int& len, any& val) {
+    c.packrat(s, outer_->id, len, val, [&](any& val) {
         auto& chldsv = c.push();
 
         const auto& rule = *ope_;
