@@ -90,7 +90,7 @@ struct SemanticValue {
     const char* s;    // Token start for the semantic value
     size_t      n;    // Token length for the semantic value
 
-	// Utility method
+    // Utility method
     template <typename T> T& get();
     template <typename T> const T& get() const;
     std::string str() const;
@@ -108,7 +108,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::end;
     // NOTE: There are more std::vector methods available...
 
-	// Transform the semantice values vector to another vector
+    // Transform the semantice values vector to another vector
     template <typename F> auto map(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
     template <typename F> auto map(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
     template <typename T> auto map(size_t beg = 0, size_t end = -1) const -> vector<T>;
@@ -257,6 +257,29 @@ The following are available operators:
 | anc      | Anchor character    |
 | cap      | Capture character   |
 | usr      | User defiend parser |
+
+Predicate control
+-----------------
+
+```c++
+peg parser("NUMBER  <-  [0-9]+");
+
+parser["NUMBER"] = [](const char* s, size_t n) {
+    return stol(string(s, n), nullptr, 10);
+};
+
+parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
+    return val.get<long>() == 100;
+};
+
+long val;
+auto ret = parser.parse("100", val);
+assert(ret == true);
+assert(val == 100);
+
+ret = parser.parse("200", val);
+assert(ret == false);
+```
 
 Adjust definitions
 ------------------

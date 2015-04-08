@@ -422,6 +422,27 @@ TEST_CASE("Calculator test3", "[general]")
     REQUIRE(val == -3);
 }
 
+TEST_CASE("Predicate test", "[general]")
+{
+    peg parser("NUMBER  <-  [0-9]+");
+
+    parser["NUMBER"] = [](const char* s, size_t n) {
+        return stol(string(s, n), nullptr, 10);
+    };
+
+	parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
+		return val.get<long>() == 100;
+	};
+
+    long val;
+    auto ret = parser.parse("100", val);
+    REQUIRE(ret == true);
+    REQUIRE(val == 100);
+
+    ret = parser.parse("200", val);
+    REQUIRE(ret == false);
+}
+
 bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);

@@ -284,6 +284,11 @@ any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
 }
 
+/*
+ * Predicate
+ */
+typedef std::function<bool(const char* s, size_t n, const any& val, const any& dt)> Predicate;
+
 class Action
 {
 public:
@@ -1159,14 +1164,14 @@ public:
         return parse_and_get_value(s, n, dt, val);
     }
 
-    Definition& operator=(Action ac) {
+    Definition& operator=(Action action) {
         assert(!actions.empty());
-        actions[0] = ac;
+        actions[0] = action;
         return *this;
     }
 
-    Definition& operator=(std::initializer_list<Action> acs) {
-        actions = acs;
+    Definition& operator=(std::initializer_list<Action> ini) {
+        actions = ini;
         return *this;
     }
 
@@ -1187,6 +1192,7 @@ public:
 
     std::string                   name;
     size_t                        id;
+    Predicate                     predicate;
     std::vector<Action>           actions;
     std::function<std::string ()> error_message;
     bool                          ignoreSemanticValue;
@@ -1221,17 +1227,20 @@ inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c
         throw std::logic_error("Uninitialized definition ope was used...");
     }
 
-    int len;
-    any val;
-    const char* ancs = s;
-    size_t      ancn = n;
+    int         len;
+    any         val;
+    const char* anchors = s;
+    size_t      anchorn = n;
 
     c.packrat(s, outer_->id, len, val, [&](any& val) {
         auto& chldsv = c.push();
 
         const auto& rule = *ope_;
         len = rule.parse(s, n, chldsv, c, dt);
-        ancn = len;
+
+        anchorn = len;
+
+        // Invoke action
         if (success(len) && !outer_->ignoreSemanticValue) {
             assert(!outer_->actions.empty());
 
@@ -1241,8 +1250,8 @@ inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c
                 : outer_->actions[0];
 
             if (chldsv.s) {
-                ancs = chldsv.s;
-                ancn = chldsv.n;
+                anchors = chldsv.s;
+                anchorn = chldsv.n;
             } else {
                 chldsv.s = s;
                 chldsv.n = len;
@@ -1251,11 +1260,16 @@ inline int Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c
             val = reduce(chldsv, dt, action);
         }
 
+        // Predicate check
+        if (success(len) && outer_->predicate && !outer_->predicate(anchors, anchorn, val, dt)) {
+            len = -1;
+        }
+
         c.pop();
     });
 
     if (success(len) && !outer_->ignoreSemanticValue) {
-        sv.emplace_back(val, outer_->name.c_str(), ancs, ancn);
+        sv.emplace_back(val, outer_->name.c_str(), anchors, anchorn);
     }
 
     if (fail(len) && outer_->error_message && !c.message_pos) {
