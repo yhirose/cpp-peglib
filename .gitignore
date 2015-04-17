@@ -37,8 +37,6 @@ Release
 *.user
 xcuserdata
 *.xcworkspace
-calc
-calc2
-test
-peglint
 temp*
+build/
+Makefile
