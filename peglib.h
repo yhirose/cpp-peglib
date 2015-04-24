@@ -1757,12 +1757,9 @@ private:
     std::pair<char, int> parse_hex_number(const char* s, size_t n, size_t i) {
         char ret = 0;
         int val;
-        if (i < n && is_hex(s[i], val)) {
-            ret = n;
-            if (i + 1 < n && is_hex(s[i + 1], val)) {
-                ret = ret * 16 + val;
-                i++;
-            }
+        while (i < n && is_hex(s[i], val)) {
+            ret = ret * 16 + val;
+            i++;
         }
         return std::make_pair(ret, i);
     }
@@ -1770,16 +1767,9 @@ private:
     std::pair<char, int> parse_octal_number(const char* s, size_t n, size_t i) {
         char ret = 0;
         int val;
-        if (i < n && is_digit(s[i], val)) {
-            ret = n;
-            if (i + 1 < n && is_digit(s[i + 1], val)) {
-                ret = ret * 8 + val;
-                i++;
-                if (i + 1 < n && is_digit(s[i + 1], val)) {
-                    ret = ret * 8 + val;
-                    i++;
-                }
-            }
+        while (i < n && is_digit(s[i], val)) {
+            ret = ret * 8 + val;
+            i++;
         }
         return std::make_pair(ret, i);
     }
@@ -1788,31 +1778,34 @@ private:
         std::string r;
         r.reserve(n);
 
-        for (auto i = 0u; i < n; i++) {
+        auto i = 0u;
+        while (i < n) {
             auto ch = s[i];
             if (ch == '\\') {
                 i++;
                 switch (s[i]) {
-                    case 'n':  r += '\n'; break;
-                    case 'r':  r += '\r'; break;
-                    case 't':  r += '\t'; break;
-                    case '\'': r += '\''; break;
-                    case '"':  r += '"';  break;
-                    case '[':  r += '[';  break;
-                    case ']':  r += ']';  break;
-                    case '\\': r += '\\'; break;
+                    case 'n':  r += '\n'; i++; break;
+                    case 'r':  r += '\r'; i++; break;
+                    case 't':  r += '\t'; i++; break;
+                    case '\'': r += '\''; i++; break;
+                    case '"':  r += '"';  i++; break;
+                    case '[':  r += '[';  i++; break;
+                    case ']':  r += ']';  i++; break;
+                    case '\\': r += '\\'; i++; break;
                     case 'x': {
                         std::tie(ch, i) = parse_hex_number(s, n, i + 1);
                         r += ch;
                         break;
                     }
                     default: {
-                        std::tie(ch, i) = parse_octal_number(s, n, i + 1);
+                        std::tie(ch, i) = parse_octal_number(s, n, i);
+                        r += ch;
                         break;
                     }
                 }
             } else {
                 r += ch;
+                i++;
             }
         }
         return r;

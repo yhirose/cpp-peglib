@@ -235,7 +235,7 @@ TEST_CASE("Backtracking test", "[general]")
 TEST_CASE("Octal/Hex value test", "[general]")
 {
     peglib::peg parser(
-        " ROOT <- '\132\x7a' "
+        R"( ROOT <- '\132\x7a' )"
     );
 
     auto ret = parser.parse("Zz");
