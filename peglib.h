@@ -8,18 +8,19 @@
 #ifndef _CPPPEGLIB_PEGLIB_H_
 #define _CPPPEGLIB_PEGLIB_H_
 
-#include <functional>
-#include <string>
-#include <limits>
-#include <memory>
-#include <mutex>
-#include <vector>
-#include <unordered_map>
-#include <map>
+#include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace peglib {
 
@@ -86,7 +87,9 @@ public:
         typename std::enable_if<!std::is_same<T, any>::value>::type*& = enabler
     >
     T& get() {
-        assert(content_);
+        if (!content_) {
+            throw std::bad_cast();
+        }
         auto p = dynamic_cast<holder<T>*>(content_);
         assert(p);
         if (!p) {
@@ -170,7 +173,7 @@ struct SemanticValue {
     const T& get() const {
         return val.get<T>();
     }
-
+    
     std::string str() const {
         return std::string(s, n);
     }
@@ -1480,7 +1483,10 @@ private:
         std::unordered_map<std::string, const char*> references;
         size_t                                       capture_count;
 
-        Data() : grammar(std::make_shared<Grammar>()), capture_count(0) {}
+        Data()
+            : grammar(std::make_shared<Grammar>())
+            , capture_count(0)
+            {}
     };
 
     void make_grammar() {
@@ -1627,15 +1633,18 @@ private:
         };
 
         g["Primary"].actions = {
+            // Default
             [&](const SemanticValues& sv) {
                 return sv[0];
             },
+            // Reference
             [&](const SemanticValues& sv, any& dt) {
                 Data& data = *dt.get<Data*>();
                 const auto& ident = sv[0].val.get<std::string>();
                 data.references[ident] = sv.s; // for error handling
                 return ref(*data.grammar, ident);
             },
+            // (Expression)
             [&](const SemanticValues& sv) {
                 return sv[1];
             },
@@ -1656,6 +1665,7 @@ private:
         g["IdentCont"] = [](const char* s, size_t n) {
             return std::string(s, n);
         };
+
         g["Literal"] = [this](const char* s, size_t n) {
             return lit(resolve_escape_sequence(s, n));
         };
@@ -1668,6 +1678,7 @@ private:
         g["QUESTION"] = [](const char* s, size_t n) { return *s; };
         g["STAR"]     = [](const char* s, size_t n) { return *s; };
         g["PLUS"]     = [](const char* s, size_t n) { return *s; };
+
 
         g["DOT"] = []() { return dot(); };
     }
@@ -1813,6 +1824,51 @@ private:
 
     Grammar g;
 };
+
+/*-----------------------------------------------------------------------------
+ *  AST
+ *---------------------------------------------------------------------------*/
+
+struct Ast
+{
+    Ast(const char* _name, int _type, const std::vector<std::shared_ptr<Ast>>& _nodes)
+        : name(_name), type(_type), is_token(false), nodes(_nodes) {}
+
+    Ast(const char* _name, int _type, const std::string& _token)
+        : name(_name), type(_type), is_token(true), token(_token) {}
+
+    void print() const;
+
+    const std::string                       name;
+    const int                               type;
+    const bool                              is_token;
+    const std::string                       token;
+    const std::vector<std::shared_ptr<Ast>> nodes;
+};
+
+struct AstPrint
+{
+    AstPrint() : level_(-1) {}
+
+    void print(const Ast& ast) {
+        level_ += 1;
+        for (auto i = 0; i < level_; i++) { std::cout << "    "; }
+        if (ast.is_token) {
+            std::cout << ast.name << ": '" << ast.token << "'" << std::endl;
+        } else {
+            std::cout << ast.name << std::endl;
+        }
+        for (auto node : ast.nodes) { print(*node); }
+        level_ -= 1;
+    }
+
+private:
+    int level_;
+};
+
+inline void Ast::print() const {
+    AstPrint().print(*this);
+}
 
 /*-----------------------------------------------------------------------------
  *  peg
@@ -1965,6 +2021,51 @@ public:
             rule.enablePackratParsing = sw;
         }
     }
+
+    peg& ast_node(const char* name, int type) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            return std::make_shared<Ast>(name, type, sv.map<std::shared_ptr<Ast>>());
+        };
+        return *this;
+    }
+
+    peg& ast_list(const char* name, int type) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            if (sv.size() == 1) {
+                std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                return ast;
+            }
+            return std::make_shared<Ast>(name, type, sv.map<std::shared_ptr<Ast>>());
+        };
+        return *this;
+    }
+
+    peg& ast_token(const char* name, int type = -1) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            return std::make_shared<Ast>(name, type, std::string(sv.s, sv.n));
+        };
+        return *this;
+    }
+
+    peg& ast_end() {
+        for (auto& x: *grammar_) {
+            const auto& name = x.first;
+            auto& def = x.second;
+            auto& action = def.actions.front();
+            if (!action) {
+                action = [&](const SemanticValues& sv) {
+                    if (sv.size() == 1) {
+                        std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                        return ast;
+                    }
+                    //std::string msg = "AST handler for '" + name + "' is not defined...";
+                    //throw std::logic_error(msg);
+                    return std::make_shared<Ast>(name.c_str(), -1, sv.map<std::shared_ptr<Ast>>());
+                };
+            }
+        }
+        return *this;
+    };
 
     MatchAction match_action;
     Log         log;
@@ -2235,7 +2336,6 @@ private:
     peg_token_iterator beg_iter;
     peg_token_iterator end_iter;
 };
-
 
 } // namespace peglib
 
