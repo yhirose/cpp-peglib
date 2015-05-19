@@ -430,9 +430,9 @@ TEST_CASE("Predicate test", "[general]")
         return stol(string(s, n), nullptr, 10);
     };
 
-	parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
-		return val.get<long>() == 100;
-	};
+    parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
+        return val.get<long>() == 100;
+    };
 
     long val;
     auto ret = parser.parse("100", val);
