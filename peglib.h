@@ -1852,11 +1852,11 @@ struct AstPrint
 
     void print(const Ast& ast) {
         level_ += 1;
-        for (auto i = 0; i < level_; i++) { std::cout << "    "; }
+        for (auto i = 0; i < level_; i++) { std::cout << "  "; }
         if (ast.is_token) {
-            std::cout << ast.name << ": '" << ast.token << "'" << std::endl;
+            std::cout << "- " << ast.name << ": '" << ast.token << "'" << std::endl;
         } else {
-            std::cout << ast.name << std::endl;
+            std::cout << "+ " << ast.name << std::endl;
         }
         for (auto node : ast.nodes) { print(*node); }
         level_ -= 1;
