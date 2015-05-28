@@ -2022,14 +2022,14 @@ public:
         }
     }
 
-    peg& ast_node(const char* name, int type) {
+    peg& ast_node(const char* name, int type = -1) {
         (*this)[name] = [=](const SemanticValues& sv) {
             return std::make_shared<Ast>(name, type, sv.map<std::shared_ptr<Ast>>());
         };
         return *this;
     }
 
-    peg& ast_list(const char* name, int type) {
+    peg& ast_node_optimizable(const char* name, int type = -1) {
         (*this)[name] = [=](const SemanticValues& sv) {
             if (sv.size() == 1) {
                 std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
@@ -2058,8 +2058,6 @@ public:
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }
-                    //std::string msg = "AST handler for '" + name + "' is not defined...";
-                    //throw std::logic_error(msg);
                     return std::make_shared<Ast>(name.c_str(), -1, sv.map<std::shared_ptr<Ast>>());
                 };
             }
