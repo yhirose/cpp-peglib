@@ -2065,6 +2065,11 @@ public:
         return *this;
     };
 
+    peg& set_logger(Log _log) {
+        log = _log;
+        return *this;
+    }
+
     MatchAction match_action;
     Log         log;
 
