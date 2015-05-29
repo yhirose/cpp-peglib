@@ -20,7 +20,7 @@ static auto g_grammar = R"(
     PRIMARY             <-  CONDITION (CONDITION_OPERATOR CONDITION)?
     CONDITION           <-  TERM (TERM_OPERATOR TERM)*
     TERM                <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-    FACTOR              <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+    FACTOR              <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
 
     BLOCK               <-  '{' _ STATEMENTS '}' _
 
@@ -32,6 +32,9 @@ static auto g_grammar = R"(
     NUMBER              <-  < [0-9]+ > _
     BOOLEAN             <-  < ('true' / 'false') > _
     STRING              <-  ['] < (!['] .)* > ['] _
+
+    INTERPOLATED_STRING   <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
+    INTERPOLATED_CONTENT  <-  (!["{] .) (!["{] .)*
 
     ~_                  <-  (Space / EndOfLine / Comment)*
     Space               <-  ' ' / '\t'
@@ -76,6 +79,8 @@ peglib::peg& get_parser()
             .ast_token("BOOLEAN", Boolean)
             .ast_token("STRING")
             .ast_token("IDENTIFIER", Identifier)
+            .ast_node("INTERPOLATED_STRING", InterpolatedString)
+            .ast_token("INTERPOLATED_CONTENT")
             .ast_end();
     }
 

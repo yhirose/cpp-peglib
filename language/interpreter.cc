@@ -20,6 +20,7 @@ struct Eval
             case Identifier:   return eval_identifier(ast, env);
             case Number:       return eval_number(ast, env);
             case Boolean:      return eval_bool(ast, env);
+            case InterpolatedString: return eval_interpolated_string(ast, env);
         }
 
         if (ast.is_token) {
@@ -172,6 +173,15 @@ private:
 
     static Value eval_bool(const Ast& ast, Env& env) {
         return Value(ast.token == "true");
+    };
+
+    static Value eval_interpolated_string(const Ast& ast, Env& env) {
+        string s;
+        for (auto node: ast.nodes) {
+            const auto& val = eval(*node, env);
+            s += val.str();
+        }
+        return Value(s);
     };
 
     static Value dereference_identirier(Env& env, const string& var) {

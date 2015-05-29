@@ -3,7 +3,8 @@
 enum AstType
 {
    Statements, While, If, FunctionCall, Assignment, Condition, BinExpresion,
-   Identifier, Number, Boolean, Function
+   Identifier, InterpolatedString,
+   Number, Boolean, Function
 };
 
 peglib::peg& get_parser();

@@ -61,6 +61,19 @@ struct Value
         throw std::runtime_error("type error.");
     }
 
+    std::string str() const {
+        switch (type) {
+            case Undefined: return "undefined";
+            case Bool:      return to_bool() ? "true" : "false";
+            case Long:      return std::to_string(to_long()); break;
+            case String:    return to_string();
+            //case Function:  return "[function]";
+            //case Array:     return "[array]";
+            default: throw std::logic_error("invalid internal condition.");
+        }
+        // NOTREACHED
+    }
+
     std::ostream& out(std::ostream& os) const {
         switch (type) {
             case Undefined: os << "undefined"; break;
@@ -181,7 +194,7 @@ struct Env
         auto func_pretty_print = Value::FunctionValue {
             { "arg" },
             [](Env& env) {
-                std::cout << env.get("arg") << std::endl;
+                std::cout << env.get("arg").str() << std::endl;
                 return Value();
             }
         };
