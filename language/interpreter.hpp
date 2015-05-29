@@ -67,8 +67,8 @@ struct Value
             case Bool:      return to_bool() ? "true" : "false";
             case Long:      return std::to_string(to_long()); break;
             case String:    return to_string();
-            //case Function:  return "[function]";
-            //case Array:     return "[array]";
+            case Function:  return "[function]";
+            case Array:     return "[array]";
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
