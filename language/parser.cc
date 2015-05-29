@@ -4,43 +4,43 @@ using namespace peglib;
 using namespace std;
 
 static auto g_grammar = R"(
-    PROGRAM             <-  _ STATEMENTS
+    PROGRAM               <-  _ STATEMENTS
 
-    STATEMENTS          <-  EXPRESSION*
+    STATEMENTS            <-  EXPRESSION*
 
-    EXPRESSION          <-  ASSIGNMENT / PRIMARY
-    ASSIGNMENT          <-  IDENTIFIER '=' _ EXPRESSION
-    WHILE               <- 'while' _ EXPRESSION BLOCK
-    IF                  <- 'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
-    FUNCTION            <-  'fn' _ PARAMETERS BLOCK
-    PARAMETERS          <-  '(' _ IDENTIFIER* ')' _ 
-    FUNCTION_CALL       <-  IDENTIFIER ARGUMENTS
-    ARGUMENTS           <-  '(' _ EXPRESSION* ')' _ 
+    EXPRESSION            <-  ASSIGNMENT / PRIMARY
+    ASSIGNMENT            <-  IDENTIFIER '=' _ EXPRESSION
+    WHILE                 <-  'while' _ EXPRESSION BLOCK
+    IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
+    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
+    PARAMETERS            <-  '(' _ IDENTIFIER* ')' _ 
+    FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
+    ARGUMENTS             <-  '(' _ EXPRESSION* ')' _ 
 
-    PRIMARY             <-  CONDITION (CONDITION_OPERATOR CONDITION)?
-    CONDITION           <-  TERM (TERM_OPERATOR TERM)*
-    TERM                <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-    FACTOR              <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+    PRIMARY               <-  CONDITION (CONDITION_OPERATOR CONDITION)?
+    CONDITION             <-  TERM (TERM_OPERATOR TERM)*
+    TERM                  <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+    FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
 
-    BLOCK               <-  '{' _ STATEMENTS '}' _
+    BLOCK                 <-  '{' _ STATEMENTS '}' _
 
-    CONDITION_OPERATOR  <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
-    TERM_OPERATOR       <-  < [-+] > _
-    FACTOR_OPERATOR     <-  < [*/%] > _
-    IDENTIFIER          <-  < [a-zA-Z_]+ > _
+    CONDITION_OPERATOR    <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
+    TERM_OPERATOR         <-  < [-+] > _
+    FACTOR_OPERATOR       <-  < [*/%] > _
+    IDENTIFIER            <-  < [a-zA-Z_]+ > _
 
-    NUMBER              <-  < [0-9]+ > _
-    BOOLEAN             <-  < ('true' / 'false') > _
-    STRING              <-  ['] < (!['] .)* > ['] _
+    NUMBER                <-  < [0-9]+ > _
+    BOOLEAN               <-  < ('true' / 'false') > _
+    STRING                <-  ['] < (!['] .)* > ['] _
 
     INTERPOLATED_STRING   <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
     INTERPOLATED_CONTENT  <-  (!["{] .) (!["{] .)*
 
-    ~_                  <-  (Space / EndOfLine / Comment)*
-    Space               <-  ' ' / '\t'
-    EndOfLine           <-  '\r\n' / '\n' / '\r'
-    EndOfFile           <-  !.
-    Comment             <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
+    ~_                    <-  (Space / EndOfLine / Comment)*
+    Space                 <-  ' ' / '\t'
+    EndOfLine             <-  '\r\n' / '\n' / '\r'
+    EndOfFile             <-  !.
+    Comment               <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
 )";
 
 peglib::peg& get_parser()
