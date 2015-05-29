@@ -178,14 +178,14 @@ struct Env
     }
 
     void setup_built_in_functions() {
-        auto func_print = Value::FunctionValue {
+        auto func_pretty_print = Value::FunctionValue {
             { "arg" },
             [](Env& env) {
                 std::cout << env.get("arg") << std::endl;
                 return Value();
             }
         };
-        set("print", Value(func_print));
+        set("pp", Value(func_pretty_print));
     }
 
 private:
