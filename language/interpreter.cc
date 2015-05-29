@@ -56,12 +56,19 @@ private:
     }
 
     static Value eval_if(const Ast& ast, Env& env) {
-        auto cond = eval(*ast.nodes[0], env);
-        if (cond.to_bool()) {
-            return eval(*ast.nodes[1], env);
-        } else if (ast.nodes.size() > 2) {
-            return eval(*ast.nodes[2], env);
+        const auto& nodes = ast.nodes;
+
+        for (auto i = 0u; i < nodes.size(); i += 2) {
+            if (i + 1 == nodes.size()) {
+                return eval(*nodes[i], env);
+            } else {
+                auto cond = eval(*nodes[i], env);
+                if (cond.to_bool()) {
+                    return eval(*nodes[i + 1], env);
+                }
+            }
         }
+
         return Value();
     }
 
