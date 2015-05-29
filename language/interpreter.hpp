@@ -193,4 +193,4 @@ private:
     std::map<std::string, Value> dic_;
 };
 
-bool run(Env& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);
+bool run(const std::string& path, Env& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);

@@ -44,27 +44,31 @@ int main(int argc, const char** argv)
         shell = path_list.empty();
     }
 
-    Env env;
-    env.setup_built_in_functions();
+    try {
+        Env env;
+        env.setup_built_in_functions();
 
-    for (auto path: path_list) {
-        vector<char> buff;
-        if (!read_file(path, buff)) {
-            cerr << "can't open '" << path << "'." << endl;
-            return -1;
+        for (auto path: path_list) {
+            vector<char> buff;
+            if (!read_file(path, buff)) {
+                cerr << "can't open '" << path << "'." << endl;
+                return -1;
+            }
+
+            Value val;
+            string msg;
+            if (!run(path, env, buff.data(), buff.size(), val, msg, print_ast)) {
+                cerr << msg;
+                return -1;
+            }
         }
 
-        Value val;
-        string msg;
-        if (!run(env, buff.data(), buff.size(), val, msg, print_ast)) {
-            cerr << "error in '" << path << "'." << endl;
-            cerr << msg.c_str() << endl;
-            return -1;
+        if (shell) {
+            repl(env, print_ast);
         }
-    }
-
-    if (shell) {
-        repl(env, print_ast);
+    } catch (exception& e) {
+        cerr << e.what() << endl;
+        return -1;
     }
 
     return 0;

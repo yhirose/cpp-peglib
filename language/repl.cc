@@ -16,11 +16,11 @@ int repl(Env& env, bool print_ast)
         if (!line.empty()) {
             Value val;
             string msg;
-            if (run(env, line.c_str(), line.size(), val, msg, print_ast)) {
+            if (run("(repl)", env, line.c_str(), line.size(), val, msg, print_ast)) {
                 cout << val << endl;
                 linenoise::AddHistory(line.c_str());
             } else if (!msg.empty()) {
-                cout << msg << endl;
+                cout << msg;
             }
         }
     }

@@ -1,5 +1,6 @@
 #include "interpreter.hpp"
 #include "parser.hpp"
+#include <sstream>
 
 using namespace peglib;
 using namespace std;
@@ -187,19 +188,28 @@ std::ostream& operator<<(std::ostream& os, const Value& val)
     return val.out(os);
 }
 
-bool run(Env& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
+bool run(const string& path, Env& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
 {
     try {
         shared_ptr<Ast> ast;        
-        if (get_parser().parse_n(expr, len, ast)) {
+
+        auto& parser = get_parser();
+
+        parser.log = [&](size_t ln, size_t col, const string& err_msg) {
+            stringstream ss;
+            ss << path << ":" << ln << ":" << col << ": " << err_msg << endl;
+            msg = ss.str();
+        };
+
+        if (parser.parse_n(expr, len, ast)) {
             if (print_ast) {
                 ast->print();
             }
 
             val = Eval::eval(*ast, env);
             return true;
-	     }
-    } catch (exception& e) {
+        }
+    } catch (runtime_error& e) {
         msg = e.what();
     }
 

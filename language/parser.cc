@@ -40,33 +40,46 @@ static auto g_grammar = R"(
     Comment             <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
 )";
 
-static auto g_parser = peg(g_grammar)
-    .ast_node_optimizable("STATEMENTS", Statements)
-    .ast_node("WHILE", While)
-    .ast_node("ASSIGNMENT", Assignment)
-    .ast_node("IF", If)
-    .ast_node("FUNCTION", Function)
-    .ast_node("PARAMETERS")
-    .ast_node("FUNCTION_CALL", FunctionCall)
-    .ast_node("ARGUMENTS")
-    .ast_node_optimizable("PRIMARY", Condition)
-    .ast_node_optimizable("CONDITION", BinExpresion)
-    .ast_node_optimizable("TERM", BinExpresion)
-    .ast_token("CONDITION_OPERATOR")
-    .ast_token("TERM_OPERATOR")
-    .ast_token("FACTOR_OPERATOR")
-    .ast_token("NUMBER", Number)
-    .ast_token("BOOLEAN", Boolean)
-    .ast_token("STRING")
-    .ast_token("IDENTIFIER", Identifier)
-    .ast_end()
-    .set_logger([&](size_t ln, size_t col, const string& msg) {
-        cerr << ln << ":" << col << ": " << msg << endl;
-    });
-
-const peglib::peg& get_parser()
+peglib::peg& get_parser()
 {
-    return g_parser;
+    static peg parser;
+
+    static bool initialized = false;
+
+    if (!initialized) {
+        initialized = true;
+
+        parser.log = [&](size_t ln, size_t col, const string& msg) {
+            cerr << ln << ":" << col << ": " << msg << endl;
+        };
+
+        if (!parser.load_grammar(g_grammar)) {
+            throw logic_error("invalid peg grammar");
+        }
+
+        parser
+            .ast_node_optimizable("STATEMENTS", Statements)
+            .ast_node("WHILE", While)
+            .ast_node("ASSIGNMENT", Assignment)
+            .ast_node("IF", If)
+            .ast_node("FUNCTION", Function)
+            .ast_node("PARAMETERS")
+            .ast_node("FUNCTION_CALL", FunctionCall)
+            .ast_node("ARGUMENTS")
+            .ast_node_optimizable("PRIMARY", Condition)
+            .ast_node_optimizable("CONDITION", BinExpresion)
+            .ast_node_optimizable("TERM", BinExpresion)
+            .ast_token("CONDITION_OPERATOR")
+            .ast_token("TERM_OPERATOR")
+            .ast_token("FACTOR_OPERATOR")
+            .ast_token("NUMBER", Number)
+            .ast_token("BOOLEAN", Boolean)
+            .ast_token("STRING")
+            .ast_token("IDENTIFIER", Identifier)
+            .ast_end();
+    }
+
+    return parser;
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix
