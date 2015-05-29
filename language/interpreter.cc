@@ -140,6 +140,7 @@ private:
                 case '-': ret -= val; break;
                 case '*': ret *= val; break;
                 case '/': ret /= val; break;
+                case '%': ret %= val; break;
             }
         }
         return Value(ret);

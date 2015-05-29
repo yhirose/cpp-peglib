@@ -26,7 +26,7 @@ static auto g_grammar = R"(
 
     CONDITION_OPERATOR  <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
     TERM_OPERATOR       <-  < [-+] > _
-    FACTOR_OPERATOR     <-  < [*/] > _
+    FACTOR_OPERATOR     <-  < [*/%] > _
     IDENTIFIER          <-  < [a-zA-Z_]+ > _
 
     NUMBER              <-  < [0-9]+ > _
