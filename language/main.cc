@@ -45,8 +45,8 @@ int main(int argc, const char** argv)
     }
 
     try {
-        Env env;
-        env.setup_built_in_functions();
+        auto env = make_shared<Environment>();
+        env->setup_built_in_functions();
 
         for (auto path: path_list) {
             vector<char> buff;

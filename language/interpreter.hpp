@@ -2,7 +2,7 @@
 #include <string>
 #include <peglib.h>
 
-struct Env;
+struct Environment;
 
 struct Value
 {
@@ -14,7 +14,7 @@ struct Value
 
     struct FunctionValue {
         std::vector<std::string>        params;
-        std::function<Value (Env& env)> eval;
+        std::function<Value (std::shared_ptr<Environment>& env)> eval;
     };
 
     explicit Value() : type(Undefined) {}
@@ -163,10 +163,10 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const Value& val);
 
-struct Env
+struct Environment
 {
-    Env() : outer_(nullptr) {}
-    Env(Env& outer) : outer_(&outer) {}
+    Environment() = default;
+    Environment(std::shared_ptr<Environment>& outer) : outer_(outer) {}
 
     bool has(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
@@ -187,14 +187,20 @@ struct Env
     }
 
     void set(const std::string& s, const Value& val) {
+        if (dic_.find(s) != dic_.end()) {
+            dic_[s] = val;
+        }
+        if (outer_ && outer_->has(s)) {
+            return outer_->set(s, val);
+        }
         dic_[s] = val;
     }
 
     void setup_built_in_functions() {
         auto func_pretty_print = Value::FunctionValue {
             { "arg" },
-            [](Env& env) {
-                std::cout << env.get("arg").str() << std::endl;
+            [](std::shared_ptr<Environment>& env) {
+                std::cout << env->get("arg").str() << std::endl;
                 return Value();
             }
         };
@@ -202,8 +208,8 @@ struct Env
     }
 
 private:
-    Env*                         outer_;
+    std::shared_ptr<Environment> outer_;
     std::map<std::string, Value> dic_;
 };
 
-bool run(const std::string& path, Env& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);
+bool run(const std::string& path, std::shared_ptr<Environment>& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);

@@ -4,7 +4,7 @@
 
 using namespace std;
 
-int repl(Env& env, bool print_ast)
+int repl(shared_ptr<Environment>& env, bool print_ast)
 {
     for (;;) {
         auto line = linenoise::Readline("cul> ");
