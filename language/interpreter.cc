@@ -9,17 +9,17 @@ struct Eval
 {
     static Value eval(const Ast& ast, shared_ptr<Environment> env) {
         switch (ast.type) {
-            case Statements:   return eval_statements(ast, env);
-            case While:        return eval_while(ast, env);
-            case If:           return eval_if(ast, env);
-            case Function:     return eval_function(ast, env);
-            case FunctionCall: return eval_function_call(ast, env);
-            case Assignment:   return eval_assignment(ast, env);
-            case Condition:    return eval_condition(ast, env);
-            case BinExpresion: return eval_bin_expression(ast, env);
-            case Identifier:   return eval_identifier(ast, env);
-            case Number:       return eval_number(ast, env);
-            case Boolean:      return eval_bool(ast, env);
+            case Statements:         return eval_statements(ast, env);
+            case While:              return eval_while(ast, env);
+            case If:                 return eval_if(ast, env);
+            case Function:           return eval_function(ast, env);
+            case FunctionCall:       return eval_function_call(ast, env);
+            case Assignment:         return eval_assignment(ast, env);
+            case Condition:          return eval_condition(ast, env);
+            case BinExpresion:       return eval_bin_expression(ast, env);
+            case Identifier:         return eval_identifier(ast, env);
+            case Number:             return eval_number(ast, env);
+            case Boolean:            return eval_bool(ast, env);
             case InterpolatedString: return eval_interpolated_string(ast, env);
         }
 
