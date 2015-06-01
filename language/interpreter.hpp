@@ -13,8 +13,8 @@ struct Value
     };
 
     struct FunctionValue {
-        std::vector<std::string>        params;
-        std::function<Value (std::shared_ptr<Environment>& env)> eval;
+        std::vector<std::string>                                params;
+        std::function<Value (std::shared_ptr<Environment> env)> eval;
     };
 
     explicit Value() : type(Undefined) {}
@@ -166,14 +166,19 @@ std::ostream& operator<<(std::ostream& os, const Value& val);
 struct Environment
 {
     Environment() = default;
-    Environment(std::shared_ptr<Environment>& outer) : outer_(outer) {}
+
+    void push_outer(std::shared_ptr<Environment> outer) {
+        outers_.push_back(outer);
+    }
 
     bool has(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return true;
         }
-        if (outer_) {
-            return outer_->has(s);
+        for (auto& outer: outers_) {
+            if (outer->has(s)) {
+                return true;
+            }
         }
         return false;
     }
@@ -183,15 +188,23 @@ struct Environment
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s);
         }
-        return outer_->get(s);
+        for (auto& outer: outers_) {
+            if (outer->has(s)) {
+                return outer->get(s);
+            }
+        }
+        // NOT REACHED
     }
 
     void set(const std::string& s, const Value& val) {
         if (dic_.find(s) != dic_.end()) {
             dic_[s] = val;
         }
-        if (outer_ && outer_->has(s)) {
-            return outer_->set(s, val);
+        for (auto& outer: outers_) {
+            if (outer->has(s)) {
+                outer->set(s, val);
+                return;
+            }
         }
         dic_[s] = val;
     }
@@ -199,7 +212,7 @@ struct Environment
     void setup_built_in_functions() {
         auto func_pretty_print = Value::FunctionValue {
             { "arg" },
-            [](std::shared_ptr<Environment>& env) {
+            [](std::shared_ptr<Environment> env) {
                 std::cout << env->get("arg").str() << std::endl;
                 return Value();
             }
@@ -208,8 +221,8 @@ struct Environment
     }
 
 private:
-    std::shared_ptr<Environment> outer_;
+    std::vector<std::shared_ptr<Environment>> outers_;
     std::map<std::string, Value> dic_;
 };
 
-bool run(const std::string& path, std::shared_ptr<Environment>& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);
+bool run(const std::string& path, std::shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);

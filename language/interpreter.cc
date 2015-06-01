@@ -7,7 +7,7 @@ using namespace std;
 
 struct Eval
 {
-    static Value eval(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval(const Ast& ast, shared_ptr<Environment> env) {
         switch (ast.type) {
             case Statements:   return eval_statements(ast, env);
             case While:        return eval_while(ast, env);
@@ -32,7 +32,7 @@ struct Eval
     }
 
 private:
-    static Value eval_statements(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_statements(const Ast& ast, shared_ptr<Environment> env) {
         if (ast.is_token) {
             return eval(ast, env);
         } else if (ast.nodes.empty()) {
@@ -46,7 +46,7 @@ private:
         return eval(**it, env);
     }
 
-    static Value eval_while(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_while(const Ast& ast, shared_ptr<Environment> env) {
         for (;;) {
             auto cond = eval(*ast.nodes[0], env);
             if (!cond.to_bool()) {
@@ -57,7 +57,7 @@ private:
         return Value();
     }
 
-    static Value eval_if(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_if(const Ast& ast, shared_ptr<Environment> env) {
         const auto& nodes = ast.nodes;
 
         for (auto i = 0u; i < nodes.size(); i += 2) {
@@ -74,7 +74,7 @@ private:
         return Value();
     }
 
-    static Value eval_function(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_function(const Ast& ast, shared_ptr<Environment> env) {
         vector<string> params;
         for (auto node: ast.nodes[0]->nodes) {
             params.push_back(node->token);
@@ -84,14 +84,16 @@ private:
 
         auto f = Value::FunctionValue {
             params,
-            [=](shared_ptr<Environment>& callEnv) {
-	            return eval(*body, callEnv);
-	        }
+            [=](shared_ptr<Environment> callEnv) {
+                callEnv->push_outer(env);
+                auto ret = eval(*body, callEnv);
+                return ret;
+            }
         };
         return Value(f);
     };
 
-    static Value eval_function_call(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_function_call(const Ast& ast, shared_ptr<Environment> env) {
         const auto& var = ast.nodes[0]->token;
         const auto& args = ast.nodes[1]->nodes;
 
@@ -99,7 +101,8 @@ private:
         const auto& fv = f.to_function();
 
         if (fv.params.size() <= args.size()) {
-            auto callEnv = make_shared<Environment>(env);
+            auto callEnv = make_shared<Environment>();
+
             callEnv->set("self", f);
 
             for (auto i = 0u; i < fv.params.size(); i++) {
@@ -108,6 +111,9 @@ private:
                 auto val = eval(*arg, env);
                 callEnv->set(var, val);
             }
+
+            callEnv->push_outer(env);
+
             return fv.eval(callEnv);
         }
 
@@ -115,7 +121,7 @@ private:
         throw runtime_error(msg);
     }
 
-    static Value eval_condition(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_condition(const Ast& ast, shared_ptr<Environment> env) {
         auto lhs = eval(*ast.nodes[0], env);
         if (ast.nodes.size() > 1) {
             auto ope = eval(*ast.nodes[1], env).to_string();
@@ -140,7 +146,7 @@ private:
         return lhs; // Any
     }
 
-    static Value eval_bin_expression(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_bin_expression(const Ast& ast, shared_ptr<Environment> env) {
         auto ret = eval(*ast.nodes[0], env).to_long();
         for (auto i = 1u; i < ast.nodes.size(); i += 2) {
             auto val = eval(*ast.nodes[i + 1], env).to_long();
@@ -156,27 +162,27 @@ private:
         return Value(ret);
     }
 
-    static Value eval_assignment(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_assignment(const Ast& ast, shared_ptr<Environment> env) {
         const auto& var = ast.nodes[0]->token;
         auto val = eval(*ast.nodes[1], env);
         env->set(var, val);
         return val;
     };
 
-    static Value eval_identifier(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_identifier(const Ast& ast, shared_ptr<Environment> env) {
         const auto& var = ast.token;
         return dereference_identirier(env, var);
     };
 
-    static Value eval_number(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_number(const Ast& ast, shared_ptr<Environment> env) {
         return Value(stol(ast.token));
     };
 
-    static Value eval_bool(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_bool(const Ast& ast, shared_ptr<Environment> env) {
         return Value(ast.token == "true");
     };
 
-    static Value eval_interpolated_string(const Ast& ast, shared_ptr<Environment>& env) {
+    static Value eval_interpolated_string(const Ast& ast, shared_ptr<Environment> env) {
         string s;
         for (auto node: ast.nodes) {
             const auto& val = eval(*node, env);
@@ -185,7 +191,7 @@ private:
         return Value(s);
     };
 
-    static Value dereference_identirier(shared_ptr<Environment>& env, const string& var) {
+    static Value dereference_identirier(shared_ptr<Environment> env, const string& var) {
         if (!env->has(var)) {
             string msg = "undefined variable '" + var + "'...";
             throw runtime_error(msg);
@@ -199,7 +205,7 @@ std::ostream& operator<<(std::ostream& os, const Value& val)
     return val.out(os);
 }
 
-bool run(const string& path, shared_ptr<Environment>& env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
+bool run(const string& path, shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
 {
     try {
         shared_ptr<Ast> ast;
