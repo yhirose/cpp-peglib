@@ -86,8 +86,7 @@ private:
             params,
             [=](shared_ptr<Environment> callEnv) {
                 callEnv->push_outer(env);
-                auto ret = eval(*body, callEnv);
-                return ret;
+                return eval(*body, callEnv);
             }
         };
         return Value(f);
