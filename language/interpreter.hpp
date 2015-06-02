@@ -188,15 +188,19 @@ struct Environment
 
     Value get(const std::string& s) const {
         assert(has(s));
+
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s);
         }
+
         for (auto& outer: outers_) {
             if (outer->has(s)) {
                 return outer->get(s);
             }
         }
-        // NOT REACHED
+
+        // NOTREACHED
+        throw std::logic_error("invalid internal condition.");
     }
 
     void set(const std::string& s, const Value& val) {
