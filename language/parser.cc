@@ -43,7 +43,7 @@ static auto g_grammar = R"(
     Comment               <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
 )";
 
-peglib::peg& get_parser()
+peg& get_parser()
 {
     static peg parser;
 
@@ -60,28 +60,29 @@ peglib::peg& get_parser()
             throw logic_error("invalid peg grammar");
         }
 
-        parser
-            .ast_node_optimizable("STATEMENTS", Statements)
-            .ast_node("WHILE", While)
-            .ast_node("ASSIGNMENT", Assignment)
-            .ast_node("IF", If)
-            .ast_node("FUNCTION", Function)
-            .ast_node("PARAMETERS")
-            .ast_node("FUNCTION_CALL", FunctionCall)
-            .ast_node("ARGUMENTS")
-            .ast_node_optimizable("PRIMARY", Condition)
-            .ast_node_optimizable("CONDITION", BinExpresion)
-            .ast_node_optimizable("TERM", BinExpresion)
-            .ast_token("CONDITION_OPERATOR")
-            .ast_token("TERM_OPERATOR")
-            .ast_token("FACTOR_OPERATOR")
-            .ast_token("NUMBER", Number)
-            .ast_token("BOOLEAN", Boolean)
-            .ast_token("STRING")
-            .ast_token("IDENTIFIER", Identifier)
-            .ast_node("INTERPOLATED_STRING", InterpolatedString)
-            .ast_token("INTERPOLATED_CONTENT")
-            .ast_end();
+        parser.ast({
+            { peg::AstNodeType::Regular,     "STATEMENTS",           Statements         },
+            { peg::AstNodeType::Regular,     "WHILE",                While              },
+            { peg::AstNodeType::Regular,     "ASSIGNMENT",           Assignment         },
+            { peg::AstNodeType::Regular,     "IF",                   If                 },
+            { peg::AstNodeType::Regular,     "FUNCTION",             Function           },
+            { peg::AstNodeType::Regular,     "PARAMETERS",           Undefined          },
+            { peg::AstNodeType::Regular,     "FUNCTION_CALL",        FunctionCall       },
+            { peg::AstNodeType::Regular,     "ARGUMENTS",            Undefined          },
+            { peg::AstNodeType::Optimizable, "PRIMARY",              Condition          },
+            { peg::AstNodeType::Optimizable, "CONDITION",            BinExpresion       },
+            { peg::AstNodeType::Optimizable, "TERM",                 BinExpresion       },
+            { peg::AstNodeType::Token,       "CONDITION_OPERATOR",   Undefined          },
+            { peg::AstNodeType::Token,       "TERM_OPERATOR",        Undefined          },
+            { peg::AstNodeType::Token,       "FACTOR_OPERATOR",      Undefined          },
+            { peg::AstNodeType::Token,       "NUMBER",               Number             },
+            { peg::AstNodeType::Token,       "BOOLEAN",              Boolean            },
+            { peg::AstNodeType::Token,       "STRING",               Undefined          },
+            { peg::AstNodeType::Token,       "IDENTIFIER",           Identifier         },
+            { peg::AstNodeType::Regular,     "INTERPOLATED_STRING",  InterpolatedString },
+            { peg::AstNodeType::Token,       "INTERPOLATED_CONTENT", Undefined          },
+        },
+        Undefined);
     }
 
     return parser;

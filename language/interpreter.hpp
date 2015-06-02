@@ -18,11 +18,14 @@ struct Value
     };
 
     explicit Value() : type(Undefined) {}
-    explicit Value(bool b) : type(Bool) { v = b; }
-    explicit Value(long l) : type(Long) { v = l; }
-    explicit Value(const std::string& s) : type(String) { v = s; }
-    explicit Value(const ArrayValue& a) : type(Array) { v = a; }
-    explicit Value(const FunctionValue& f) : type(Function) { v = f; }
+    explicit Value(bool b) : type(Bool), v(b) {}
+    explicit Value(long l) : type(Long), v(l) {}
+    explicit Value(std::string&& s) : type(String), v(s) {}
+    explicit Value(ArrayValue&& a) : type(Array), v(a) {}
+    explicit Value(FunctionValue&& f) : type(Function), v(f) {}
+
+    Value(const Value&) = default;
+    Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
 
     bool to_bool() const {
         switch (type) {
@@ -210,14 +213,13 @@ struct Environment
     }
 
     void setup_built_in_functions() {
-        auto func_pretty_print = Value::FunctionValue {
+        set("pp", Value(Value::FunctionValue {
             { "arg" },
             [](std::shared_ptr<Environment> env) {
                 std::cout << env->get("arg").str() << std::endl;
                 return Value();
             }
-        };
-        set("pp", Value(func_pretty_print));
+        }));
     }
 
 private:

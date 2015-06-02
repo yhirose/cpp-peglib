@@ -65,15 +65,6 @@ public:
         return *this;
     }
 
-    template <typename T>
-    any& operator=(const T& value) {
-        if (content_) {
-            delete content_;
-        }
-        content_ = new holder<T>(value);
-        return *this;
-    }
-
     ~any() {
         delete content_;
     }
@@ -1831,16 +1822,16 @@ private:
 
 struct Ast
 {
-    Ast(const char* _name, int _type, const std::vector<std::shared_ptr<Ast>>& _nodes)
-        : name(_name), type(_type), is_token(false), nodes(_nodes) {}
+    Ast(const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
+        : name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
 
-    Ast(const char* _name, int _type, const std::string& _token)
-        : name(_name), type(_type), is_token(true), token(_token) {}
+    Ast(const char* _name, int _tag, const std::string& _token)
+        : name(_name), tag(_tag), is_token(true), token(_token) {}
 
     void print() const;
 
     const std::string                       name;
-    const int                               type;
+    const int                               tag;
     const bool                              is_token;
     const std::string                       token;
     const std::vector<std::shared_ptr<Ast>> nodes;
@@ -2022,51 +2013,35 @@ public:
         }
     }
 
-    peg& ast_node(const char* name, int type = -1) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            return std::make_shared<Ast>(name, type, sv.map<std::shared_ptr<Ast>>());
-        };
-        return *this;
-    }
-
-    peg& ast_node_optimizable(const char* name, int type = -1) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            if (sv.size() == 1) {
-                std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
-                return ast;
-            }
-            return std::make_shared<Ast>(name, type, sv.map<std::shared_ptr<Ast>>());
-        };
-        return *this;
-    }
-
-    peg& ast_token(const char* name, int type = -1) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            return std::make_shared<Ast>(name, type, std::string(sv.s, sv.n));
-        };
-        return *this;
-    }
-
-    peg& ast_end() {
-        for (auto& x: *grammar_) {
-            const auto& name = x.first;
-            auto& def = x.second;
-            auto& action = def.actions.front();
-            if (!action) {
-                action = [&](const SemanticValues& sv) {
-                    if (sv.size() == 1) {
-                        std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
-                        return ast;
-                    }
-                    return std::make_shared<Ast>(name.c_str(), -1, sv.map<std::shared_ptr<Ast>>());
-                };
-            }
-        }
-        return *this;
+    enum AstNodeType {
+        Regular,
+        Optimizable,
+        Token
     };
 
-    peg& set_logger(Log _log) {
-        log = _log;
+    struct AstNodeInfo {
+        AstNodeType type;
+        const char* name;
+        int         tag;
+    };
+
+    peg& ast(std::initializer_list<AstNodeInfo> list, int tag) {
+        for (const auto& info: list) {
+            switch (info.type) {
+            case Regular:
+                ast_node(info.name, info.tag);
+                break;
+            case Optimizable:
+                ast_node_optimizable(info.name, info.tag);
+                break;
+            case Token:
+                ast_token(info.name, info.tag);
+                break;
+            default:
+                throw std::logic_error("Invalid Ast type was used...");
+            }
+        }
+        ast_end(tag);
         return *this;
     }
 
@@ -2082,6 +2057,45 @@ private:
             } else if (r.len != n) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
+            }
+        }
+    }
+
+    void ast_node(const char* name, int tag) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            return std::make_shared<Ast>(name, tag, sv.map<std::shared_ptr<Ast>>());
+        };
+    }
+
+    void ast_node_optimizable(const char* name, int tag) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            if (sv.size() == 1) {
+                std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                return ast;
+            }
+            return std::make_shared<Ast>(name, tag, sv.map<std::shared_ptr<Ast>>());
+        };
+    }
+
+    void ast_token(const char* name, int tag) {
+        (*this)[name] = [=](const SemanticValues& sv) {
+            return std::make_shared<Ast>(name, tag, std::string(sv.s, sv.n));
+        };
+    }
+
+    void ast_end(int tag) {
+        for (auto& x: *grammar_) {
+            const auto& name = x.first;
+            auto& def = x.second;
+            auto& action = def.actions.front();
+            if (!action) {
+                action = [&](const SemanticValues& sv) {
+                    if (sv.size() == 1) {
+                        std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                        return ast;
+                    }
+                    return std::make_shared<Ast>(name.c_str(), tag, sv.map<std::shared_ptr<Ast>>());
+                };
             }
         }
     }

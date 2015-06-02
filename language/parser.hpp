@@ -1,7 +1,8 @@
 #include <peglib.h>
 
-enum AstType
+enum AstTag
 {
+   Undefined,
    Statements, While, If, FunctionCall, Assignment, Condition, BinExpresion,
    Identifier, InterpolatedString,
    Number, Boolean, Function

@@ -8,7 +8,7 @@ using namespace std;
 struct Eval
 {
     static Value eval(const Ast& ast, shared_ptr<Environment> env) {
-        switch (ast.type) {
+        switch (ast.tag) {
             case Statements:         return eval_statements(ast, env);
             case While:              return eval_while(ast, env);
             case If:                 return eval_if(ast, env);
@@ -24,7 +24,7 @@ struct Eval
         }
 
         if (ast.is_token) {
-            return Value(ast.token);
+            return Value(string(ast.token));
         }
 
         // NOTREACHED
@@ -82,14 +82,13 @@ private:
 
         auto body = ast.nodes[1];
 
-        auto f = Value::FunctionValue {
+        return Value(Value::FunctionValue {
             params,
             [=](shared_ptr<Environment> callEnv) {
                 callEnv->push_outer(env);
                 return eval(*body, callEnv);
             }
-        };
-        return Value(f);
+        });
     };
 
     static Value eval_function_call(const Ast& ast, shared_ptr<Environment> env) {
@@ -187,7 +186,7 @@ private:
             const auto& val = eval(*node, env);
             s += val.str();
         }
-        return Value(s);
+        return Value(std::move(s));
     };
 
     static Value dereference_identirier(shared_ptr<Environment> env, const string& var) {
