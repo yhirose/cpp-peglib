@@ -217,15 +217,17 @@ struct Environment
             outer_->assign(s, val);
             return;
         }
+        // NOTREACHED
+        throw std::logic_error("invalid internal condition.");
     }
 
-    void declare(const std::string& s, const Value& val, bool mut) {
+    void initialize(const std::string& s, const Value& val, bool mut) {
         assert(!has(s));
         dic_[s] = Symbol{val, mut};
     }
 
     void setup_built_in_functions() {
-        declare(
+        initialize(
             "pp",
             Value(Value::FunctionValue {
                 { {"arg", true} },

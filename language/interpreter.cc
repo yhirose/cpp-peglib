@@ -103,13 +103,13 @@ private:
         if (fv.params.size() <= args.size()) {
             auto callEnv = make_shared<Environment>();
 
-            callEnv->declare("self", f, false);
+            callEnv->initialize("self", f, false);
 
             for (auto i = 0u; i < fv.params.size(); i++) {
                 auto param = fv.params[i];
                 auto arg = args[i];
                 auto val = eval(*arg, env);
-                callEnv->declare(param.name, val, param.mut);
+                callEnv->initialize(param.name, val, param.mut);
             }
 
             return fv.eval(callEnv);
@@ -167,7 +167,7 @@ private:
         if (env->has(var)) {
             env->assign(var, val);
         } else {
-            env->declare(var, val, mut == "mut");
+            env->initialize(var, val, mut == "mut");
         }
         return val;
     };
