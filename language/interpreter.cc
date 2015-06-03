@@ -75,9 +75,11 @@ private:
     }
 
     static Value eval_function(const Ast& ast, shared_ptr<Environment> env) {
-        vector<string> params;
+        vector<Value::FunctionValue::Parameter> params;
         for (auto node: ast.nodes[0]->nodes) {
-            params.push_back(node->token);
+            auto mut = node->nodes[0]->token == "mut";
+            const auto& name = node->nodes[1]->token;
+            params.push_back({ name, mut });
         }
 
         auto body = ast.nodes[1];
@@ -95,19 +97,19 @@ private:
         const auto& var = ast.nodes[0]->token;
         const auto& args = ast.nodes[1]->nodes;
 
-        const auto& f = dereference_identirier(env, var);
+        const auto& f = env->get(var);
         const auto& fv = f.to_function();
 
         if (fv.params.size() <= args.size()) {
             auto callEnv = make_shared<Environment>();
 
-            callEnv->set("self", f);
+            callEnv->declare("self", f, false);
 
             for (auto i = 0u; i < fv.params.size(); i++) {
-                auto var = fv.params[i];
+                auto param = fv.params[i];
                 auto arg = args[i];
                 auto val = eval(*arg, env);
-                callEnv->set(var, val);
+                callEnv->declare(param.name, val, param.mut);
             }
 
             return fv.eval(callEnv);
@@ -159,15 +161,20 @@ private:
     }
 
     static Value eval_assignment(const Ast& ast, shared_ptr<Environment> env) {
-        const auto& var = ast.nodes[0]->token;
-        auto val = eval(*ast.nodes[1], env);
-        env->set(var, val);
+        const auto& mut = ast.nodes[0]->token;
+        const auto& var = ast.nodes[1]->token;
+        auto val = eval(*ast.nodes[2], env);
+        if (env->has(var)) {
+            env->assign(var, val);
+        } else {
+            env->declare(var, val, mut == "mut");
+        }
         return val;
     };
 
     static Value eval_identifier(const Ast& ast, shared_ptr<Environment> env) {
         const auto& var = ast.token;
-        return dereference_identirier(env, var);
+        return env->get(var);
     };
 
     static Value eval_number(const Ast& ast, shared_ptr<Environment> env) {
@@ -185,14 +192,6 @@ private:
             s += val.str();
         }
         return Value(std::move(s));
-    };
-
-    static Value dereference_identirier(shared_ptr<Environment> env, const string& var) {
-        if (!env->has(var)) {
-            string msg = "undefined variable '" + var + "'...";
-            throw runtime_error(msg);
-        }
-        return env->get(var);
     };
 };
 

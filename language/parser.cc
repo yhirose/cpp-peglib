@@ -9,11 +9,12 @@ static auto g_grammar = R"(
     STATEMENTS            <-  EXPRESSION*
 
     EXPRESSION            <-  ASSIGNMENT / PRIMARY
-    ASSIGNMENT            <-  IDENTIFIER '=' _ EXPRESSION
+    ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
     WHILE                 <-  'while' _ EXPRESSION BLOCK
     IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
-    FUNCTION              <-  'fun' _ PARAMETERS BLOCK
-    PARAMETERS            <-  '(' _ (IDENTIFIER (',' _ IDENTIFIER)*)? ')' _
+    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
+    PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
+    PARAMETER             <-  MUTABLE IDENTIFIER
     FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
     ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
 
@@ -35,6 +36,8 @@ static auto g_grammar = R"(
 
     INTERPOLATED_STRING   <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
     INTERPOLATED_CONTENT  <-  (!["{] .) (!["{] .)*
+
+    MUTABLE               <-  < 'mut'? > _
 
     ~_                    <-  (Space / EndOfLine / Comment)*
     Space                 <-  ' ' / '\t'
@@ -81,6 +84,7 @@ peg& get_parser()
             { peg::AstNodeType::Token,       "IDENTIFIER",           Identifier         },
             { peg::AstNodeType::Regular,     "INTERPOLATED_STRING",  InterpolatedString },
             { peg::AstNodeType::Token,       "INTERPOLATED_CONTENT", Undefined          },
+            { peg::AstNodeType::Token,       "MUTABLE",              Undefined          },
         },
         Undefined);
     }

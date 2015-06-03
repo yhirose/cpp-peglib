@@ -13,7 +13,11 @@ struct Value
     };
 
     struct FunctionValue {
-        std::vector<std::string>                                params;
+        struct Parameter {
+            std::string name;
+            bool        mut;
+        };
+        std::vector<Parameter>                            params;
         std::function<Value (std::shared_ptr<Environment> env)> eval;
     };
 
@@ -189,40 +193,58 @@ struct Environment
 
     Value get(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
-            return dic_.at(s);
+            return dic_.at(s).val;
         }
         if (outer_) {
             return outer_->get(s);
         }
-        // NOTREACHED
-        throw std::logic_error("invalid internal condition.");
+        std::string msg = "undefined variable '" + s + "'...";
+        throw std::runtime_error(msg);
     }
 
-    void set(const std::string& s, const Value& val) {
+    void assign(const std::string& s, const Value& val) {
+        assert(has(s));
         if (dic_.find(s) != dic_.end()) {
-            dic_[s] = val;
+            auto& sym = dic_[s];
+            if (!sym.mut) {
+                std::string msg = "immutable variable '" + s + "'...";
+                throw std::runtime_error(msg);
+            }
+            sym.val = val;
             return;
         }
         if (outer_ && outer_->has(s)) {
-            outer_->set(s, val);
+            outer_->assign(s, val);
             return;
         }
-        dic_[s] = val;
+    }
+
+    void declare(const std::string& s, const Value& val, bool mut) {
+        assert(!has(s));
+        dic_[s] = Symbol{val, mut};
     }
 
     void setup_built_in_functions() {
-        set("pp", Value(Value::FunctionValue {
-            { "arg" },
-            [](std::shared_ptr<Environment> env) {
-                std::cout << env->get("arg").str() << std::endl;
-                return Value();
-            }
-        }));
+        declare(
+            "pp",
+            Value(Value::FunctionValue {
+                { {"arg", true} },
+                [](std::shared_ptr<Environment> env) {
+                    std::cout << env->get("arg").str() << std::endl;
+                    return Value();
+                }
+            }),
+            false);
     }
 
 private:
+    struct Symbol {
+        Value val;
+        bool  mut;
+    };
+
     std::shared_ptr<Environment> outer_;
-    std::map<std::string, Value> dic_;
+    std::map<std::string, Symbol> dic_;
 };
 
 bool run(const std::string& path, std::shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);
