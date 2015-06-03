@@ -28,7 +28,7 @@ struct Value
     Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
 
     Value& operator=(const Value&) = default;
-    Value& operator=(Value&&) = default;
+    Value& operator=(Value&& rhs) { type = rhs.type; v = rhs.v; return *this; }
 
     bool to_bool() const {
         switch (type) {
