@@ -27,6 +27,9 @@ struct Value
     Value(const Value&) = default;
     Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
 
+    Value& operator=(const Value&) = default;
+    Value& operator=(Value&&) = default;
+
     bool to_bool() const {
         switch (type) {
             case Bool: return v.get<bool>();
@@ -164,41 +167,33 @@ private:
 
 };
 
-std::ostream& operator<<(std::ostream& os, const Value& val);
+inline std::ostream& operator<<(std::ostream& os, const Value& val)
+{
+    return val.out(os);
+}
 
 struct Environment
 {
     Environment() = default;
 
-    void push_outer(std::shared_ptr<Environment> outer) {
-        outers_.push_back(outer);
+    void set_outer(std::shared_ptr<Environment> outer) {
+        outer_ = outer;
     }
 
     bool has(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return true;
         }
-        for (auto& outer: outers_) {
-            if (outer->has(s)) {
-                return true;
-            }
-        }
-        return false;
+        return outer_ && outer_->has(s);
     }
 
     Value get(const std::string& s) const {
-        assert(has(s));
-
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s);
         }
-
-        for (auto& outer: outers_) {
-            if (outer->has(s)) {
-                return outer->get(s);
-            }
+        if (outer_) {
+            return outer_->get(s);
         }
-
         // NOTREACHED
         throw std::logic_error("invalid internal condition.");
     }
@@ -206,12 +201,11 @@ struct Environment
     void set(const std::string& s, const Value& val) {
         if (dic_.find(s) != dic_.end()) {
             dic_[s] = val;
+            return;
         }
-        for (auto& outer: outers_) {
-            if (outer->has(s)) {
-                outer->set(s, val);
-                return;
-            }
+        if (outer_ && outer_->has(s)) {
+            outer_->set(s, val);
+            return;
         }
         dic_[s] = val;
     }
@@ -227,7 +221,7 @@ struct Environment
     }
 
 private:
-    std::vector<std::shared_ptr<Environment>> outers_;
+    std::shared_ptr<Environment> outer_;
     std::map<std::string, Value> dic_;
 };
 

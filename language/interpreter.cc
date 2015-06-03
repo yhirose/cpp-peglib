@@ -85,7 +85,7 @@ private:
         return Value(Value::FunctionValue {
             params,
             [=](shared_ptr<Environment> callEnv) {
-                callEnv->push_outer(env);
+                callEnv->set_outer(env);
                 return eval(*body, callEnv);
             }
         });
@@ -109,8 +109,6 @@ private:
                 auto val = eval(*arg, env);
                 callEnv->set(var, val);
             }
-
-            callEnv->push_outer(env);
 
             return fv.eval(callEnv);
         }
@@ -197,11 +195,6 @@ private:
         return env->get(var);
     };
 };
-
-std::ostream& operator<<(std::ostream& os, const Value& val)
-{
-    return val.out(os);
-}
 
 bool run(const string& path, shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
 {
