@@ -12,7 +12,7 @@ static auto g_grammar = R"(
     ASSIGNMENT            <-  IDENTIFIER '=' _ EXPRESSION
     WHILE                 <-  'while' _ EXPRESSION BLOCK
     IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
-    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
+    FUNCTION              <-  'fun' _ PARAMETERS BLOCK
     PARAMETERS            <-  '(' _ (IDENTIFIER (',' _ IDENTIFIER)*)? ')' _
     FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
     ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
