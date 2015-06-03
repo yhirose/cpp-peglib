@@ -58,7 +58,7 @@ int main(int argc, const char** argv)
             Value val;
             string msg;
             if (!run(path, env, buff.data(), buff.size(), val, msg, print_ast)) {
-                cerr << msg;
+                cerr << msg << endl;
                 return -1;
             }
         }
