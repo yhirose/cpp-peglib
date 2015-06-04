@@ -422,6 +422,49 @@ TEST_CASE("Calculator test3", "[general]")
     REQUIRE(val == -3);
 }
 
+TEST_CASE("Calculator test with AST", "[general]")
+{
+    peg parser(
+        "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
+        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
+        "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
+        "  TERM_OPERATOR    <-  < [-+] > _                        "
+        "  FACTOR_OPERATOR  <-  < [/*] > _                        "
+        "  NUMBER           <-  < [0-9]+ > _                      "
+        "  ~_               <-  [ \t\r\n]*                        "
+        );
+
+    const int kTagNumber = 0;
+    parser.enable_ast({ { "NUMBER", kTagNumber } });
+
+    function<long (const Ast&)> eval = [&](const Ast& ast) {
+        if (ast.tag == kTagNumber) {
+            return stol(ast.token);
+        } else {
+            const auto& nodes = ast.nodes;
+            auto result = eval(*nodes[0]);
+            for (auto i = 1u; i < nodes.size(); i += 2) {
+                auto num = eval(*nodes[i + 1]);
+                auto ope = nodes[i]->token[0];
+                switch (ope) {
+                    case '+': result += num; break;
+                    case '-': result -= num; break;
+                    case '*': result *= num; break;
+                    case '/': result /= num; break;
+                }
+            }
+            return result;
+        }
+    };
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse("1+2*3*(4-5+6)/7-8", ast);
+    auto val = eval(*ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(val == -3);
+}
+
 TEST_CASE("Predicate test", "[general]")
 {
     peg parser("NUMBER  <-  [0-9]+");

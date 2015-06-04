@@ -12,77 +12,32 @@
 using namespace peglib;
 using namespace std;
 
-template <typename T, typename U, typename F>
-static U reduce(T i, T end, U val, F f) {
-    if (i == end) {
-        return val;
-    }
-    tie(val, i) = f(val, i);
-    return reduce(i, end, val, f);
-};
-
-struct ast_node
-{
-    virtual ~ast_node() = default;
-    virtual long eval() = 0;
-};
-
-struct ast_ope : public ast_node
-{
-    ast_ope(char ope, shared_ptr<ast_node> left, shared_ptr<ast_node> right)
-        : ope_(ope), left_(left), right_(right) {}
-
-    long eval() override {
-        switch (ope_) {
-            case '+': return left_->eval() + right_->eval();
-            case '-': return left_->eval() - right_->eval();
-            case '*': return left_->eval() * right_->eval();
-            case '/': return left_->eval() / right_->eval();
-        }
-        assert(false);
-        return 0;
-    };
-
-    static shared_ptr<ast_node> create(const SemanticValues& sv) {
-        assert(!sv.empty());
-        return reduce(
-            sv.begin() + 1,
-            sv.end(),
-            sv[0].get<shared_ptr<ast_node>>(),
-            [](shared_ptr<ast_node> r, SemanticValues::const_iterator i) {
-                auto ope = (i++)->val.get<char>();
-                auto nd = (i++)->val.get<shared_ptr<ast_node>>();
-                r = make_shared<ast_ope>(ope, r, nd);
-                return make_tuple(r, i);
-            });
-    }
-
-private:
-    char                 ope_;
-    shared_ptr<ast_node> left_;
-    shared_ptr<ast_node> right_;
-};
-
-struct ast_num : public ast_node
-{
-    ast_num(long num) : num_(num) {}
-
-    long eval() override { return num_; };
-
-    static shared_ptr<ast_node> create(const char* s, size_t n) {
-        return make_shared<ast_num>(atol(s));
-    }
-
-private:
-    long num_;
-};
-
 int main(int argc, const char** argv)
 {
     if (argc < 2 || string("--help") == argv[1]) {
         cout << "usage: calc3 [formula]" << endl;
         return 1;
     }
+
+	function<long (const Ast&)> eval = [&](const Ast& ast) {
+	    if (ast.name == "NUMBER") {
+	        return stol(ast.token);
+	    } else {
+	        const auto& nodes = ast.nodes;
+	        auto result = eval(*nodes[0]);
+	        for (auto i = 1u; i < nodes.size(); i += 2) {
+	            auto num = eval(*nodes[i + 1]);
+	            auto ope = nodes[i]->token[0];
+	            switch (ope) {
+	                case '+': result += num; break;
+	                case '-': result -= num; break;
+	                case '*': result *= num; break;
+	                case '/': result /= num; break;
+	            }
+	        }
+	        return result;
+	    }
+	};
 
     peg parser(
         "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
@@ -94,16 +49,13 @@ int main(int argc, const char** argv)
         "  ~_               <-  [ \t\r\n]*                        "
         );
 
-    parser["EXPRESSION"]      = ast_ope::create;
-    parser["TERM"]            = ast_ope::create;
-    parser["TERM_OPERATOR"]   = [](const char* s, size_t n) { return *s; };
-    parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return *s; };
-    parser["NUMBER"]          = ast_num::create;
+    parser.enable_ast();
 
     auto expr = argv[1];
-    shared_ptr<ast_node> ast;
+    shared_ptr<Ast> ast;
     if (parser.parse(expr, ast)) {
-        cout << expr << " = " << ast->eval() << endl;
+        ast->print();
+        cout << expr << " = " << eval(*ast) << endl;
         return 0;
     }
 

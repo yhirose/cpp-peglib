@@ -180,14 +180,20 @@ struct SemanticValues : protected std::vector<SemanticValue>
     const char* s;
     size_t      n;
     size_t      choice;
+    bool        has_anchor;
+    bool        is_leaf;
 
-    SemanticValues() : s(nullptr), n(0), choice(0) {}
+    SemanticValues() : s(nullptr), n(0), choice(0), has_anchor(false), is_leaf(true) {}
 
     std::string str(size_t i = 0) const {
         if (i > 0) {
             return (*this)[i].str();
         }
         return std::string(s, n);
+    }
+
+    bool is_token() const {
+        return has_anchor || is_leaf;
     }
 
     typedef SemanticValue T;
@@ -515,6 +521,8 @@ struct Context
         }
         sv.s = nullptr;
         sv.n = 0;
+        sv.has_anchor = false;
+        sv.is_leaf = true;
         return sv;
     }
 
@@ -618,6 +626,8 @@ public:
                 sv.s = chldsv.s;
                 sv.n = chldsv.n;
                 sv.choice = id;
+                sv.has_anchor = chldsv.has_anchor;
+                sv.is_leaf = chldsv.is_leaf;
                 c.pop();
                 return len;
             }
@@ -880,6 +890,7 @@ public:
         if (success(len)) {
             sv.s = s;
             sv.n = len;
+            sv.has_anchor = true;
         }
         return len;
     }
@@ -1286,6 +1297,7 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt, const Action& actio
 
 inline size_t DefinitionReference::parse(
     const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    sv.is_leaf = false;
     const auto& rule = *get_rule();
     return rule.parse(s, n, sv, c, dt);
 }
@@ -2013,33 +2025,15 @@ public:
         }
     }
 
-    enum AstNodeType {
-        Regular,
-        Optimizable,
-        Token
-    };
-
     struct AstNodeInfo {
-        AstNodeType type;
         const char* name;
         int         tag;
+        bool        optimize;
     };
 
-    peg& ast(std::initializer_list<AstNodeInfo> list, int tag) {
+    peg& enable_ast(std::initializer_list<AstNodeInfo> list = {}, int tag = -1) {
         for (const auto& info: list) {
-            switch (info.type) {
-            case Regular:
-                ast_node(info.name, info.tag);
-                break;
-            case Optimizable:
-                ast_node_optimizable(info.name, info.tag);
-                break;
-            case Token:
-                ast_token(info.name, info.tag);
-                break;
-            default:
-                throw std::logic_error("Invalid Ast type was used...");
-            }
+            ast_node(info);
         }
         ast_end(tag);
         return *this;
@@ -2061,25 +2055,16 @@ private:
         }
     }
 
-    void ast_node(const char* name, int tag) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            return std::make_shared<Ast>(name, tag, sv.map<std::shared_ptr<Ast>>());
-        };
-    }
-
-    void ast_node_optimizable(const char* name, int tag) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            if (sv.size() == 1) {
+    void ast_node(const AstNodeInfo& info) {
+        (*this)[info.name] = [info](const SemanticValues& sv) {
+            if (sv.is_token()) {
+                return std::make_shared<Ast>(info.name, info.tag, std::string(sv.s, sv.n));
+            }
+            if (info.optimize && sv.size() == 1) {
                 std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                 return ast;
             }
-            return std::make_shared<Ast>(name, tag, sv.map<std::shared_ptr<Ast>>());
-        };
-    }
-
-    void ast_token(const char* name, int tag) {
-        (*this)[name] = [=](const SemanticValues& sv) {
-            return std::make_shared<Ast>(name, tag, std::string(sv.s, sv.n));
+            return std::make_shared<Ast>(info.name, info.tag, sv.map<std::shared_ptr<Ast>>());
         };
     }
 
@@ -2089,7 +2074,10 @@ private:
             auto& def = x.second;
             auto& action = def.actions.front();
             if (!action) {
-                action = [&](const SemanticValues& sv) {
+                action = [tag, name](const SemanticValues& sv) {
+                    if (sv.is_token()) {
+                        return std::make_shared<Ast>(name.c_str(), tag, std::string(sv.s, sv.n));
+                    }
                     if (sv.size() == 1) {
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
