@@ -18,7 +18,9 @@ static auto g_grammar = R"(
     FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
     ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
 
-    PRIMARY               <-  CONDITION (CONDITION_OPERATOR CONDITION)?
+    PRIMARY               <-  LOGICAL_OR ('||' _ LOGICAL_OR)*
+    LOGICAL_OR            <-  LOGICAL_AND ('&&' _  LOGICAL_AND)*
+    LOGICAL_AND           <-  CONDITION (CONDITION_OPERATOR CONDITION)*
     CONDITION             <-  TERM (TERM_OPERATOR TERM)*
     TERM                  <-  FACTOR (FACTOR_OPERATOR FACTOR)*
     FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
@@ -72,7 +74,9 @@ peg& get_parser()
             { peg::AstNodeType::Regular,     "PARAMETERS",           Undefined          },
             { peg::AstNodeType::Regular,     "FUNCTION_CALL",        FunctionCall       },
             { peg::AstNodeType::Regular,     "ARGUMENTS",            Undefined          },
-            { peg::AstNodeType::Optimizable, "PRIMARY",              Condition          },
+            { peg::AstNodeType::Optimizable, "PRIMARY",              LogicalOr          },
+            { peg::AstNodeType::Optimizable, "LOGICAL_OR",           LogicalAnd         },
+            { peg::AstNodeType::Optimizable, "LOGICAL_AND",          Condition          },
             { peg::AstNodeType::Optimizable, "CONDITION",            BinExpresion       },
             { peg::AstNodeType::Optimizable, "TERM",                 BinExpresion       },
             { peg::AstNodeType::Token,       "CONDITION_OPERATOR",   Undefined          },

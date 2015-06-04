@@ -15,6 +15,8 @@ struct Eval
             case Function:           return eval_function(ast, env);
             case FunctionCall:       return eval_function_call(ast, env);
             case Assignment:         return eval_assignment(ast, env);
+            case LogicalOr:          return eval_logical_or(ast, env);
+            case LogicalAnd:         return eval_logical_and(ast, env);
             case Condition:          return eval_condition(ast, env);
             case BinExpresion:       return eval_bin_expression(ast, env);
             case Identifier:         return eval_identifier(ast, env);
@@ -119,9 +121,37 @@ private:
         throw runtime_error(msg);
     }
 
+    static Value eval_logical_or(const Ast& ast, shared_ptr<Environment> env) {
+        if (ast.nodes.size() == 1) {
+            return eval(*ast.nodes[0], env);
+        } else {
+            Value ret;
+            for (auto node: ast.nodes) {
+                ret = eval(*node, env);
+                if (ret.to_bool()) {
+                    return ret;
+                }
+            }
+            return ret;
+        }
+    }
+
+    static Value eval_logical_and(const Ast& ast, shared_ptr<Environment> env) {
+        Value ret;
+        for (auto node: ast.nodes) {
+            ret = eval(*node, env);
+            if (!ret.to_bool()) {
+                return ret;
+            }
+        }
+        return ret;
+    }
+
     static Value eval_condition(const Ast& ast, shared_ptr<Environment> env) {
-        auto lhs = eval(*ast.nodes[0], env);
-        if (ast.nodes.size() > 1) {
+        if (ast.nodes.size() == 1) {
+            return eval(*ast.nodes[0], env);
+        } else {
+            auto lhs = eval(*ast.nodes[0], env);
             auto ope = eval(*ast.nodes[1], env).to_string();
             auto rhs = eval(*ast.nodes[2], env);
 
@@ -137,11 +167,10 @@ private:
                 return Value(lhs >= rhs);
             } else if (ope == ">") {
                 return Value(lhs > rhs);
+            } else {
+                throw std::logic_error("invalid internal condition.");
             }
-
-            throw std::logic_error("invalid internal condition.");
         }
-        return lhs; // Any
     }
 
     static Value eval_bin_expression(const Ast& ast, shared_ptr<Environment> env) {
