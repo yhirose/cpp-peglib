@@ -4,7 +4,7 @@ enum AstTag
 {
    Undefined,
    Statements, While, If, FunctionCall, Assignment,
-   LogicalOr, LogicalAnd, Condition, BinExpresion,
+   LogicalOr, LogicalAnd, Condition, UnaryPlus, UnaryMinus, UnaryNot, BinExpresion,
    Identifier, InterpolatedString,
    Number, Boolean, Function
 };

@@ -22,14 +22,21 @@ static auto g_grammar = R"(
     LOGICAL_OR            <-  LOGICAL_AND ('&&' _  LOGICAL_AND)*
     LOGICAL_AND           <-  CONDITION (CONDITION_OPERATOR CONDITION)*
     CONDITION             <-  TERM (TERM_OPERATOR TERM)*
-    TERM                  <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+    TERM                  <-  UNARY_PLUS_OPERATOR? UNARY_PLUS
+    UNARY_PLUS            <-  UNARY_MINUS_OPERATOR? UNARY_MINUS
+    UNARY_MINUS           <-  UNARY_NOT_OPERATOR? UNARY_NOT
+    UNARY_NOT             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
     FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
 
     BLOCK                 <-  '{' _ STATEMENTS '}' _
 
     CONDITION_OPERATOR    <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
     TERM_OPERATOR         <-  < [-+] > _
+    UNARY_PLUS_OPERATOR   <-  < '+' > _
+    UNARY_MINUS_OPERATOR  <-  < '-' > _
+    UNARY_NOT_OPERATOR    <-  < '!' > _
     FACTOR_OPERATOR       <-  < [*/%] > _
+
     IDENTIFIER            <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
     NUMBER                <-  < [0-9]+ > _
@@ -78,9 +85,15 @@ peg& get_parser()
             { peg::AstNodeType::Optimizable, "LOGICAL_OR",           LogicalAnd         },
             { peg::AstNodeType::Optimizable, "LOGICAL_AND",          Condition          },
             { peg::AstNodeType::Optimizable, "CONDITION",            BinExpresion       },
-            { peg::AstNodeType::Optimizable, "TERM",                 BinExpresion       },
+            { peg::AstNodeType::Optimizable, "TERM",                 UnaryPlus          },
+            { peg::AstNodeType::Optimizable, "UNARY_PLUS",           UnaryMinus         },
+            { peg::AstNodeType::Optimizable, "UNARY_MINUS",          UnaryNot           },
+            { peg::AstNodeType::Optimizable, "UNARY_NOT",            BinExpresion       },
             { peg::AstNodeType::Token,       "CONDITION_OPERATOR",   Undefined          },
             { peg::AstNodeType::Token,       "TERM_OPERATOR",        Undefined          },
+            { peg::AstNodeType::Token,       "UNARY_PLUS_OPERATOR",  Undefined          },
+            { peg::AstNodeType::Token,       "UNARY_MINUS_OPERATOR", Undefined          },
+            { peg::AstNodeType::Token,       "UNARY_NOT_OPERATOR",   Undefined          },
             { peg::AstNodeType::Token,       "FACTOR_OPERATOR",      Undefined          },
             { peg::AstNodeType::Token,       "NUMBER",               Number             },
             { peg::AstNodeType::Token,       "BOOLEAN",              Boolean            },

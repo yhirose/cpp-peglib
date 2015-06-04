@@ -18,6 +18,9 @@ struct Eval
             case LogicalOr:          return eval_logical_or(ast, env);
             case LogicalAnd:         return eval_logical_and(ast, env);
             case Condition:          return eval_condition(ast, env);
+            case UnaryPlus:          return eval_unary_plus(ast, env);
+            case UnaryMinus:         return eval_unary_minus(ast, env);
+            case UnaryNot:           return eval_unary_not(ast, env);
             case BinExpresion:       return eval_bin_expression(ast, env);
             case Identifier:         return eval_identifier(ast, env);
             case Number:             return eval_number(ast, env);
@@ -170,6 +173,30 @@ private:
             } else {
                 throw std::logic_error("invalid internal condition.");
             }
+        }
+    }
+
+    static Value eval_unary_plus(const Ast& ast, shared_ptr<Environment> env) {
+        if (ast.nodes.size() == 1) {
+            return eval(*ast.nodes[0], env);
+        } else {
+            return eval(*ast.nodes[1], env);
+        }
+    }
+
+    static Value eval_unary_minus(const Ast& ast, shared_ptr<Environment> env) {
+        if (ast.nodes.size() == 1) {
+            return eval(*ast.nodes[0], env);
+        } else {
+            return Value(eval(*ast.nodes[1], env).to_long() * -1);
+        }
+    }
+
+    static Value eval_unary_not(const Ast& ast, shared_ptr<Environment> env) {
+        if (ast.nodes.size() == 1) {
+            return eval(*ast.nodes[0], env);
+        } else {
+            return Value(!eval(*ast.nodes[1], env).to_bool());
         }
     }
 
