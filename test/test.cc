@@ -225,7 +225,7 @@ TEST_CASE("Backtracking test", "[general]")
         count++;
     };
 
-    parser.packrat_parsing(true);
+    parser.enable_packrat_parsing(true);
 
     bool ret = parser.parse("Hello Two");
     REQUIRE(ret == true);

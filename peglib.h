@@ -1832,10 +1832,10 @@ private:
  *  AST
  *---------------------------------------------------------------------------*/
 
+const int AstDefaultTag = -1;
+
 struct Ast
 {
-    static const int DefaultTag = -1;
-
     Ast(const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
         : name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
 
@@ -2020,7 +2020,7 @@ public:
         return (*grammar_)[s];
     }
 
-    void packrat_parsing(bool sw) {
+    void enable_packrat_parsing(bool sw) {
         if (grammar_ != nullptr) {
             auto& rule = (*grammar_)[start_];
             rule.enablePackratParsing = sw;
@@ -2029,7 +2029,7 @@ public:
 
     struct AstNodeInfo {
         const char* name;
-        int         tag;
+        int         tag; // TODO: It should be calculated at compile-time from 'name' with constexpr hash function.
         bool        optimize;
     };
 
@@ -2083,13 +2083,13 @@ private:
             if (!action) {
                 action = [name](const SemanticValues& sv) {
                     if (sv.is_token()) {
-                        return std::make_shared<Ast>(name.c_str(), Ast::DefaultTag, std::string(sv.s, sv.n));
+                        return std::make_shared<Ast>(name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }
                     if (sv.size() == 1) {
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }
-                    return std::make_shared<Ast>(name.c_str(), Ast::DefaultTag, sv.map<std::shared_ptr<Ast>>());
+                    return std::make_shared<Ast>(name.c_str(), AstDefaultTag, sv.map<std::shared_ptr<Ast>>());
                 };
             }
         }
