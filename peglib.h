@@ -2031,11 +2031,16 @@ public:
         bool        optimize;
     };
 
-    peg& enable_ast(std::initializer_list<AstNodeInfo> list = {}, int tag = -1) {
+    peg& enable_ast(std::initializer_list<AstNodeInfo> list, int tag) {
         for (const auto& info: list) {
             ast_node(info);
         }
         ast_end(tag);
+        return *this;
+    }
+
+    peg& enable_ast() {
+        ast_end(-1);
         return *this;
     }
 
