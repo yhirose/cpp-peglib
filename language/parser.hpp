@@ -2,7 +2,7 @@
 
 enum AstTag
 {
-   Undefined,
+   Default = peglib::Ast::DefaultTag,
    Statements, While, If, FunctionCall, Assignment,
    LogicalOr, LogicalAnd, Condition, UnaryPlus, UnaryMinus, UnaryNot, BinExpresion,
    Identifier, InterpolatedString,

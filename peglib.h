@@ -1834,6 +1834,8 @@ private:
 
 struct Ast
 {
+    static const int DefaultTag = -1;
+
     Ast(const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
         : name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
 
@@ -2031,16 +2033,16 @@ public:
         bool        optimize;
     };
 
-    peg& enable_ast(std::initializer_list<AstNodeInfo> list, int tag) {
+    peg& enable_ast(std::initializer_list<AstNodeInfo> list) {
         for (const auto& info: list) {
             ast_node(info);
         }
-        ast_end(tag);
+        ast_end();
         return *this;
     }
 
     peg& enable_ast() {
-        ast_end(-1);
+        ast_end();
         return *this;
     }
 
@@ -2073,21 +2075,21 @@ private:
         };
     }
 
-    void ast_end(int tag) {
+    void ast_end() {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& def = x.second;
             auto& action = def.actions.front();
             if (!action) {
-                action = [tag, name](const SemanticValues& sv) {
+                action = [name](const SemanticValues& sv) {
                     if (sv.is_token()) {
-                        return std::make_shared<Ast>(name.c_str(), tag, std::string(sv.s, sv.n));
+                        return std::make_shared<Ast>(name.c_str(), Ast::DefaultTag, std::string(sv.s, sv.n));
                     }
                     if (sv.size() == 1) {
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }
-                    return std::make_shared<Ast>(name.c_str(), tag, sv.map<std::shared_ptr<Ast>>());
+                    return std::make_shared<Ast>(name.c_str(), Ast::DefaultTag, sv.map<std::shared_ptr<Ast>>());
                 };
             }
         }

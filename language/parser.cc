@@ -4,6 +4,7 @@ using namespace peglib;
 using namespace std;
 
 static auto g_grammar = R"(
+
     PROGRAM               <-  _ STATEMENTS
 
     STATEMENTS            <-  (EXPRESSION (';' _)?)*
@@ -53,12 +54,12 @@ static auto g_grammar = R"(
     EndOfLine             <-  '\r\n' / '\n' / '\r'
     EndOfFile             <-  !.
     Comment               <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
+
 )";
 
 peg& get_parser()
 {
-    static peg parser;
-
+    static peg  parser;
     static bool initialized = false;
 
     if (!initialized) {
@@ -73,28 +74,30 @@ peg& get_parser()
         }
 
         parser.enable_ast({
-            { "STATEMENTS",          Statements              },
-            { "WHILE",               While                   },
-            { "ASSIGNMENT",          Assignment              },
-            { "IF",                  If                      },
-            { "FUNCTION",            Function                },
-            { "PARAMETERS",          Undefined               },
-            { "FUNCTION_CALL",       FunctionCall            },
-            { "ARGUMENTS",           Undefined               },
-            { "PRIMARY",             LogicalOr,         true },
-            { "LOGICAL_OR",          LogicalAnd,        true },
-            { "LOGICAL_AND",         Condition,         true },
-            { "CONDITION",           BinExpresion,      true },
-            { "TERM",                UnaryPlus,         true },
-            { "UNARY_PLUS",          UnaryMinus,        true },
-            { "UNARY_MINUS",         UnaryNot,          true },
-            { "UNARY_NOT",           BinExpresion,      true },
-            { "NUMBER",              Number                  },
-            { "BOOLEAN",             Boolean                 },
-            { "IDENTIFIER",          Identifier              },
-            { "INTERPOLATED_STRING", InterpolatedString      },
-        },
-        Undefined);
+            /*
+               Definition,            Tag               Optimize
+             ---------------------- ------------------ ---------- */
+            { "STATEMENTS",          Statements                   },
+            { "WHILE",               While                        },
+            { "ASSIGNMENT",          Assignment                   },
+            { "IF",                  If                           },
+            { "FUNCTION",            Function                     },
+            { "PARAMETERS",          Default                      },
+            { "FUNCTION_CALL",       FunctionCall                 },
+            { "ARGUMENTS",           Default                      },
+            { "PRIMARY",             LogicalOr,         true      },
+            { "LOGICAL_OR",          LogicalAnd,        true      },
+            { "LOGICAL_AND",         Condition,         true      },
+            { "CONDITION",           BinExpresion,      true      },
+            { "TERM",                UnaryPlus,         true      },
+            { "UNARY_PLUS",          UnaryMinus,        true      },
+            { "UNARY_MINUS",         UnaryNot,          true      },
+            { "UNARY_NOT",           BinExpresion,      true      },
+            { "NUMBER",              Number                       },
+            { "BOOLEAN",             Boolean                      },
+            { "IDENTIFIER",          Identifier                   },
+            { "INTERPOLATED_STRING", InterpolatedString           },
+        });
     }
 
     return parser;
