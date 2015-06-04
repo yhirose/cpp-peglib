@@ -6,7 +6,7 @@ using namespace std;
 static auto g_grammar = R"(
     PROGRAM               <-  _ STATEMENTS
 
-    STATEMENTS            <-  EXPRESSION*
+    STATEMENTS            <-  (EXPRESSION (';' _)?)*
 
     EXPRESSION            <-  ASSIGNMENT / PRIMARY
     ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
