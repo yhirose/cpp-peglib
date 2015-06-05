@@ -1015,46 +1015,61 @@ struct AssignIDToDefinition : public Ope::Visitor
             op->accept(*this);
         }
     }
-    void visit(ZeroOrMore& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(OneOrMore& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(Option& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(AndPredicate& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(NotPredicate& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(LiteralString& ope) override {
-    }
-    void visit(CharacterClass& ope) override {
-    }
-    void visit(Character& ope) override {
-    }
-    void visit(AnyCharacter& ope) override {
-    }
-    void visit(Capture& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(Anchor& ope) override {
-        ope.ope_->accept(*this);
-    }
-    void visit(User& ope) override {
-    }
-    void visit(WeakHolder& ope) override {
-        ope.weak_.lock()->accept(*this);
-    }
+    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
+    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
+    void visit(Option& ope) override { ope.ope_->accept(*this); }
+    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(LiteralString& ope) override {}
+    void visit(CharacterClass& ope) override {}
+    void visit(Character& ope) override {}
+    void visit(AnyCharacter& ope) override {}
+    void visit(Capture& ope) override { ope.ope_->accept(*this); }
+    void visit(Anchor& ope) override { ope.ope_->accept(*this); }
+    void visit(User& ope) override {}
+    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override;
-    void visit(DefinitionReference& ope) override {
-        ope.get_rule()->accept(*this);
-    }
+    void visit(DefinitionReference& ope) override { ope.get_rule()->accept(*this); }
 
     std::unordered_map<void*, size_t> ids;
+};
+
+struct IsToken : public Ope::Visitor
+{
+    IsToken() : has_anchor(false), has_rule(false) {}
+
+    void visit(Sequence& ope) override {
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+        }
+    }
+    void visit(PrioritizedChoice& ope) override {
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+        }
+    }
+    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
+    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
+    void visit(Option& ope) override { ope.ope_->accept(*this); }
+    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(LiteralString& ope) override {}
+    void visit(CharacterClass& ope) override {}
+    void visit(Character& ope) override {}
+    void visit(AnyCharacter& ope) override {}
+    void visit(Capture& ope) override { ope.ope_->accept(*this); }
+    void visit(Anchor& ope) override { has_anchor = true; }
+    void visit(User& ope) override {}
+    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
+    void visit(Holder& ope) override {}
+    void visit(DefinitionReference& ope) override { has_rule = true; }
+
+    bool is_token() const {
+        return has_anchor || !has_rule;
+    }
+
+    bool has_anchor;
+    bool has_rule;
 };
 
 /*
@@ -1075,6 +1090,7 @@ public:
         : actions(1)
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
+        , is_token(false)
         , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
@@ -1082,6 +1098,7 @@ public:
         , actions(1)
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
+        , is_token(false)
         , holder_(rhs.holder_)
     {
         holder_->outer_ = this;
@@ -1092,6 +1109,7 @@ public:
         , actions(1)
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
         , enablePackratParsing(rhs.enablePackratParsing)
+        , is_token(rhs.is_token)
         , holder_(std::move(rhs.holder_))
     {
         holder_->outer_ = this;
@@ -1101,9 +1119,10 @@ public:
         : actions(1)
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
+        , is_token(false)
         , holder_(std::make_shared<Holder>(this))
     {
-        holder_->ope_ = ope;
+        *this <= ope;
     }
 
     operator std::shared_ptr<Ope>() {
@@ -1111,7 +1130,12 @@ public:
     }
 
     Definition& operator<=(const std::shared_ptr<Ope>& ope) {
+        IsToken isToken;
+        ope->accept(isToken);
+        is_token = isToken.is_token();
+
         holder_->ope_ = ope;
+
         return *this;
     }
 
@@ -1202,6 +1226,7 @@ public:
     std::function<std::string ()> error_message;
     bool                          ignoreSemanticValue;
     bool                          enablePackratParsing;
+    bool                          is_token;
 
 private:
     friend class DefinitionReference;
