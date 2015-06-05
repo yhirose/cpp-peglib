@@ -180,20 +180,14 @@ struct SemanticValues : protected std::vector<SemanticValue>
     const char* s;
     size_t      n;
     size_t      choice;
-    bool        has_anchor;
-    bool        is_leaf;
 
-    SemanticValues() : s(nullptr), n(0), choice(0), has_anchor(false), is_leaf(true) {}
+    SemanticValues() : s(nullptr), n(0), choice(0) {}
 
     std::string str(size_t i = 0) const {
         if (i > 0) {
             return (*this)[i].str();
         }
         return std::string(s, n);
-    }
-
-    bool is_token() const {
-        return has_anchor || is_leaf;
     }
 
     typedef SemanticValue T;
@@ -521,8 +515,6 @@ struct Context
         }
         sv.s = nullptr;
         sv.n = 0;
-        sv.has_anchor = false;
-        sv.is_leaf = true;
         return sv;
     }
 
@@ -626,8 +618,6 @@ public:
                 sv.s = chldsv.s;
                 sv.n = chldsv.n;
                 sv.choice = id;
-                sv.has_anchor = chldsv.has_anchor;
-                sv.is_leaf = chldsv.is_leaf;
                 c.pop();
                 return len;
             }
@@ -890,7 +880,6 @@ public:
         if (success(len)) {
             sv.s = s;
             sv.n = len;
-            sv.has_anchor = true;
         }
         return len;
     }
@@ -1320,7 +1309,6 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt, const Action& actio
 
 inline size_t DefinitionReference::parse(
     const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    sv.is_leaf = false;
     const auto& rule = *get_rule();
     return rule.parse(s, n, sv, c, dt);
 }
@@ -2086,8 +2074,10 @@ private:
     }
 
     void ast_node(const AstNodeInfo& info) {
-        (*this)[info.name] = [info](const SemanticValues& sv) {
-            if (sv.is_token()) {
+        auto& rule = (*this)[info.name];
+        auto is_token = rule.is_token;
+        rule = [info, is_token](const SemanticValues& sv) {
+            if (is_token) {
                 return std::make_shared<Ast>(info.name, info.tag, std::string(sv.s, sv.n));
             }
             if (info.optimize && sv.size() == 1) {
@@ -2104,8 +2094,9 @@ private:
             auto& rule = x.second;
             auto& action = rule.actions.front();
             if (!action) {
-                action = [name](const SemanticValues& sv) {
-                    if (sv.is_token()) {
+                auto is_token = rule.is_token;
+                action = [name, is_token](const SemanticValues& sv) {
+                    if (is_token) {
                         return std::make_shared<Ast>(name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }
                     if (sv.size() == 1) {
