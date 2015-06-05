@@ -1003,7 +1003,7 @@ struct Ope::Visitor
     virtual void visit(DefinitionReference& ope) = 0;
 };
 
-struct DefinitionIDs : public Ope::Visitor
+struct AssignIDToDefinition : public Ope::Visitor
 {
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1210,12 +1210,12 @@ private:
     Definition& operator=(Definition&& rhs);
 
     Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt) const {
-        DefinitionIDs defIds;
-        holder_->accept(defIds);
+        AssignIDToDefinition assignId;
+        holder_->accept(assignId);
 
-        Context c(s, n, defIds.ids.size(), enablePackratParsing);
-        auto len = holder_->parse(s, n, sv, c, dt);
-        return Result{ success(len), len, c.error_pos, c.message_pos, c.message };
+        Context cxt(s, n, assignId.ids.size(, enablePackratParsing);
+        auto len = holder_->parse(s, n, sv, cxt, dt);
+        return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
 
     std::shared_ptr<Holder> holder_;
