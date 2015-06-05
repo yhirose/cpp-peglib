@@ -172,7 +172,7 @@ TEST_CASE("Visit test", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), dot()));
     WS       <= zom(cls(" \t"));
 
-    DefinitionIDs defIds;
+    AssignIDToDefinition defIds;
     ROOT.accept(defIds);
 
     REQUIRE(defIds.ids.size() == 4);

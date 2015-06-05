@@ -1213,7 +1213,7 @@ private:
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
-        Context cxt(s, n, assignId.ids.size(, enablePackratParsing);
+        Context cxt(s, n, assignId.ids.size(), enablePackratParsing);
         auto len = holder_->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1328,7 +1328,7 @@ inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
 inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
 
-inline void DefinitionIDs::visit(Holder& ope) {
+inline void AssignIDToDefinition::visit(Holder& ope) {
     auto p = (void*)ope.outer_;
     if (ids.find(p) != ids.end()) {
         return;
