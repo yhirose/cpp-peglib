@@ -164,7 +164,7 @@ struct SemanticValue {
     const T& get() const {
         return val.get<T>();
     }
-    
+
     std::string str() const {
         return std::string(s, n);
     }
@@ -1563,10 +1563,10 @@ private:
             const auto& name = sv[baseId].val.get<std::string>();
             auto ope = sv[baseId + 2].val.get<std::shared_ptr<Ope>>();
 
-            auto& def = (*data.grammar)[name];
-            def <= ope;
-            def.name = name;
-            def.ignoreSemanticValue = ignore;
+            auto& rule = (*data.grammar)[name];
+            rule <= ope;
+            rule.name = name;
+            rule.ignoreSemanticValue = ignore;
 
             if (data.start.empty()) {
                 data.start = name;
@@ -1719,10 +1719,10 @@ private:
             }
 
             if (!name.empty()) {
-                auto& def = grammar[name];
-                def <= x.second;
-                def.name = name;
-                def.ignoreSemanticValue = ignore;
+                auto& rule = grammar[name];
+                rule <= x.second;
+                rule.name = name;
+                rule.ignoreSemanticValue = ignore;
             }
         }
 
@@ -2076,8 +2076,8 @@ private:
     void ast_end() {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
-            auto& def = x.second;
-            auto& action = def.actions.front();
+            auto& rule = x.second;
+            auto& action = rule.actions.front();
             if (!action) {
                 action = [name](const SemanticValues& sv) {
                     if (sv.is_token()) {
