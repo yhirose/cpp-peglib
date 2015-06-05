@@ -1221,8 +1221,6 @@ private:
     std::shared_ptr<Holder> holder_;
 };
 
-typedef Definition rule;
-
 /*
  * Implementations
  */

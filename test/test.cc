@@ -70,7 +70,7 @@ TEST_CASE("String capture test2", "[general]")
 {
     vector<string> tags;
 
-    rule ROOT, TAG, TAG_NAME, WS;
+    Definition ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
     TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t n) { tags.push_back(string(s, n)); };
@@ -131,7 +131,7 @@ TEST_CASE("Named capture test", "[general]")
 
 TEST_CASE("String capture test with embedded match action", "[general]")
 {
-    rule ROOT, TAG, TAG_NAME, WS;
+    Definition ROOT, TAG, TAG_NAME, WS;
 
     vector<string> tags;
 
@@ -156,8 +156,8 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
 TEST_CASE("Cyclic grammer test", "[general]")
 {
-    rule PARENT;
-    rule CHILD;
+    Definition PARENT;
+    Definition CHILD;
 
     PARENT <= seq(CHILD);
     CHILD  <= seq(PARENT);
@@ -165,7 +165,7 @@ TEST_CASE("Cyclic grammer test", "[general]")
 
 TEST_CASE("Visit test", "[general]")
 {
-    rule ROOT, TAG, TAG_NAME, WS;
+    Definition ROOT, TAG, TAG_NAME, WS;
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
@@ -296,7 +296,7 @@ TEST_CASE("Simple calculator test", "[general]")
 TEST_CASE("Calculator test", "[general]")
 {
     // Construct grammer
-    rule EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
+    Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
     EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
     TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
