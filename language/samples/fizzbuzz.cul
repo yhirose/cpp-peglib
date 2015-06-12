@@ -1,0 +1,17 @@
+/*
+ * Fizz Buzz
+ */
+
+mut i = 1
+while i < 24 {
+    if i % 15 == 0 {
+        pp('FizzBuzz')
+    } else if i % 5 == 0 {
+        pp('Buzz')
+    } else if i % 3 == 0 {
+        pp('Fizz')
+    } else {
+        pp(i)
+    }
+    i = i + 1
+}

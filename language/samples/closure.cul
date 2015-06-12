@@ -1,0 +1,17 @@
+/*
+ * Closure test
+ */
+
+make_func = fn (mut x) {
+    mut n = 100
+    fn () {
+	    n = n + 1
+        x = x + 1 + n
+    }
+}
+
+f = make_func(10)
+
+pp("1: { f() }")
+pp("2: { f() }")
+pp("3: { f() }")
