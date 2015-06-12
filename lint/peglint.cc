@@ -26,13 +26,29 @@ bool read_file(const char* path, vector<char>& buff)
 
 int main(int argc, const char** argv)
 {
-    if (argc < 2 || string("--help") == argv[1]) {
-        cerr << "usage: peglint [grammar file path] [source file path]" << endl;
+    auto opt_ast = false;
+    auto opt_help = false;
+    vector<const char*> path_list;
+
+    int argi = 1;
+    while (argi < argc) {
+        auto arg = argv[argi++];
+        if (string("--help") == arg) {
+            opt_help = true;
+        } else if (string("--ast") == arg) {
+            opt_ast = true;
+        } else {
+            path_list.push_back(arg);
+        }
+    }
+
+    if (path_list.empty() || opt_help) {
+        cerr << "usage: peglint [--ast] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
     // Check PEG grammar
-    auto syntax_path = argv[1];
+    auto syntax_path = path_list[0];
 
     vector<char> syntax;
     if (!read_file(syntax_path, syntax)) {
@@ -50,25 +66,38 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    if (argc < 3) {
+    if (path_list.size() < 2) {
         return 0;
     }
 
     // Check source
-    auto source_path = argv[2];
+    auto source_path = path_list[1];
 
     vector<char> source;
     if (!read_file(source_path, source)) {
-        cerr << "can't open the source file." << endl;
-        return -1;
+       auto beg = source_path;
+       auto end = source_path + strlen(source_path);
+	    source.assign(beg, end);
+       source_path = "[commendline]";
     }
 
     peg.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
-    if (!peg.parse_n(source.data(), source.size())) {
-        return -1;
+    if (opt_ast) {
+	    peg.enable_ast();
+
+	    std::shared_ptr<peglib::Ast> ast;
+	    if (!peg.parse_n(source.data(), source.size(), ast)) {
+	        return -1;
+	    }
+
+	    peglib::AstPrint().print(*ast);
+    } else {
+	    if (!peg.parse_n(source.data(), source.size())) {
+	        return -1;
+	    }
     }
 
     return 0;
