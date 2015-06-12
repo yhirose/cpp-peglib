@@ -454,7 +454,7 @@ TEST_CASE("Calculator test with AST", "[general]")
         );
 
     const int kTagNumber = 0;
-    parser.enable_ast({ { "NUMBER", kTagNumber } });
+    parser.enable_ast(true, { { "NUMBER", kTagNumber } });
 
     function<long (const Ast&)> eval = [&](const Ast& ast) {
         if (ast.tag == kTagNumber) {
