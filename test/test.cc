@@ -266,7 +266,7 @@ TEST_CASE("mutable lambda test", "[general]")
 {
     vector<string> vec;
 
-    peg pg("ROOT <- 'mutable lambda test'"); 
+    peg pg("ROOT <- 'mutable lambda test'");
 
     // This test makes sure if the following code can be compiled.
     pg["TOKEN"] = [=](const char* s, size_t n) mutable {
@@ -503,6 +503,25 @@ TEST_CASE("Predicate test", "[general]")
 
     ret = parser.parse("200", val);
     REQUIRE(ret == false);
+}
+
+TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
+{
+    peg parser(
+       " START       <- _ &HELLO HELLO_WORLD '.' "
+       " HELLO_WORLD <- HELLO 'World' _          "
+       " HELLO       <- 'Hello' _                "
+       " ~_          <- [ \t\r\n]*               "
+    );
+
+    parser.enable_ast(false);
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse("Hello World.", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->nodes.size() == 1);
+    REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
 }
 
 bool exact(Grammar& g, const char* d, const char* s) {
