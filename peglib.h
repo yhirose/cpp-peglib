@@ -148,7 +148,13 @@ private:
 /*
 * Semantic values
 */
-struct SemanticValue {
+struct SemanticValue
+{
+    any         val;
+    const char* name;
+    const char* s;
+    size_t      n;
+
     SemanticValue()
         : s(nullptr), n(0) {}
 
@@ -168,11 +174,6 @@ struct SemanticValue {
     std::string str() const {
         return std::string(s, n);
     }
-
-    any         val;
-    const char* name;
-    const char* s;
-    size_t      n;
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
@@ -2057,7 +2058,7 @@ public:
         return *this;
     }
 
-    peg& enable_ast(bool optimize_nodes = true) {
+    peg& enable_ast(bool optimize_nodes) {
         ast_end(optimize_nodes);
         return *this;
     }

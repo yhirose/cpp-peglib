@@ -49,7 +49,7 @@ int main(int argc, const char** argv)
         "  ~_               <-  [ \t\r\n]*                        "
         );
 
-    parser.enable_ast();
+    parser.enable_ast(true);
 
     auto expr = argv[1];
     shared_ptr<Ast> ast;
