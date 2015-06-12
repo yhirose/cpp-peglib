@@ -27,6 +27,7 @@ bool read_file(const char* path, vector<char>& buff)
 int main(int argc, const char** argv)
 {
     auto opt_ast = false;
+    auto opt_optimize_ast_nodes = false;
     auto opt_help = false;
     vector<const char*> path_list;
 
@@ -37,13 +38,15 @@ int main(int argc, const char** argv)
             opt_help = true;
         } else if (string("--ast") == arg) {
             opt_ast = true;
+        } else if (string("--optimize_ast_nodes") == arg || string("--opt") == arg) {
+            opt_optimize_ast_nodes = true;
         } else {
             path_list.push_back(arg);
         }
     }
 
     if (path_list.empty() || opt_help) {
-        cerr << "usage: peglint [--ast] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
@@ -86,7 +89,7 @@ int main(int argc, const char** argv)
     };
 
     if (opt_ast) {
-	    peg.enable_ast();
+	    peg.enable_ast(opt_optimize_ast_nodes);
 
 	    std::shared_ptr<peglib::Ast> ast;
 	    if (!peg.parse_n(source.data(), source.size(), ast)) {

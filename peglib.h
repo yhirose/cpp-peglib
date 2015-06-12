@@ -2041,19 +2041,19 @@ public:
     struct AstNodeInfo {
         const char* name;
         int         tag; // TODO: It should be calculated at compile-time from 'name' with constexpr hash function.
-        bool        optimize;
+        bool        optimize_nodes;
     };
 
-    peg& enable_ast(std::initializer_list<AstNodeInfo> list) {
+    peg& enable_ast(bool optimize_nodes, std::initializer_list<AstNodeInfo> list) {
         for (const auto& info: list) {
             ast_node(info);
         }
-        ast_end();
+        ast_end(optimize_nodes);
         return *this;
     }
 
-    peg& enable_ast() {
-        ast_end();
+    peg& enable_ast(bool optimize_nodes = true) {
+        ast_end(optimize_nodes);
         return *this;
     }
 
@@ -2080,7 +2080,7 @@ private:
             if (is_token) {
                 return std::make_shared<Ast>(info.name, info.tag, std::string(sv.s, sv.n));
             }
-            if (info.optimize && sv.size() == 1) {
+            if (info.optimize_nodes && sv.size() == 1) {
                 std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                 return ast;
             }
@@ -2088,18 +2088,18 @@ private:
         };
     }
 
-    void ast_end() {
+    void ast_end(bool optimize_nodes) {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& rule = x.second;
             auto& action = rule.actions.front();
             if (!action) {
                 auto is_token = rule.is_token;
-                action = [name, is_token](const SemanticValues& sv) {
+                action = [=](const SemanticValues& sv) {
                     if (is_token) {
                         return std::make_shared<Ast>(name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }
-                    if (sv.size() == 1) {
+                    if (optimize_nodes && sv.size() == 1) {
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }

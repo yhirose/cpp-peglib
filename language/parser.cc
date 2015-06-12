@@ -73,7 +73,7 @@ peg& get_parser()
             throw logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast({
+        parser.enable_ast(true, {
             /*
                Definition,            Tag               Optimize
              ---------------------- ------------------ ---------- */
