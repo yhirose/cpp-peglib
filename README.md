@@ -261,25 +261,7 @@ The following are available operators:
 Predicate control
 -----------------
 
-```c++
-peg parser("NUMBER  <-  [0-9]+");
-
-parser["NUMBER"] = [](const char* s, size_t n) {
-    return stol(string(s, n), nullptr, 10);
-};
-
-parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
-    return val.get<long>() == 100;
-};
-
-long val;
-auto ret = parser.parse("100", val);
-assert(ret == true);
-assert(val == 100);
-
-ret = parser.parse("200", val);
-assert(ret == false);
-```
+  * TODO
 
 Adjust definitions
 ------------------

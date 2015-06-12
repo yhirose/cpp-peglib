@@ -484,6 +484,7 @@ TEST_CASE("Calculator test with AST", "[general]")
     REQUIRE(val == -3);
 }
 
+#if 0
 TEST_CASE("Predicate test", "[general]")
 {
     peg parser("NUMBER  <-  [0-9]+");
@@ -504,6 +505,7 @@ TEST_CASE("Predicate test", "[general]")
     ret = parser.parse("200", val);
     REQUIRE(ret == false);
 }
+#endif
 
 TEST_CASE("Ignore semantic value test", "[general]")
 {

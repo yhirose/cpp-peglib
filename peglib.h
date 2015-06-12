@@ -279,10 +279,12 @@ any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
 }
 
+#if 0
 /*
  * Predicate
  */
 typedef std::function<bool(const char* s, size_t n, const any& val, const any& dt)> Predicate;
+#endif
 
 class Action
 {
@@ -1233,7 +1235,9 @@ public:
 
     std::string                   name;
     size_t                        id;
+#if 0
     Predicate                     predicate;
+#endif
     std::vector<Action>           actions;
     std::function<std::string ()> error_message;
     bool                          ignoreSemanticValue;
@@ -1300,10 +1304,12 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             val = reduce(chldsv, dt, action);
         }
 
+#if 0
         // Predicate check
         if (success(len) && outer_->predicate && !outer_->predicate(anchors, anchorn, val, dt)) {
             len = -1;
         }
+#endif
 
         c.pop();
     });
