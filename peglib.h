@@ -712,7 +712,9 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
+        auto& chldsv = c.push();
+        auto len = rule.parse(s, n, chldsv, c, dt);
+        c.pop();
         if (success(len)) {
             return 0;
         } else {
@@ -734,8 +736,11 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto error_pos = c.error_pos;
+        auto& chldsv = c.push();
         auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len)) {
+        c.pop();
+        if (success(len))
+           {
             c.set_error_pos(s);
             return -1;
         } else {
