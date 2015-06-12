@@ -737,11 +737,8 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto error_pos = c.error_pos;
-        auto& chldsv = c.push();
         auto len = rule.parse(s, n, sv, c, dt);
-        c.pop();
-        if (success(len))
-           {
+        if (success(len)) {
             c.set_error_pos(s);
             return -1;
         } else {
@@ -856,7 +853,6 @@ public:
         : ope_(ope), match_action_(ma), id(n), name(s) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        assert(ope_);
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len) && match_action_) {
@@ -880,13 +876,31 @@ public:
     Anchor(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        assert(ope_);
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             sv.s = s;
             sv.n = len;
         }
+        return len;
+    }
+
+    void accept(Visitor& v) override;
+
+//private:
+    std::shared_ptr<Ope> ope_;
+};
+
+class Ignore : public Ope
+{
+public:
+    Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        const auto& rule = *ope_;
+        auto& chldsv = c.push();
+        auto len = rule.parse(s, n, chldsv, c, dt);
+        c.pop();
         return len;
     }
 
@@ -992,6 +1006,7 @@ struct Ope::Visitor
     virtual void visit(AnyCharacter& ope) = 0;
     virtual void visit(Capture& ope) = 0;
     virtual void visit(Anchor& ope) = 0;
+    virtual void visit(Ignore& ope) = 0;
     virtual void visit(User& ope) = 0;
     virtual void visit(WeakHolder& ope) = 0;
     virtual void visit(Holder& ope) = 0;
@@ -1021,6 +1036,7 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(AnyCharacter& ope) override {}
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(Anchor& ope) override { ope.ope_->accept(*this); }
+    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(User& ope) override {}
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override;
@@ -1046,14 +1062,15 @@ struct IsToken : public Ope::Visitor
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(AndPredicate& ope) override {}
+    void visit(NotPredicate& ope) override {}
     void visit(LiteralString& ope) override {}
     void visit(CharacterClass& ope) override {}
     void visit(Character& ope) override {}
     void visit(AnyCharacter& ope) override {}
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(Anchor& ope) override { has_anchor = true; }
+    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(User& ope) override {}
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override {}
@@ -1342,6 +1359,7 @@ inline void Character::accept(Visitor& v) { v.visit(*this); }
 inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
 inline void Capture::accept(Visitor& v) { v.visit(*this); }
 inline void Anchor::accept(Visitor& v) { v.visit(*this); }
+inline void Ignore::accept(Visitor& v) { v.visit(*this); }
 inline void User::accept(Visitor& v) { v.visit(*this); }
 inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
@@ -1417,6 +1435,10 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma)
 
 inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Anchor>(ope);
+}
+
+inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<Ignore>(ope);
 }
 
 inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn) {
@@ -1518,7 +1540,7 @@ private:
         g["Sequence"]   <= zom(g["Prefix"]);
         g["Prefix"]     <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
         g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
-        g["Primary"]    <= cho(seq(g["Identifier"], npd(g["LEFTARROW"])),
+        g["Primary"]    <= cho(seq(opt(g["IGNORE"]), g["Identifier"], npd(g["LEFTARROW"])),
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
                                seq(g["Begin"], g["Expression"], g["End"]),
                                seq(g["BeginCap"], g["Expression"], g["EndCap"]),
@@ -1660,9 +1682,18 @@ private:
             // Reference
             [&](const SemanticValues& sv, any& dt) {
                 Data& data = *dt.get<Data*>();
-                const auto& ident = sv[0].val.get<std::string>();
+
+                auto ignore = (sv.size() == 2);
+                auto baseId = ignore ? 1 : 0;
+
+                const auto& ident = sv[baseId].val.get<std::string>();
                 data.references[ident] = sv.s; // for error handling
-                return ref(*data.grammar, ident);
+
+                if (ignore) {
+                    return ign(ref(*data.grammar, ident));
+                } else {
+                    return ref(*data.grammar, ident);
+                }
             },
             // (Expression)
             [&](const SemanticValues& sv) {

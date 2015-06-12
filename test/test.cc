@@ -505,6 +505,45 @@ TEST_CASE("Predicate test", "[general]")
     REQUIRE(ret == false);
 }
 
+TEST_CASE("Ignore semantic value test", "[general]")
+{
+    peg parser(
+       " START <-  ~HELLO WORLD "
+       " HELLO <- 'Hello' _     "
+       " WORLD <- 'World' _     "
+       " _     <- [ \t\r\n]*    "
+    );
+
+    parser.enable_ast(false);
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse("Hello World", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->nodes.size() == 1);
+    REQUIRE(ast->nodes[0]->name == "WORLD");
+}
+
+TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
+{
+    peg parser(
+       " START       <- _ !DUMMY HELLO_WORLD '.' "
+       " HELLO_WORLD <- HELLO 'World' _          "
+       " HELLO       <- 'Hello' _                "
+       " DUMMY       <- 'dummy' _                "
+       " ~_          <- [ \t\r\n]*               "
+    );
+
+    parser.enable_ast(false);
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse("Hello World.", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->nodes.size() == 1);
+    REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
+}
+
 TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
 {
     peg parser(
