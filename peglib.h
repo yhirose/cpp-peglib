@@ -1514,11 +1514,12 @@ private:
     }
 
     struct Data {
-        std::shared_ptr<Grammar>                     grammar;
-        std::string                                  start;
-        MatchAction                                  match_action;
-        std::unordered_map<std::string, const char*> references;
-        size_t                                       capture_count;
+        std::shared_ptr<Grammar>                         grammar;
+        std::string                                      start;
+        MatchAction                                      match_action;
+        std::vector<std::pair<std::string, const char*>> duplicates;
+        std::unordered_map<std::string, const char*>     references;
+        size_t                                           capture_count;
 
         Data()
             : grammar(std::make_shared<Grammar>())
@@ -1693,13 +1694,18 @@ private:
             const auto& name = sv[baseId].val.get<std::string>();
             auto ope = sv[baseId + 2].val.get<std::shared_ptr<Ope>>();
 
-            auto& rule = (*data.grammar)[name];
-            rule <= ope;
-            rule.name = name;
-            rule.ignoreSemanticValue = ignore;
+            auto& grammar = *data.grammar;
+            if (grammar.find(name) == grammar.end()) {
+                auto& rule = grammar[name];
+                rule <= ope;
+                rule.name = name;
+                rule.ignoreSemanticValue = ignore;
 
-            if (data.start.empty()) {
-                data.start = name;
+                if (data.start.empty()) {
+                    data.start = name;
+                }
+            } else {
+                data.duplicates.push_back(std::make_pair(name, sv.s));
             }
         };
 
@@ -1868,9 +1874,19 @@ private:
             }
         }
 
-        // Check missing definitions
-        bool ret = true;
+        // Check duplicated definitions
+        bool ret = data.duplicates.empty();;
 
+        for (const auto& x: data.duplicates) {
+            if (log) {
+                const auto& name = x.first;
+                auto ptr = x.second;
+                auto line = line_info(s, ptr);
+                log(line.first, line.second, "'" + name + "' is already defined.");
+            }
+        }
+
+        // Check missing definitions
         for (const auto& x : data.references) {
             const auto& name = x.first;
             auto ptr = x.second;

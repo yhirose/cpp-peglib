@@ -565,6 +565,16 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
     REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
 }
 
+TEST_CASE("Definition duplicates test", "[general]")
+{
+    peg parser(
+        " A <- ''"
+        " A <- ''"
+    );
+
+    REQUIRE(parser == false);
+}
+
 TEST_CASE("Left recursive test", "[left recursive]")
 {
     peg parser(
