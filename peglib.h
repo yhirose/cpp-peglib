@@ -995,24 +995,24 @@ private:
  */
 struct Ope::Visitor
 {
-    virtual void visit(Sequence& ope) = 0;
-    virtual void visit(PrioritizedChoice& ope) = 0;
-    virtual void visit(ZeroOrMore& ope) = 0;
-    virtual void visit(OneOrMore& ope) = 0;
-    virtual void visit(Option& ope) = 0;
-    virtual void visit(AndPredicate& ope) = 0;
-    virtual void visit(NotPredicate& ope) = 0;
-    virtual void visit(LiteralString& ope) = 0;
-    virtual void visit(CharacterClass& ope) = 0;
-    virtual void visit(Character& ope) = 0;
-    virtual void visit(AnyCharacter& ope) = 0;
-    virtual void visit(Capture& ope) = 0;
-    virtual void visit(Anchor& ope) = 0;
-    virtual void visit(Ignore& ope) = 0;
-    virtual void visit(User& ope) = 0;
-    virtual void visit(WeakHolder& ope) = 0;
-    virtual void visit(Holder& ope) = 0;
-    virtual void visit(DefinitionReference& ope) = 0;
+    virtual void visit(Sequence& ope) {}
+    virtual void visit(PrioritizedChoice& ope) {}
+    virtual void visit(ZeroOrMore& ope) {}
+    virtual void visit(OneOrMore& ope) {}
+    virtual void visit(Option& ope) {}
+    virtual void visit(AndPredicate& ope) {}
+    virtual void visit(NotPredicate& ope) {}
+    virtual void visit(LiteralString& ope) {}
+    virtual void visit(CharacterClass& ope) {}
+    virtual void visit(Character& ope) {}
+    virtual void visit(AnyCharacter& ope) {}
+    virtual void visit(Capture& ope) {}
+    virtual void visit(Anchor& ope) {}
+    virtual void visit(Ignore& ope) {}
+    virtual void visit(User& ope) {}
+    virtual void visit(WeakHolder& ope) {}
+    virtual void visit(Holder& ope) {}
+    virtual void visit(DefinitionReference& ope) {}
 };
 
 struct AssignIDToDefinition : public Ope::Visitor
@@ -1032,14 +1032,9 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
     void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(LiteralString& ope) override {}
-    void visit(CharacterClass& ope) override {}
-    void visit(Character& ope) override {}
-    void visit(AnyCharacter& ope) override {}
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(Anchor& ope) override { ope.ope_->accept(*this); }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(User& ope) override {}
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override;
     void visit(DefinitionReference& ope) override { ope.get_rule()->accept(*this); }
@@ -1064,18 +1059,10 @@ struct IsToken : public Ope::Visitor
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override {}
-    void visit(NotPredicate& ope) override {}
-    void visit(LiteralString& ope) override {}
-    void visit(CharacterClass& ope) override {}
-    void visit(Character& ope) override {}
-    void visit(AnyCharacter& ope) override {}
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(Anchor& ope) override { has_anchor = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(User& ope) override {}
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override {}
     void visit(DefinitionReference& ope) override { has_rule = true; }
 
     bool is_token() const {
