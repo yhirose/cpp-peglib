@@ -255,7 +255,7 @@ The following are available operators:
 | chr      | Character             |
 | dot      | Any character         |
 | anc      | Anchor character      |
-| ing      | Ignore semantic value |
+| ign      | Ignore semantic value |
 | cap      | Capture character     |
 | usr      | User defiend parser   |
 
