@@ -175,6 +175,7 @@ Simple interface
 
 ```c++
 peglib::match m;
+
 auto ret = peglib::peg_match(
     R"(
         ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*
@@ -189,6 +190,26 @@ assert(m.size() == 4);
 assert(m.str(1) == "tag1");
 assert(m.str(2) == "tag:2");
 assert(m.str(3) == "tag-3");
+```
+
+It also supports named capture with the `$name<` ... `>` operator.
+
+```c++
+peglib::match m;
+
+auto ret = peglib::peg_match(
+    "  ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*  "
+    "  TAG_NAME  <-  (!']' .)+                "
+    "  _         <-  [ \t]*                   ",
+    " [tag1] [tag:2] [tag-3] ",
+    m);
+
+auto cap = m.named_capture("test");
+
+REQUIRE(ret == true);
+REQUIRE(m.size() == 4);
+REQUIRE(cap.size() == 3);
+REQUIRE(m.str(cap[2]) == "tag-3");
 ```
 
 There are some ways to *search* a peg pattern in a document.
