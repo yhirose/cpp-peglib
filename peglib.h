@@ -583,7 +583,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::vector<std::shared_ptr<Ope>> opes_;
 };
 
@@ -635,7 +634,6 @@ public:
 
     size_t size() const { return opes_.size();  }
 
-//private:
     std::vector<std::shared_ptr<Ope>> opes_;
 };
 
@@ -659,7 +657,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -688,7 +685,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -705,7 +701,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -728,7 +723,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -752,7 +746,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -774,7 +767,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::string lit_;
 };
 
@@ -810,7 +802,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::string chars_;
 };
 
@@ -830,7 +821,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     char ch_;
 };
 
@@ -852,25 +842,26 @@ public:
 class Capture : public Ope
 {
 public:
-    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t n, const std::string& s)
-        : ope_(ope), match_action_(ma), id(n), name(s) {}
+    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t id, const std::string& name)
+        : ope_(ope), match_action_(ma), id_(id), name_(name) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len) && match_action_) {
-            match_action_(s, len, id, name);
+            match_action_(s, len, id_, name_);
         }
         return len;
     }
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
+
+private:
     MatchAction          match_action_;
-    size_t               id;
-    std::string          name;
+    size_t               id_;
+    std::string          name_;
 };
 
 class Anchor : public Ope
@@ -890,7 +881,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -909,7 +899,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::shared_ptr<Ope> ope_;
 };
 
@@ -927,7 +916,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::function<size_t(const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
 };
 
@@ -945,7 +933,6 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
     std::weak_ptr<Ope> weak_;
 };
 
@@ -961,13 +948,12 @@ public:
 
     void accept(Visitor& v) override;
 
-//private:
-    friend class Definition;
-
     any reduce(const SemanticValues& sv, any& dt, const Action& action) const;
 
     std::shared_ptr<Ope> ope_;
     Definition*          outer_;
+
+    friend class Definition;
 };
 
 class DefinitionReference : public Ope
@@ -985,10 +971,11 @@ public:
 
     std::shared_ptr<Ope> get_rule() const;
 
-//private:
     const std::unordered_map<std::string, Definition>& grammar_;
     const std::string                                  name_;
     const char*                                        s_;
+
+private:
     mutable std::once_flag                             init_;
     mutable std::shared_ptr<Ope>                       rule_;
 };
