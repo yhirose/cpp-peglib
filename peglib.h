@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -973,9 +974,10 @@ class DefinitionReference : public Ope
 {
 public:
     DefinitionReference(
-        const std::unordered_map<std::string, Definition>& grammar, const std::string& name)
+        const std::unordered_map<std::string, Definition>& grammar, const std::string& name, const char* s)
         : grammar_(grammar)
-        , name_(name) {}
+        , name_(name)
+        , s_(s) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
@@ -983,9 +985,10 @@ public:
 
     std::shared_ptr<Ope> get_rule() const;
 
-private:
+//private:
     const std::unordered_map<std::string, Definition>& grammar_;
     const std::string                                  name_;
+    const char*                                        s_;
     mutable std::once_flag                             init_;
     mutable std::shared_ptr<Ope>                       rule_;
 };
@@ -1018,13 +1021,13 @@ struct Ope::Visitor
 struct AssignIDToDefinition : public Ope::Visitor
 {
     void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
+        for (auto ope: ope.opes_) {
+            ope->accept(*this);
         }
     }
     void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
+        for (auto ope: ope.opes_) {
+            ope->accept(*this);
         }
     }
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
@@ -1047,13 +1050,13 @@ struct IsToken : public Ope::Visitor
     IsToken() : has_anchor(false), has_rule(false) {}
 
     void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
+        for (auto ope: ope.opes_) {
+            ope->accept(*this);
         }
     }
     void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
+        for (auto ope: ope.opes_) {
+            ope->accept(*this);
         }
     }
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
@@ -1438,8 +1441,8 @@ inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, S
     return std::make_shared<User>(fn);
 }
 
-inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition>& grammar, const std::string& name) {
-    return std::make_shared<DefinitionReference>(grammar, name);
+inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition>& grammar, const std::string& name, const char* s) {
+    return std::make_shared<DefinitionReference>(grammar, name, s);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1521,6 +1524,100 @@ private:
             : grammar(std::make_shared<Grammar>())
             , capture_count(0)
             {}
+    };
+
+    struct DetectLeftRecursion : public Ope::Visitor {
+        DetectLeftRecursion(const std::string& name)
+            : s_(nullptr), name_(name), done_(false) {}
+
+        void visit(Sequence& ope) override {
+            for (auto ope: ope.opes_) {
+                ope->accept(*this);
+                if (done_) {
+                    break;
+                } else if (s_) {
+                    done_ = true;
+                    break;
+                }
+            }
+        }
+        void visit(PrioritizedChoice& ope) override {
+            for (auto ope: ope.opes_) {
+                ope->accept(*this);
+                if (s_) {
+                    done_ = true;
+                    break;
+                }
+            }
+        }
+        void visit(ZeroOrMore& ope) override {
+            ope.ope_->accept(*this);
+            done_ = false;
+        }
+        void visit(OneOrMore& ope) override {
+            ope.ope_->accept(*this);
+            done_ = true;
+        }
+        void visit(Option& ope) override {
+            ope.ope_->accept(*this);
+            done_ = false;
+        }
+        void visit(AndPredicate& ope) override {
+            ope.ope_->accept(*this);
+            done_ = false;
+        }
+        void visit(NotPredicate& ope) override {
+            ope.ope_->accept(*this);
+            done_ = false;
+        }
+        void visit(LiteralString& ope) override {
+            done_ = !ope.lit_.empty();
+        }
+        void visit(CharacterClass& ope) override {
+            done_ = true;
+        }
+        void visit(Character& ope) override {
+            done_ = true;
+        }
+        void visit(AnyCharacter& ope) override {
+            done_ = true;
+        }
+        void visit(Capture& ope) override {
+            ope.ope_->accept(*this);
+        }
+        void visit(Anchor& ope) override {
+            ope.ope_->accept(*this);
+        }
+        void visit(Ignore& ope) override {
+            ope.ope_->accept(*this);
+        }
+        void visit(User& ope) override {
+            done_ = true;
+        }
+        void visit(WeakHolder& ope) override {
+            ope.weak_.lock()->accept(*this);
+        }
+        void visit(Holder& ope) override {
+            ope.ope_->accept(*this);
+        }
+        void visit(DefinitionReference& ope) override {
+            if (ope.name_ == name_) {
+                s_ = ope.s_;
+            } else if (refs_.find(ope.name_) != refs_.end()) {
+                ;
+            } else {
+                refs_.insert(ope.name_);
+                ope.get_rule()->accept(*this);
+            }
+            done_ = true;
+        }
+
+        const char* s_;
+
+    private:
+        std::string           name_;
+        std::set<std::string> refs_;
+        bool                  done_;
     };
 
     void make_grammar() {
@@ -1679,12 +1776,15 @@ private:
                 auto baseId = ignore ? 1 : 0;
 
                 const auto& ident = sv[baseId].val.get<std::string>();
-                data.references[ident] = sv.s; // for error handling
+
+                if (data.references.find(ident) == data.references.end()) {
+                    data.references[ident] = sv.s; // for error handling
+                }
 
                 if (ignore) {
-                    return ign(ref(*data.grammar, ident));
+                    return ign(ref(*data.grammar, ident, sv.s));
                 } else {
-                    return ref(*data.grammar, ident);
+                    return ref(*data.grammar, ident, sv.s);
                 }
             },
             // (Expression)
@@ -1769,6 +1869,8 @@ private:
         }
 
         // Check missing definitions
+        bool ret = true;
+
         for (const auto& x : data.references) {
             const auto& name = x.first;
             auto ptr = x.second;
@@ -1777,10 +1879,37 @@ private:
                     auto line = line_info(s, ptr);
                     log(line.first, line.second, "'" + name + "' is not defined.");
                 }
-                return nullptr;
+                ret = false;
             }
         }
 
+        if (!ret) {
+            return nullptr;
+        }
+
+        // Check left recursion
+        ret = true;
+
+        for (auto& x: grammar) {
+            const auto& name = x.first;
+            auto& rule = x.second;
+
+            DetectLeftRecursion lr(name);
+            rule.accept(lr);
+            if (lr.s_) {
+                if (log) {
+                    auto line = line_info(s, lr.s_);
+                    log(line.first, line.second, "'" + name + "' is left recursive.");
+                }
+                ret = false;;
+            }
+        }
+
+        if (!ret) {
+            return nullptr;
+        }
+
+        // Set root definition
         start = data.start;
 
         return data.grammar;

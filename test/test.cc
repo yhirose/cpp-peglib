@@ -565,6 +565,44 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
     REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
 }
 
+TEST_CASE("Left recursive test", "[left recursive]")
+{
+    peg parser(
+        " A <- A 'a'"
+        " B <- A 'a'"
+    );
+
+    REQUIRE(parser == false);
+}
+
+TEST_CASE("Left recursive with option test", "[left recursive]")
+{
+    peg parser(
+        " A  <- 'a' / 'b'? B 'c' "
+        " B  <- A                "
+    );
+
+    REQUIRE(parser == false);
+}
+
+TEST_CASE("Left recursive with zom test", "[left recursive]")
+{
+    peg parser(
+        " A <- 'a'* A* "
+    );
+
+    REQUIRE(parser == false);
+}
+
+TEST_CASE("Left recursive with empty string test", "[left recursive]")
+{
+    peg parser(
+        " A <- '' A"
+    );
+
+    REQUIRE(parser == false);
+}
+
 bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);
