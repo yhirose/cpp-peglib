@@ -1480,8 +1480,7 @@ public:
         MatchAction  ma,
         Log          log)
     {
-        static PEGParser instance;
-        return get().perform_core(s, n, rules, start, ma, log);
+        return get_instance().perform_core(s, n, rules, start, ma, log);
     }
 
     static std::shared_ptr<Grammar> parse(
@@ -1497,11 +1496,11 @@ public:
 
     // For debuging purpose
     static Grammar& grammar() {
-        return get().g;
+        return get_instance().g;
     }
 
 private:
-    static PEGParser& get() {
+    static PEGParser& get_instance() {
         static PEGParser instance;
         return instance;
     }
