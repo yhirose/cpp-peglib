@@ -144,9 +144,9 @@ We can ignore unnecessary semantic values from the list by using `~` operator.
 
 ```c++
 peglib::peg parser(
-    "  ROOT  <-  _ ITEM (',' _ ITEM _)* "
-    "  ITEM  <-  ([a-z])+  "
-    "  ~_    <-  [ \t]*    "
+    "  ROOT  <-  _ ITEM (',' _ ITEM _)*  "
+    "  ITEM  <-  ([a-z])+                "
+    "  ~_    <-  [ \t]*                  "
 );
 
 parser["ROOT"] = [&](const SemanticValues& sv) {
@@ -154,6 +154,16 @@ parser["ROOT"] = [&](const SemanticValues& sv) {
 };
 
 auto ret = parser.parse(" item1, item2 ");
+```
+
+The following grammar is same as the above.
+
+```c++
+peglib::peg parser(
+    "  ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*  "
+    "  ITEM  <-  ([a-z])+                   "
+    "  _     <-  [ \t]*                     "
+);
 ```
 
 Simple interface
