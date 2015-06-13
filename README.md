@@ -241,22 +241,23 @@ auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
 The following are available operators:
 
-| Operator |     Description     |
-| :------- | :------------------ |
-| seq      | Sequence            |
-| cho      | Prioritized Choice  |
-| zom      | Zero or More        |
-| oom      | One or More         |
-| opt      | Optional            |
-| apd      | And predicate       |
-| npd      | Not predicate       |
-| lit      | Literal string      |
-| cls      | Character class     |
-| chr      | Character           |
-| dot      | Any character       |
-| anc      | Anchor character    |
-| cap      | Capture character   |
-| usr      | User defiend parser |
+| Operator |     Description       |
+| :------- | :-------------------- |
+| seq      | Sequence              |
+| cho      | Prioritized Choice    |
+| zom      | Zero or More          |
+| oom      | One or More           |
+| opt      | Optional              |
+| apd      | And predicate         |
+| npd      | Not predicate         |
+| lit      | Literal string        |
+| cls      | Character class       |
+| chr      | Character             |
+| dot      | Any character         |
+| anc      | Anchor character      |
+| ing      | Ignore semantic value |
+| cap      | Capture character     |
+| usr      | User defiend parser   |
 
 Predicate control
 -----------------
