@@ -19,25 +19,25 @@ int main(int argc, const char** argv)
         return 1;
     }
 
-	function<long (const Ast&)> eval = [&](const Ast& ast) {
-	    if (ast.name == "NUMBER") {
-	        return stol(ast.token);
-	    } else {
-	        const auto& nodes = ast.nodes;
-	        auto result = eval(*nodes[0]);
-	        for (auto i = 1u; i < nodes.size(); i += 2) {
-	            auto num = eval(*nodes[i + 1]);
-	            auto ope = nodes[i]->token[0];
-	            switch (ope) {
-	                case '+': result += num; break;
-	                case '-': result -= num; break;
-	                case '*': result *= num; break;
-	                case '/': result /= num; break;
-	            }
-	        }
-	        return result;
-	    }
-	};
+    function<long (const Ast&)> eval = [&](const Ast& ast) {
+        if (ast.name == "NUMBER") {
+            return stol(ast.token);
+        } else {
+            const auto& nodes = ast.nodes;
+            auto result = eval(*nodes[0]);
+            for (auto i = 1u; i < nodes.size(); i += 2) {
+                auto num = eval(*nodes[i + 1]);
+                auto ope = nodes[i]->token[0];
+                switch (ope) {
+                    case '+': result += num; break;
+                    case '-': result -= num; break;
+                    case '*': result *= num; break;
+                    case '/': result /= num; break;
+                }
+            }
+            return result;
+        }
+    };
 
     peg parser(
         "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
