@@ -17,22 +17,43 @@ struct Value
             std::string name;
             bool        mut;
         };
-        std::vector<Parameter>                            params;
+        std::vector<Parameter>                                  params;
         std::function<Value (std::shared_ptr<Environment> env)> eval;
     };
 
-    explicit Value() : type(Undefined) {}
+    Value() : type(Undefined) {
+        //std::cout << "Val::def ctor: " << std::endl;
+    }
+
+    Value(const Value& rhs) : type(rhs.type), v(rhs.v) {
+        //std::cout << "Val::copy ctor: " << *this << std::endl;
+    }
+
+    Value(Value&& rhs) : type(rhs.type), v(rhs.v) {
+        //std::cout << "Val::move ctor: " << *this << std::endl;
+    }
+
+    Value& operator=(const Value& rhs) {
+        if (this != &rhs) {
+            type = rhs.type;
+            v = rhs.v;
+            //std::cout << "Val::copy=: " << *this << std::endl;
+        }
+        return *this;
+    }
+
+    Value& operator=(Value&& rhs) {
+        type = rhs.type;
+        v = rhs.v;
+        //std::cout << "Val::move=: " << *this << std::endl;
+        return *this;
+    }
+
     explicit Value(bool b) : type(Bool), v(b) {}
     explicit Value(long l) : type(Long), v(l) {}
     explicit Value(std::string&& s) : type(String), v(s) {}
     explicit Value(ArrayValue&& a) : type(Array), v(a) {}
     explicit Value(FunctionValue&& f) : type(Function), v(f) {}
-
-    Value(const Value&) = default;
-    Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
-
-    Value& operator=(const Value&) = default;
-    Value& operator=(Value&& rhs) { type = rhs.type; v = rhs.v; return *this; }
 
     bool to_bool() const {
         switch (type) {
@@ -191,7 +212,7 @@ struct Environment
         return outer_ && outer_->has(s);
     }
 
-    Value get(const std::string& s) const {
+    const Value& get(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s).val;
         }
@@ -203,13 +224,13 @@ struct Environment
     }
 
     void assign(const std::string& s, const Value& val) {
-        assert(has(s));
         if (dic_.find(s) != dic_.end()) {
             auto& sym = dic_[s];
             if (!sym.mut) {
                 std::string msg = "immutable variable '" + s + "'...";
                 throw std::runtime_error(msg);
             }
+            //std::cout << "Env::assgin: " << s << std::endl;
             sym.val = val;
             return;
         }
@@ -222,7 +243,7 @@ struct Environment
     }
 
     void initialize(const std::string& s, const Value& val, bool mut) {
-        assert(!has(s));
+        //std::cout << "Env::initialize: " << s << std::endl;
         dic_[s] = Symbol{val, mut};
     }
 

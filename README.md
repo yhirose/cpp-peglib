@@ -198,9 +198,11 @@ It also supports named capture with the `$name<` ... `>` operator.
 peglib::match m;
 
 auto ret = peglib::peg_match(
-    "  ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*  "
-    "  TAG_NAME  <-  (!']' .)+                "
-    "  _         <-  [ \t]*                   ",
+    R"(
+        ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*
+        TAG_NAME  <-  (!']' .)+
+        _         <-  [ \t]*
+    )",
     " [tag1] [tag:2] [tag-3] ",
     m);
 
@@ -290,11 +292,6 @@ The following are available operators:
 | cap      | Capture character     |
 | usr      | User defiend parser   |
 
-Predicate control
------------------
-
-  * TODO
-
 Adjust definitions
 ------------------
 
@@ -344,7 +341,7 @@ Tested Compilers
 TODO
 ----
 
-  * Optimization of grammars
+  * Predicate control
   * Unicode support
 
 License
