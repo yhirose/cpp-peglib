@@ -304,14 +304,14 @@ auto syntax = R"(
 
 Rules rules = {
     {
-        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) {
+        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) -> size_t {
             static vector<string> names = { "PEG", "BNF" };
-            for (const auto& n: names) {
-                if (n.size() <= n && !n.compare(0, n.size(), s, n.size())) {
-                    return success(n.size());
+            for (const auto& name: names) {
+                if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
+                    return name.size();
                 }
             }
-            return fail(s);
+            return -1;
         })
     },
     {

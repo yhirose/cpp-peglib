@@ -613,6 +613,32 @@ TEST_CASE("Left recursive with empty string test", "[left recursive]")
     REQUIRE(parser == false);
 }
 
+TEST_CASE("User rule test", "[user rule]")
+{
+    auto syntax = " ROOT <- _ 'Hello' _ NAME '!' _ ";
+
+    Rules rules = {
+        {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) -> size_t {
+                static vector<string> names = { "PEG", "BNF" };
+                for (const auto& name: names) {
+                    if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
+                        return name.size();
+                    }
+                }
+                return -1;
+            })
+        },
+        {
+            "~_", zom(cls(" \t\r\n"))
+        }
+    };
+
+    peg g = peg(syntax, rules);
+
+    REQUIRE(g.parse(" Hello BNF! ") == true);
+}
+
 bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);

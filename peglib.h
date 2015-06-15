@@ -284,7 +284,7 @@ any call(F fn, Args&&... args) {
 /*
  * Predicate
  */
-typedef std::function<bool(const char* s, size_t n, const any& val, const any& dt)> Predicate;
+typedef std::function<bool (const char* s, size_t n, const any& val, const any& dt)> Predicate;
 #endif
 
 class Action
@@ -902,7 +902,7 @@ public:
     std::shared_ptr<Ope> ope_;
 };
 
-typedef std::function<size_t(const char* s, size_t n, SemanticValues& sv, any& dt)> Parser;
+typedef std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> Parser;
 
 class User : public Ope
 {
@@ -916,7 +916,7 @@ public:
 
     void accept(Visitor& v) override;
 
-    std::function<size_t(const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
+    std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
 };
 
 class WeakHolder : public Ope
