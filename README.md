@@ -319,7 +319,7 @@ Rules additional_rules = {
     }
 };
 
-peg g = peg(syntax, rules);
+peg g = peg(syntax, additional_rules);
 
 assert(g.parse(" Hello BNF! "));
 ```
