@@ -166,6 +166,28 @@ peglib::peg parser(
 );
 ```
 
+*Semantic predicate* support is available. We can do it by throwing a `peglib::parse_error` exception in a semantic action.
+
+```c++
+peglib::peg parser("NUMBER  <-  [0-9]+");
+
+parser["NUMBER"] = [](const char* s, size_t n) {
+    auto val = stol(string(s, n), nullptr, 10);
+    if (val != 100) {
+        throw peglib::parse_error("value error!!");
+    }
+    return val;
+};
+
+long val;
+auto ret = parser.parse("100", val);
+assert(ret == true);
+assert(val == 100);
+
+ret = parser.parse("200", val);
+assert(ret == false);
+```
+
 Simple interface
 ----------------
 

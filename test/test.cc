@@ -484,29 +484,6 @@ TEST_CASE("Calculator test with AST", "[general]")
     REQUIRE(val == -3);
 }
 
-#if 0
-TEST_CASE("Predicate test", "[general]")
-{
-    peg parser("NUMBER  <-  [0-9]+");
-
-    parser["NUMBER"] = [](const char* s, size_t n) {
-        return stol(string(s, n), nullptr, 10);
-    };
-
-    parser["NUMBER"].predicate = [](const char* s, size_t n, const any& val, const any& dt) {
-        return val.get<long>() == 100;
-    };
-
-    long val;
-    auto ret = parser.parse("100", val);
-    REQUIRE(ret == true);
-    REQUIRE(val == 100);
-
-    ret = parser.parse("200", val);
-    REQUIRE(ret == false);
-}
-#endif
-
 TEST_CASE("Ignore semantic value test", "[general]")
 {
     peg parser(
@@ -637,6 +614,28 @@ TEST_CASE("User rule test", "[user rule]")
     peg g = peg(syntax, rules);
 
     REQUIRE(g.parse(" Hello BNF! ") == true);
+}
+
+
+TEST_CASE("Semantic predicate test", "[predicate]")
+{
+    peg parser("NUMBER  <-  [0-9]+");
+
+    parser["NUMBER"] = [](const char* s, size_t n) {
+        auto val = stol(string(s, n), nullptr, 10);
+        if (val != 100) {
+            throw parse_error("value error!!");
+        }
+        return val;
+    };
+
+    long val;
+    auto ret = parser.parse("100", val);
+    REQUIRE(ret == true);
+    REQUIRE(val == 100);
+
+    ret = parser.parse("200", val);
+    REQUIRE(ret == false);
 }
 
 bool exact(Grammar& g, const char* d, const char* s) {

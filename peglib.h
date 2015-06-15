@@ -280,13 +280,22 @@ any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
 }
 
-#if 0
 /*
- * Predicate
+ * Semantic predicate
  */
-typedef std::function<bool (const char* s, size_t n, const any& val, const any& dt)> Predicate;
-#endif
+typedef std::function<bool (const SemanticValues& sv, const any& dt)> SemanticPredicate;
 
+struct parse_error {
+    parse_error() = default;
+    parse_error(const char* s) : s_(s) {}
+    const char* what() const { return s_.empty() ? nullptr : s_.c_str(); }
+private:
+    std::string s_;
+};
+
+/*
+ * Action
+ */
 class Action
 {
 public:
@@ -1212,9 +1221,6 @@ public:
 
     std::string                   name;
     size_t                        id;
-#if 0
-    Predicate                     predicate;
-#endif
     std::vector<Action>           actions;
     std::function<std::string ()> error_message;
     bool                          ignoreSemanticValue;
@@ -1262,7 +1268,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         anchorn = len;
 
         // Invoke action
-        if (success(len) && !outer_->ignoreSemanticValue) {
+        if (success(len)) {
             assert(!outer_->actions.empty());
 
             auto i = chldsv.choice + 1; // Index 0 is for the default action
@@ -1278,15 +1284,16 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                 chldsv.n = len;
             }
 
-            val = reduce(chldsv, dt, action);
+            try {
+                val = reduce(chldsv, dt, action);
+            } catch (const parse_error& e) {
+                if (e.what()) {
+                    c.message_pos = s;
+                    c.message = e.what();
+                }
+                len = -1;
+            }
         }
-
-#if 0
-        // Predicate check
-        if (success(len) && outer_->predicate && !outer_->predicate(anchors, anchorn, val, dt)) {
-            len = -1;
-        }
-#endif
 
         c.pop();
     });
