@@ -242,7 +242,7 @@ There are some ways to *search* a peg pattern in a document.
 using namespace peglib;
 
 auto syntax = R"(
-ROOT <- '[' $< [a-z0-9]+ > ']'
+    ROOT <- '[' $< [a-z0-9]+ > ']'
 )";
 
 auto s = " [tag1] [tag2] [tag3] ";
@@ -253,23 +253,23 @@ size_t pos = 0;
 auto n = strlen(s);
 match m;
 while (peg_search(pg, s + pos, n - pos, m)) {
-  cout << m.str()  << endl; // entire match
-  cout << m.str(1) << endl; // submatch #1
-  pos += m.length();
+    cout << m.str()  << endl; // entire match
+    cout << m.str(1) << endl; // submatch #1
+    pos += m.length();
 }
 
 // peglib::peg_token_iterator
 peg_token_iterator it(syntax, s);
 while (it != peg_token_iterator()) {
-  cout << it->str()  << endl; // entire match
-  cout << it->str(1) << endl; // submatch #1
-  ++it;
+    cout << it->str()  << endl; // entire match
+    cout << it->str(1) << endl; // submatch #1
+    ++it;
 }
 
 // peglib::peg_token_range
 for (auto& m: peg_token_range(syntax, s)) {
-  cout << m.str()  << endl; // entire match
-  cout << m.str(1) << endl; // submatch #1
+    cout << m.str()  << endl; // entire match
+    cout << m.str(1) << endl; // submatch #1
 }
 ```
 
@@ -330,10 +330,10 @@ Rules additional_rules = {
             static vector<string> names = { "PEG", "BNF" };
             for (const auto& name: names) {
                 if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
-                    return name.size();
+                    return name.size(); // processed length
                 }
             }
-            return -1;
+            return -1; // parse error
         })
     },
     {
@@ -363,7 +363,6 @@ Tested Compilers
 TODO
 ----
 
-  * Predicate control
   * Unicode support
 
 License
