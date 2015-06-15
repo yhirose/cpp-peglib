@@ -295,14 +295,14 @@ The following are available operators:
 Adjust definitions
 ------------------
 
-It's possible to add and override definitions with parser operaters.
+It's possible to add/override definitions.
 
 ```c++
 auto syntax = R"(
     ROOT <- _ 'Hello' _ NAME '!' _
 )";
 
-Rules rules = {
+Rules additional_rules = {
     {
         "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) -> size_t {
             static vector<string> names = { "PEG", "BNF" };
