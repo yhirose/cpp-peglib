@@ -41,19 +41,20 @@ int main(void) {
     peg parser(syntax);
 
     // (3) Setup an action
-    parser["Additive"] = {
-        nullptr,                                        // Default action
-        [](const SemanticValues& sv) {
-            return sv[0].get<int>() + sv[1].get<int>(); // "Multitive '+' Additive"
-        },
-        [](const SemanticValues& sv) { return sv[0]; }  // "Multitive"
+    parser["Additive"] = [](const SemanticValues& sv) {
+        switch (sv.choice) {
+        case 0:  // "Multitive '+' Additive"
+            return sv[0].get<int>() + sv[1].get<int>();
+        default: // "Multitive"
+            return sv[0].get<int>();
+        }
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice) {
-        case 0:  // "Multitive '+' Additive"
+        case 0:  // "Primary '*' Multitive"
             return sv[0].get<int>() * sv[1].get<int>();
-        default: // "Multitive"
+        default: // "Primary"
             return sv[0].get<int>();
         }
     };
@@ -63,7 +64,7 @@ int main(void) {
     };
 
     // (4) Parse
-    parser.packrat_parsing(true); // Enable packrat parsing.
+    parser.packrat_parsing(); // Enable packrat parsing.
 
     int val;
     parser.parse("(1+2)*3", val);

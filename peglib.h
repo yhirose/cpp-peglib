@@ -946,7 +946,7 @@ public:
 
     void accept(Visitor& v) override;
 
-    any reduce(const SemanticValues& sv, any& dt, const Action& action) const;
+    any reduce(const SemanticValues& sv, any& dt) const;
 
     std::shared_ptr<Ope> ope_;
     Definition*          outer_;
@@ -1076,15 +1076,13 @@ public:
     };
 
     Definition()
-        : actions(1)
-        , ignoreSemanticValue(false)
+        : ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
         , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
-        , actions(1)
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
@@ -1095,7 +1093,6 @@ public:
 
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
-        , actions(1)
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
         , enablePackratParsing(rhs.enablePackratParsing)
         , is_token(rhs.is_token)
@@ -1105,8 +1102,7 @@ public:
     }
 
     Definition(const std::shared_ptr<Ope>& ope)
-        : actions(1)
-        , ignoreSemanticValue(false)
+        : ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
         , holder_(std::make_shared<Holder>(this))
@@ -1182,14 +1178,8 @@ public:
         return parse_and_get_value(s, n, dt, val);
     }
 
-    Definition& operator=(Action action) {
-        assert(!actions.empty());
-        actions[0] = action;
-        return *this;
-    }
-
-    Definition& operator=(std::initializer_list<Action> ini) {
-        actions = ini;
+    Definition& operator=(Action a) {
+        action = a;
         return *this;
     }
 
@@ -1210,7 +1200,7 @@ public:
 
     std::string                   name;
     size_t                        id;
-    std::vector<Action>           actions;
+    Action                        action;
     std::function<std::string ()> error_message;
     bool                          ignoreSemanticValue;
     bool                          enablePackratParsing;
@@ -1258,13 +1248,6 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
         // Invoke action
         if (success(len)) {
-            assert(!outer_->actions.empty());
-
-            auto i = chldsv.choice + 1; // Index 0 is for the default action
-            const auto& action = (i < outer_->actions.size() && outer_->actions[i])
-                ? outer_->actions[i]
-                : outer_->actions[0];
-
             if (chldsv.s) {
                 anchors = chldsv.s;
                 anchorn = chldsv.n;
@@ -1274,7 +1257,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             }
 
             try {
-                val = reduce(chldsv, dt, action);
+                val = reduce(chldsv, dt);
             } catch (const parse_error& e) {
                 if (e.what()) {
                     c.message_pos = s;
@@ -1299,9 +1282,9 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     return len;
 }
 
-inline any Holder::reduce(const SemanticValues& sv, any& dt, const Action& action) const {
-    if (action) {
-        return action(sv, dt);
+inline any Holder::reduce(const SemanticValues& sv, any& dt) const {
+    if (outer_->action) {
+        return outer_->action(sv, dt);
     } else if (sv.empty()) {
         return any();
     } else {
@@ -1674,8 +1657,8 @@ private:
             auto ignore = (sv.size() == 4);
             auto baseId = ignore ? 1 : 0;
 
-            const auto& name = sv[baseId].val.get<std::string>();
-            auto ope = sv[baseId + 2].val.get<std::shared_ptr<Ope>>();
+            const auto& name = sv[baseId].get<std::string>();
+            auto ope = sv[baseId + 2].get<std::shared_ptr<Ope>>();
 
             auto& grammar = *data.grammar;
             if (grammar.find(name) == grammar.end()) {
@@ -1694,11 +1677,11 @@ private:
 
         g["Expression"] = [&](const SemanticValues& sv) {
             if (sv.size() == 1) {
-                return sv[0].val.get<std::shared_ptr<Ope>>();
+                return sv[0].get<std::shared_ptr<Ope>>();
             } else {
                 std::vector<std::shared_ptr<Ope>> opes;
                 for (auto i = 0u; i < sv.size(); i++) {
-                    opes.push_back(sv[i].val.get<std::shared_ptr<Ope>>());
+                    opes.push_back(sv[i].get<std::shared_ptr<Ope>>());
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
                 return ope;
@@ -1707,11 +1690,11 @@ private:
 
         g["Sequence"] = [&](const SemanticValues& sv) {
             if (sv.size() == 1) {
-                return sv[0].val.get<std::shared_ptr<Ope>>();
+                return sv[0].get<std::shared_ptr<Ope>>();
             } else {
                 std::vector<std::shared_ptr<Ope>> opes;
                 for (const auto& x: sv) {
-                    opes.push_back(x.val.get<std::shared_ptr<Ope>>());
+                    opes.push_back(x.get<std::shared_ptr<Ope>>());
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
                 return ope;
@@ -1721,11 +1704,11 @@ private:
         g["Prefix"] = [&](const SemanticValues& sv) {
             std::shared_ptr<Ope> ope;
             if (sv.size() == 1) {
-                ope = sv[0].val.get<std::shared_ptr<Ope>>();
+                ope = sv[0].get<std::shared_ptr<Ope>>();
             } else {
                 assert(sv.size() == 2);
-                auto tok = sv[0].val.get<char>();
-                ope = sv[1].val.get<std::shared_ptr<Ope>>();
+                auto tok = sv[0].get<char>();
+                ope = sv[1].get<std::shared_ptr<Ope>>();
                 if (tok == '&') {
                     ope = apd(ope);
                 } else { // '!'
@@ -1736,12 +1719,12 @@ private:
         };
 
         g["Suffix"] = [&](const SemanticValues& sv) {
-            auto ope = sv[0].val.get<std::shared_ptr<Ope>>();
+            auto ope = sv[0].get<std::shared_ptr<Ope>>();
             if (sv.size() == 1) {
                 return ope;
             } else {
                 assert(sv.size() == 2);
-                auto tok = sv[1].val.get<char>();
+                auto tok = sv[1].get<char>();
                 if (tok == '?') {
                     return opt(ope);
                 } else if (tok == '*') {
@@ -1752,45 +1735,40 @@ private:
             }
         };
 
-        g["Primary"].actions = {
-            // Default
-            [&](const SemanticValues& sv) {
-                return sv[0];
-            },
-            // Reference
-            [&](const SemanticValues& sv, any& dt) {
-                Data& data = *dt.get<Data*>();
+        g["Primary"] = [&](const SemanticValues& sv, any& dt) {
+            Data& data = *dt.get<Data*>();
+            switch (sv.choice) {
+                case 0: { // Reference
+                    auto ignore = (sv.size() == 2);
+                    auto baseId = ignore ? 1 : 0;
 
-                auto ignore = (sv.size() == 2);
-                auto baseId = ignore ? 1 : 0;
+                    const auto& ident = sv[baseId].get<std::string>();
 
-                const auto& ident = sv[baseId].val.get<std::string>();
+                    if (data.references.find(ident) == data.references.end()) {
+                        data.references[ident] = sv.s; // for error handling
+                    }
 
-                if (data.references.find(ident) == data.references.end()) {
-                    data.references[ident] = sv.s; // for error handling
+                    if (ignore) {
+                        return ign(ref(*data.grammar, ident, sv.s));
+                    } else {
+                        return ref(*data.grammar, ident, sv.s);
+                    }
                 }
-
-                if (ignore) {
-                    return ign(ref(*data.grammar, ident, sv.s));
-                } else {
-                    return ref(*data.grammar, ident, sv.s);
+                case 1: { // (Expression)
+                    return sv[1].get<std::shared_ptr<Ope>>();
                 }
-            },
-            // (Expression)
-            [&](const SemanticValues& sv) {
-                return sv[1];
-            },
-            // Anchor
-            [&](const SemanticValues& sv) {
-                auto ope = sv[1].val.get<std::shared_ptr<Ope>>();
-                return anc(ope);
-            },
-            // Capture
-            [&](const SemanticValues& sv, any& dt) {
-                Data& data = *dt.get<Data*>();
-                auto name = std::string(sv[0].s, sv[0].n);
-                auto ope = sv[1].val.get<std::shared_ptr<Ope>>();
-                return cap(ope, data.match_action, ++data.capture_count, name);
+                case 2: { // Anchor
+                    auto ope = sv[1].get<std::shared_ptr<Ope>>();
+                    return anc(ope);
+                }
+                case 3: { // Capture
+                    auto name = std::string(sv[0].s, sv[0].n);
+                    auto ope = sv[1].get<std::shared_ptr<Ope>>();
+                    return cap(ope, data.match_action, ++data.capture_count, name);
+                }
+                default: {
+                    return sv[0].get<std::shared_ptr<Ope>>();
+                }
             }
         };
 
@@ -2249,10 +2227,9 @@ private:
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& rule = x.second;
-            auto& action = rule.actions.front();
-            if (!action) {
+            if (!rule.action) {
                 auto is_token = rule.is_token;
-                action = [=](const SemanticValues& sv) {
+                rule.action = [=](const SemanticValues& sv) {
                     if (is_token) {
                         return std::make_shared<Ast>(name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }

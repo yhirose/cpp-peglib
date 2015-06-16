@@ -284,21 +284,21 @@ TEST_CASE("Simple calculator test", "[general]")
 
     peg parser(syntax);
 
-    parser["Additive"] = {
-        // Default action
-        nullptr,
-        // Action for the first choice
-        [](const SemanticValues& sv) { return sv[0].val.get<int>() + sv[1].val.get<int>(); },
-        // Action for the second choice
-        [](const SemanticValues& sv) { return sv[0]; }
+    parser["Additive"] = [](const SemanticValues& sv) {
+        switch (sv.choice) {
+        case 0:
+            return sv[0].get<int>() + sv[1].get<int>();
+        default:
+            return sv[0].get<int>();
+        }
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice) {
-        case 0:  // Action for the first choice
-            return sv[0].val.get<int>() * sv[1].val.get<int>();
-        default: // Action for the second choice
-            return sv[0].val.get<int>();
+        case 0:
+            return sv[0].get<int>() * sv[1].get<int>();
+        default:
+            return sv[0].get<int>();
         }
     };
 
