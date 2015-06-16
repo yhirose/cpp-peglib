@@ -2199,10 +2199,10 @@ public:
         return (*grammar_)[s];
     }
 
-    void enable_packrat_parsing(bool sw) {
+    void enable_packrat_parsing() {
         if (grammar_ != nullptr) {
             auto& rule = (*grammar_)[start_];
-            rule.enablePackratParsing = sw;
+            rule.enablePackratParsing = true;
         }
     }
 
