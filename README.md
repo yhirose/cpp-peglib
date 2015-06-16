@@ -84,8 +84,8 @@ Here are available actions:
 
 ```c++
 struct SemanticValue {
-    peglib::any val;  // Semantic value
-    std::string name; // Definition name for the sematic value
+    any         val;  // Semantic value
+    const char* name; // Definition name for the sematic value
     const char* s;    // Token start for the semantic value
     size_t      n;    // Token length for the semantic value
 
@@ -104,8 +104,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     std::string str() const;
 
     // Transform the semantice value vector to another vector
-    template <typename T>
-    vector<T> transform(size_t beg = 0, size_t end = -1) const;
+    template <typename T> vector<T> transform(size_t beg = 0, size_t end = -1) const;
 }
 ```
 
