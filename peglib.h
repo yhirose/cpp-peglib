@@ -269,22 +269,6 @@ any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
 }
 
-/*
- * Semantic predicate
- */
-typedef std::function<bool (const SemanticValues& sv, const any& dt)> SemanticPredicate;
-
-struct parse_error {
-    parse_error() = default;
-    parse_error(const char* s) : s_(s) {}
-    const char* what() const { return s_.empty() ? nullptr : s_.c_str(); }
-private:
-    std::string s_;
-};
-
-/*
- * Action
- */
 class Action
 {
 public:
@@ -343,26 +327,6 @@ private:
         std::function<R (const SemanticValues& sv, any& dt)> fn_;
     };
 
-#if 0
-    template <typename R>
-    struct TypeAdaptor_s_l {
-        TypeAdaptor_s_l(std::function<R (const char* s, size_t n)> fn) : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& dt) {
-            return call<R>(fn_, sv.s, sv.n);
-        }
-        std::function<R (const char* s, size_t n)> fn_;
-    };
-
-    template <typename R>
-    struct TypeAdaptor_empty {
-        TypeAdaptor_empty(std::function<R ()> fn) : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& dt) {
-            return call<R>(fn_);
-        }
-        std::function<R ()> fn_;
-    };
-#endif
-
     typedef std::function<any (const SemanticValues& sv, any& dt)> Fty;
 
     template<typename F, typename R>
@@ -395,39 +359,20 @@ private:
         return TypeAdaptor_c<R>(fn);
     }
 
-#if 0
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t) const) {
-        return TypeAdaptor_s_l<R>(fn);
-    }
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t)) {
-        return TypeAdaptor_s_l<R>(fn);
-    }
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const char*, size_t)) {
-        return TypeAdaptor_s_l<R>(fn);
-    }
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)() const) {
-        return TypeAdaptor_empty<R>(fn);
-    }
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)()) {
-        return TypeAdaptor_empty<R>(fn);
-    }
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)()) {
-        return TypeAdaptor_empty<R>(fn);
-    }
-#endif
-
     Fty fn_;
+};
+
+/*
+ * Semantic predicate
+ */
+typedef std::function<bool (const SemanticValues& sv, const any& dt)> SemanticPredicate;
+
+struct parse_error {
+    parse_error() = default;
+    parse_error(const char* s) : s_(s) {}
+    const char* what() const { return s_.empty() ? nullptr : s_.c_str(); }
+private:
+    std::string s_;
 };
 
 /*
