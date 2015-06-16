@@ -1689,8 +1689,9 @@ private:
             }
         };
 
-        g["Primary"] = [&](const SemanticValues& sv, any& dt) {
+        g["Primary"] = [&](const SemanticValues& sv, any& dt) -> std::shared_ptr<Ope> {
             Data& data = *dt.get<Data*>();
+
             switch (sv.choice) {
                 case 0: { // Reference
                     auto ignore = (sv.size() == 2);
@@ -1712,8 +1713,7 @@ private:
                     return sv[1].get<std::shared_ptr<Ope>>();
                 }
                 case 2: { // Anchor
-                    auto ope = sv[1].get<std::shared_ptr<Ope>>();
-                    return anc(ope);
+                    return anc(sv[1].get<std::shared_ptr<Ope>>());
                 }
                 case 3: { // Capture
                     auto name = std::string(sv[0].s, sv[0].n);
