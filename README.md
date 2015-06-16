@@ -93,7 +93,6 @@ struct SemanticValue {
     // Utility method
     template <typename T> T& get();
     template <typename T> const T& get() const;
-    std::string str() const;
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
@@ -102,16 +101,10 @@ struct SemanticValues : protected std::vector<SemanticValue>
     size_t      n;      // Token length
     size_t      choice; // Choice number (0 based index)
 
-    using std::vector<T>::size;
-    using std::vector<T>::operator[];
-    using std::vector<T>::begin;
-    using std::vector<T>::end;
-    // NOTE: There are more std::vector methods available...
-
     // Transform the semantice values vector to another vector
-    template <typename F> auto map(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
-    template <typename F> auto map(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
-    template <typename T> auto map(size_t beg = 0, size_t end = -1) const -> vector<T>;
+    template <typename F> auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
+    template <typename F> auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
+    template <typename T> auto transform(size_t beg = 0, size_t end = -1) const -> vector<T>;
 }
 ```
 

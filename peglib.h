@@ -171,10 +171,6 @@ struct SemanticValue
     const T& get() const {
         return val.get<T>();
     }
-
-    std::string str() const {
-        return std::string(s, n);
-    }
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
@@ -184,13 +180,6 @@ struct SemanticValues : protected std::vector<SemanticValue>
     size_t      choice;
 
     SemanticValues() : s(nullptr), n(0), choice(0) {}
-
-    std::string str(size_t i = 0) const {
-        if (i > 0) {
-            return (*this)[i].str();
-        }
-        return std::string(s, n);
-    }
 
     typedef SemanticValue T;
     using std::vector<T>::iterator;
@@ -217,7 +206,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::emplace_back;
 
     template <typename F>
-    auto map(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
+    auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
         for (const auto& v: *this) {
             r.push_back(f(v));
@@ -226,7 +215,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     }
 
     template <typename F>
-    auto map(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
+    auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
         end = std::min(end, size());
         for (size_t i = beg; i < end; i++) {
@@ -236,8 +225,8 @@ struct SemanticValues : protected std::vector<SemanticValue>
     }
 
     template <typename T>
-    auto map(size_t beg = 0, size_t end = -1) const -> vector<T> {
-        return this->map(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
+    auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
+        return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
     }
 };
 
@@ -469,10 +458,10 @@ struct Context
     std::vector<bool>                            cache_register;
     std::vector<bool>                            cache_success;
 
-    std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
-
     std::vector<std::shared_ptr<SemanticValues>> stack;
     size_t                                       stack_size;
+
+    std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
 
     Context(const char* _s, size_t _l, size_t _def_count, bool enablePackratParsing)
         : s(_s)
@@ -2252,7 +2241,7 @@ private:
                 std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                 return ast;
             }
-            return std::make_shared<Ast>(info.name, info.tag, sv.map<std::shared_ptr<Ast>>());
+            return std::make_shared<Ast>(info.name, info.tag, sv.transform<std::shared_ptr<Ast>>());
         };
     }
 
@@ -2271,7 +2260,7 @@ private:
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }
-                    return std::make_shared<Ast>(name.c_str(), AstDefaultTag, sv.map<std::shared_ptr<Ast>>());
+                    return std::make_shared<Ast>(name.c_str(), AstDefaultTag, sv.transform<std::shared_ptr<Ast>>());
                 };
             }
         }
