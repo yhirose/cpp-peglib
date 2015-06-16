@@ -60,7 +60,7 @@ int main(void) {
     };
 
     parser["Number"] = [](const SemanticValues& sv) {
-        return stoi(string(sv.s, sv.n), nullptr, 10);
+        return stoi(sv.str(), nullptr, 10);
     };
 
     // (4) Parse
@@ -89,7 +89,7 @@ struct SemanticValue {
     const char* s;    // Token start for the semantic value
     size_t      n;    // Token length for the semantic value
 
-    // Utility method
+    // Cast semantic value
     template <typename T> T& get();
     template <typename T> const T& get() const;
 };
@@ -99,6 +99,9 @@ struct SemanticValues : protected std::vector<SemanticValue>
     const char* s;      // Token start
     size_t      n;      // Token length
     size_t      choice; // Choice number (0 based index)
+
+    // Get token
+    std::string str() const;
 
     // Transform the semantice values vector to another vector
     template <typename F> auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
@@ -126,7 +129,7 @@ peg pg(syntax);
 
 pg["TOKEN"] = [](const SemanticValues& sv) {
     // 'token' doesn't include trailing whitespaces
-    auto token = string(sv.s, sv.n);
+    auto token = sv.str();
 };
 
 auto ret = pg.parse(" token1, token2 ");
@@ -164,7 +167,7 @@ peglib::peg parser(
 peglib::peg parser("NUMBER  <-  [0-9]+");
 
 parser["NUMBER"] = [](const SemanticValues& sv) {
-    auto val = stol(string(sv.s, sv.n), nullptr, 10);
+    auto val = stol(sv.str(), nullptr, 10);
     if (val != 100) {
         throw peglib::parse_error("value error!!");
     }
@@ -279,7 +282,7 @@ vector<string> tags;
 Definition ROOT, TAG_NAME, _;
 ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
 TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& sv) {
-                tags.push_back(string(sv.s, sv.n));
+                tags.push_back(sv.str());
             };
 _        <= zom(cls(" \t"));
 

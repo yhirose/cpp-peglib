@@ -205,6 +205,10 @@ struct SemanticValues : protected std::vector<SemanticValue>
     using std::vector<T>::emplace;
     using std::vector<T>::emplace_back;
 
+    std::string str() const {
+        return std::string(s, n);
+    }
+
     template <typename F>
     auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
