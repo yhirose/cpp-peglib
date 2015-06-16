@@ -209,6 +209,12 @@ struct SemanticValues : protected std::vector<SemanticValue>
         return std::string(s, n);
     }
 
+    template <typename T>
+    auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
+        return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
+    }
+
+private:
     template <typename F>
     auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
@@ -226,11 +232,6 @@ struct SemanticValues : protected std::vector<SemanticValue>
             r.emplace_back(f((*this)[i]));
         }
         return r;
-    }
-
-    template <typename T>
-    auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
-        return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
     }
 };
 

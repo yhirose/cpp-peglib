@@ -103,10 +103,9 @@ struct SemanticValues : protected std::vector<SemanticValue>
     // Get token
     std::string str() const;
 
-    // Transform the semantice values vector to another vector
-    template <typename F> auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
-    template <typename F> auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type>;
-    template <typename T> auto transform(size_t beg = 0, size_t end = -1) const -> vector<T>;
+    // Transform the semantice value vector to another vector
+    template <typename T>
+    vector<T> transform(size_t beg = 0, size_t end = -1) const;
 }
 ```
 
