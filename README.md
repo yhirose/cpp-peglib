@@ -92,6 +92,9 @@ struct SemanticValue {
     // Cast semantic value
     template <typename T> T& get();
     template <typename T> const T& get() const;
+
+    // Get token
+    std::string str() const;
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>

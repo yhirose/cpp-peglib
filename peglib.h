@@ -171,6 +171,11 @@ struct SemanticValue
     const T& get() const {
         return val.get<T>();
     }
+
+    std::string str() const {
+        return std::string(s, n);
+    }
+
 };
 
 struct SemanticValues : protected std::vector<SemanticValue>
