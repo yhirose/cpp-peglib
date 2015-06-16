@@ -49,9 +49,9 @@ int main(int argc, const char** argv)
     EXPRESSION      <= seq(TERM, zom(seq(TERM_OPERATOR, TERM))),         reduce;
     TERM            <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR))),   reduce;
     FACTOR          <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
-    TERM_OPERATOR   <= cls("+-"),                                        [](const char* s, size_t n) { return (char)*s; };
-    FACTOR_OPERATOR <= cls("*/"),                                        [](const char* s, size_t n) { return (char)*s; };
-    NUMBER          <= oom(cls("0-9")),                                  [](const char* s, size_t n) { return atol(s); };
+    TERM_OPERATOR   <= cls("+-"),                                        [](const SemanticValues& sv) { return (char)*sv.s; };
+    FACTOR_OPERATOR <= cls("*/"),                                        [](const SemanticValues& sv) { return (char)*sv.s; };
+    NUMBER          <= oom(cls("0-9")),                                  [](const SemanticValues& sv) { return atol(sv.s); };
 
     auto expr = argv[1];
     long val = 0;

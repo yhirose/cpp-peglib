@@ -209,7 +209,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
         for (const auto& v: *this) {
-            r.push_back(f(v));
+            r.emplace_back(f(v));
         }
         return r;
     }
@@ -219,7 +219,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
         end = std::min(end, size());
         for (size_t i = beg; i < end; i++) {
-            r.push_back(f((*this)[i]));
+            r.emplace_back(f((*this)[i]));
         }
         return r;
     }
@@ -343,6 +343,7 @@ private:
         std::function<R (const SemanticValues& sv, any& dt)> fn_;
     };
 
+#if 0
     template <typename R>
     struct TypeAdaptor_s_l {
         TypeAdaptor_s_l(std::function<R (const char* s, size_t n)> fn) : fn_(fn) {}
@@ -360,6 +361,7 @@ private:
         }
         std::function<R ()> fn_;
     };
+#endif
 
     typedef std::function<any (const SemanticValues& sv, any& dt)> Fty;
 
@@ -393,6 +395,7 @@ private:
         return TypeAdaptor_c<R>(fn);
     }
 
+#if 0
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::*mf)(const char*, size_t) const) {
         return TypeAdaptor_s_l<R>(fn);
@@ -422,6 +425,7 @@ private:
     Fty make_adaptor(F fn, R (*mf)()) {
         return TypeAdaptor_empty<R>(fn);
     }
+#endif
 
     Fty fn_;
 };
@@ -509,7 +513,7 @@ struct Context
     inline SemanticValues& push() {
         assert(stack_size <= stack.size());
         if (stack_size == stack.size()) {
-            stack.push_back(std::make_shared<SemanticValues>());
+            stack.emplace_back(std::make_shared<SemanticValues>());
         }
         auto& sv = *stack[stack_size++];
         if (!sv.empty()) {
@@ -1671,7 +1675,7 @@ private:
                     data.start = name;
                 }
             } else {
-                data.duplicates.push_back(std::make_pair(name, sv.s));
+                data.duplicates.emplace_back(name, sv.s);
             }
         };
 
@@ -1681,7 +1685,7 @@ private:
             } else {
                 std::vector<std::shared_ptr<Ope>> opes;
                 for (auto i = 0u; i < sv.size(); i++) {
-                    opes.push_back(sv[i].get<std::shared_ptr<Ope>>());
+                    opes.emplace_back(sv[i].get<std::shared_ptr<Ope>>());
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
                 return ope;
@@ -1694,7 +1698,7 @@ private:
             } else {
                 std::vector<std::shared_ptr<Ope>> opes;
                 for (const auto& x: sv) {
-                    opes.push_back(x.get<std::shared_ptr<Ope>>());
+                    opes.emplace_back(x.get<std::shared_ptr<Ope>>());
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
                 return ope;
@@ -1772,25 +1776,25 @@ private:
             }
         };
 
-        g["IdentCont"] = [](const char* s, size_t n) {
-            return std::string(s, n);
+        g["IdentCont"] = [](const SemanticValues& sv) {
+            return std::string(sv.s, sv.n);
         };
 
-        g["Literal"] = [this](const char* s, size_t n) {
-            return lit(resolve_escape_sequence(s, n));
+        g["Literal"] = [this](const SemanticValues& sv) {
+            return lit(resolve_escape_sequence(sv.s, sv.n));
         };
-        g["Class"] = [this](const char* s, size_t n) {
-            return cls(resolve_escape_sequence(s, n));
+        g["Class"] = [this](const SemanticValues& sv) {
+            return cls(resolve_escape_sequence(sv.s, sv.n));
         };
 
-        g["AND"]      = [](const char* s, size_t n) { return *s; };
-        g["NOT"]      = [](const char* s, size_t n) { return *s; };
-        g["QUESTION"] = [](const char* s, size_t n) { return *s; };
-        g["STAR"]     = [](const char* s, size_t n) { return *s; };
-        g["PLUS"]     = [](const char* s, size_t n) { return *s; };
+        g["AND"]      = [](const SemanticValues& sv) { return *sv.s; };
+        g["NOT"]      = [](const SemanticValues& sv) { return *sv.s; };
+        g["QUESTION"] = [](const SemanticValues& sv) { return *sv.s; };
+        g["STAR"]     = [](const SemanticValues& sv) { return *sv.s; };
+        g["PLUS"]     = [](const SemanticValues& sv) { return *sv.s; };
 
 
-        g["DOT"] = []() { return dot(); };
+        g["DOT"] = [](const SemanticValues& sv) { return dot(); };
     }
 
     std::shared_ptr<Grammar> perform_core(

@@ -33,8 +33,8 @@ TEST_CASE("String capture test", "[general]")
 
     std::vector<std::string> tags;
 
-    parser["TAG_NAME"] = [&](const char* s, size_t n) {
-        tags.push_back(std::string(s, n));
+    parser["TAG_NAME"] = [&](const peglib::SemanticValues& sv) {
+        tags.push_back(std::string(sv.s, sv.n));
     };
 
     auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
@@ -73,7 +73,7 @@ TEST_CASE("String capture test2", "[general]")
     Definition ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['), TAG_NAME, chr(']'), WS);
-    TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t n) { tags.push_back(string(s, n)); };
+    TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& sv) { tags.push_back(string(sv.s, sv.n)); };
     WS       <= zom(cls(" \t"));
 
     auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
@@ -97,8 +97,8 @@ TEST_CASE("String capture test3", "[general]")
 
    std::vector<std::string> tags;
 
-   pg["TOKEN"] = [&](const char* s, size_t n) {
-       tags.push_back(std::string(s, n));
+   pg["TOKEN"] = [&](const SemanticValues& sv) {
+       tags.push_back(std::string(sv.s, sv.n));
    };
 
    auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
@@ -204,8 +204,8 @@ TEST_CASE("Lambda action test", "[general]")
        "  CHAR  <- .       ");
 
     string ss;
-    parser["CHAR"] = [&](const char* s, size_t n) {
-        ss += *s;
+    parser["CHAR"] = [&](const SemanticValues& sv) {
+        ss += *sv.s;
     };
 
     bool ret = parser.parse("hello");
@@ -240,7 +240,7 @@ TEST_CASE("Backtracking test", "[general]")
     );
 
     size_t count = 0;
-    parser["HELLO"] = [&](const char* s, size_t n) {
+    parser["HELLO"] = [&](const SemanticValues& sv) {
         count++;
     };
 
@@ -269,8 +269,8 @@ TEST_CASE("mutable lambda test", "[general]")
     peg pg("ROOT <- 'mutable lambda test'");
 
     // This test makes sure if the following code can be compiled.
-    pg["TOKEN"] = [=](const char* s, size_t n) mutable {
-        vec.push_back(string(s, n));
+    pg["TOKEN"] = [=](const SemanticValues& sv) mutable {
+        vec.push_back(string(sv.s, sv.n));
     };
 }
 
@@ -302,8 +302,8 @@ TEST_CASE("Simple calculator test", "[general]")
         }
     };
 
-    parser["Number"] = [](const char* s, size_t n) {
-        return atoi(s);
+    parser["Number"] = [](const SemanticValues& sv) {
+        return atoi(sv.s);
     };
 
     int val;
@@ -341,9 +341,9 @@ TEST_CASE("Calculator test", "[general]")
 
     EXPRESSION      = reduce;
     TERM            = reduce;
-    TERM_OPERATOR   = [](const char* s, size_t n) { return *s; };
-    FACTOR_OPERATOR = [](const char* s, size_t n) { return *s; };
-    NUMBER          = [&](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
+    TERM_OPERATOR   = [](const SemanticValues& sv) { return *sv.s; };
+    FACTOR_OPERATOR = [](const SemanticValues& sv) { return *sv.s; };
+    NUMBER          = [](const SemanticValues& sv) { return stol(string(sv.s, sv.n), nullptr, 10); };
 
     // Parse
     long val;
@@ -387,9 +387,9 @@ TEST_CASE("Calculator test2", "[general]")
 
     g["EXPRESSION"]      = reduce;
     g["TERM"]            = reduce;
-    g["TERM_OPERATOR"]   = [](const char* s, size_t n) { return *s; };
-    g["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return *s; };
-    g["NUMBER"]          = [](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
+    g["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return *sv.s; };
+    g["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return *sv.s; };
+    g["NUMBER"]          = [](const SemanticValues& sv) { return stol(string(sv.s, sv.n), nullptr, 10); };
 
     // Parse
     long val;
@@ -429,9 +429,9 @@ TEST_CASE("Calculator test3", "[general]")
     // Setup actions
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const char* s, size_t n) { return (char)*s; };
-    parser["FACTOR_OPERATOR"] = [](const char* s, size_t n) { return (char)*s; };
-    parser["NUMBER"]          = [](const char* s, size_t n) { return stol(string(s, n), nullptr, 10); };
+    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return (char)*sv.s; };
+    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return (char)*sv.s; };
+    parser["NUMBER"]          = [](const SemanticValues& sv) { return stol(string(sv.s, sv.n), nullptr, 10); };
 
     // Parse
     long val;
@@ -621,8 +621,8 @@ TEST_CASE("Semantic predicate test", "[predicate]")
 {
     peg parser("NUMBER  <-  [0-9]+");
 
-    parser["NUMBER"] = [](const char* s, size_t n) {
-        auto val = stol(string(s, n), nullptr, 10);
+    parser["NUMBER"] = [](const SemanticValues& sv) {
+        auto val = stol(string(sv.s, sv.n), nullptr, 10);
         if (val != 100) {
             throw parse_error("value error!!");
         }

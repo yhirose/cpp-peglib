@@ -59,8 +59,8 @@ int main(void) {
         }
     };
 
-    parser["Number"] = [](const char* s, size_t n) {
-        return stoi(string(s, n), nullptr, 10);
+    parser["Number"] = [](const SemanticValues& sv) {
+        return stoi(string(sv.s, sv.n), nullptr, 10);
     };
 
     // (4) Parse
@@ -73,13 +73,11 @@ int main(void) {
 }
 ```
 
-Here is a complete list of available actions:
+Here are available actions:
 
 ```c++
 [](const SemanticValues& sv, any& dt)
 [](const SemanticValues& sv)
-[](const char* s, size_t n)
-[]()
 ```
 
 `const SemanticValues& sv` contains semantic values. `SemanticValues` structure is defined as follows.
@@ -126,9 +124,9 @@ auto syntax = R"(
 
 peg pg(syntax);
 
-pg["TOKEN"] = [](const char* s, size_t n) {
+pg["TOKEN"] = [](const SemanticValues& sv) {
     // 'token' doesn't include trailing whitespaces
-    auto token = string(s, n);
+    auto token = string(sv.s, sv.n);
 };
 
 auto ret = pg.parse(" token1, token2 ");
@@ -165,8 +163,8 @@ peglib::peg parser(
 ```c++
 peglib::peg parser("NUMBER  <-  [0-9]+");
 
-parser["NUMBER"] = [](const char* s, size_t n) {
-    auto val = stol(string(s, n), nullptr, 10);
+parser["NUMBER"] = [](const SemanticValues& sv) {
+    auto val = stol(string(sv.s, sv.n), nullptr, 10);
     if (val != 100) {
         throw peglib::parse_error("value error!!");
     }
@@ -280,8 +278,8 @@ vector<string> tags;
 
 Definition ROOT, TAG_NAME, _;
 ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const char* s, size_t n) {
-                tags.push_back(string(s, n));
+TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& sv) {
+                tags.push_back(string(sv.s, sv.n));
             };
 _        <= zom(cls(" \t"));
 
