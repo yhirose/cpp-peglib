@@ -270,4 +270,11 @@ private:
     std::map<std::string, Symbol> dic_;
 };
 
-bool run(const std::string& path, std::shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast);
+bool run(
+    const std::string&           path,
+    std::shared_ptr<Environment> env,
+    const char*                  expr,
+    size_t                       len,
+    Value&                       val,
+    std::string&                 msg,
+    bool                         print_ast);

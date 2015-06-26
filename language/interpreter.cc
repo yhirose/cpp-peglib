@@ -14,6 +14,8 @@ struct Eval
             case If:                 return eval_if(ast, env);
             case Function:           return eval_function(ast, env);
             case FunctionCall:       return eval_function_call(ast, env);
+            case Array:              return eval_array(ast, env);
+            case ArrayReference:     return eval_array_reference(ast, env);
             case Assignment:         return eval_assignment(ast, env);
             case LogicalOr:          return eval_logical_or(ast, env);
             case LogicalAnd:         return eval_logical_and(ast, env);
@@ -100,10 +102,10 @@ private:
 
     static Value eval_function_call(const Ast& ast, shared_ptr<Environment> env) {
         const auto& var = ast.nodes[0]->token;
-        const auto& args = ast.nodes[1]->nodes;
-
         const auto& f = env->get(var);
         const auto& fv = f.to_function();
+
+        const auto& args = ast.nodes[1]->nodes;
 
         if (fv.params.size() <= args.size()) {
             auto callEnv = make_shared<Environment>();
@@ -122,6 +124,35 @@ private:
 
         string msg = "arguments error in '" + var + "'...";
         throw runtime_error(msg);
+    }
+
+    static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
+        vector<Value> values;
+
+        for (auto i = 0u; i < ast.nodes.size(); i++) {
+            auto expr = ast.nodes[i];
+            auto val = eval(*expr, env);
+            values.push_back(val);
+        }
+
+        return Value(Value::ArrayValue {
+            values
+        });
+    }
+
+    static Value eval_array_reference(const Ast& ast, shared_ptr<Environment> env) {
+        const auto& var = ast.nodes[0]->token;
+
+        const auto& a = env->get(var);
+        const auto& av = a.to_array();
+
+        const auto& idx = eval(*ast.nodes[1], env).to_long();
+
+        if (0 <= idx && idx < av.values.size()) {
+            return av.values[idx];
+        }
+
+        return Value();
     }
 
     static Value eval_logical_or(const Ast& ast, shared_ptr<Environment> env) {
@@ -251,7 +282,14 @@ private:
     };
 };
 
-bool run(const string& path, shared_ptr<Environment> env, const char* expr, size_t len, Value& val, std::string& msg, bool print_ast)
+bool run(
+    const string&           path,
+    shared_ptr<Environment> env,
+    const char*             expr,
+    size_t                  len,
+    Value&                  val,
+    string&                 msg,
+    bool                    print_ast)
 {
     try {
         shared_ptr<Ast> ast;

@@ -13,9 +13,6 @@ static auto g_grammar = R"(
     ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
     WHILE                 <-  'while' _ EXPRESSION BLOCK
     IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
-    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
-    PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
-    PARAMETER             <-  MUTABLE IDENTIFIER
     FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
     ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
 
@@ -27,7 +24,14 @@ static auto g_grammar = R"(
     UNARY_PLUS            <-  UNARY_MINUS_OPERATOR? UNARY_MINUS
     UNARY_MINUS           <-  UNARY_NOT_OPERATOR? UNARY_NOT
     UNARY_NOT             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-    FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+    FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / ARRAY / ARRAY_REFERENCE / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+
+    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
+    PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
+    PARAMETER             <-  MUTABLE IDENTIFIER
+
+    ARRAY                 <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
+    ARRAY_REFERENCE       <-  IDENTIFIER '[' _ EXPRESSION ']' _
 
     BLOCK                 <-  '{' _ STATEMENTS '}' _
 
@@ -84,6 +88,8 @@ peg& get_parser()
             { "FUNCTION",            Function,           false    },
             { "PARAMETERS",          Default,            false    },
             { "FUNCTION_CALL",       FunctionCall,       false    },
+            { "ARRAY",               Array,              false    },
+            { "ARRAY_REFERENCE",     ArrayReference,     false    },
             { "ARGUMENTS",           Default,            false    },
             { "PRIMARY",             LogicalOr,          true     },
             { "LOGICAL_OR",          LogicalAnd,         true     },
