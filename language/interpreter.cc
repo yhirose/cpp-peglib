@@ -101,8 +101,7 @@ private:
     };
 
     static Value eval_function_call(const Ast& ast, shared_ptr<Environment> env) {
-        const auto& var = ast.nodes[0]->token;
-        const auto& f = env->get(var);
+        const auto& f = eval(*ast.nodes[0], env);
         const auto& fv = f.to_function();
 
         const auto& args = ast.nodes[1]->nodes;
@@ -122,7 +121,7 @@ private:
             return fv.eval(callEnv);
         }
 
-        string msg = "arguments error in '" + var + "'...";
+        string msg = "arguments error...";
         throw runtime_error(msg);
     }
 
@@ -141,15 +140,11 @@ private:
     }
 
     static Value eval_array_reference(const Ast& ast, shared_ptr<Environment> env) {
-        const auto& var = ast.nodes[0]->token;
+        const auto& a = eval(*ast.nodes[0], env).to_array();
+        const auto& i = eval(*ast.nodes[1], env).to_long();
 
-        const auto& a = env->get(var);
-        const auto& av = a.to_array();
-
-        const auto& idx = eval(*ast.nodes[1], env).to_long();
-
-        if (0 <= idx && idx < av.values.size()) {
-            return av.values[idx];
+        if (0 <= i && i < a.values.size()) {
+            return a.values[i];
         }
 
         return Value();

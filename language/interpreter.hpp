@@ -92,6 +92,19 @@ struct Value
         throw std::runtime_error("type error.");
     }
 
+    std::string str_array() const {
+        const auto& values = to_array().values;
+        std::string s = "[";
+        for (auto i = 0u; i < values.size(); i++) {
+            if (i != 0) {
+                s += ", ";
+            }
+            s += values[i].str();
+        }
+        s += "]";
+        return s;
+    }
+
     std::string str() const {
         switch (type) {
             case Undefined: return "undefined";
@@ -99,31 +112,24 @@ struct Value
             case Long:      return std::to_string(to_long()); break;
             case String:    return to_string();
             case Function:  return "[function]";
-            case Array:     return "[array]";
+            case Array:     return str_array();
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
     }
 
     std::ostream& out(std::ostream& os) const {
-        switch (type) {
-            case Undefined: os << "undefined"; break;
-            case Bool:      os << (to_bool() ? "true" : "false"); break;
-            case Long:      os << to_long(); break;
-            case String:    os << "'" << to_string() << "'"; break;
-            case Function:  os << "[function]"; break;
-            case Array:     os << "[array]"; break;
-            default: throw std::logic_error("invalid internal condition.");
-        }
+        os << str();
         return os;
     }
 
     bool operator==(const Value& rhs) const {
         switch (type) {
-            case Undefined: return true; 
+            case Undefined: return true;
             case Bool:      return to_bool() == rhs.to_bool();
             case Long:      return to_long() == rhs.to_long();
             case String:    return to_string() == rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -131,10 +137,11 @@ struct Value
 
     bool operator!=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false; 
+            case Undefined: return false;
             case Bool:      return to_bool() != rhs.to_bool();
             case Long:      return to_long() != rhs.to_long();
             case String:    return to_string() != rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -142,10 +149,11 @@ struct Value
 
     bool operator<=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false; 
+            case Undefined: return false;
             case Bool:      return to_bool() <= rhs.to_bool();
             case Long:      return to_long() <= rhs.to_long();
             case String:    return to_string() <= rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -153,10 +161,11 @@ struct Value
 
     bool operator<(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false; 
+            case Undefined: return false;
             case Bool:      return to_bool() < rhs.to_bool();
             case Long:      return to_long() < rhs.to_long();
             case String:    return to_string() < rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -164,10 +173,11 @@ struct Value
 
     bool operator>=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false; 
+            case Undefined: return false;
             case Bool:      return to_bool() >= rhs.to_bool();
             case Long:      return to_long() >= rhs.to_long();
             case String:    return to_string() >= rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -175,10 +185,11 @@ struct Value
 
     bool operator>(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false; 
+            case Undefined: return false;
             case Bool:      return to_bool() > rhs.to_bool();
             case Long:      return to_long() > rhs.to_long();
             case String:    return to_string() > rhs.to_string();
+            // TODO: Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
