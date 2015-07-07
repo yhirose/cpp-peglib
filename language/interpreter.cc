@@ -143,7 +143,7 @@ private:
         const auto& a = eval(*ast.nodes[0], env).to_array();
         const auto& i = eval(*ast.nodes[1], env).to_long();
 
-        if (0 <= i && i < a.values.size()) {
+        if (0 <= i && i < static_cast<long>(a.values.size())) {
             return a.values[i];
         }
 
