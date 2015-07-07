@@ -9,22 +9,22 @@ static auto g_grammar = R"(
 
     STATEMENTS            <-  (EXPRESSION (';' _)?)*
 
-    EXPRESSION            <-  ASSIGNMENT / PRIMARY
+    EXPRESSION            <-  ASSIGNMENT / LOGICAL_OR
     ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
     WHILE                 <-  'while' _ EXPRESSION BLOCK
     IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
     FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
     ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
 
-    PRIMARY               <-  LOGICAL_OR ('||' _ LOGICAL_OR)*
-    LOGICAL_OR            <-  LOGICAL_AND ('&&' _  LOGICAL_AND)*
-    LOGICAL_AND           <-  CONDITION (CONDITION_OPERATOR CONDITION)*
-    CONDITION             <-  TERM (TERM_OPERATOR TERM)*
-    TERM                  <-  UNARY_PLUS_OPERATOR? UNARY_PLUS
-    UNARY_PLUS            <-  UNARY_MINUS_OPERATOR? UNARY_MINUS
-    UNARY_MINUS           <-  UNARY_NOT_OPERATOR? UNARY_NOT
-    UNARY_NOT             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-    FACTOR                <-  WHILE / IF / FUNCTION / FUNCTION_CALL / ARRAY / ARRAY_REFERENCE / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+    LOGICAL_OR            <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
+    LOGICAL_AND           <-  CONDITION ('&&' _  CONDITION)*
+    CONDITION             <-  ADDITIVE (CONDITION_OPERATOR ADDITIVE)*
+    ADDITIVE              <-  UNARY_PLUS (ADDITIVE_OPERATOR UNARY_PLUS)*
+    UNARY_PLUS            <-  UNARY_PLUS_OPERATOR? UNARY_MINUS
+    UNARY_MINUS           <-  UNARY_MINUS_OPERATOR? UNARY_NOT
+    UNARY_NOT             <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
+    MULTIPLICATIVE        <-  PRIMARY (MULTIPLICATIVE_OPERATOR PRIMARY)*
+    PRIMARY               <-  WHILE / IF / FUNCTION / FUNCTION_CALL / ARRAY / ARRAY_REFERENCE / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
 
     FUNCTION              <-  'fn' _ PARAMETERS BLOCK
     PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
@@ -36,11 +36,11 @@ static auto g_grammar = R"(
     BLOCK                 <-  '{' _ STATEMENTS '}' _
 
     CONDITION_OPERATOR    <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
-    TERM_OPERATOR         <-  < [-+] > _
+    ADDITIVE_OPERATOR     <-  < [-+] > _
     UNARY_PLUS_OPERATOR   <-  < '+' > _
     UNARY_MINUS_OPERATOR  <-  < '-' > _
     UNARY_NOT_OPERATOR    <-  < '!' > _
-    FACTOR_OPERATOR       <-  < [*/%] > _
+    MULTIPLICATIVE_OPERATOR  <-  < [*/%] > _
 
     IDENTIFIER            <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
@@ -91,14 +91,14 @@ peg& get_parser()
             { "ARRAY",               Array,              false    },
             { "ARRAY_REFERENCE",     ArrayReference,     false    },
             { "ARGUMENTS",           Default,            false    },
-            { "PRIMARY",             LogicalOr,          true     },
-            { "LOGICAL_OR",          LogicalAnd,         true     },
-            { "LOGICAL_AND",         Condition,          true     },
-            { "CONDITION",           BinExpresion,       true     },
-            { "TERM",                UnaryPlus,          true     },
-            { "UNARY_PLUS",          UnaryMinus,         true     },
-            { "UNARY_MINUS",         UnaryNot,           true     },
-            { "UNARY_NOT",           BinExpresion,       true     },
+            { "LOGICAL_OR",          LogicalOr,          true     },
+            { "LOGICAL_AND",         LogicalAnd,         true     },
+            { "CONDITION",           Condition,          true     },
+            { "ADDITIVE",            BinExpresion,       true     },
+            { "UNARY_PLUS",          UnaryPlus,          true     },
+            { "UNARY_MINUS",         UnaryMinus,         true     },
+            { "UNARY_NOT",           UnaryNot,           true     },
+            { "MULTIPLICATIVE",      BinExpresion,       true     },
             { "NUMBER",              Number,             false    },
             { "BOOLEAN",             Boolean,            false    },
             { "IDENTIFIER",          Identifier,         false    },
