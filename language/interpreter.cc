@@ -118,6 +118,9 @@ private:
                 callEnv->initialize(param.name, val, param.mut);
             }
 
+            callEnv->initialize("__LINE__", Value((long)ast.line), false);
+            callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
+
             return fv.eval(callEnv);
         }
 

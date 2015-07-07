@@ -180,6 +180,7 @@ struct SemanticValue
 
 struct SemanticValues : protected std::vector<SemanticValue>
 {
+    const char* ss;
     const char* s;
     size_t      n;
     size_t      choice;
@@ -474,6 +475,7 @@ struct Context
         if (!sv.empty()) {
             sv.clear();
         }
+        sv.ss = s;
         sv.s = nullptr;
         sv.n = 0;
         return sv;
@@ -1941,14 +1943,16 @@ const int AstDefaultTag = -1;
 
 struct Ast
 {
-    Ast(const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
-        : name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
+    Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
+        : line(_line), column(_column), name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
 
-    Ast(const char* _name, int _tag, const std::string& _token)
-        : name(_name), tag(_tag), is_token(true), token(_token) {}
+    Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::string& _token)
+        : line(_line), column(_column), name(_name), tag(_tag), is_token(true), token(_token) {}
 
     void print() const;
 
+    const size_t                            line;
+    const size_t                            column;
     const std::string                       name;
     const int                               tag;
     const bool                              is_token;
@@ -2008,7 +2012,8 @@ public:
 
     bool load_grammar(const char* s, size_t n, const Rules& rules) {
         grammar_ = PEGParser::parse(
-            s, n, rules,
+            s, n,
+            rules,
             start_,
             [&](const char* s, size_t n, size_t id, const std::string& name) {
                 if (match_action) match_action(s, n, id, name);
@@ -2172,13 +2177,15 @@ private:
         auto is_token = rule.is_token;
         rule = [info, is_token](const SemanticValues& sv) {
             if (is_token) {
-                return std::make_shared<Ast>(info.name, info.tag, std::string(sv.s, sv.n));
+                auto line = line_info(sv.ss, sv.s);
+                return std::make_shared<Ast>(line.first, line.second, info.name, info.tag, std::string(sv.s, sv.n));
             }
             if (info.optimize_nodes && sv.size() == 1) {
                 std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                 return ast;
             }
-            return std::make_shared<Ast>(info.name, info.tag, sv.transform<std::shared_ptr<Ast>>());
+            auto line = line_info(sv.ss, sv.s);
+            return std::make_shared<Ast>(line.first, line.second, info.name, info.tag, sv.transform<std::shared_ptr<Ast>>());
         };
     }
 
@@ -2190,13 +2197,15 @@ private:
                 auto is_token = rule.is_token;
                 rule.action = [=](const SemanticValues& sv) {
                     if (is_token) {
-                        return std::make_shared<Ast>(name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
+                        auto line = line_info(sv.ss, sv.s);
+                        return std::make_shared<Ast>(line.first, line.second, name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }
                     if (optimize_nodes && sv.size() == 1) {
                         std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
                         return ast;
                     }
-                    return std::make_shared<Ast>(name.c_str(), AstDefaultTag, sv.transform<std::shared_ptr<Ast>>());
+                    auto line = line_info(sv.ss, sv.s);
+                    return std::make_shared<Ast>(line.first, line.second, name.c_str(), AstDefaultTag, sv.transform<std::shared_ptr<Ast>>());
                 };
             }
         }

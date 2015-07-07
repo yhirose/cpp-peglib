@@ -269,6 +269,23 @@ struct Environment
                 }
             }),
             false);
+
+        initialize(
+            "assert",
+            Value(Value::FunctionValue {
+                { {"arg", true} },
+                [](std::shared_ptr<Environment> env) {
+                    auto cond = env->get("arg").to_bool();
+                    if (!cond) {
+                        auto line = env->get("__LINE__").to_long();
+                        auto column = env->get("__COLUMN__").to_long();
+                        std::string msg = "assert failed at " + std::to_string(line) + ":" + std::to_string(column) + ".";
+                        throw std::runtime_error(msg);
+                    }
+                    return Value();
+                }
+            }),
+            false);
     }
 
 private:
