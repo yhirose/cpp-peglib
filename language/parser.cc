@@ -5,63 +5,60 @@ using namespace std;
 
 static auto g_grammar = R"(
 
-    PROGRAM               <-  _ STATEMENTS
+    PROGRAM                  <-  _ STATEMENTS
 
-    STATEMENTS            <-  (EXPRESSION (';' _)?)*
+    STATEMENTS               <-  (EXPRESSION (';' _)?)*
 
-    EXPRESSION            <-  ASSIGNMENT / LOGICAL_OR
-    ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
-    WHILE                 <-  'while' _ EXPRESSION BLOCK
-    IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
+    EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
+    ASSIGNMENT               <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
+    WHILE                    <-  'while' _ EXPRESSION BLOCK
+    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
 
-    LOGICAL_OR            <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
-    LOGICAL_AND           <-  CONDITION ('&&' _  CONDITION)*
-    CONDITION             <-  ADDITIVE (CONDITION_OPERATOR ADDITIVE)*
-    ADDITIVE              <-  UNARY_PLUS (ADDITIVE_OPERATOR UNARY_PLUS)*
-    UNARY_PLUS            <-  UNARY_PLUS_OPERATOR? UNARY_MINUS
-    UNARY_MINUS           <-  UNARY_MINUS_OPERATOR? UNARY_NOT
-    UNARY_NOT             <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
-    MULTIPLICATIVE        <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
+    LOGICAL_OR               <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
+    LOGICAL_AND              <-  CONDITION ('&&' _  CONDITION)*
+    CONDITION                <-  ADDITIVE (CONDITION_OPERATOR ADDITIVE)*
+    ADDITIVE                 <-  UNARY_PLUS (ADDITIVE_OPERATOR UNARY_PLUS)*
+    UNARY_PLUS               <-  UNARY_PLUS_OPERATOR? UNARY_MINUS
+    UNARY_MINUS              <-  UNARY_MINUS_OPERATOR? UNARY_NOT
+    UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
+    MULTIPLICATIVE           <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
 
-    CALL                  <-  PRIMARY (ARGUMENTS / INDEX)*
+    CALL                     <-  PRIMARY (ARGUMENTS / INDEX)*
+    ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
+    INDEX                    <-  '[' _ EXPRESSION ']' _
 
-    #FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
-    ARGUMENTS             <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
-    #ARRAY_REFERENCE       <-  IDENTIFIER INDEX
-    INDEX                 <-  '[' _ EXPRESSION ']' _
+    PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
-    PRIMARY               <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
+    FUNCTION                 <-  'fn' _ PARAMETERS BLOCK
+    PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
+    PARAMETER                <-  MUTABLE IDENTIFIER
 
-    FUNCTION              <-  'fn' _ PARAMETERS BLOCK
-    PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
-    PARAMETER             <-  MUTABLE IDENTIFIER
+    BLOCK                    <-  '{' _ STATEMENTS '}' _
 
-    BLOCK                 <-  '{' _ STATEMENTS '}' _
-
-    CONDITION_OPERATOR    <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
-    ADDITIVE_OPERATOR     <-  < [-+] > _
-    UNARY_PLUS_OPERATOR   <-  < '+' > _
-    UNARY_MINUS_OPERATOR  <-  < '-' > _
-    UNARY_NOT_OPERATOR    <-  < '!' > _
+    CONDITION_OPERATOR       <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
+    ADDITIVE_OPERATOR        <-  < [-+] > _
+    UNARY_PLUS_OPERATOR      <-  < '+' > _
+    UNARY_MINUS_OPERATOR     <-  < '-' > _
+    UNARY_NOT_OPERATOR       <-  < '!' > _
     MULTIPLICATIVE_OPERATOR  <-  < [*/%] > _
 
-    IDENTIFIER            <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
+    IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
-    ARRAY                 <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
-    NUMBER                <-  < [0-9]+ > _
-    BOOLEAN               <-  < ('true' / 'false') > _
-    STRING                <-  ['] < (!['] .)* > ['] _
+    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
+    NUMBER                   <-  < [0-9]+ > _
+    BOOLEAN                  <-  < ('true' / 'false') > _
+    STRING                   <-  ['] < (!['] .)* > ['] _
 
-    INTERPOLATED_STRING   <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
-    INTERPOLATED_CONTENT  <-  (!["{] .) (!["{] .)*
+    INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
+    INTERPOLATED_CONTENT     <-  (!["{] .) (!["{] .)*
 
-    MUTABLE               <-  < 'mut'? > _
+    MUTABLE                  <-  < 'mut'? > _
 
-    ~_                    <-  (Space / EndOfLine / Comment)*
-    Space                 <-  ' ' / '\t'
-    EndOfLine             <-  '\r\n' / '\n' / '\r'
-    EndOfFile             <-  !.
-    Comment               <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
+    ~_                       <-  (Space / EndOfLine / Comment)*
+    Space                    <-  ' ' / '\t'
+    EndOfLine                <-  '\r\n' / '\n' / '\r'
+    EndOfFile                <-  !.
+    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
 
 )";
 
