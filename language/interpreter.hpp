@@ -55,6 +55,14 @@ struct Value
     explicit Value(ArrayValue&& a) : type(Array), v(a) {}
     explicit Value(FunctionValue&& f) : type(Function), v(f) {}
 
+    long size() const {
+        switch (type) {
+            case String: return to_string().size();
+            case Array:  return to_array().values.size();
+        }
+        throw std::runtime_error("type error.");
+    }
+
     bool to_bool() const {
         switch (type) {
             case Bool: return v.get<bool>();
@@ -283,6 +291,17 @@ struct Environment
                         throw std::runtime_error(msg);
                     }
                     return Value();
+                }
+            }),
+            false);
+
+        initialize(
+            "size",
+            Value(Value::FunctionValue {
+                { {"arg", true} },
+                [](std::shared_ptr<Environment> env) {
+                    auto size = env->get("arg").size();
+                    return Value(size);
                 }
             }),
             false);
