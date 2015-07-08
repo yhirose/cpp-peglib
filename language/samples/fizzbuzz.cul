@@ -5,13 +5,13 @@
 mut i = 1
 while i < 24 {
     if i % 15 == 0 {
-        pp('FizzBuzz')
+        puts('FizzBuzz')
     } else if i % 5 == 0 {
-        pp('Buzz')
+        puts('Buzz')
     } else if i % 3 == 0 {
-        pp('Fizz')
+        puts('Fizz')
     } else {
-        pp(i)
+        puts(i)
     }
     i = i + 1
 }

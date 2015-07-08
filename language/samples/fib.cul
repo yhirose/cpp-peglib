@@ -12,6 +12,6 @@ fib = fn (x) {
 
 mut i = 0
 while i < 30 {
-    pp("{i}: {fib(i)}")
+    puts("{i}: {fib(i)}")
     i = i + 1
 }

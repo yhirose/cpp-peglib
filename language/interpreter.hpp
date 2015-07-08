@@ -260,7 +260,7 @@ struct Environment
 
     void setup_built_in_functions() {
         initialize(
-            "pp",
+            "puts",
             Value(Value::FunctionValue {
                 { {"arg", true} },
                 [](std::shared_ptr<Environment> env) {

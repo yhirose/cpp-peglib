@@ -12,6 +12,6 @@ make_func = fn (mut x) {
 
 f = make_func(10)
 
-pp("1: { f() }")
-pp("2: { f() }")
-pp("3: { f() }")
+puts("1: { f() }")
+puts("2: { f() }")
+puts("3: { f() }")
