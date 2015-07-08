@@ -1,4 +1,26 @@
 
+test_call = fn () {
+    ret = fn(){[1,fn(){[4,5,6]},3]}()[1]()[1]
+    assert(ret == 5)
+}
+
+test_closure = fn () {
+    make_func = fn (mut x) {
+        mut n = 100
+        fn () {
+            n = n + 1
+            x = x + 1 + n
+        }
+    }
+
+    f = make_func(10)
+    f()
+    f()
+    ret = f()
+
+    assert(ret == 319)
+}
+
 test_sum = fn () {
     mut i = 1
     mut ret = 0
@@ -24,23 +46,7 @@ test_fib = fn () {
     assert(ret == 610)
 }
 
-test_closure = fn () {
-    make_func = fn (mut x) {
-        mut n = 100
-        fn () {
-            n = n + 1
-            x = x + 1 + n
-        }
-    }
-
-    f = make_func(10)
-    f()
-    f()
-    ret = f()
-
-    assert(ret == 319)
-}
-
+test_call()
+test_closure()
 test_sum()
 test_fib()
-test_closure()

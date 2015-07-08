@@ -13,8 +13,6 @@ static auto g_grammar = R"(
     ASSIGNMENT            <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
     WHILE                 <-  'while' _ EXPRESSION BLOCK
     IF                    <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
-    FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
-    ARGUMENTS             <-  '(' _ (EXPRESSION (', ' _ EXPRESSION)*)? ')' _
 
     LOGICAL_OR            <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
     LOGICAL_AND           <-  CONDITION ('&&' _  CONDITION)*
@@ -23,15 +21,20 @@ static auto g_grammar = R"(
     UNARY_PLUS            <-  UNARY_PLUS_OPERATOR? UNARY_MINUS
     UNARY_MINUS           <-  UNARY_MINUS_OPERATOR? UNARY_NOT
     UNARY_NOT             <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
-    MULTIPLICATIVE        <-  PRIMARY (MULTIPLICATIVE_OPERATOR PRIMARY)*
-    PRIMARY               <-  WHILE / IF / FUNCTION / FUNCTION_CALL / ARRAY / ARRAY_REFERENCE / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / IDENTIFIER / '(' _ EXPRESSION ')' _
+    MULTIPLICATIVE        <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
+
+    CALL                  <-  PRIMARY (ARGUMENTS / INDEX)*
+
+    #FUNCTION_CALL         <-  IDENTIFIER ARGUMENTS
+    ARGUMENTS             <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
+    #ARRAY_REFERENCE       <-  IDENTIFIER INDEX
+    INDEX                 <-  '[' _ EXPRESSION ']' _
+
+    PRIMARY               <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
     FUNCTION              <-  'fn' _ PARAMETERS BLOCK
     PARAMETERS            <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
     PARAMETER             <-  MUTABLE IDENTIFIER
-
-    ARRAY                 <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
-    ARRAY_REFERENCE       <-  IDENTIFIER '[' _ EXPRESSION ']' _
 
     BLOCK                 <-  '{' _ STATEMENTS '}' _
 
@@ -44,6 +47,7 @@ static auto g_grammar = R"(
 
     IDENTIFIER            <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
+    ARRAY                 <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
     NUMBER                <-  < [0-9]+ > _
     BOOLEAN               <-  < ('true' / 'false') > _
     STRING                <-  ['] < (!['] .)* > ['] _
@@ -87,10 +91,9 @@ peg& get_parser()
             { "IF",                  If,                 false    },
             { "FUNCTION",            Function,           false    },
             { "PARAMETERS",          Default,            false    },
-            { "FUNCTION_CALL",       FunctionCall,       false    },
-            { "ARRAY",               Array,              false    },
-            { "ARRAY_REFERENCE",     ArrayReference,     false    },
-            { "ARGUMENTS",           Default,            false    },
+            { "CALL",                Call,               true     },
+            { "ARGUMENTS",           Arguments,          false    },
+            { "INDEX",               Index,              false    },
             { "LOGICAL_OR",          LogicalOr,          true     },
             { "LOGICAL_AND",         LogicalAnd,         true     },
             { "CONDITION",           Condition,          true     },
@@ -99,6 +102,7 @@ peg& get_parser()
             { "UNARY_MINUS",         UnaryMinus,         true     },
             { "UNARY_NOT",           UnaryNot,           true     },
             { "MULTIPLICATIVE",      BinExpresion,       true     },
+            { "ARRAY",               Array,              false    },
             { "NUMBER",              Number,             false    },
             { "BOOLEAN",             Boolean,            false    },
             { "IDENTIFIER",          Identifier,         false    },

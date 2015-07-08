@@ -13,9 +13,7 @@ struct Eval
             case While:              return eval_while(ast, env);
             case If:                 return eval_if(ast, env);
             case Function:           return eval_function(ast, env);
-            case FunctionCall:       return eval_function_call(ast, env);
-            case Array:              return eval_array(ast, env);
-            case ArrayReference:     return eval_array_reference(ast, env);
+            case Call:               return eval_call(ast, env);
             case Assignment:         return eval_assignment(ast, env);
             case LogicalOr:          return eval_logical_or(ast, env);
             case LogicalAnd:         return eval_logical_and(ast, env);
@@ -25,6 +23,7 @@ struct Eval
             case UnaryNot:           return eval_unary_not(ast, env);
             case BinExpresion:       return eval_bin_expression(ast, env);
             case Identifier:         return eval_identifier(ast, env);
+            case Array:              return eval_array(ast, env);
             case Number:             return eval_number(ast, env);
             case Boolean:            return eval_bool(ast, env);
             case InterpolatedString: return eval_interpolated_string(ast, env);
@@ -100,57 +99,46 @@ private:
         });
     };
 
-    static Value eval_function_call(const Ast& ast, shared_ptr<Environment> env) {
-        const auto& f = eval(*ast.nodes[0], env);
-        const auto& fv = f.to_function();
+    static Value eval_call(const Ast& ast, shared_ptr<Environment> env) {
+        Value val = eval(*ast.nodes[0], env);
 
-        const auto& args = ast.nodes[1]->nodes;
+        for (auto i = 1u; i < ast.nodes.size(); i++) {
+            const auto& n = *ast.nodes[i];
+            if (n.tag == AstTag::Arguments) {
+                // Function call
+                const auto& f = val.to_function();
+                const auto& args = n.nodes;
+                if (f.params.size() <= args.size()) {
+                    auto callEnv = make_shared<Environment>();
 
-        if (fv.params.size() <= args.size()) {
-            auto callEnv = make_shared<Environment>();
+                    callEnv->initialize("self", val, false);
 
-            callEnv->initialize("self", f, false);
+                    for (auto iprm = 0u; iprm < f.params.size(); iprm++) {
+                        auto param = f.params[iprm];
+                        auto arg = args[iprm];
+                        auto val = eval(*arg, env);
+                        callEnv->initialize(param.name, val, param.mut);
+                    }
 
-            for (auto i = 0u; i < fv.params.size(); i++) {
-                auto param = fv.params[i];
-                auto arg = args[i];
-                auto val = eval(*arg, env);
-                callEnv->initialize(param.name, val, param.mut);
+                    callEnv->initialize("__LINE__", Value((long)ast.line), false);
+                    callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
+
+                    val = f.eval(callEnv);
+                } else {
+                    string msg = "arguments error...";
+                    throw runtime_error(msg);
+                }
+            } else { // n.tag == AstTag::Index
+                // Array reference
+                const auto& a = val.to_array();
+                const auto& idx = eval(*n.nodes[0], env).to_long();
+                if (0 <= idx && idx < static_cast<long>(a.values.size())) {
+                    val = a.values[idx];
+                }
             }
-
-            callEnv->initialize("__LINE__", Value((long)ast.line), false);
-            callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
-
-            return fv.eval(callEnv);
         }
 
-        string msg = "arguments error...";
-        throw runtime_error(msg);
-    }
-
-    static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
-        vector<Value> values;
-
-        for (auto i = 0u; i < ast.nodes.size(); i++) {
-            auto expr = ast.nodes[i];
-            auto val = eval(*expr, env);
-            values.push_back(val);
-        }
-
-        return Value(Value::ArrayValue {
-            values
-        });
-    }
-
-    static Value eval_array_reference(const Ast& ast, shared_ptr<Environment> env) {
-        const auto& a = eval(*ast.nodes[0], env).to_array();
-        const auto& i = eval(*ast.nodes[1], env).to_long();
-
-        if (0 <= i && i < static_cast<long>(a.values.size())) {
-            return a.values[i];
-        }
-
-        return Value();
+        return val;
     }
 
     static Value eval_logical_or(const Ast& ast, shared_ptr<Environment> env) {
@@ -261,6 +249,20 @@ private:
         const auto& var = ast.token;
         return env->get(var);
     };
+
+    static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
+        vector<Value> values;
+
+        for (auto i = 0u; i < ast.nodes.size(); i++) {
+            auto expr = ast.nodes[i];
+            auto val = eval(*expr, env);
+            values.push_back(val);
+        }
+
+        return Value(Value::ArrayValue {
+            values
+        });
+    }
 
     static Value eval_number(const Ast& ast, shared_ptr<Environment> env) {
         return Value(stol(ast.token));
