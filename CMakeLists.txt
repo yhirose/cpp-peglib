@@ -3,6 +3,7 @@ include_directories(.)
 add_definitions("-std=c++1y")
 
 add_executable(peglint lint/peglint.cc)
+add_executable(playground lint/playground/main.cc)
 add_executable(test-main test/test.cc)
 
 add_executable(calc example/calc.cc)
