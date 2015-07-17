@@ -12,18 +12,24 @@
 }
 body {
     display: flex;
+    display: -webkit-flex;
     flex-direction: column;
+    -webkit-flex-direction: column;
     height: 100vh;
 }
 #main {
     flex: 1;
+    -webkit-flex: 1;
     display: none;
 }
 .editor-container {
     flex: 1;
+    -webkit-flex: 1;
     width: 100%;
     display: flex;
+    display: -webkit-flex;
     flex-direction: column;
+    -webkit-flex-direction: column;
     margin: 8px;
 }
 .editor-container:first-child {
@@ -31,6 +37,7 @@ body {
 }
 .editor-header {
     display: flex;
+    display: -webkit-flex;
     height: 48px;
     padding: 4px 8px;
 }
@@ -61,6 +68,7 @@ body {
 }
 .editor-area {
     flex: 1;
+    -webkit-flex: 1;
     border: 1px solid lightgray;
 }
 .editor-info {
@@ -183,7 +191,10 @@ NUMBER           <-  < [0-9]+ > _
     $('#code-info').on('click', 'li', makeOnClickInInfo(code));
 
     // Show page
-    $('#main').css('display', 'flex');
+    $('#main').css({
+        'display': 'flex',
+        'display': '-webkit-flex'
+    });
 
     // Initial parse
     parse();
