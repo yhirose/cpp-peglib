@@ -7,18 +7,6 @@
 using namespace httplib;
 using namespace std;
 
-void open_url(const char* url)
-{
-    string cmd;
-#ifdef _MSC_VER
-    cmd += "start ";
-#else
-    cmd += "open ";
-#endif
-    cmd += url;
-    system(cmd.c_str());
-}
-
 function<void (size_t, size_t, const string&)> makeJSONFormatter(string& json)
 {
     auto init = make_shared<bool>(true);
@@ -86,11 +74,10 @@ int main(void)
         }
         json += "}";
 
-        res.set_content(json, "application/json");
-    });
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "POST");
 
-    svr.get("/stop", [&](const Request& req, Response& res) {
-        svr.stop();
+        res.set_content(json, "application/json");
     });
 
     svr.set_error_handler([](const Request& req, Response& res) {
@@ -99,8 +86,6 @@ int main(void)
         snprintf(buf, sizeof(buf), fmt, res.status);
         res.set_content(buf, "text/html");
     });
-
-    open_url("http://localhost:1234");
 
     svr.listen("localhost", 1234);
 
