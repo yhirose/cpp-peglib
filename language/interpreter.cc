@@ -81,7 +81,7 @@ private:
     }
 
     static Value eval_function(const Ast& ast, shared_ptr<Environment> env) {
-        vector<Value::FunctionValue::Parameter> params;
+        std::vector<Value::FunctionValue::Parameter> params;
         for (auto node: ast.nodes[0]->nodes) {
             auto mut = node->nodes[0]->token == "mut";
             const auto& name = node->nodes[1]->token;
@@ -90,13 +90,15 @@ private:
 
         auto body = ast.nodes[1];
 
-        return Value(Value::FunctionValue {
+        auto f = Value::FunctionValue(
             params,
             [=](shared_ptr<Environment> callEnv) {
                 callEnv->set_outer(env);
                 return eval(*body, callEnv);
             }
-        });
+        );
+
+        return Value(std::move(f));
     };
 
     static Value eval_call(const Ast& ast, shared_ptr<Environment> env) {
@@ -107,14 +109,15 @@ private:
             if (n.tag == AstTag::Arguments) {
                 // Function call
                 const auto& f = val.to_function();
+                const auto& params = f.data->params;
                 const auto& args = n.nodes;
-                if (f.params.size() <= args.size()) {
+                if (params.size() <= args.size()) {
                     auto callEnv = make_shared<Environment>();
 
                     callEnv->initialize("self", val, false);
 
-                    for (auto iprm = 0u; iprm < f.params.size(); iprm++) {
-                        auto param = f.params[iprm];
+                    for (auto iprm = 0u; iprm < params.size(); iprm++) {
+                        auto param = params[iprm];
                         auto arg = args[iprm];
                         auto val = eval(*arg, env);
                         callEnv->initialize(param.name, val, param.mut);
@@ -123,17 +126,41 @@ private:
                     callEnv->initialize("__LINE__", Value((long)ast.line), false);
                     callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
 
-                    val = f.eval(callEnv);
+                    val = f.data->eval(callEnv);
                 } else {
                     string msg = "arguments error...";
                     throw runtime_error(msg);
                 }
-            } else { // n.tag == AstTag::Index
+            } else if (n.tag == AstTag::Index) {
                 // Array reference
-                const auto& a = val.to_array();
-                const auto& idx = eval(*n.nodes[0], env).to_long();
-                if (0 <= idx && idx < static_cast<long>(a.values.size())) {
-                    val = a.values[idx];
+                const auto& arr = val.to_array();
+                auto idx = eval(*n.nodes[0], env).to_long();
+                if (0 <= idx && idx < static_cast<long>(arr.data->values.size())) {
+                    val = arr.data->values.at(idx);
+                }
+            } else { // n.tag == AstTag::Property
+                // Property
+                auto name = n.nodes[0]->token;
+                auto prop = val.get_property(name);
+
+                if (prop.get_type() == Value::Function) {
+                    const auto& pf = prop.to_function();
+
+                    auto f = Value::FunctionValue(
+                        pf.data->params,
+                        [=](shared_ptr<Environment> callEnv) {
+                            auto thisEnv = make_shared<Environment>();
+                            thisEnv->set_outer(env);
+                            thisEnv->initialize("this", val, false);
+
+                            callEnv->set_outer(thisEnv);
+                            return pf.data->eval(callEnv);
+                        }
+                    );
+
+                    val = Value(std::move(f));
+                } else {
+                    val = prop;
                 }
             }
         }
@@ -251,17 +278,15 @@ private:
     };
 
     static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
-        vector<Value> values;
+        Value::ArrayValue arr;
 
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             auto expr = ast.nodes[i];
             auto val = eval(*expr, env);
-            values.push_back(val);
+            arr.data->values.push_back(val);
         }
 
-        return Value(Value::ArrayValue {
-            values
-        });
+        return Value(std::move(arr));
     }
 
     static Value eval_number(const Ast& ast, shared_ptr<Environment> env) {
@@ -280,6 +305,32 @@ private:
         }
         return Value(std::move(s));
     };
+};
+
+std::map<std::string, Value> Value::ArrayValue::prototypes = {
+    {
+        "size",
+        Value(FunctionValue(
+            {},
+            [](shared_ptr<Environment> callEnv) {
+                const auto& val = callEnv->get("this");
+                long n = val.to_array().data->values.size();
+                return Value(n);
+            }
+        ))
+    },
+    {
+        "push",
+        Value(FunctionValue {
+            { {"arg", false} },
+            [](shared_ptr<Environment> callEnv) {
+                const auto& val = callEnv->get("this");
+                const auto& arg = callEnv->get("arg");
+                val.to_array().data->values.push_back(arg);
+                return Value();
+            }
+        })
+    },
 };
 
 bool run(

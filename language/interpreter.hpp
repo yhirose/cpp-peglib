@@ -6,19 +6,57 @@ struct Environment;
 
 struct Value
 {
-    enum Type { Undefined, Bool, Long, String, Array, Function };
-
-    struct ArrayValue {
-        std::vector<Value> values;
-    };
+    enum Type { Undefined, Bool, Long, String, Object, Array, Function };
 
     struct FunctionValue {
         struct Parameter {
             std::string name;
             bool        mut;
         };
-        std::vector<Parameter>                                  params;
-        std::function<Value (std::shared_ptr<Environment> env)> eval;
+
+        struct Data {
+            std::vector<Parameter>                                  params;
+            std::function<Value (std::shared_ptr<Environment> env)> eval;
+        };
+
+        FunctionValue(
+            const std::vector<Parameter>& params,
+            const std::function<Value (std::shared_ptr<Environment> env)>& eval) {
+
+            data = std::make_shared<Data>();
+            data->params = params;
+            data->eval = eval;
+        }
+
+        std::shared_ptr<Data> data;
+    };
+
+    struct ObjectValue {
+        Value get_property(const std::string& name) const {
+            return data->props.at(name);
+        }
+
+        struct Data {
+            std::map<std::string, Value> props;
+        };
+        std::shared_ptr<Data> data = std::make_shared<Data>();
+    };
+
+    struct ArrayValue {
+        Value get_property(const std::string& name) const {
+            if (data->props.find(name) == data->props.end()) {
+                return prototypes.at(name);
+            }
+            return data->props.at(name);
+        }
+
+        struct Data {
+            std::map<std::string, Value> props;
+            std::vector<Value> values;
+        };
+        std::shared_ptr<Data> data = std::make_shared<Data>();
+
+        static std::map<std::string, Value> prototypes;
     };
 
     Value() : type(Undefined) {
@@ -52,56 +90,84 @@ struct Value
     explicit Value(bool b) : type(Bool), v(b) {}
     explicit Value(long l) : type(Long), v(l) {}
     explicit Value(std::string&& s) : type(String), v(s) {}
+    explicit Value(ObjectValue&& o) : type(Object), v(0) {}
     explicit Value(ArrayValue&& a) : type(Array), v(a) {}
     explicit Value(FunctionValue&& f) : type(Function), v(f) {}
 
-    long size() const {
-        switch (type) {
-            case String: return to_string().size();
-            case Array:  return to_array().values.size();
-        }
-        throw std::runtime_error("type error.");
+    Type get_type() const {
+        return type;
     }
 
     bool to_bool() const {
         switch (type) {
             case Bool: return v.get<bool>();
             case Long: return v.get<long>() != 0;
+            default: throw std::runtime_error("type error.");
         }
-        throw std::runtime_error("type error.");
     }
 
     long to_long() const {
         switch (type) {
             case Bool: return v.get<bool>();
             case Long: return v.get<long>();
+            default: throw std::runtime_error("type error.");
         }
-        throw std::runtime_error("type error.");
     }
 
     std::string to_string() const {
         switch (type) {
             case String: return v.get<std::string>();
+            default: throw std::runtime_error("type error.");
         }
-        throw std::runtime_error("type error.");
+    }
+
+    ObjectValue to_object() const {
+        switch (type) {
+            case Object: return v.get<ObjectValue>();
+            default: throw std::runtime_error("type error.");
+        }
     }
 
     ArrayValue to_array() const {
         switch (type) {
             case Array: return v.get<ArrayValue>();
+            default: throw std::runtime_error("type error.");
         }
-        throw std::runtime_error("type error.");
     }
 
     FunctionValue to_function() const {
         switch (type) {
             case Function: return v.get<FunctionValue>();
+            default: throw std::runtime_error("type error.");
         }
-        throw std::runtime_error("type error.");
+    }
+
+    Value get_property(const std::string& name) const {
+        switch (type) {
+            case Object: return to_object().get_property(name);
+            case Array:  return to_array().get_property(name);
+            default: throw std::runtime_error("type error.");
+        }
+    }
+
+    std::string str_object() const {
+        const auto& props = to_object().data->props;
+        std::string s = "{";
+        auto it = props.begin();
+        for (; it != props.end(); ++it) {
+            if (it != props.begin()) {
+                s += ", ";
+            }
+            s += '"' + it->first + '"';
+            s += ": ";
+            s += it->second.str();
+        }
+        s += "}";
+        return s;
     }
 
     std::string str_array() const {
-        const auto& values = to_array().values;
+        const auto& values = to_array().data->values;
         std::string s = "[";
         for (auto i = 0u; i < values.size(); i++) {
             if (i != 0) {
@@ -119,8 +185,9 @@ struct Value
             case Bool:      return to_bool() ? "true" : "false";
             case Long:      return std::to_string(to_long()); break;
             case String:    return to_string();
-            case Function:  return "[function]";
+            case Object:    return str_object();
             case Array:     return str_array();
+            case Function:  return "[function]";
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -206,7 +273,7 @@ struct Value
 private:
     friend std::ostream& operator<<(std::ostream&, const Value&);
 
-    int         type;
+    Type        type;
     peglib::any v;
 
 };
@@ -267,20 +334,19 @@ struct Environment
     }
 
     void setup_built_in_functions() {
-        initialize(
-            "puts",
-            Value(Value::FunctionValue {
+        {
+            auto f = Value::FunctionValue(
                 { {"arg", true} },
                 [](std::shared_ptr<Environment> env) {
                     std::cout << env->get("arg").str() << std::endl;
                     return Value();
                 }
-            }),
-            false);
+            );
+            initialize("puts", Value(std::move(f)), false);
+        }
 
-        initialize(
-            "assert",
-            Value(Value::FunctionValue {
+        {
+            auto f = Value::FunctionValue(
                 { {"arg", true} },
                 [](std::shared_ptr<Environment> env) {
                     auto cond = env->get("arg").to_bool();
@@ -292,19 +358,9 @@ struct Environment
                     }
                     return Value();
                 }
-            }),
-            false);
-
-        initialize(
-            "size",
-            Value(Value::FunctionValue {
-                { {"arg", true} },
-                [](std::shared_ptr<Environment> env) {
-                    auto size = env->get("arg").size();
-                    return Value(size);
-                }
-            }),
-            false);
+            );
+            initialize("assert", Value(std::move(f)), false);
+        }
     }
 
 private:

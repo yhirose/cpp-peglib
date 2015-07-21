@@ -32,6 +32,17 @@ test_sum = fn () {
     assert(ret == 55)
 }
 
+test_array = fn () {
+    a = [1,2,3]
+    assert(a.size() == 3)
+
+    a.push(4)
+    assert(a.size() == 4)
+
+    b = []
+    assert(b.size() == 0)
+}
+
 test_fib = fn () {
     fib = fn (x) {
         if x < 2 {
@@ -48,5 +59,6 @@ test_fib = fn () {
 
 test_call()
 test_closure()
+test_array()
 test_sum()
 test_fib()

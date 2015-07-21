@@ -23,9 +23,10 @@ static auto g_grammar = R"(
     UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
     MULTIPLICATIVE           <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
 
-    CALL                     <-  PRIMARY (ARGUMENTS / INDEX)*
+    CALL                     <-  PRIMARY (ARGUMENTS / INDEX / PROPERTY)*
     ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
     INDEX                    <-  '[' _ EXPRESSION ']' _
+    PROPERTY                 <-  '.' _ IDENTIFIER
 
     PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
@@ -44,7 +45,7 @@ static auto g_grammar = R"(
 
     IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
-    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
+    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
     NUMBER                   <-  < [0-9]+ > _
     BOOLEAN                  <-  < ('true' / 'false') > _
     STRING                   <-  ['] < (!['] .)* > ['] _
@@ -91,6 +92,7 @@ peg& get_parser()
             { "CALL",                Call,               true     },
             { "ARGUMENTS",           Arguments,          false    },
             { "INDEX",               Index,              false    },
+            { "PROPERTY",            Property,           false    },
             { "LOGICAL_OR",          LogicalOr,          true     },
             { "LOGICAL_AND",         LogicalAnd,         true     },
             { "CONDITION",           Condition,          true     },

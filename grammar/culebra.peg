@@ -17,9 +17,10 @@
     UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
     MULTIPLICATIVE           <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
 
-    CALL                     <-  PRIMARY (ARGUMENTS / INDEX)*
+    CALL                     <-  PRIMARY (ARGUMENTS / INDEX / METHOD)*
     ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
     INDEX                    <-  '[' _ EXPRESSION ']' _
+    METHOD                   <-  '.' _ IDENTIFIER ARGUMENTS
 
     PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
@@ -38,7 +39,7 @@
 
     IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
-    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*) ']' _
+    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
     NUMBER                   <-  < [0-9]+ > _
     BOOLEAN                  <-  < ('true' / 'false') > _
     STRING                   <-  ['] < (!['] .)* > ['] _
