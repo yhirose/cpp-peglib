@@ -3,11 +3,35 @@
 enum AstTag
 {
    Default = peglib::AstDefaultTag,
-   Statements, While, If, Call, Assignment,
-   Arguments, Index, Property,
-   LogicalOr, LogicalAnd, Condition, UnaryPlus, UnaryMinus, UnaryNot, BinExpresion,
-   Identifier, InterpolatedString,
-   Number, Boolean, Function, Array
+
+   Statements,
+   While,
+   If,
+   Call,
+   Assignment,
+
+   Arguments,
+   Index,
+   Dot,
+
+   LogicalOr,
+   LogicalAnd,
+   Condition,
+   UnaryPlus,
+   UnaryMinus,
+   UnaryNot,
+   BinExpresion,
+
+   Identifier,
+
+   Object,
+   Array,
+   Function,
+
+   InterpolatedString,
+
+   Number,
+   Boolean,
 };
 
 peglib::peg& get_parser();

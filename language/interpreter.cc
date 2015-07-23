@@ -23,6 +23,7 @@ struct Eval
             case UnaryNot:           return eval_unary_not(ast, env);
             case BinExpresion:       return eval_bin_expression(ast, env);
             case Identifier:         return eval_identifier(ast, env);
+            case Object:             return eval_object(ast, env);
             case Array:              return eval_array(ast, env);
             case Number:             return eval_number(ast, env);
             case Boolean:            return eval_bool(ast, env);
@@ -93,7 +94,7 @@ private:
         auto f = Value::FunctionValue(
             params,
             [=](shared_ptr<Environment> callEnv) {
-                callEnv->set_outer(env);
+                callEnv->append_outer(env);
                 return eval(*body, callEnv);
             }
         );
@@ -106,7 +107,7 @@ private:
 
         for (auto i = 1u; i < ast.nodes.size(); i++) {
             const auto& n = *ast.nodes[i];
-            if (n.tag == AstTag::Arguments) {
+            if (n.original_tag == AstTag::Arguments) {
                 // Function call
                 const auto& f = val.to_function();
                 const auto& params = f.data->params;
@@ -131,16 +132,16 @@ private:
                     string msg = "arguments error...";
                     throw runtime_error(msg);
                 }
-            } else if (n.tag == AstTag::Index) {
+            } else if (n.original_tag == AstTag::Index) {
                 // Array reference
                 const auto& arr = val.to_array();
-                auto idx = eval(*n.nodes[0], env).to_long();
+                auto idx = eval(n, env).to_long();
                 if (0 <= idx && idx < static_cast<long>(arr.data->values.size())) {
                     val = arr.data->values.at(idx);
                 }
-            } else { // n.tag == AstTag::Property
+            } else if (n.original_tag == AstTag::Dot) {
                 // Property
-                auto name = n.nodes[0]->token;
+                auto name = n.token;
                 auto prop = val.get_property(name);
 
                 if (prop.get_type() == Value::Function) {
@@ -149,11 +150,10 @@ private:
                     auto f = Value::FunctionValue(
                         pf.data->params,
                         [=](shared_ptr<Environment> callEnv) {
-                            auto thisEnv = make_shared<Environment>();
-                            thisEnv->set_outer(env);
-                            thisEnv->initialize("this", val, false);
-
-                            callEnv->set_outer(thisEnv);
+                            callEnv->initialize("this", val, false);
+                            if (val.get_type() == Value::Object) {
+                                callEnv->set_object(val.to_object());
+                            }
                             return pf.data->eval(callEnv);
                         }
                     );
@@ -162,6 +162,8 @@ private:
                 } else {
                     val = prop;
                 }
+            } else {
+                throw std::logic_error("invalid internal condition.");
             }
         }
 
@@ -277,6 +279,19 @@ private:
         return env->get(var);
     };
 
+    static Value eval_object(const Ast& ast, shared_ptr<Environment> env) {
+        Value::ObjectValue obj;
+
+        for (auto i = 0u; i < ast.nodes.size(); i++) {
+            const auto& prop = *ast.nodes[i];
+            const auto& name = prop.nodes[0]->token;
+            auto val = eval(*prop.nodes[1], env);
+            obj.data->props.emplace(name, val);
+        }
+
+        return Value(std::move(obj));
+    }
+
     static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
         Value::ArrayValue arr;
 
@@ -307,6 +322,20 @@ private:
     };
 };
 
+std::map<std::string, Value> Value::ObjectValue::prototypes = {
+    {
+        "size",
+        Value(FunctionValue(
+            {},
+            [](shared_ptr<Environment> callEnv) {
+                const auto& val = callEnv->get("this");
+                long n = val.to_object().data->props.size();
+                return Value(n);
+            }
+        ))
+    }
+};
+
 std::map<std::string, Value> Value::ArrayValue::prototypes = {
     {
         "size",
@@ -330,7 +359,7 @@ std::map<std::string, Value> Value::ArrayValue::prototypes = {
                 return Value();
             }
         })
-    },
+    }
 };
 
 bool run(

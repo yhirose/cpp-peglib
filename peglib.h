@@ -1944,10 +1944,15 @@ const int AstDefaultTag = -1;
 struct Ast
 {
     Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
-        : line(_line), column(_column), name(_name), tag(_tag), is_token(false), nodes(_nodes) {}
+        : line(_line), column(_column), name(_name), tag(_tag), original_tag(_tag), is_token(false), nodes(_nodes) {}
 
     Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::string& _token)
-        : line(_line), column(_column), name(_name), tag(_tag), is_token(true), token(_token) {}
+        : line(_line), column(_column), name(_name), tag(_tag), original_tag(_tag), is_token(true), token(_token) {}
+
+    Ast(const Ast& ast, int original_tag)
+        : line(ast.line), column(ast.column), name(ast.name), tag(ast.tag), original_tag(original_tag), is_token(ast.is_token), token(ast.token), nodes(ast.nodes) {}
+
+    const Ast& get_smallest_ancestor() const;
 
     void print() const;
 
@@ -1955,6 +1960,7 @@ struct Ast
     const size_t                            column;
     const std::string                       name;
     const int                               tag;
+    const int                               original_tag;
     const bool                              is_token;
     const std::string                       token;
     const std::vector<std::shared_ptr<Ast>> nodes;
@@ -1979,6 +1985,16 @@ struct AstPrint
 private:
     int level_;
 };
+
+inline const Ast& Ast::get_smallest_ancestor() const {
+	 assert(nodes.size() <= 1);
+
+    if (nodes.empty()) {
+        return *this;
+    }
+
+    return nodes[0]->get_smallest_ancestor();
+}
 
 inline void Ast::print() const {
     AstPrint().print(*this);
@@ -2162,7 +2178,7 @@ public:
 private:
     void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
         if (log) {
-            if (!r.ret) {
+            if (!r.ret) { 
                 auto line = line_info(s, r.error_pos);
                 log(line.first, line.second, r.message.empty() ? "syntax error" : r.message);
             } else if (r.len != n) {
@@ -2181,7 +2197,7 @@ private:
                 return std::make_shared<Ast>(line.first, line.second, info.name, info.tag, std::string(sv.s, sv.n));
             }
             if (info.optimize_nodes && sv.size() == 1) {
-                std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), info.tag);
                 return ast;
             }
             auto line = line_info(sv.ss, sv.s);
@@ -2201,7 +2217,7 @@ private:
                         return std::make_shared<Ast>(line.first, line.second, name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
                     }
                     if (optimize_nodes && sv.size() == 1) {
-                        std::shared_ptr<Ast> ast = sv[0].get<std::shared_ptr<Ast>>();
+                        auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), AstDefaultTag);
                         return ast;
                     }
                     auto line = line_info(sv.ss, sv.s);

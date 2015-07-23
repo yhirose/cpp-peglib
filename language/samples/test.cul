@@ -21,17 +21,6 @@ test_closure = fn () {
     assert(ret == 319)
 }
 
-test_sum = fn () {
-    mut i = 1
-    mut ret = 0
-    while i <= 10 {
-        ret = ret + i
-        i = i + 1
-    }
-
-    assert(ret == 55)
-}
-
 test_array = fn () {
     a = [1,2,3]
     assert(a.size() == 3)
@@ -41,6 +30,68 @@ test_array = fn () {
 
     b = []
     assert(b.size() == 0)
+}
+
+g_ = 1
+
+test_function = fn () {
+    a = 1
+    make = fn () {
+        b = 1
+        fn (c) {
+            g_ + a + b + c
+        }
+    }
+    f = make()
+    assert(f(1) == 4)
+}
+
+test_object = fn () {
+    n = 1
+    o = {
+    	n: 123,
+    	s: 'str',
+    	f1: fn (x) { x + this.n },
+    	f2: fn (x) { x + n }
+    }
+    assert(o.size() == 4)
+    assert(o.f1(10) == 133)
+    assert(o.f2(10) == 133)
+}
+
+test_object_factory = fn () {
+    ctor = fn (init) {
+        mut n = init
+
+        {
+            add: fn (x) {
+                n = n + x
+            },
+            sub: fn (x) {
+                n = n - x
+            },
+            val: fn () {
+                n
+            }
+        }
+    }
+
+    calc = ctor(10)
+
+    assert(calc.val() == 10)
+    assert(calc.add(1) == 11)
+    assert(calc.sub(1) == 10)
+}
+
+test_sum = fn () {
+    mut i = 1
+    mut ret = 0
+    while i <= 10 {
+        ret = ret + i
+        i = i + 1
+    }
+
+    assert(ret == 55)
 }
 
 test_fib = fn () {
@@ -57,8 +108,19 @@ test_fib = fn () {
     assert(ret == 610)
 }
 
+test_interpolated_string = fn () {
+    hello = "Hello"
+	world = "World!"
+    ret = "{hello} {world}"
+    assert(ret == 'Hello World!')
+}
+
 test_call()
 test_closure()
 test_array()
+test_function()
+test_object()
+test_object_factory()
 test_sum()
 test_fib()
+test_interpolated_string()

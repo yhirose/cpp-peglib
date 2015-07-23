@@ -32,7 +32,17 @@ struct Value
     };
 
     struct ObjectValue {
+        bool has_property(const std::string& name) const {
+            if (data->props.find(name) == data->props.end()) {
+                return prototypes.find(name) != prototypes.end();
+            }
+            return true;
+        }
+
         Value get_property(const std::string& name) const {
+            if (data->props.find(name) == data->props.end()) {
+                return prototypes.at(name);
+            }
             return data->props.at(name);
         }
 
@@ -40,6 +50,8 @@ struct Value
             std::map<std::string, Value> props;
         };
         std::shared_ptr<Data> data = std::make_shared<Data>();
+
+        static std::map<std::string, Value> prototypes;
     };
 
     struct ArrayValue {
@@ -90,7 +102,7 @@ struct Value
     explicit Value(bool b) : type(Bool), v(b) {}
     explicit Value(long l) : type(Long), v(l) {}
     explicit Value(std::string&& s) : type(String), v(s) {}
-    explicit Value(ObjectValue&& o) : type(Object), v(0) {}
+    explicit Value(ObjectValue&& o) : type(Object), v(o) {}
     explicit Value(ArrayValue&& a) : type(Array), v(a) {}
     explicit Value(FunctionValue&& f) : type(Function), v(f) {}
 
@@ -287,20 +299,38 @@ struct Environment
 {
     Environment() = default;
 
+    void set_object(const Value::ObjectValue& obj) {
+        obj_ = obj;
+    }
+
     void set_outer(std::shared_ptr<Environment> outer) {
         outer_ = outer;
+    }
+
+    void append_outer(std::shared_ptr<Environment> outer) {
+        if (outer_) {
+            outer_->append_outer(outer);
+        } else {
+            outer_ = outer;
+        }
     }
 
     bool has(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return true;
         }
+        if (obj_.has_property(s)) {
+            return true;
+        }
         return outer_ && outer_->has(s);
     }
 
-    const Value& get(const std::string& s) const {
+    Value get(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s).val;
+        }
+        if (obj_.has_property(s)) {
+            return obj_.get_property(s);
         }
         if (outer_) {
             return outer_->get(s);
@@ -333,45 +363,46 @@ struct Environment
         dic_[s] = Symbol{val, mut};
     }
 
-    void setup_built_in_functions() {
-        {
-            auto f = Value::FunctionValue(
-                { {"arg", true} },
-                [](std::shared_ptr<Environment> env) {
-                    std::cout << env->get("arg").str() << std::endl;
-                    return Value();
-                }
-            );
-            initialize("puts", Value(std::move(f)), false);
-        }
-
-        {
-            auto f = Value::FunctionValue(
-                { {"arg", true} },
-                [](std::shared_ptr<Environment> env) {
-                    auto cond = env->get("arg").to_bool();
-                    if (!cond) {
-                        auto line = env->get("__LINE__").to_long();
-                        auto column = env->get("__COLUMN__").to_long();
-                        std::string msg = "assert failed at " + std::to_string(line) + ":" + std::to_string(column) + ".";
-                        throw std::runtime_error(msg);
-                    }
-                    return Value();
-                }
-            );
-            initialize("assert", Value(std::move(f)), false);
-        }
-    }
-
 private:
     struct Symbol {
         Value val;
         bool  mut;
     };
 
-    std::shared_ptr<Environment> outer_;
+    std::shared_ptr<Environment>  outer_;
     std::map<std::string, Symbol> dic_;
+    Value::ObjectValue            obj_;
 };
+
+inline void setup_built_in_functions(Environment& env) {
+    {
+        auto f = Value::FunctionValue(
+            { {"arg", true} },
+            [](std::shared_ptr<Environment> env) {
+                std::cout << env->get("arg").str() << std::endl;
+                return Value();
+            }
+        );
+        env.initialize("puts", Value(std::move(f)), false);
+    }
+
+    {
+        auto f = Value::FunctionValue(
+            { {"arg", true} },
+            [](std::shared_ptr<Environment> env) {
+                auto cond = env->get("arg").to_bool();
+                if (!cond) {
+                    auto line = env->get("__LINE__").to_long();
+                    auto column = env->get("__COLUMN__").to_long();
+                    std::string msg = "assert failed at " + std::to_string(line) + ":" + std::to_string(column) + ".";
+                    throw std::runtime_error(msg);
+                }
+                return Value();
+            }
+        );
+        env.initialize("assert", Value(std::move(f)), false);
+    }
+}
 
 bool run(
     const std::string&           path,

@@ -23,12 +23,12 @@ static auto g_grammar = R"(
     UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
     MULTIPLICATIVE           <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
 
-    CALL                     <-  PRIMARY (ARGUMENTS / INDEX / PROPERTY)*
+    CALL                     <-  PRIMARY (ARGUMENTS / INDEX / DOT)*
     ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
     INDEX                    <-  '[' _ EXPRESSION ']' _
-    PROPERTY                 <-  '.' _ IDENTIFIER
+    DOT                      <-  '.' _ IDENTIFIER
 
-    PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
+    PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / OBJECT / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
     FUNCTION                 <-  'fn' _ PARAMETERS BLOCK
     PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
@@ -45,7 +45,11 @@ static auto g_grammar = R"(
 
     IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
+    OBJECT                   <-  '{' _ (OBJECT_PROPERTY (',' _ OBJECT_PROPERTY)*)? '}' _
+    OBJECT_PROPERTY          <-  IDENTIFIER ':' _ EXPRESSION
+
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
+
     NUMBER                   <-  < [0-9]+ > _
     BOOLEAN                  <-  < ('true' / 'false') > _
     STRING                   <-  ['] < (!['] .)* > ['] _
@@ -79,34 +83,36 @@ peg& get_parser()
             throw logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast(true, {
-            /*
-               Definition,            Tag               Optimize
-             ---------------------- ------------------ ---------- */
-            { "STATEMENTS",          Statements,         false    },
-            { "WHILE",               While,              false    },
-            { "ASSIGNMENT",          Assignment,         false    },
-            { "IF",                  If,                 false    },
-            { "FUNCTION",            Function,           false    },
-            { "PARAMETERS",          Default,            false    },
-            { "CALL",                Call,               true     },
-            { "ARGUMENTS",           Arguments,          false    },
-            { "INDEX",               Index,              false    },
-            { "PROPERTY",            Property,           false    },
-            { "LOGICAL_OR",          LogicalOr,          true     },
-            { "LOGICAL_AND",         LogicalAnd,         true     },
-            { "CONDITION",           Condition,          true     },
-            { "ADDITIVE",            BinExpresion,       true     },
-            { "UNARY_PLUS",          UnaryPlus,          true     },
-            { "UNARY_MINUS",         UnaryMinus,         true     },
-            { "UNARY_NOT",           UnaryNot,           true     },
-            { "MULTIPLICATIVE",      BinExpresion,       true     },
-            { "ARRAY",               Array,              false    },
-            { "NUMBER",              Number,             false    },
-            { "BOOLEAN",             Boolean,            false    },
-            { "IDENTIFIER",          Identifier,         false    },
-            { "INTERPOLATED_STRING", InterpolatedString, false    },
-        });
+        parser.enable_ast(
+           true, // Optimize AST nodes
+           {
+	            /*     Definition              Tag          Optimize
+	            ----------------------- ------------------ ---------- */
+	            { "STATEMENTS",          Statements,         true   },
+	            { "WHILE",               While,              true   },
+	            { "ASSIGNMENT",          Assignment,         true   },
+	            { "IF",                  If,                 true   },
+	            { "FUNCTION",            Function,           true   },
+	            { "PARAMETERS",          Default,            false  },
+	            { "CALL",                Call,               true   },
+	            { "ARGUMENTS",           Arguments,          false  },
+	            { "INDEX",               Index,              true   },
+	            { "DOT",                 Dot,                true   },
+	            { "LOGICAL_OR",          LogicalOr,          true   },
+	            { "LOGICAL_AND",         LogicalAnd,         true   },
+	            { "CONDITION",           Condition,          true   },
+	            { "ADDITIVE",            BinExpresion,       true   },
+	            { "UNARY_PLUS",          UnaryPlus,          true   },
+	            { "UNARY_MINUS",         UnaryMinus,         true   },
+	            { "UNARY_NOT",           UnaryNot,           true   },
+	            { "MULTIPLICATIVE",      BinExpresion,       true   },
+	            { "OBJECT",              Object,             true   },
+	            { "ARRAY",               Array,              true   },
+	            { "NUMBER",              Number,             true   },
+	            { "BOOLEAN",             Boolean,            true   },
+	            { "IDENTIFIER",          Identifier,         true   },
+	            { "INTERPOLATED_STRING", InterpolatedString, true   },
+	        });
     }
 
     return parser;
