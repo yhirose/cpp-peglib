@@ -138,7 +138,9 @@
 #ifndef STDOUT_FILENO
 #define STDOUT_FILENO 1
 #endif
+#if (_MSC_VER < 1900)
 #define snprintf _snprintf
+#endif
 #define isatty _isatty
 #define write win32_write
 #define read _read
@@ -1911,7 +1913,9 @@ inline const std::vector<std::string>& GetHistory() {
 } // namespace linenoise
 
 #ifdef _WIN32
+#if (_MSC_VER < 1900)
 #undef snprintf
+#endif
 #undef isatty
 #undef write
 #undef read
