@@ -11,17 +11,17 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\peglib.h" />
-    <ClInclude Include="interpreter.hpp" />
-    <ClInclude Include="linenoise.hpp" />
-    <ClInclude Include="parser.hpp" />
-    <ClInclude Include="repl.hpp" />
+    <ClInclude Include="..\..\peglib.h" />
+    <ClInclude Include="..\interpreter.hpp" />
+    <ClInclude Include="..\linenoise.hpp" />
+    <ClInclude Include="..\parser.hpp" />
+    <ClInclude Include="..\repl.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="interpreter.cc" />
-    <ClCompile Include="main.cc" />
-    <ClCompile Include="parser.cc" />
-    <ClCompile Include="repl.cc" />
+    <ClCompile Include="..\interpreter.cc" />
+    <ClCompile Include="..\main.cc" />
+    <ClCompile Include="..\parser.cc" />
+    <ClCompile Include="..\repl.cc" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F85B641A-7538-4809-8175-C528FF632CF6}</ProjectGuid>
@@ -65,7 +65,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../..</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -82,7 +82,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../..</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
