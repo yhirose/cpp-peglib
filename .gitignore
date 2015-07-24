@@ -40,3 +40,8 @@ xcuserdata
 temp*
 build/
 Makefile
+CMakeFiles
+CMakeCache.txt
+*.cmake
+*.vcxproj.filters
+*.opensdf
