@@ -2,74 +2,51 @@
 #include <string>
 #include <peglib.h>
 
+struct Value;
 struct Environment;
+
+struct FunctionValue {
+    struct Parameter {
+        std::string name;
+        bool        mut;
+    };
+
+    struct Data {
+        std::vector<Parameter>                                  params;
+        std::function<Value (std::shared_ptr<Environment> env)> eval;
+    };
+
+    FunctionValue(
+        const std::vector<Parameter>& params,
+        const std::function<Value (std::shared_ptr<Environment> env)>& eval) {
+
+        data = std::make_shared<Data>();
+        data->params = params;
+        data->eval = eval;
+    }
+
+    std::shared_ptr<Data> data;
+};
+
+struct ObjectValue {
+    bool has_property(const std::string& name) const;
+    Value get_property(const std::string& name) const;
+    virtual std::map<std::string, Value>& builtins();
+
+    std::shared_ptr<std::map<std::string, Value>> properties =
+        std::make_shared<std::map<std::string, Value>>();
+};
+
+struct ArrayValue : public ObjectValue {
+    std::map<std::string, Value>& builtins() override;
+
+    std::shared_ptr<std::vector<Value>> values =
+        std::make_shared<std::vector<Value>>();
+};
 
 struct Value
 {
     enum Type { Undefined, Bool, Long, String, Object, Array, Function };
-
-    struct FunctionValue {
-        struct Parameter {
-            std::string name;
-            bool        mut;
-        };
-
-        struct Data {
-            std::vector<Parameter>                                  params;
-            std::function<Value (std::shared_ptr<Environment> env)> eval;
-        };
-
-        FunctionValue(
-            const std::vector<Parameter>& params,
-            const std::function<Value (std::shared_ptr<Environment> env)>& eval) {
-
-            data = std::make_shared<Data>();
-            data->params = params;
-            data->eval = eval;
-        }
-
-        std::shared_ptr<Data> data;
-    };
-
-    struct ObjectValue {
-        bool has_property(const std::string& name) const {
-            if (data->props.find(name) == data->props.end()) {
-                return prototypes.find(name) != prototypes.end();
-            }
-            return true;
-        }
-
-        Value get_property(const std::string& name) const {
-            if (data->props.find(name) == data->props.end()) {
-                return prototypes.at(name);
-            }
-            return data->props.at(name);
-        }
-
-        struct Data {
-            std::map<std::string, Value> props;
-        };
-        std::shared_ptr<Data> data = std::make_shared<Data>();
-
-        static std::map<std::string, Value> prototypes;
-    };
-
-    struct ArrayValue {
-        Value get_property(const std::string& name) const {
-            if (data->props.find(name) == data->props.end()) {
-                return prototypes.at(name);
-            }
-            return data->props.at(name);
-        }
-
-        struct Data {
-            std::map<std::string, Value> props;
-            std::vector<Value> values;
-        };
-        std::shared_ptr<Data> data = std::make_shared<Data>();
-
-        static std::map<std::string, Value> prototypes;
-    };
 
     Value() : type(Undefined) {
         //std::cout << "Val::def ctor: " << std::endl;
@@ -163,11 +140,11 @@ struct Value
     }
 
     std::string str_object() const {
-        const auto& props = to_object().data->props;
+        const auto& properties = *to_object().properties;
         std::string s = "{";
-        auto it = props.begin();
-        for (; it != props.end(); ++it) {
-            if (it != props.begin()) {
+        auto it = properties.begin();
+        for (; it != properties.end(); ++it) {
+            if (it != properties.begin()) {
                 s += ", ";
             }
             s += '"' + it->first + '"';
@@ -179,7 +156,7 @@ struct Value
     }
 
     std::string str_array() const {
-        const auto& values = to_array().data->values;
+        const auto& values = *to_array().values;
         std::string s = "[";
         for (auto i = 0u; i < values.size(); i++) {
             if (i != 0) {
@@ -299,7 +276,7 @@ struct Environment
 {
     Environment() = default;
 
-    void set_object(const Value::ObjectValue& obj) {
+    void set_object(const ObjectValue& obj) {
         obj_ = obj;
     }
 
@@ -371,12 +348,74 @@ private:
 
     std::shared_ptr<Environment>  outer_;
     std::map<std::string, Symbol> dic_;
-    Value::ObjectValue            obj_;
+    ObjectValue                   obj_;
 };
+
+inline bool ObjectValue::has_property(const std::string& name) const {
+    if (properties->find(name) == properties->end()) {
+        const auto& proto = const_cast<ObjectValue*>(this)->builtins();
+        return proto.find(name) != proto.end();
+    }
+    return true;
+}
+
+inline Value ObjectValue::get_property(const std::string& name) const {
+    if (properties->find(name) == properties->end()) {
+        const auto& proto = const_cast<ObjectValue*>(this)->builtins();
+        return proto.at(name);
+    }
+    return properties->at(name);
+}
+
+inline std::map<std::string, Value>& ObjectValue::builtins() {
+    static std::map<std::string, Value> proto_ = {
+        {
+            "size",
+            Value(FunctionValue(
+                {},
+                [](std::shared_ptr<Environment> callEnv) {
+                    const auto& val = callEnv->get("this");
+                    long n = val.to_object().properties->size();
+                    return Value(n);
+                }
+            ))
+        }
+    };
+    return proto_;
+}
+
+inline std::map<std::string, Value>& ArrayValue::builtins() {
+    static std::map<std::string, Value> proto_ = {
+        {
+            "size",
+            Value(FunctionValue(
+                {},
+                [](std::shared_ptr<Environment> callEnv) {
+                    const auto& val = callEnv->get("this");
+                    long n = val.to_array().values->size();
+                    return Value(n);
+                }
+            ))
+        },
+        {
+            "push",
+            Value(FunctionValue {
+                { {"arg", false} },
+                [](std::shared_ptr<Environment> callEnv) {
+                    const auto& val = callEnv->get("this");
+                    const auto& arg = callEnv->get("arg");
+                    val.to_array().values->push_back(arg);
+                    return Value();
+                }
+            })
+        }
+    };
+    return proto_;
+}
 
 inline void setup_built_in_functions(Environment& env) {
     {
-        auto f = Value::FunctionValue(
+        auto f = FunctionValue(
             { {"arg", true} },
             [](std::shared_ptr<Environment> env) {
                 std::cout << env->get("arg").str() << std::endl;
@@ -387,7 +426,7 @@ inline void setup_built_in_functions(Environment& env) {
     }
 
     {
-        auto f = Value::FunctionValue(
+        auto f = FunctionValue(
             { {"arg", true} },
             [](std::shared_ptr<Environment> env) {
                 auto cond = env->get("arg").to_bool();

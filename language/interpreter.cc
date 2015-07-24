@@ -82,7 +82,7 @@ private:
     }
 
     static Value eval_function(const Ast& ast, shared_ptr<Environment> env) {
-        std::vector<Value::FunctionValue::Parameter> params;
+        std::vector<FunctionValue::Parameter> params;
         for (auto node: ast.nodes[0]->nodes) {
             auto mut = node->nodes[0]->token == "mut";
             const auto& name = node->nodes[1]->token;
@@ -91,7 +91,7 @@ private:
 
         auto body = ast.nodes[1];
 
-        auto f = Value::FunctionValue(
+        auto f = FunctionValue(
             params,
             [=](shared_ptr<Environment> callEnv) {
                 callEnv->append_outer(env);
@@ -136,8 +136,8 @@ private:
                 // Array reference
                 const auto& arr = val.to_array();
                 auto idx = eval(n, env).to_long();
-                if (0 <= idx && idx < static_cast<long>(arr.data->values.size())) {
-                    val = arr.data->values.at(idx);
+                if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
+                    val = arr.values->at(idx);
                 }
             } else if (n.original_tag == AstTag::Dot) {
                 // Property
@@ -147,7 +147,7 @@ private:
                 if (prop.get_type() == Value::Function) {
                     const auto& pf = prop.to_function();
 
-                    auto f = Value::FunctionValue(
+                    auto f = FunctionValue(
                         pf.data->params,
                         [=](shared_ptr<Environment> callEnv) {
                             callEnv->initialize("this", val, false);
@@ -280,25 +280,25 @@ private:
     };
 
     static Value eval_object(const Ast& ast, shared_ptr<Environment> env) {
-        Value::ObjectValue obj;
+        ObjectValue obj;
 
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             const auto& prop = *ast.nodes[i];
             const auto& name = prop.nodes[0]->token;
             auto val = eval(*prop.nodes[1], env);
-            obj.data->props.emplace(name, val);
+            obj.properties->emplace(name, val);
         }
 
         return Value(std::move(obj));
     }
 
     static Value eval_array(const Ast& ast, shared_ptr<Environment> env) {
-        Value::ArrayValue arr;
+        ArrayValue arr;
 
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             auto expr = ast.nodes[i];
             auto val = eval(*expr, env);
-            arr.data->values.push_back(val);
+            arr.values->push_back(val);
         }
 
         return Value(std::move(arr));
@@ -320,46 +320,6 @@ private:
         }
         return Value(std::move(s));
     };
-};
-
-std::map<std::string, Value> Value::ObjectValue::prototypes = {
-    {
-        "size",
-        Value(FunctionValue(
-            {},
-            [](shared_ptr<Environment> callEnv) {
-                const auto& val = callEnv->get("this");
-                long n = val.to_object().data->props.size();
-                return Value(n);
-            }
-        ))
-    }
-};
-
-std::map<std::string, Value> Value::ArrayValue::prototypes = {
-    {
-        "size",
-        Value(FunctionValue(
-            {},
-            [](shared_ptr<Environment> callEnv) {
-                const auto& val = callEnv->get("this");
-                long n = val.to_array().data->values.size();
-                return Value(n);
-            }
-        ))
-    },
-    {
-        "push",
-        Value(FunctionValue {
-            { {"arg", false} },
-            [](shared_ptr<Environment> callEnv) {
-                const auto& val = callEnv->get("this");
-                const auto& arg = callEnv->get("arg");
-                val.to_array().data->values.push_back(arg);
-                return Value();
-            }
-        })
-    }
 };
 
 bool run(
