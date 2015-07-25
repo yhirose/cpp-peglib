@@ -86,7 +86,7 @@ inline peglib::peg& get_parser()
             throw std::logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS" });
+        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS", "OBJECT" });
     }
 
     return parser;
@@ -355,18 +355,12 @@ struct Environment
         if (dic_.find(s) != dic_.end()) {
             return true;
         }
-        if (object.has_property(s)) {
-            return true;
-        }
         return outer && outer->has(s);
     }
 
     Value get(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s).val;
-        }
-        if (object.has_property(s)) {
-            return object.get_property(s);
         }
         if (outer) {
             return outer->get(s);
@@ -400,7 +394,6 @@ struct Environment
     }
 
     std::shared_ptr<Environment>  outer;
-    ObjectValue                   object;
 
 private:
     struct Symbol {
@@ -513,6 +506,7 @@ struct Eval
             case "IF"_:                  return eval_if(ast, env);
             case "FUNCTION"_:            return eval_function(ast, env);
             case "CALL"_:                return eval_call(ast, env);
+            case "BLOCK"_:               return eval_block(ast, env);
             case "ASSIGNMENT"_:          return eval_assignment(ast, env);
             case "LOGICAL_OR"_:          return eval_logical_or(ast, env);
             case "LOGICAL_AND"_:         return eval_logical_and(ast, env);
@@ -650,9 +644,6 @@ private:
                         *pf.params,
                         [=](std::shared_ptr<Environment> callEnv) {
                             callEnv->initialize("this", val, false);
-                            if (val.type == Value::Object) {
-                                callEnv->object = val.to_object();
-                            }
                             return pf.eval(callEnv);
                         }
                     ));
@@ -665,6 +656,10 @@ private:
         }
 
         return std::move(val);
+    }
+
+    static Value eval_block(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+        return Value();
     }
 
     static Value eval_logical_or(const peglib::Ast& ast, std::shared_ptr<Environment> env) {

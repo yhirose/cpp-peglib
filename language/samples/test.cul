@@ -75,7 +75,7 @@ test_object = fn () {
     }
     assert(o.size() == 4)
     assert(o.f1(10) == 133)
-    assert(o.f2(10) == 133)
+    assert(o.f2(10) == 11)
 }
 
 test_object_factory = fn () {
