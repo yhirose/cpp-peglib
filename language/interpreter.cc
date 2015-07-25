@@ -9,25 +9,26 @@ struct Eval
 {
     static Value eval(const Ast& ast, shared_ptr<Environment> env) {
         switch (ast.tag) {
-            case Statements:         return eval_statements(ast, env);
-            case While:              return eval_while(ast, env);
-            case If:                 return eval_if(ast, env);
-            case Function:           return eval_function(ast, env);
-            case Call:               return eval_call(ast, env);
-            case Assignment:         return eval_assignment(ast, env);
-            case LogicalOr:          return eval_logical_or(ast, env);
-            case LogicalAnd:         return eval_logical_and(ast, env);
-            case Condition:          return eval_condition(ast, env);
-            case UnaryPlus:          return eval_unary_plus(ast, env);
-            case UnaryMinus:         return eval_unary_minus(ast, env);
-            case UnaryNot:           return eval_unary_not(ast, env);
-            case BinExpresion:       return eval_bin_expression(ast, env);
-            case Identifier:         return eval_identifier(ast, env);
-            case Object:             return eval_object(ast, env);
-            case Array:              return eval_array(ast, env);
-            case Number:             return eval_number(ast, env);
-            case Boolean:            return eval_bool(ast, env);
-            case InterpolatedString: return eval_interpolated_string(ast, env);
+            case "STATEMENTS"_:          return eval_statements(ast, env);
+            case "WHILE"_:               return eval_while(ast, env);
+            case "IF"_:                  return eval_if(ast, env);
+            case "FUNCTION"_:            return eval_function(ast, env);
+            case "CALL"_:                return eval_call(ast, env);
+            case "ASSIGNMENT"_:          return eval_assignment(ast, env);
+            case "LOGICAL_OR"_:          return eval_logical_or(ast, env);
+            case "LOGICAL_AND"_:         return eval_logical_and(ast, env);
+            case "CONDITION"_:           return eval_condition(ast, env);
+            case "UNARY_PLUS"_:          return eval_unary_plus(ast, env);
+            case "UNARY_MINUS"_:         return eval_unary_minus(ast, env);
+            case "UNARY_NOT"_:           return eval_unary_not(ast, env);
+            case "ADDITIVE"_:
+            case "MULTIPLICATIVE"_:      return eval_bin_expression(ast, env);
+            case "IDENTIFIER"_:          return eval_identifier(ast, env);
+            case "OBJECT"_:              return eval_object(ast, env);
+            case "ARRAY"_:               return eval_array(ast, env);
+            case "NUMBER"_:              return eval_number(ast, env);
+            case "BOOLEAN"_:             return eval_bool(ast, env);
+            case "INTERPOLATED_STRING"_: return eval_interpolated_string(ast, env);
         }
 
         if (ast.is_token) {
@@ -107,7 +108,7 @@ private:
 
         for (auto i = 1u; i < ast.nodes.size(); i++) {
             const auto& n = *ast.nodes[i];
-            if (n.original_tag == AstTag::Arguments) {
+            if (n.original_tag == "ARGUMENTS"_) {
                 // Function call
                 const auto& f = val.to_function();
                 const auto& params = f.data->params;
@@ -132,14 +133,14 @@ private:
                     string msg = "arguments error...";
                     throw runtime_error(msg);
                 }
-            } else if (n.original_tag == AstTag::Index) {
+            } else if (n.original_tag == "INDEX"_) {
                 // Array reference
                 const auto& arr = val.to_array();
                 auto idx = eval(n, env).to_long();
                 if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
                     val = arr.values->at(idx);
                 }
-            } else if (n.original_tag == AstTag::Dot) {
+            } else if (n.original_tag == "DOT"_) {
                 // Property
                 auto name = n.token;
                 auto prop = val.get_property(name);

@@ -1941,16 +1941,39 @@ private:
 
 const int AstDefaultTag = -1;
 
+#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+inline constexpr unsigned int str2tag(const char* str, int h = 0) {
+    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ str[h];
+}
+
+inline constexpr unsigned int operator "" _(const char* s, size_t) {
+    return str2tag(s);
+}
+#endif
+
 struct Ast
 {
-    Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::vector<std::shared_ptr<Ast>>& _nodes)
-        : line(_line), column(_column), name(_name), tag(_tag), original_tag(_tag), is_token(false), nodes(_nodes) {}
+    Ast(size_t _line, size_t _column, const char* _name, const std::vector<std::shared_ptr<Ast>>& _nodes)
+        : line(_line), column(_column), name(_name), original_name(name), is_token(false), nodes(_nodes)
+#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+        , tag(str2tag(_name)), original_tag(tag)
+#endif
+    {}
 
-    Ast(size_t _line, size_t _column, const char* _name, int _tag, const std::string& _token)
-        : line(_line), column(_column), name(_name), tag(_tag), original_tag(_tag), is_token(true), token(_token) {}
+    Ast(size_t _line, size_t _column, const char* _name, const std::string& _token)
+        : line(_line), column(_column), name(_name), original_name(name), is_token(true), token(_token)
+#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+        , tag(str2tag(_name)), original_tag(tag)
+#endif
+    {}
 
-    Ast(const Ast& ast, int original_tag)
-        : line(ast.line), column(ast.column), name(ast.name), tag(ast.tag), original_tag(original_tag), is_token(ast.is_token), token(ast.token), nodes(ast.nodes) {}
+    Ast(const Ast& ast, const char* _original_name)
+        : line(ast.line), column(ast.column), name(ast.name), original_name(_original_name)
+        , is_token(ast.is_token), token(ast.token), nodes(ast.nodes)
+#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+        , tag(ast.tag), original_tag(str2tag(_original_name))
+#endif
+    {}
 
     const Ast& get_smallest_ancestor() const;
 
@@ -1959,11 +1982,14 @@ struct Ast
     const size_t                            line;
     const size_t                            column;
     const std::string                       name;
-    const int                               tag;
-    const int                               original_tag;
+    const std::string                       original_name;
     const bool                              is_token;
     const std::string                       token;
     const std::vector<std::shared_ptr<Ast>> nodes;
+#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+    const unsigned int                      tag;
+    const unsigned int                      original_tag;
+#endif
 };
 
 struct AstPrint
@@ -2153,22 +2179,30 @@ public:
         }
     }
 
-    struct AstNodeInfo {
-        const char* name;
-        int         tag; // TODO: It should be calculated at compile-time from 'name' with constexpr hash function.
-        bool        optimize_nodes;
-    };
+    peg& enable_ast(bool optimize_nodes, const std::initializer_list<std::string>& filters) {
+        for (auto& x: *grammar_) {
+            const auto& name = x.first;
+            auto& rule = x.second;
 
-    peg& enable_ast(bool optimize_nodes, std::initializer_list<AstNodeInfo> list) {
-        for (const auto& info: list) {
-            ast_node(info);
+            auto found = std::find(filters.begin(), filters.end(), name) != filters.end();
+            bool opt = optimize_nodes ? !found : found;
+
+            if (!rule.action) {
+                auto is_token = rule.is_token;
+                rule.action = [=](const SemanticValues& sv) {
+                    if (is_token) {
+                        auto line = line_info(sv.ss, sv.s);
+                        return std::make_shared<Ast>(line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
+                    }
+                    if (opt && sv.size() == 1) {
+                        auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), name.c_str());
+                        return ast;
+                    }
+                    auto line = line_info(sv.ss, sv.s);
+                    return std::make_shared<Ast>(line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
+                };
+            }
         }
-        ast_end(optimize_nodes);
-        return *this;
-    }
-
-    peg& enable_ast(bool optimize_nodes) {
-        ast_end(optimize_nodes);
         return *this;
     }
 
@@ -2184,45 +2218,6 @@ private:
             } else if (r.len != n) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
-            }
-        }
-    }
-
-    void ast_node(const AstNodeInfo& info) {
-        auto& rule = (*this)[info.name];
-        auto is_token = rule.is_token;
-        rule = [info, is_token](const SemanticValues& sv) {
-            if (is_token) {
-                auto line = line_info(sv.ss, sv.s);
-                return std::make_shared<Ast>(line.first, line.second, info.name, info.tag, std::string(sv.s, sv.n));
-            }
-            if (info.optimize_nodes && sv.size() == 1) {
-                auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), info.tag);
-                return ast;
-            }
-            auto line = line_info(sv.ss, sv.s);
-            return std::make_shared<Ast>(line.first, line.second, info.name, info.tag, sv.transform<std::shared_ptr<Ast>>());
-        };
-    }
-
-    void ast_end(bool optimize_nodes) {
-        for (auto& x: *grammar_) {
-            const auto& name = x.first;
-            auto& rule = x.second;
-            if (!rule.action) {
-                auto is_token = rule.is_token;
-                rule.action = [=](const SemanticValues& sv) {
-                    if (is_token) {
-                        auto line = line_info(sv.ss, sv.s);
-                        return std::make_shared<Ast>(line.first, line.second, name.c_str(), AstDefaultTag, std::string(sv.s, sv.n));
-                    }
-                    if (optimize_nodes && sv.size() == 1) {
-                        auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), AstDefaultTag);
-                        return ast;
-                    }
-                    auto line = line_info(sv.ss, sv.s);
-                    return std::make_shared<Ast>(line.first, line.second, name.c_str(), AstDefaultTag, sv.transform<std::shared_ptr<Ast>>());
-                };
             }
         }
     }

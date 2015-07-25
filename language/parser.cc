@@ -3,7 +3,7 @@
 using namespace peglib;
 using namespace std;
 
-static auto g_grammar = R"(
+const auto g_grammar = R"(
 
     PROGRAM                  <-  _ STATEMENTS
 
@@ -83,36 +83,7 @@ peg& get_parser()
             throw logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast(
-           true, // Optimize AST nodes
-           {
-	            /*     Definition              Tag          Optimize
-	            ----------------------- ------------------ ---------- */
-	            { "STATEMENTS",          Statements,         true   },
-	            { "WHILE",               While,              true   },
-	            { "ASSIGNMENT",          Assignment,         true   },
-	            { "IF",                  If,                 true   },
-	            { "FUNCTION",            Function,           true   },
-	            { "PARAMETERS",          Default,            false  },
-	            { "CALL",                Call,               true   },
-	            { "ARGUMENTS",           Arguments,          false  },
-	            { "INDEX",               Index,              true   },
-	            { "DOT",                 Dot,                true   },
-	            { "LOGICAL_OR",          LogicalOr,          true   },
-	            { "LOGICAL_AND",         LogicalAnd,         true   },
-	            { "CONDITION",           Condition,          true   },
-	            { "ADDITIVE",            BinExpresion,       true   },
-	            { "UNARY_PLUS",          UnaryPlus,          true   },
-	            { "UNARY_MINUS",         UnaryMinus,         true   },
-	            { "UNARY_NOT",           UnaryNot,           true   },
-	            { "MULTIPLICATIVE",      BinExpresion,       true   },
-	            { "OBJECT",              Object,             true   },
-	            { "ARRAY",               Array,              true   },
-	            { "NUMBER",              Number,             true   },
-	            { "BOOLEAN",             Boolean,            true   },
-	            { "IDENTIFIER",          Identifier,         true   },
-	            { "INTERPOLATED_STRING", InterpolatedString, true   },
-	        });
+        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS" });
     }
 
     return parser;
