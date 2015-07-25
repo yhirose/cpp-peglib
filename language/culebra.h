@@ -30,7 +30,7 @@ const auto grammar_ = R"(
     INDEX                    <-  '[' _ EXPRESSION ']' _
     DOT                      <-  '.' _ IDENTIFIER
 
-    PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / OBJECT / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
+    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
     FUNCTION                 <-  'fn' _ PARAMETERS BLOCK
     PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
@@ -52,8 +52,9 @@ const auto grammar_ = R"(
 
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
 
-    NUMBER                   <-  < [0-9]+ > _
+    UNDEFINED                <-  < 'undefined' > _
     BOOLEAN                  <-  < ('true' / 'false') > _
+    NUMBER                   <-  < [0-9]+ > _
     STRING                   <-  ['] < (!['] .)* > ['] _
 
     INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
@@ -278,11 +279,11 @@ struct Value
 
     bool operator==(const Value& rhs) const {
         switch (type) {
-            case Undefined: return true;
+            case Undefined: return rhs.type == Undefined;
             case Bool:      return to_bool() == rhs.to_bool();
             case Long:      return to_long() == rhs.to_long();
             case String:    return to_string() == rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -290,11 +291,11 @@ struct Value
 
     bool operator!=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false;
+            case Undefined: return rhs.type != Undefined;
             case Bool:      return to_bool() != rhs.to_bool();
             case Long:      return to_long() != rhs.to_long();
             case String:    return to_string() != rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -306,7 +307,7 @@ struct Value
             case Bool:      return to_bool() <= rhs.to_bool();
             case Long:      return to_long() <= rhs.to_long();
             case String:    return to_string() <= rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -318,7 +319,7 @@ struct Value
             case Bool:      return to_bool() < rhs.to_bool();
             case Long:      return to_long() < rhs.to_long();
             case String:    return to_string() < rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -330,7 +331,7 @@ struct Value
             case Bool:      return to_bool() >= rhs.to_bool();
             case Long:      return to_long() >= rhs.to_long();
             case String:    return to_string() >= rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -342,7 +343,7 @@ struct Value
             case Bool:      return to_bool() > rhs.to_bool();
             case Long:      return to_long() > rhs.to_long();
             case String:    return to_string() > rhs.to_string();
-            // TODO: Array support
+            // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
         // NOTREACHED
@@ -555,8 +556,9 @@ struct Eval
             case "IDENTIFIER"_:          return eval_identifier(ast, env);
             case "OBJECT"_:              return eval_object(ast, env);
             case "ARRAY"_:               return eval_array(ast, env);
-            case "NUMBER"_:              return eval_number(ast, env);
+            case "UNDEFINED"_:           return eval_undefined(ast, env);
             case "BOOLEAN"_:             return eval_bool(ast, env);
+            case "NUMBER"_:              return eval_number(ast, env);
             case "INTERPOLATED_STRING"_: return eval_interpolated_string(ast, env);
         }
 
@@ -836,12 +838,16 @@ private:
         return Value(std::move(arr));
     }
 
-    static Value eval_number(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        return Value(stol(ast.token));
+    static Value eval_undefined(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+        return Value();
     };
 
     static Value eval_bool(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return Value(ast.token == "true");
+    };
+
+    static Value eval_number(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+        return Value(stol(ast.token));
     };
 
     static Value eval_interpolated_string(const peglib::Ast& ast, std::shared_ptr<Environment> env) {

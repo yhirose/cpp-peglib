@@ -4,6 +4,25 @@ test_call = fn () {
     assert(ret == 5)
 }
 
+test_undefined = fn () {
+    assert(undefined == undefined)
+    assert(!(undefined != undefined))
+
+    a = undefined
+    assert(a == undefined)
+    assert(!(a != undefined))
+    assert(!(a <= undefined))
+    assert(!(a < undefined))
+    assert(!(a >= undefined))
+    assert(!(a > undefined))
+    assert(undefined == a)
+    assert(!(undefined != a))
+    assert(!(undefined <= a))
+    assert(!(undefined < a))
+    assert(!(undefined >= a))
+    assert(!(undefined > a))
+}
+
 test_closure = fn () {
     make_func = fn (mut x) {
         mut n = 100
@@ -117,6 +136,7 @@ test_interpolated_string = fn () {
 
 test_call()
 test_closure()
+test_undefined()
 test_array()
 test_function()
 test_object()
