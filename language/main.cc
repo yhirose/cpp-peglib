@@ -40,7 +40,7 @@ int repl(shared_ptr<Environment> env, bool print_ast)
                 cout << val << endl;
                 linenoise::AddHistory(line.c_str());
             } else if (!msg.empty()) {
-                cout << msg;
+                cout << msg << endl;;
             }
         }
     }
