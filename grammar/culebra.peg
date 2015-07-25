@@ -22,7 +22,7 @@
     INDEX                    <-  '[' _ EXPRESSION ']' _
     DOT                      <-  '.' _ IDENTIFIER
 
-    PRIMARY                  <-  WHILE / IF / FUNCTION / IDENTIFIER / OBJECT / ARRAY / NUMBER / BOOLEAN / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
+    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
     FUNCTION                 <-  'fn' _ PARAMETERS BLOCK
     PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
@@ -44,8 +44,9 @@
 
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
 
-    NUMBER                   <-  < [0-9]+ > _
+    UNDEFINED                <-  < 'undefined' > _
     BOOLEAN                  <-  < ('true' / 'false') > _
+    NUMBER                   <-  < [0-9]+ > _
     STRING                   <-  ['] < (!['] .)* > ['] _
 
     INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
