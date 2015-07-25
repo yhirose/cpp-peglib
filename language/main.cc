@@ -1,4 +1,5 @@
-#include "repl.hpp"
+#include "interpreter.hpp"
+#include "linenoise.hpp"
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -20,6 +21,30 @@ bool read_file(const char* path, vector<char>& buff)
     }
 
     return true;
+}
+
+int repl(shared_ptr<Environment> env, bool print_ast)
+{
+    for (;;) {
+        auto line = linenoise::Readline("cul> ");
+
+        if (line == "exit" || line == "quit") {
+            break;
+        }
+
+        if (!line.empty()) {
+            Value val;
+            string msg;
+            if (run("(repl)", env, line.c_str(), line.size(), val, msg, print_ast)) {
+                cout << val << endl;
+                linenoise::AddHistory(line.c_str());
+            } else if (!msg.empty()) {
+                cout << msg;
+            }
+        }
+    }
+
+    return 0;
 }
 
 int main(int argc, const char** argv)
