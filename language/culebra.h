@@ -101,21 +101,14 @@ struct FunctionValue {
         bool        mut;
     };
 
-    struct Data {
-        std::vector<Parameter>                                  params;
-        std::function<Value (std::shared_ptr<Environment> env)> eval;
-    };
-
     FunctionValue(
         const std::vector<Parameter>& params,
-        const std::function<Value (std::shared_ptr<Environment> env)>& eval) {
+        const std::function<Value (std::shared_ptr<Environment> env)>& eval)
+        : params(std::make_shared<std::vector<Parameter>>(params))
+        , eval(eval) {}
 
-        data = std::make_shared<Data>();
-        data->params = params;
-        data->eval = eval;
-    }
-
-    std::shared_ptr<Data> data;
+    std::shared_ptr<std::vector<Parameter>>                 params;
+    std::function<Value (std::shared_ptr<Environment> env)> eval;
 };
 
 struct ObjectValue {
@@ -173,10 +166,6 @@ struct Value
     explicit Value(ArrayValue&& a) : type(Array), v(a) {}
     explicit Value(FunctionValue&& f) : type(Function), v(f) {}
 
-    Type get_type() const {
-        return type;
-    }
-
     bool to_bool() const {
         switch (type) {
             case Bool: return v.get<bool>();
@@ -200,6 +189,13 @@ struct Value
         }
     }
 
+    FunctionValue to_function() const {
+        switch (type) {
+            case Function: return v.get<FunctionValue>();
+            default: throw std::runtime_error("type error.");
+        }
+    }
+
     ObjectValue to_object() const {
         switch (type) {
             case Object: return v.get<ObjectValue>();
@@ -210,13 +206,6 @@ struct Value
     ArrayValue to_array() const {
         switch (type) {
             case Array: return v.get<ArrayValue>();
-            default: throw std::runtime_error("type error.");
-        }
-    }
-
-    FunctionValue to_function() const {
-        switch (type) {
-            case Function: return v.get<FunctionValue>();
             default: throw std::runtime_error("type error.");
         }
     }
@@ -290,15 +279,7 @@ struct Value
     }
 
     bool operator!=(const Value& rhs) const {
-        switch (type) {
-            case Undefined: return rhs.type != Undefined;
-            case Bool:      return to_bool() != rhs.to_bool();
-            case Long:      return to_long() != rhs.to_long();
-            case String:    return to_string() != rhs.to_string();
-            // TODO: Object and Array support
-            default: throw std::logic_error("invalid internal condition.");
-        }
-        // NOTREACHED
+        return !operator==(rhs);
     }
 
     bool operator<=(const Value& rhs) const {
@@ -349,12 +330,8 @@ struct Value
         // NOTREACHED
     }
 
-private:
-    friend std::ostream& operator<<(std::ostream&, const Value&);
-
     Type        type;
     peglib::any v;
-
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Value& val)
@@ -366,19 +343,11 @@ struct Environment
 {
     Environment() = default;
 
-    void set_object(const ObjectValue& obj) {
-        obj_ = obj;
-    }
-
-    void set_outer(std::shared_ptr<Environment> outer) {
-        outer_ = outer;
-    }
-
     void append_outer(std::shared_ptr<Environment> outer) {
-        if (outer_) {
-            outer_->append_outer(outer);
+        if (this->outer) {
+            this->outer->append_outer(outer);
         } else {
-            outer_ = outer;
+            this->outer = outer;
         }
     }
 
@@ -386,21 +355,21 @@ struct Environment
         if (dic_.find(s) != dic_.end()) {
             return true;
         }
-        if (obj_.has_property(s)) {
+        if (object.has_property(s)) {
             return true;
         }
-        return outer_ && outer_->has(s);
+        return outer && outer->has(s);
     }
 
     Value get(const std::string& s) const {
         if (dic_.find(s) != dic_.end()) {
             return dic_.at(s).val;
         }
-        if (obj_.has_property(s)) {
-            return obj_.get_property(s);
+        if (object.has_property(s)) {
+            return object.get_property(s);
         }
-        if (outer_) {
-            return outer_->get(s);
+        if (outer) {
+            return outer->get(s);
         }
         std::string msg = "undefined variable '" + s + "'...";
         throw std::runtime_error(msg);
@@ -417,8 +386,8 @@ struct Environment
             sym.val = val;
             return;
         }
-        if (outer_ && outer_->has(s)) {
-            outer_->assign(s, val);
+        if (outer && outer->has(s)) {
+            outer->assign(s, val);
             return;
         }
         // NOTREACHED
@@ -430,35 +399,35 @@ struct Environment
         dic_[s] = Symbol{val, mut};
     }
 
+    std::shared_ptr<Environment>  outer;
+    ObjectValue                   object;
+
 private:
     struct Symbol {
         Value val;
         bool  mut;
     };
-
-    std::shared_ptr<Environment>  outer_;
     std::map<std::string, Symbol> dic_;
-    ObjectValue                   obj_;
 };
 
 inline bool ObjectValue::has_property(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
-        const auto& proto = const_cast<ObjectValue*>(this)->builtins();
-        return proto.find(name) != proto.end();
+        const auto& props = const_cast<ObjectValue*>(this)->builtins();
+        return props.find(name) != props.end();
     }
     return true;
 }
 
 inline Value ObjectValue::get_property(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
-        const auto& proto = const_cast<ObjectValue*>(this)->builtins();
-        return proto.at(name);
+        const auto& props = const_cast<ObjectValue*>(this)->builtins();
+        return props.at(name);
     }
     return properties->at(name);
 }
 
 inline std::map<std::string, Value>& ObjectValue::builtins() {
-    static std::map<std::string, Value> proto_ = {
+    static std::map<std::string, Value> props_ = {
         {
             "size",
             Value(FunctionValue(
@@ -471,11 +440,11 @@ inline std::map<std::string, Value>& ObjectValue::builtins() {
             ))
         }
     };
-    return proto_;
+    return props_;
 }
 
 inline std::map<std::string, Value>& ArrayValue::builtins() {
-    static std::map<std::string, Value> proto_ = {
+    static std::map<std::string, Value> props_ = {
         {
             "size",
             Value(FunctionValue(
@@ -500,23 +469,24 @@ inline std::map<std::string, Value>& ArrayValue::builtins() {
             })
         }
     };
-    return proto_;
+    return props_;
 }
 
 inline void setup_built_in_functions(Environment& env) {
-    {
-        auto f = FunctionValue(
+    env.initialize(
+        "puts",
+        Value(FunctionValue(
             { {"arg", true} },
             [](std::shared_ptr<Environment> env) {
                 std::cout << env->get("arg").str() << std::endl;
                 return Value();
             }
-        );
-        env.initialize("puts", Value(std::move(f)), false);
-    }
+        )),
+        false);
 
-    {
-        auto f = FunctionValue(
+    env.initialize(
+        "assert",
+        Value(FunctionValue(
             { {"arg", true} },
             [](std::shared_ptr<Environment> env) {
                 auto cond = env->get("arg").to_bool();
@@ -528,9 +498,8 @@ inline void setup_built_in_functions(Environment& env) {
                 }
                 return Value();
             }
-        );
-        env.initialize("assert", Value(std::move(f)), false);
-    }
+        )),
+        false);
 }
 
 struct Eval
@@ -623,15 +592,13 @@ private:
 
         auto body = ast.nodes[1];
 
-        auto f = FunctionValue(
+        return Value(FunctionValue(
             params,
             [=](std::shared_ptr<Environment> callEnv) {
                 callEnv->append_outer(env);
                 return eval(*body, callEnv);
             }
-        );
-
-        return Value(std::move(f));
+        ));
     };
 
     static Value eval_call(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
@@ -644,7 +611,7 @@ private:
             if (n.original_tag == "ARGUMENTS"_) {
                 // Function call
                 const auto& f = val.to_function();
-                const auto& params = f.data->params;
+                const auto& params = *f.params;
                 const auto& args = n.nodes;
                 if (params.size() <= args.size()) {
                     auto callEnv = std::make_shared<Environment>();
@@ -661,7 +628,7 @@ private:
                     callEnv->initialize("__LINE__", Value((long)ast.line), false);
                     callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
 
-                    val = f.data->eval(callEnv);
+                    val = f.eval(callEnv);
                 } else {
                     std::string msg = "arguments error...";
                     throw std::runtime_error(msg);
@@ -677,22 +644,18 @@ private:
                 // Property
                 auto name = n.token;
                 auto prop = val.get_property(name);
-
-                if (prop.get_type() == Value::Function) {
+                if (prop.type == Value::Function) {
                     const auto& pf = prop.to_function();
-
-                    auto f = FunctionValue(
-                        pf.data->params,
+                    val = Value(FunctionValue(
+                        *pf.params,
                         [=](std::shared_ptr<Environment> callEnv) {
                             callEnv->initialize("this", val, false);
-                            if (val.get_type() == Value::Object) {
-                                callEnv->set_object(val.to_object());
+                            if (val.type == Value::Object) {
+                                callEnv->object = val.to_object();
                             }
-                            return pf.data->eval(callEnv);
+                            return pf.eval(callEnv);
                         }
-                    );
-
-                    val = Value(std::move(f));
+                    ));
                 } else {
                     val = prop;
                 }
@@ -701,83 +664,61 @@ private:
             }
         }
 
-        return val;
+        return std::move(val);
     }
 
     static Value eval_logical_or(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        if (ast.nodes.size() == 1) {
-            return eval(*ast.nodes[0], env);
-        } else {
-            Value ret;
-            for (auto node: ast.nodes) {
-                ret = eval(*node, env);
-                if (ret.to_bool()) {
-                    return ret;
-                }
+        assert(ast.nodes.size() > 1); // if the size is 1, thes node will be hoisted.
+        Value val;
+        for (auto node: ast.nodes) {
+            val = eval(*node, env);
+            if (val.to_bool()) {
+                return std::move(val);
             }
-            return ret;
         }
+        return std::move(val);
     }
 
     static Value eval_logical_and(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        Value ret;
+        Value val;
         for (auto node: ast.nodes) {
-            ret = eval(*node, env);
-            if (!ret.to_bool()) {
-                return ret;
+            val = eval(*node, env);
+            if (!val.to_bool()) {
+                return std::move(val);
             }
         }
-        return ret;
+        return std::move(val);
     }
 
     static Value eval_condition(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        if (ast.nodes.size() == 1) {
-            return eval(*ast.nodes[0], env);
-        } else {
-            auto lhs = eval(*ast.nodes[0], env);
-            auto ope = eval(*ast.nodes[1], env).to_string();
-            auto rhs = eval(*ast.nodes[2], env);
+        assert(ast.nodes.size() == 3); // if the size is 1, thes node will be hoisted.
 
-            if (ope == "==") {
-                return Value(lhs == rhs);
-            } else if (ope == "!=") {
-                return Value(lhs != rhs);
-            } else if (ope == "<=") {
-                return Value(lhs <= rhs);
-            } else if (ope == "<") {
-                return Value(lhs < rhs);
-            } else if (ope == ">=") {
-                return Value(lhs >= rhs);
-            } else if (ope == ">") {
-                return Value(lhs > rhs);
-            } else {
-                throw std::logic_error("invalid internal condition.");
-            }
-        }
+        auto lhs = eval(*ast.nodes[0], env);
+        auto ope = eval(*ast.nodes[1], env).to_string();
+        auto rhs = eval(*ast.nodes[2], env);
+
+        if (ope == "==") { return Value(lhs == rhs); }
+        else if (ope == "!=") { return Value(lhs != rhs); }
+        else if (ope == "<=") { return Value(lhs <= rhs); }
+        else if (ope == "<") { return Value(lhs < rhs); }
+        else if (ope == ">=") { return Value(lhs >= rhs); }
+        else if (ope == ">") { return Value(lhs > rhs); }
+        else { throw std::logic_error("invalid internal condition."); }
     }
 
     static Value eval_unary_plus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        if (ast.nodes.size() == 1) {
-            return eval(*ast.nodes[0], env);
-        } else {
-            return eval(*ast.nodes[1], env);
-        }
+        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
+        return eval(*ast.nodes[1], env);
     }
 
     static Value eval_unary_minus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        if (ast.nodes.size() == 1) {
-            return eval(*ast.nodes[0], env);
-        } else {
-            return Value(eval(*ast.nodes[1], env).to_long() * -1);
-        }
+        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
+        return Value(eval(*ast.nodes[1], env).to_long() * -1);
     }
 
     static Value eval_unary_not(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        if (ast.nodes.size() == 1) {
-            return eval(*ast.nodes[0], env);
-        } else {
-            return Value(!eval(*ast.nodes[1], env).to_bool());
-        }
+        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
+        return Value(!eval(*ast.nodes[1], env).to_bool());
     }
 
     static Value eval_bin_expression(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
@@ -797,44 +738,39 @@ private:
     }
 
     static Value eval_assignment(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        const auto& mut = ast.nodes[0]->token;
         const auto& var = ast.nodes[1]->token;
         auto val = eval(*ast.nodes[2], env);
         if (env->has(var)) {
             env->assign(var, val);
         } else {
+            const auto& mut = ast.nodes[0]->token;
             env->initialize(var, val, mut == "mut");
         }
-        return val;
+        return std::move(val);
     };
 
     static Value eval_identifier(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        const auto& var = ast.token;
-        return env->get(var);
+        return env->get(ast.token);
     };
 
     static Value eval_object(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         ObjectValue obj;
-
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             const auto& prop = *ast.nodes[i];
             const auto& name = prop.nodes[0]->token;
             auto val = eval(*prop.nodes[1], env);
             obj.properties->emplace(name, val);
         }
-
         return Value(std::move(obj));
     }
 
     static Value eval_array(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         ArrayValue arr;
-
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             auto expr = ast.nodes[i];
             auto val = eval(*expr, env);
             arr.values->push_back(val);
         }
-
         return Value(std::move(arr));
     }
 
@@ -870,8 +806,6 @@ inline bool run(
     bool                         print_ast)
 {
     try {
-        std::shared_ptr<peglib::Ast> ast;
-
         auto& parser = get_parser();
 
         parser.log = [&](size_t ln, size_t col, const std::string& err_msg) {
@@ -879,6 +813,8 @@ inline bool run(
             ss << path << ":" << ln << ":" << col << ": " << err_msg << std::endl;
             msg = ss.str();
         };
+
+        std::shared_ptr<peglib::Ast> ast;
 
         if (parser.parse_n(expr, len, ast)) {
             if (print_ast) {

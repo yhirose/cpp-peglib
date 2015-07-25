@@ -159,8 +159,8 @@ struct SemanticValue
     SemanticValue()
         : s(nullptr), n(0) {}
 
-    SemanticValue(const any& _val, const char* _name, const char* _s, size_t _n)
-        : val(_val), name(_name), s(_s), n(_n) {}
+    SemanticValue(const any& val, const char* name, const char* s, size_t n)
+        : val(val), name(name), s(s), n(n) {}
 
     template <typename T>
     T& get() {
@@ -423,12 +423,12 @@ struct Context
 
     std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
 
-    Context(const char* _s, size_t _l, size_t _def_count, bool enablePackratParsing)
-        : s(_s)
-        , l(_l)
+    Context(const char* s, size_t l, size_t def_count, bool enablePackratParsing)
+        : s(s)
+        , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
-        , def_count(_def_count)
+        , def_count(def_count)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , stack_size(0)
@@ -1953,25 +1953,25 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 
 struct Ast
 {
-    Ast(size_t _line, size_t _column, const char* _name, const std::vector<std::shared_ptr<Ast>>& _nodes)
-        : line(_line), column(_column), name(_name), original_name(name), is_token(false), nodes(_nodes)
+    Ast(size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
+        : line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
-        , tag(str2tag(_name)), original_tag(tag)
+        , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
-    Ast(size_t _line, size_t _column, const char* _name, const std::string& _token)
-        : line(_line), column(_column), name(_name), original_name(name), is_token(true), token(_token)
+    Ast(size_t line, size_t column, const char* name, const std::string& token)
+        : line(line), column(column), name(name), original_name(name), is_token(true), token(token)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
-        , tag(str2tag(_name)), original_tag(tag)
+        , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
-    Ast(const Ast& ast, const char* _original_name)
-        : line(ast.line), column(ast.column), name(ast.name), original_name(_original_name)
+    Ast(const Ast& ast, const char* original_name)
+        : line(ast.line), column(ast.column), name(ast.name), original_name(original_name)
         , is_token(ast.is_token), token(ast.token), nodes(ast.nodes)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
-        , tag(ast.tag), original_tag(str2tag(_original_name))
+        , tag(ast.tag), original_tag(str2tag(original_name))
 #endif
     {}
 
