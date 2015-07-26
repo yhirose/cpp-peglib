@@ -86,7 +86,7 @@ inline peglib::peg& get_parser()
             throw std::logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS", "OBJECT" });
+        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY" });
     }
 
     return parser;

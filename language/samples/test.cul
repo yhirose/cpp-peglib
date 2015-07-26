@@ -49,6 +49,9 @@ test_array = fn () {
 
     b = []
     assert(b.size() == 0)
+
+    c = [1]
+    assert(c.size() == 1)
 }
 
 g_ = 1
