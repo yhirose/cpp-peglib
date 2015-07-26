@@ -1,12 +1,9 @@
 
     PROGRAM                  <-  _ STATEMENTS
-
     STATEMENTS               <-  (EXPRESSION (';' _)?)*
-
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
-    ASSIGNMENT               <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
-    WHILE                    <-  'while' _ EXPRESSION BLOCK
-    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
+
+    ASSIGNMENT               <-  MUTABLE PRIMARY (ARGUMENTS / INDEX / DOT)* '=' _ EXPRESSION
 
     LOGICAL_OR               <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
     LOGICAL_AND              <-  CONDITION ('&&' _  CONDITION)*
@@ -21,6 +18,9 @@
     ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
     INDEX                    <-  '[' _ EXPRESSION ']' _
     DOT                      <-  '.' _ IDENTIFIER
+
+    WHILE                    <-  'while' _ EXPRESSION BLOCK
+    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
 
     PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
@@ -40,7 +40,7 @@
     IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
     OBJECT                   <-  '{' _ (OBJECT_PROPERTY (',' _ OBJECT_PROPERTY)*)? '}' _
-    OBJECT_PROPERTY          <-  IDENTIFIER ':' _ EXPRESSION
+    OBJECT_PROPERTY          <-  MUTABLE IDENTIFIER ':' _ EXPRESSION
 
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
 

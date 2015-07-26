@@ -8,13 +8,10 @@ namespace culebra {
 const auto grammar_ = R"(
 
     PROGRAM                  <-  _ STATEMENTS
-
     STATEMENTS               <-  (EXPRESSION (';' _)?)*
-
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
-    ASSIGNMENT               <-  MUTABLE IDENTIFIER '=' _ EXPRESSION
-    WHILE                    <-  'while' _ EXPRESSION BLOCK
-    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
+
+    ASSIGNMENT               <-  MUTABLE PRIMARY (ARGUMENTS / INDEX / DOT)* '=' _ EXPRESSION
 
     LOGICAL_OR               <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
     LOGICAL_AND              <-  CONDITION ('&&' _  CONDITION)*
@@ -29,6 +26,9 @@ const auto grammar_ = R"(
     ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
     INDEX                    <-  '[' _ EXPRESSION ']' _
     DOT                      <-  '.' _ IDENTIFIER
+
+    WHILE                    <-  'while' _ EXPRESSION BLOCK
+    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
 
     PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
@@ -48,7 +48,7 @@ const auto grammar_ = R"(
     IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
 
     OBJECT                   <-  '{' _ (OBJECT_PROPERTY (',' _ OBJECT_PROPERTY)*)? '}' _
-    OBJECT_PROPERTY          <-  IDENTIFIER ':' _ EXPRESSION
+    OBJECT_PROPERTY          <-  MUTABLE IDENTIFIER ':' _ EXPRESSION
 
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
 
@@ -93,6 +93,7 @@ inline peglib::peg& get_parser()
 }
 
 struct Value;
+struct Symbol;
 struct Environment;
 
 struct FunctionValue {
@@ -112,12 +113,14 @@ struct FunctionValue {
 };
 
 struct ObjectValue {
-    bool has_property(const std::string& name) const;
-    Value get_property(const std::string& name) const;
+    bool has(const std::string& name) const;
+    const Value& get(const std::string& name) const;
+    void assign(const std::string& name, const Value& val);
+    void initialize(const std::string& name, const Value& val, bool mut);
     virtual std::map<std::string, Value>& builtins();
 
-    std::shared_ptr<std::map<std::string, Value>> properties =
-        std::make_shared<std::map<std::string, Value>>();
+    std::shared_ptr<std::map<std::string, Symbol>> properties =
+        std::make_shared<std::map<std::string, Symbol>>();
 };
 
 struct ArrayValue : public ObjectValue {
@@ -196,43 +199,30 @@ struct Value
         }
     }
 
-    ObjectValue to_object() const {
+    const ObjectValue& to_object() const {
         switch (type) {
             case Object: return v.get<ObjectValue>();
+            case Array: return v.get<ArrayValue>();
             default: throw std::runtime_error("type error.");
         }
     }
 
-    ArrayValue to_array() const {
+    ObjectValue& to_object() {
+        switch (type) {
+            case Object: return v.get<ObjectValue>();
+            case Array: return v.get<ArrayValue>();
+            default: throw std::runtime_error("type error.");
+        }
+    }
+
+    const ArrayValue& to_array() const {
         switch (type) {
             case Array: return v.get<ArrayValue>();
             default: throw std::runtime_error("type error.");
         }
     }
 
-    Value get_property(const std::string& name) const {
-        switch (type) {
-            case Object: return to_object().get_property(name);
-            case Array:  return to_array().get_property(name);
-            default: throw std::runtime_error("type error.");
-        }
-    }
-
-    std::string str_object() const {
-        const auto& properties = *to_object().properties;
-        std::string s = "{";
-        auto it = properties.begin();
-        for (; it != properties.end(); ++it) {
-            if (it != properties.begin()) {
-                s += ", ";
-            }
-            s += '"' + it->first + '"';
-            s += ": ";
-            s += it->second.str();
-        }
-        s += "}";
-        return s;
-    }
+    std::string str_object() const;
 
     std::string str_array() const {
         const auto& values = *to_array().values;
@@ -251,8 +241,8 @@ struct Value
         switch (type) {
             case Undefined: return "undefined";
             case Bool:      return to_bool() ? "true" : "false";
-            case Long:      return std::to_string(to_long()); break;
-            case String:    return to_string();
+            case Long:      return std::to_string(to_long());
+            case String:    return "'" + to_string() + "'";
             case Object:    return str_object();
             case Array:     return str_array();
             case Function:  return "[function]";
@@ -334,6 +324,11 @@ struct Value
     peglib::any v;
 };
 
+struct Symbol {
+    Value val;
+    bool  mut;
+};
+
 inline std::ostream& operator<<(std::ostream& os, const Value& val)
 {
     return val.out(os);
@@ -370,6 +365,7 @@ struct Environment
     }
 
     void assign(const std::string& s, const Value& val) {
+        assert(has(s));
         if (dic_.find(s) != dic_.end()) {
             auto& sym = dic_[s];
             if (!sym.mut) {
@@ -380,30 +376,22 @@ struct Environment
             sym.val = val;
             return;
         }
-        if (outer && outer->has(s)) {
-            outer->assign(s, val);
-            return;
-        }
-        // NOTREACHED
-        throw std::logic_error("invalid internal condition.");
+        outer->assign(s, val);
+        return;
     }
 
     void initialize(const std::string& s, const Value& val, bool mut) {
         //std::cout << "Env::initialize: " << s << std::endl;
-        dic_[s] = Symbol{val, mut};
+        dic_[s] = Symbol{ val, mut };
     }
 
     std::shared_ptr<Environment>  outer;
 
 private:
-    struct Symbol {
-        Value val;
-        bool  mut;
-    };
     std::map<std::string, Symbol> dic_;
 };
 
-inline bool ObjectValue::has_property(const std::string& name) const {
+inline bool ObjectValue::has(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
         const auto& props = const_cast<ObjectValue*>(this)->builtins();
         return props.find(name) != props.end();
@@ -411,12 +399,27 @@ inline bool ObjectValue::has_property(const std::string& name) const {
     return true;
 }
 
-inline Value ObjectValue::get_property(const std::string& name) const {
+inline const Value& ObjectValue::get(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
         const auto& props = const_cast<ObjectValue*>(this)->builtins();
         return props.at(name);
     }
-    return properties->at(name);
+    return properties->at(name).val;
+}
+
+inline void ObjectValue::assign(const std::string& name, const Value& val) {
+    assert(has(name));
+    auto& sym = properties->at(name);
+    if (!sym.mut) {
+        std::string msg = "immutable property '" + name + "'...";
+        throw std::runtime_error(msg);
+    }
+    sym.val = val;
+    return;
+}
+
+inline void ObjectValue::initialize(const std::string& name, const Value& val, bool mut) {
+    (*properties)[name] = Symbol{ val, mut };
 }
 
 inline std::map<std::string, Value>& ObjectValue::builtins() {
@@ -463,6 +466,27 @@ inline std::map<std::string, Value>& ArrayValue::builtins() {
         }
     };
     return props_;
+}
+
+inline std::string Value::str_object() const {
+    const auto& properties = *to_object().properties;
+    std::string s = "{";
+    auto it = properties.begin();
+    for (; it != properties.end(); ++it) {
+        if (it != properties.begin()) {
+            s += ", ";
+        }
+        const auto& name = it->first;
+        const auto& sym = it->second;
+        if (sym.mut) {
+            s += "mut ";
+        }
+        s += name;
+        s += ": ";
+        s += sym.val.str();
+    }
+    s += "}";
+    return s;
 }
 
 inline void setup_built_in_functions(Environment& env) {
@@ -595,63 +619,73 @@ private:
         ));
     };
 
+    static Value eval_function_call(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+        const auto& f = val.to_function();
+        const auto& params = *f.params;
+        const auto& args = ast.nodes;
+
+        if (params.size() <= args.size()) {
+            auto callEnv = std::make_shared<Environment>();
+            callEnv->initialize("self", val, false);
+            for (auto iprm = 0u; iprm < params.size(); iprm++) {
+                auto param = params[iprm];
+                auto arg = args[iprm];
+                auto val = eval(*arg, env);
+                callEnv->initialize(param.name, val, param.mut);
+            }
+            callEnv->initialize("__LINE__", Value((long)ast.line), false);
+            callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
+            return f.eval(callEnv);
+        }
+
+        std::string msg = "arguments error...";
+        throw std::runtime_error(msg);
+    }
+
+    static Value eval_array_reference(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+        const auto& arr = val.to_array();
+        auto idx = eval(ast, env).to_long();
+        if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
+            return arr.values->at(idx);
+        } else {
+            // TODO: error? or 'undefined'?
+        }
+        return val;
+    }
+
+    static Value eval_property(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+        const auto& obj = val.to_object();
+        auto name = ast.token;
+        if (!obj.has(name)) {
+            return Value();
+        }
+        const auto& prop = obj.get(name);
+        if (prop.type == Value::Function) {
+            const auto& pf = prop.to_function();
+            return Value(FunctionValue(
+                *pf.params,
+                [=](std::shared_ptr<Environment> callEnv) {
+                    callEnv->initialize("this", val, false);
+                    return pf.eval(callEnv);
+                }
+            ));
+        }
+        return prop;
+    }
+
     static Value eval_call(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         using peglib::operator"" _;
 
         Value val = eval(*ast.nodes[0], env);
 
         for (auto i = 1u; i < ast.nodes.size(); i++) {
-            const auto& n = *ast.nodes[i];
-            if (n.original_tag == "ARGUMENTS"_) {
-                // Function call
-                const auto& f = val.to_function();
-                const auto& params = *f.params;
-                const auto& args = n.nodes;
-                if (params.size() <= args.size()) {
-                    auto callEnv = std::make_shared<Environment>();
+            const auto& postfix = *ast.nodes[i];
 
-                    callEnv->initialize("self", val, false);
-
-                    for (auto iprm = 0u; iprm < params.size(); iprm++) {
-                        auto param = params[iprm];
-                        auto arg = args[iprm];
-                        auto val = eval(*arg, env);
-                        callEnv->initialize(param.name, val, param.mut);
-                    }
-
-                    callEnv->initialize("__LINE__", Value((long)ast.line), false);
-                    callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
-
-                    val = f.eval(callEnv);
-                } else {
-                    std::string msg = "arguments error...";
-                    throw std::runtime_error(msg);
-                }
-            } else if (n.original_tag == "INDEX"_) {
-                // Array reference
-                const auto& arr = val.to_array();
-                auto idx = eval(n, env).to_long();
-                if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
-                    val = arr.values->at(idx);
-                }
-            } else if (n.original_tag == "DOT"_) {
-                // Property
-                auto name = n.token;
-                auto prop = val.get_property(name);
-                if (prop.type == Value::Function) {
-                    const auto& pf = prop.to_function();
-                    val = Value(FunctionValue(
-                        *pf.params,
-                        [=](std::shared_ptr<Environment> callEnv) {
-                            callEnv->initialize("this", val, false);
-                            return pf.eval(callEnv);
-                        }
-                    ));
-                } else {
-                    val = prop;
-                }
-            } else {
-                throw std::logic_error("invalid internal condition.");
+            switch (postfix.original_tag) {
+                case "ARGUMENTS"_: val = eval_function_call(postfix, env, val);   break;
+                case "INDEX"_:     val = eval_array_reference(postfix, env, val); break;
+                case "DOT"_:       val = eval_property(postfix, env, val);        break;
+                default: throw std::logic_error("invalid internal condition.");
             }
         }
 
@@ -733,15 +767,63 @@ private:
     }
 
     static Value eval_assignment(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
-        const auto& var = ast.nodes[1]->token;
-        auto val = eval(*ast.nodes[2], env);
-        if (env->has(var)) {
-            env->assign(var, val);
+        auto end = ast.nodes.size() - 1;
+
+        auto mut = ast.nodes[0]->token == "mut";
+        auto val = eval(*ast.nodes[end], env);
+
+        if (ast.nodes.size() == 3) {
+            const auto& var = ast.nodes[1]->token;
+            if (env->has(var)) {
+                env->assign(var, val);
+            } else {
+                env->initialize(var, val, mut);
+            }
+            return std::move(val);
         } else {
-            const auto& mut = ast.nodes[0]->token;
-            env->initialize(var, val, mut == "mut");
+            using peglib::operator"" _;
+
+            Value lval = eval(*ast.nodes[1], env);
+
+            auto end = ast.nodes.size() - 2;
+            for (auto i = 2; i < end; i++) {
+                const auto& postfix = *ast.nodes[i];
+
+                switch (postfix.original_tag) {
+                    case "ARGUMENTS"_: lval = eval_function_call(postfix, env, lval);   break;
+                    case "INDEX"_:     lval = eval_array_reference(postfix, env, lval); break;
+                    case "DOT"_:       lval = eval_property(postfix, env, lval);        break;
+                    default: throw std::logic_error("invalid internal condition.");
+                }
+            }
+
+            const auto& postfix = *ast.nodes[end];
+
+            switch (postfix.original_tag) {
+                case "INDEX"_: {
+                    const auto& arr = lval.to_array();
+                    auto idx = eval(postfix, env).to_long();
+                    if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
+                        arr.values->at(idx) = val;
+                    } else {
+                        // TODO: error? or set 'undefined'?
+                    }
+                    return val;
+                }
+                case "DOT"_: {
+                    auto& obj = lval.to_object();
+                    auto name = postfix.token;
+                    if (obj.has(name)) {
+                        obj.assign(name, val);
+                    } else {
+                        obj.initialize(name, val, mut);
+                    }
+                    return val;
+                }
+                default:
+                    throw std::logic_error("invalid internal condition.");
+            }
         }
-        return std::move(val);
     };
 
     static Value eval_identifier(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
@@ -752,9 +834,10 @@ private:
         ObjectValue obj;
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             const auto& prop = *ast.nodes[i];
-            const auto& name = prop.nodes[0]->token;
-            auto val = eval(*prop.nodes[1], env);
-            obj.properties->emplace(name, val);
+            auto mut = prop.nodes[0]->token == "mut";
+            const auto& name = prop.nodes[1]->token;
+            auto val = eval(*prop.nodes[2], env);
+            obj.properties->emplace(name, Symbol{ val, mut });
         }
         return Value(std::move(obj));
     }
@@ -785,7 +868,11 @@ private:
         std::string s;
         for (auto node: ast.nodes) {
             const auto& val = eval(*node, env);
-            s += val.str();
+            if (val.type == Value::String) {
+                s += val.to_string();
+            } else {
+                s += val.str();
+            }
         }
         return Value(std::move(s));
     };
