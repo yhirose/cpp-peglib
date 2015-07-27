@@ -111,6 +111,30 @@ test_object_factory = fn () {
     assert(calc.sub(1) == 10)
 }
 
+test_class = fn () {
+    // TODO: support 'prototype' property
+    Car = {
+        new: fn(miles_per_run) {
+            mut total_miles = 0
+
+            {
+                run: fn (times) {
+                    total_miles = total_miles + miles_per_run * times
+                },
+                total: fn () {
+                    total_miles
+                }
+            }
+        }
+    }
+
+    car = Car.new(5)
+    car.run(1)
+    car.run(2)
+
+    assert(car.total() == 15)
+}
+
 test_sum = fn () {
     mut i = 1
     mut ret = 0
@@ -150,6 +174,7 @@ test_array()
 test_function()
 test_object()
 test_object_factory()
+test_class()
 test_sum()
 test_fib()
 test_interpolated_string()
