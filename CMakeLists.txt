@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 include_directories(.)
-add_definitions("-std=c++1y")
+add_definitions("-std=c++1y" -DPEGLIB_HAS_CONSTEXPR_SUPPORT)
 
 add_executable(peglint lint/peglint.cc)
 target_link_libraries(peglint pthread)
@@ -20,5 +20,5 @@ target_link_libraries(calc2 pthread)
 add_executable(calc3 example/calc3.cc)
 target_link_libraries(calc3 pthread)
 
-add_executable(culebra language/main.cc language/repl.cc language/interpreter.cc language/parser.cc)
+add_executable(culebra language/main.cc)
 target_link_libraries(culebra pthread)

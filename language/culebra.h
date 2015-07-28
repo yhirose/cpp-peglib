@@ -8,7 +8,11 @@ namespace culebra {
 const auto grammar_ = R"(
 
     PROGRAM                  <-  _ STATEMENTS
-    STATEMENTS               <-  (EXPRESSION (';' _)?)*
+    STATEMENTS               <-  (STATEMENT (';' _)?)*
+    STATEMENT                <-  DEBUGGER / EXPRESSION
+
+    DEBUGGER                 <-  'debugger' _
+
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
     ASSIGNMENT               <-  MUTABLE PRIMARY (ARGUMENTS / INDEX / DOT)* '=' _ EXPRESSION
@@ -336,7 +340,10 @@ inline std::ostream& operator<<(std::ostream& os, const Value& val)
 
 struct Environment
 {
-    Environment() = default;
+    Environment(std::shared_ptr<Environment> parent = nullptr)
+        : parent(parent)
+        , level(parent ? parent->level + 1 : 0) {
+    }
 
     void append_outer(std::shared_ptr<Environment> outer) {
         if (this->outer) {
@@ -385,11 +392,16 @@ struct Environment
         dic_[s] = Symbol{ val, mut };
     }
 
-    std::shared_ptr<Environment>  outer;
+    std::shared_ptr<Environment> outer;
+
+    std::shared_ptr<Environment> parent;
+    size_t                       level;
 
 private:
     std::map<std::string, Symbol> dic_;
 };
+
+typedef std::function<void (const peglib::Ast& ast, std::shared_ptr<Environment> env, bool force_to_break)> Debugger;
 
 inline bool ObjectValue::has(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
@@ -521,8 +533,19 @@ inline void setup_built_in_functions(Environment& env) {
 
 struct Eval
 {
-    static Value eval(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Eval(Debugger debugger = nullptr)
+        : debugger_(debugger) {
+    }
+
+    Value eval(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         using peglib::operator"" _;
+
+        if (debugger_) {
+            if (ast.original_tag == "STATEMENT"_) {
+                auto force_to_break = ast.tag == "DEBUGGER"_;
+                debugger_(ast, env, force_to_break);
+            }
+        }
 
         switch (ast.tag) {
             case "STATEMENTS"_:          return eval_statements(ast, env);
@@ -547,6 +570,7 @@ struct Eval
             case "BOOLEAN"_:             return eval_bool(ast, env);
             case "NUMBER"_:              return eval_number(ast, env);
             case "INTERPOLATED_STRING"_: return eval_interpolated_string(ast, env);
+            case "DEBUGGER"_:            return Value();
         }
 
         if (ast.is_token) {
@@ -558,7 +582,7 @@ struct Eval
     }
 
 private:
-    static Value eval_statements(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_statements(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         if (ast.is_token) {
             return eval(ast, env);
         } else if (ast.nodes.empty()) {
@@ -572,7 +596,7 @@ private:
         return eval(**it, env);
     }
 
-    static Value eval_while(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_while(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         for (;;) {
             auto cond = eval(*ast.nodes[0], env);
             if (!cond.to_bool()) {
@@ -583,7 +607,7 @@ private:
         return Value();
     }
 
-    static Value eval_if(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_if(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         const auto& nodes = ast.nodes;
 
         for (auto i = 0u; i < nodes.size(); i += 2) {
@@ -600,7 +624,7 @@ private:
         return Value();
     }
 
-    static Value eval_function(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_function(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         std::vector<FunctionValue::Parameter> params;
         for (auto node: ast.nodes[0]->nodes) {
             auto mut = node->nodes[0]->token == "mut";
@@ -619,13 +643,13 @@ private:
         ));
     };
 
-    static Value eval_function_call(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+    Value eval_function_call(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
         const auto& f = val.to_function();
         const auto& params = *f.params;
         const auto& args = ast.nodes;
 
         if (params.size() <= args.size()) {
-            auto callEnv = std::make_shared<Environment>();
+            auto callEnv = std::make_shared<Environment>(env);
             callEnv->initialize("self", val, false);
             for (auto iprm = 0u; iprm < params.size(); iprm++) {
                 auto param = params[iprm];
@@ -642,7 +666,7 @@ private:
         throw std::runtime_error(msg);
     }
 
-    static Value eval_array_reference(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+    Value eval_array_reference(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
         const auto& arr = val.to_array();
         auto idx = eval(ast, env).to_long();
         if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
@@ -653,7 +677,7 @@ private:
         return val;
     }
 
-    static Value eval_property(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
+    Value eval_property(const peglib::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
         const auto& obj = val.to_object();
         auto name = ast.token;
         if (!obj.has(name)) {
@@ -673,7 +697,7 @@ private:
         return prop;
     }
 
-    static Value eval_call(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_call(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         using peglib::operator"" _;
 
         Value val = eval(*ast.nodes[0], env);
@@ -692,11 +716,11 @@ private:
         return std::move(val);
     }
 
-    static Value eval_block(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_block(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return Value();
     }
 
-    static Value eval_logical_or(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_logical_or(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         assert(ast.nodes.size() > 1); // if the size is 1, thes node will be hoisted.
         Value val;
         for (auto node: ast.nodes) {
@@ -708,7 +732,7 @@ private:
         return std::move(val);
     }
 
-    static Value eval_logical_and(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_logical_and(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         Value val;
         for (auto node: ast.nodes) {
             val = eval(*node, env);
@@ -719,7 +743,7 @@ private:
         return std::move(val);
     }
 
-    static Value eval_condition(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_condition(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         assert(ast.nodes.size() == 3); // if the size is 1, thes node will be hoisted.
 
         auto lhs = eval(*ast.nodes[0], env);
@@ -735,22 +759,22 @@ private:
         else { throw std::logic_error("invalid internal condition."); }
     }
 
-    static Value eval_unary_plus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_unary_plus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return eval(*ast.nodes[1], env);
     }
 
-    static Value eval_unary_minus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_unary_minus(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return Value(eval(*ast.nodes[1], env).to_long() * -1);
     }
 
-    static Value eval_unary_not(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_unary_not(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return Value(!eval(*ast.nodes[1], env).to_bool());
     }
 
-    static Value eval_bin_expression(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_bin_expression(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         auto ret = eval(*ast.nodes[0], env).to_long();
         for (auto i = 1u; i < ast.nodes.size(); i += 2) {
             auto val = eval(*ast.nodes[i + 1], env).to_long();
@@ -766,7 +790,7 @@ private:
         return Value(ret);
     }
 
-    static Value eval_assignment(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_assignment(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         auto end = ast.nodes.size() - 1;
 
         auto mut = ast.nodes[0]->token == "mut";
@@ -826,11 +850,11 @@ private:
         }
     };
 
-    static Value eval_identifier(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_identifier(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return env->get(ast.token);
     };
 
-    static Value eval_object(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_object(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         ObjectValue obj;
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             const auto& prop = *ast.nodes[i];
@@ -842,7 +866,7 @@ private:
         return Value(std::move(obj));
     }
 
-    static Value eval_array(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_array(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         ArrayValue arr;
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             auto expr = ast.nodes[i];
@@ -852,19 +876,19 @@ private:
         return Value(std::move(arr));
     }
 
-    static Value eval_undefined(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_undefined(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return Value();
     };
 
-    static Value eval_bool(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_bool(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return Value(ast.token == "true");
     };
 
-    static Value eval_number(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_number(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         return Value(stol(ast.token));
     };
 
-    static Value eval_interpolated_string(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_interpolated_string(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         std::string s;
         for (auto node: ast.nodes) {
             const auto& val = eval(*node, env);
@@ -876,16 +900,19 @@ private:
         }
         return Value(std::move(s));
     };
+
+    Debugger debugger_;
 };
 
 inline bool run(
-    const std::string&           path,
-    std::shared_ptr<Environment> env,
-    const char*                  expr,
-    size_t                       len,
-    Value&                       val,
-    std::string&                 msg,
-    bool                         print_ast)
+    const std::string&            path,
+    std::shared_ptr<Environment>  env,
+    const char*                   expr,
+    size_t                        len,
+    Value&                        val,
+    std::vector<std::string>&     msgs,
+    std::shared_ptr<peglib::Ast>& ast,
+    Debugger                      debugger = nullptr)
 {
     try {
         auto& parser = get_parser();
@@ -893,21 +920,15 @@ inline bool run(
         parser.log = [&](size_t ln, size_t col, const std::string& err_msg) {
             std::stringstream ss;
             ss << path << ":" << ln << ":" << col << ": " << err_msg << std::endl;
-            msg = ss.str();
+            msgs.push_back(ss.str());
         };
 
-        std::shared_ptr<peglib::Ast> ast;
-
-        if (parser.parse_n(expr, len, ast)) {
-            if (print_ast) {
-                ast->print();
-            }
-
-            val = Eval::eval(*ast, env);
+        if (parser.parse_n(expr, len, ast, path.c_str())) {
+            val = Eval(debugger).eval(*ast, env);
             return true;
         }
     } catch (std::runtime_error& e) {
-        msg = e.what();
+        msgs.push_back(e.what());
     }
 
     return false;

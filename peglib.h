@@ -180,6 +180,7 @@ struct SemanticValue
 
 struct SemanticValues : protected std::vector<SemanticValue>
 {
+    const char* path;
     const char* ss;
     const char* s;
     size_t      n;
@@ -407,6 +408,7 @@ inline bool fail(size_t len) {
  */
 struct Context
 {
+    const char*                                  path;
     const char*                                  s;
     size_t                                       l;
 
@@ -423,8 +425,9 @@ struct Context
 
     std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
 
-    Context(const char* s, size_t l, size_t def_count, bool enablePackratParsing)
-        : s(s)
+    Context(const char* path, const char* s, size_t l, size_t def_count, bool enablePackratParsing)
+        : path(path)
+        , s(s)
         , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
@@ -475,6 +478,7 @@ struct Context
         if (!sv.empty()) {
             sv.clear();
         }
+        sv.path = path;
         sv.ss = s;
         sv.s = nullptr;
         sv.n = 0;
@@ -1085,32 +1089,32 @@ public:
         return *this;
     }
 
-    Result parse(const char* s, size_t n) const {
+    Result parse(const char* s, size_t n, const char* path = nullptr) const {
         SemanticValues sv;
         any dt;
-        return parse_core(s, n, sv, dt);
+        return parse_core(s, n, sv, dt, path);
     }
 
-    Result parse(const char* s) const {
+    Result parse(const char* s, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse(s, n);
+        return parse(s, n, path);
     }
 
-    Result parse(const char* s, size_t n, any& dt) const {
+    Result parse(const char* s, size_t n, any& dt, const char* path = nullptr) const {
         SemanticValues sv;
-        return parse_core(s, n, sv, dt);
+        return parse_core(s, n, sv, dt, path);
     }
 
-    Result parse(const char* s, any& dt) const {
+    Result parse(const char* s, any& dt, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse(s, n, dt);
+        return parse(s, n, dt, path);
     }
 
     template <typename T>
-    Result parse_and_get_value(const char* s, size_t n, T& val) const {
+    Result parse_and_get_value(const char* s, size_t n, T& val, const char* path = nullptr) const {
         SemanticValues sv;
         any dt;
-        auto r = parse_core(s, n, sv, dt);
+        auto r = parse_core(s, n, sv, dt, path);
         if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
             val = sv[0].val.get<T>();
         }
@@ -1118,15 +1122,15 @@ public:
     }
 
     template <typename T>
-    Result parse_and_get_value(const char* s, T& val) const {
+    Result parse_and_get_value(const char* s, T& val, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse_and_get_value(s, n, val);
+        return parse_and_get_value(s, n, val, path);
     }
 
     template <typename T>
-    Result parse_and_get_value(const char* s, size_t n, any& dt, T& val) const {
+    Result parse_and_get_value(const char* s, size_t n, any& dt, T& val, const char* path = nullptr) const {
         SemanticValues sv;
-        auto r = parse_core(s, n, sv, dt);
+        auto r = parse_core(s, n, sv, dt, path);
         if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
             val = sv[0].val.get<T>();
         }
@@ -1134,9 +1138,9 @@ public:
     }
 
     template <typename T>
-    Result parse_and_get_value(const char* s, any& dt, T& val) const {
+    Result parse_and_get_value(const char* s, any& dt, T& val, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse_and_get_value(s, n, dt, val);
+        return parse_and_get_value(s, n, dt, val, path);
     }
 
     Definition& operator=(Action a) {
@@ -1173,11 +1177,11 @@ private:
     Definition& operator=(const Definition& rhs);
     Definition& operator=(Definition&& rhs);
 
-    Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt) const {
+    Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt, const char* path) const {
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
-        Context cxt(s, n, assignId.ids.size(), enablePackratParsing);
+        Context cxt(path, s, n, assignId.ids.size(), enablePackratParsing);
         auto len = holder_->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1953,22 +1957,22 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 
 struct Ast
 {
-    Ast(size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
-        : line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
+    Ast(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
+        : path(path), line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
-    Ast(size_t line, size_t column, const char* name, const std::string& token)
-        : line(line), column(column), name(name), original_name(name), is_token(true), token(token)
+    Ast(const char* path, size_t line, size_t column, const char* name, const std::string& token)
+        : path(path), line(line), column(column), name(name), original_name(name), is_token(true), token(token)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
     Ast(const Ast& ast, const char* original_name)
-        : line(ast.line), column(ast.column), name(ast.name), original_name(original_name)
+        : path(ast.path), line(ast.line), column(ast.column), name(ast.name), original_name(original_name)
         , is_token(ast.is_token), token(ast.token), nodes(ast.nodes)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
         , tag(ast.tag), original_tag(str2tag(original_name))
@@ -1979,6 +1983,7 @@ struct Ast
 
     void print() const;
 
+    const std::string                       path;
     const size_t                            line;
     const size_t                            column;
     const std::string                       name;
@@ -2079,41 +2084,41 @@ public:
         return load_grammar(s, n);
     }
 
-    bool parse_n(const char* s, size_t n) const {
+    bool parse_n(const char* s, size_t n, const char* path = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, n);
+            auto r = rule.parse(s, n, path);
             output_log(s, n, log, r);
             return r.ret && r.len == n;
         }
         return false;
     }
 
-    bool parse(const char* s) const {
+    bool parse(const char* s, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse_n(s, n);
+        return parse_n(s, n, path);
     }
 
-    bool parse_n(const char* s, size_t n, any& dt) const {
+    bool parse_n(const char* s, size_t n, any& dt, const char* path = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, n, dt);
+            auto r = rule.parse(s, n, dt, path);
             output_log(s, n, log, r);
             return r.ret && r.len == n;
         }
         return false;
     }
 
-    bool parse(const char* s, any& dt) const {
+    bool parse(const char* s, any& dt, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse_n(s, n, dt);
+        return parse_n(s, n, dt, path);
     }
 
     template <typename T>
-    bool parse_n(const char* s, size_t n, T& val) const {
+    bool parse_n(const char* s, size_t n, T& val, const char* path = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_and_get_value(s, n, val);
+            auto r = rule.parse_and_get_value(s, n, val, path);
             output_log(s, n, log, r);
             return r.ret && r.len == n;
         }
@@ -2121,16 +2126,16 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, T& val) const {
+    bool parse(const char* s, T& val, const char* path = nullptr) const {
         auto n = strlen(s);
-        return parse_n(s, n, val);
+        return parse_n(s, n, val, path);
     }
 
     template <typename T>
-    bool parse_n(const char* s, size_t n, any& dt, T& val) const {
+    bool parse_n(const char* s, size_t n, any& dt, T& val, const char* path = nullptr) const {
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_and_get_value(s, n, dt, val);
+            auto r = rule.parse_and_get_value(s, n, dt, val, path);
             output_log(s, n, log, r);
             return r.ret && r.len == n;
         }
@@ -2138,7 +2143,7 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, any& dt, T& val) const {
+    bool parse(const char* s, any& dt, T& val, const char* path = nullptr) const {
         auto n = strlen(s);
         return parse_n(s, n, dt, val);
     }
@@ -2179,7 +2184,7 @@ public:
         }
     }
 
-    peg& enable_ast(bool optimize_nodes, const std::initializer_list<std::string>& filters) {
+    peg& enable_ast(bool optimize_nodes, const std::initializer_list<std::string>& filters = {}) {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& rule = x.second;
@@ -2192,14 +2197,14 @@ public:
                 rule.action = [=](const SemanticValues& sv) {
                     if (is_token) {
                         auto line = line_info(sv.ss, sv.s);
-                        return std::make_shared<Ast>(line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
+                        return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
                     }
                     if (opt && sv.size() == 1) {
                         auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), name.c_str());
                         return ast;
                     }
                     auto line = line_info(sv.ss, sv.s);
-                    return std::make_shared<Ast>(line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
+                    return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
                 };
             }
         }
