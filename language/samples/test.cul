@@ -167,6 +167,7 @@ test_interpolated_string = fn () {
     assert(ret == 'Hello World!')
 }
 
+debugger
 test_call()
 test_closure()
 test_undefined()
