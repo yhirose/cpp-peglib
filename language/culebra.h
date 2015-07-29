@@ -396,7 +396,7 @@ struct Environment
     std::map<std::string, Symbol> dictionary;
 };
 
-typedef std::function<void (const peglib::Ast& ast, std::shared_ptr<Environment> env, bool force_to_break)> Debugger;
+typedef std::function<void (const peglib::Ast& ast, Environment& env, bool force_to_break)> Debugger;
 
 inline bool ObjectValue::has(const std::string& name) const {
     if (properties->find(name) == properties->end()) {
@@ -538,7 +538,7 @@ struct Eval
         if (debugger_) {
             if (ast.original_tag == "STATEMENT"_) {
                 auto force_to_break = ast.tag == "DEBUGGER"_;
-                debugger_(ast, env, force_to_break);
+                debugger_(ast, *env, force_to_break);
             }
         }
 

@@ -28,14 +28,14 @@ bool read_file(const char* path, vector<char>& buff)
 
 struct CommandLineDebugger
 {
-    void operator()(const Ast& ast, shared_ptr<Environment> env, bool force_to_break) {
+    void operator()(const Ast& ast, Environment& env, bool force_to_break) {
         if (quit) {
             return;
         }
 
-        if ((command_ == "n" && env->level <= level_) ||
+        if ((command_ == "n" && env.level <= level_) ||
             (command_ == "s") ||
-            (command_ == "o" && env->level < level_)) {
+            (command_ == "o" && env.level < level_)) {
             force_to_break = true;
         }
 
@@ -72,7 +72,7 @@ struct CommandLineDebugger
                     break;
                 }
             }
-            level_ = env->level;;
+            level_ = env.level;;
         }
     }
 
@@ -123,22 +123,22 @@ struct CommandLineDebugger
         }
     }
 
-    void print(const Ast& ast, shared_ptr<Environment> env, const string& symbol) {
+    void print(const Ast& ast, Environment& env, const string& symbol) {
         if (symbol.empty()) {
             print_all(ast, env);
-        } else if (env->has(symbol)) {
-            cout << symbol << ": " << env->get(symbol).str() << endl;
+        } else if (env.has(symbol)) {
+            cout << symbol << ": " << env.get(symbol).str() << endl;
         } else {
             cout << "'" << symbol << "'" << "is not undefined." << endl;
         }
     }
 
-    void print_all(const Ast& ast, shared_ptr<Environment> env) {
+    void print_all(const Ast& ast, Environment& env) {
         auto node = find_function_node(ast);
         set<string> references;
         enum_identifiers(*node, references);
         for (const auto& symbol: references) {
-            const auto& val = env->get(symbol);
+            const auto& val = env.get(symbol);
             cout << symbol << ": " << val.str() << endl;
         }
     }
