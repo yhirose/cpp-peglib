@@ -28,9 +28,9 @@ bool read_file(const char* path, vector<char>& buff)
 struct CommandLineDebugger
 {
     void operator()(const peglib::Ast& ast, shared_ptr<Environment> env, bool force_to_break) {
-        if (command == "n" && env->level <= level ||
-            command == "s" ||
-            command == "o" && env->level < level) {
+        if ((command == "n" && env->level <= level) ||
+            (command == "s") ||
+            (command == "o" && env->level < level)) {
             force_to_break = true;
         }
 
