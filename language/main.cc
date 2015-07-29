@@ -6,6 +6,7 @@
 #include <vector>
 
 using namespace culebra;
+using namespace peglib;
 using namespace std;
 
 bool read_file(const char* path, vector<char>& buff)
@@ -27,10 +28,14 @@ bool read_file(const char* path, vector<char>& buff)
 
 struct CommandLineDebugger
 {
-    void operator()(const peglib::Ast& ast, shared_ptr<Environment> env, bool force_to_break) {
-        if ((command == "n" && env->level <= level) ||
-            (command == "s") ||
-            (command == "o" && env->level < level)) {
+    void operator()(const Ast& ast, shared_ptr<Environment> env, bool force_to_break) {
+        if (quit) {
+            return;
+        }
+
+        if ((command_ == "n" && env->level <= level_) ||
+            (command_ == "s") ||
+            (command_ == "o" && env->level < level_)) {
             force_to_break = true;
         }
 
@@ -38,30 +43,52 @@ struct CommandLineDebugger
             show_lines(ast);
 
             for (;;) {
-                command = linenoise::Readline("debug> ");
+                cout << "debug> ";
+                string s;
+                std::getline(cin, s);
 
-                if (command == "bt") {
-                    cout << "level: " << env->level << endl;
-                } else if (command == "c") { // continue
+                istringstream is(s);
+                is >> command_;
+
+                if (command_ == "h") {
+                    cout << "(c)ontinue, (n)ext, (s)tep in, step (o)out, (p)ring, (l)ist, (q)uit" << endl;
+                } else if (command_ == "l") {
+                    is >> display_lines_;
+                    show_lines(ast);
+                } else if (command_ == "p") {
+                    string symbol;
+                    is >> symbol;
+                    print(ast, env, symbol);
+                } else if (command_ == "c") {
                     break;
-                } else if (command == "n") { // step over
+                } else if (command_ == "n") {
                     break;
-                } else if (command == "s") { // step into
+                } else if (command_ == "s") {
                     break;
-                } else if (command == "o") { // step out
+                } else if (command_ == "o") {
+                    break;
+                } else if (command_ == "q") {
+                    quit = true;
                     break;
                 }
             }
-            level = env->level;;
+            level_ = env->level;;
         }
     }
 
-    void show_lines(const peglib::Ast& ast) {
+    void show_lines(const Ast& ast) {
+        prepare_cache(ast.path);
+
         cout << "break in " << ast.path << ":" << ast.line << endl;
+
         auto count = get_line_count(ast.path);
-        auto digits = to_string(count).length();;
-        size_t start = max((int)ast.line - 1, 1);
-        auto end = min(ast.line + 3, count);
+
+        auto lines_ahead = (size_t)((display_lines_ - .5) / 2);
+        auto start = (size_t)max((int)ast.line - (int)lines_ahead, 1);
+        auto end = min(start + display_lines_, count);
+
+        auto needed_digits = to_string(count).length();
+
         for (auto l = start; l < end; l++) {
             auto s = get_line(ast.path, l);
             if (l == ast.line) {
@@ -69,19 +96,59 @@ struct CommandLineDebugger
             } else {
                 cout << "  ";
             }
-            cout << setw(digits) << l << " " << s << endl;
+            cout << setw(needed_digits) << l << " " << s << endl;
+        }
+    }
+
+    shared_ptr<Ast> find_function_node(const Ast& ast) {
+        auto node = ast.parent_node;
+        while (node->parent_node && node->tag != "FUNCTION"_) {
+            node = node->parent_node;
+        }
+        return node;
+    }
+
+    void enum_identifiers(const Ast& ast, set<string>& references) {
+        for (auto node: ast.nodes) {
+            switch (node->tag) {
+            case "IDENTIFIER"_:
+                references.insert(node->token);
+                break;
+            case "FUNCTION"_:
+                break;
+            default:
+                enum_identifiers(*node, references);
+                break;
+            }
+        }
+    }
+
+    void print(const Ast& ast, shared_ptr<Environment> env, const string& symbol) {
+        if (symbol.empty()) {
+            print_all(ast, env);
+        } else if (env->has(symbol)) {
+            cout << symbol << ": " << env->get(symbol).str() << endl;
+        } else {
+            cout << "'" << symbol << "'" << "is not undefined." << endl;
+        }
+    }
+
+    void print_all(const Ast& ast, shared_ptr<Environment> env) {
+        auto node = find_function_node(ast);
+        set<string> references;
+        enum_identifiers(*node, references);
+        for (const auto& symbol: references) {
+            const auto& val = env->get(symbol);
+            cout << symbol << ": " << val.str() << endl;
         }
     }
 
     size_t get_line_count(const string& path) {
-        prepare_cache(path);
-        return sources[path].size();
+        return sources_[path].size();
     }
 
     string get_line(const string& path, size_t line) {
-        prepare_cache(path);
-
-        const auto& positions = sources[path];
+        const auto& positions = sources_[path];
         auto idx = line - 1;
         auto first = idx > 0 ? positions[idx - 1] : 0;
         auto last = positions[idx];
@@ -106,12 +173,12 @@ struct CommandLineDebugger
     }
 
     void prepare_cache(const string& path) {
-        auto it = sources.find(path);
-        if (it == sources.end()) {
+        auto it = sources_.find(path);
+        if (it == sources_.end()) {
             vector<char> buff;
             read_file(path.c_str(), buff);
 
-            auto& positions = sources[path];
+            auto& positions = sources_[path];
 
             auto i = 0u;
             for (; i < buff.size(); i++) {
@@ -123,9 +190,11 @@ struct CommandLineDebugger
         }
     }
 
-    string command;
-    size_t level = 0;
-    map<string, vector<size_t>> sources;
+    bool   quit = false;
+    string command_;
+    size_t level_ = 0;
+    size_t display_lines_ = 4;
+    map<string, vector<size_t>> sources_;
 };
 
 int repl(shared_ptr<Environment> env, bool print_ast)
@@ -138,9 +207,9 @@ int repl(shared_ptr<Environment> env, bool print_ast)
         }
 
         if (!line.empty()) {
-            Value val;
-            vector<string> msgs;
-            shared_ptr<peglib::Ast> ast;
+            Value           val;
+            vector<string>  msgs;
+            shared_ptr<Ast> ast;
             auto ret = run("(repl)", env, line.c_str(), line.size(), val, msgs, ast);
             if (ret) {
                 if (print_ast) {
@@ -195,10 +264,10 @@ int main(int argc, const char** argv)
                 return -1;
             }
 
-            Value                   val;
-            vector<string>          msgs;
-            shared_ptr<peglib::Ast> ast;
-            Debugger                dbg;
+            Value           val;
+            vector<string>  msgs;
+            shared_ptr<Ast> ast;
+            Debugger        dbg;
 
             CommandLineDebugger debugger;
             if (debug) {

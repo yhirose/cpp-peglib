@@ -1991,6 +1991,7 @@ struct Ast
     const bool                              is_token;
     const std::string                       token;
     const std::vector<std::shared_ptr<Ast>> nodes;
+    std::shared_ptr<Ast>                    parent_node;
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
     const unsigned int                      tag;
     const unsigned int                      original_tag;
@@ -2199,12 +2200,18 @@ public:
                         auto line = line_info(sv.ss, sv.s);
                         return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
                     }
+
+                    std::shared_ptr<Ast> ast;
                     if (opt && sv.size() == 1) {
-                        auto ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), name.c_str());
-                        return ast;
+                        ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), name.c_str());
+                    } else {
+                        auto line = line_info(sv.ss, sv.s);
+                        ast = std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
                     }
-                    auto line = line_info(sv.ss, sv.s);
-                    return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
+                    for (auto node: ast->nodes) {
+                        node->parent_node = ast;
+                    }
+                    return ast;
                 };
             }
         }

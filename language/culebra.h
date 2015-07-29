@@ -341,8 +341,7 @@ inline std::ostream& operator<<(std::ostream& os, const Value& val)
 struct Environment
 {
     Environment(std::shared_ptr<Environment> parent = nullptr)
-        : parent(parent)
-        , level(parent ? parent->level + 1 : 0) {
+        : level(parent ? parent->level + 1 : 0) {
     }
 
     void append_outer(std::shared_ptr<Environment> outer) {
@@ -354,15 +353,15 @@ struct Environment
     }
 
     bool has(const std::string& s) const {
-        if (dic_.find(s) != dic_.end()) {
+        if (dictionary.find(s) != dictionary.end()) {
             return true;
         }
         return outer && outer->has(s);
     }
 
     Value get(const std::string& s) const {
-        if (dic_.find(s) != dic_.end()) {
-            return dic_.at(s).val;
+        if (dictionary.find(s) != dictionary.end()) {
+            return dictionary.at(s).val;
         }
         if (outer) {
             return outer->get(s);
@@ -373,8 +372,8 @@ struct Environment
 
     void assign(const std::string& s, const Value& val) {
         assert(has(s));
-        if (dic_.find(s) != dic_.end()) {
-            auto& sym = dic_[s];
+        if (dictionary.find(s) != dictionary.end()) {
+            auto& sym = dictionary[s];
             if (!sym.mut) {
                 std::string msg = "immutable variable '" + s + "'...";
                 throw std::runtime_error(msg);
@@ -389,16 +388,12 @@ struct Environment
 
     void initialize(const std::string& s, const Value& val, bool mut) {
         //std::cout << "Env::initialize: " << s << std::endl;
-        dic_[s] = Symbol{ val, mut };
+        dictionary[s] = Symbol{ val, mut };
     }
 
-    std::shared_ptr<Environment> outer;
-
-    std::shared_ptr<Environment> parent;
-    size_t                       level;
-
-private:
-    std::map<std::string, Symbol> dic_;
+    size_t                        level;
+    std::shared_ptr<Environment>  outer;
+    std::map<std::string, Symbol> dictionary;
 };
 
 typedef std::function<void (const peglib::Ast& ast, std::shared_ptr<Environment> env, bool force_to_break)> Debugger;
@@ -810,7 +805,7 @@ private:
             Value lval = eval(*ast.nodes[1], env);
 
             auto end = ast.nodes.size() - 2;
-            for (auto i = 2; i < end; i++) {
+            for (auto i = 2u; i < end; i++) {
                 const auto& postfix = *ast.nodes[i];
 
                 switch (postfix.original_tag) {
