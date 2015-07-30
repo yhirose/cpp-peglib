@@ -12,8 +12,8 @@ call       <- 'CALL' _ ident
 statements <- 'BEGIN' _ statement (';' _ statement )* 'END' _
 if         <- 'IF' _ condition 'THEN' _ statement
 while      <- 'WHILE' _ condition 'DO' _ statement
-out        <- '!' _ expression
-in         <- '?' _ ident
+out        <- ('out' / 'write' / '!') _ expression
+in         <- ('in' / 'read' / '?') _ ident
 
 condition  <- odd / compare
 odd        <- 'ODD' _ expression
