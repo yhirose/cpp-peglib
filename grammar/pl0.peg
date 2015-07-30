@@ -1,18 +1,19 @@
 
-program    <- block '.' _
+program    <- _ block '.' _
 
 block      <- const var procedure statement
 const      <- ('CONST' _ ident '=' _ number (',' _ ident '=' _ number)* ';' _)?
 var        <- ('VAR' _ ident (',' _ ident)* ';' _)?
 procedure  <- ('PROCEDURE' _ ident ';' _ block ';' _)*
 
-statement  <- (assignment / call / statements / if / while / write)?
+statement  <- (assignment / call / statements / if / while / out / in)?
 assignment <- ident ':=' _ expression
 call       <- 'CALL' _ ident
 statements <- 'BEGIN' _ statement (';' _ statement )* 'END' _
 if         <- 'IF' _ condition 'THEN' _ statement
 while      <- 'WHILE' _ condition 'DO' _ statement
 out        <- '!' _ expression
+in         <- '?' _ ident
 
 condition  <- odd / compare
 odd        <- 'ODD' _ expression
