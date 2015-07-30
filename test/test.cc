@@ -453,11 +453,10 @@ TEST_CASE("Calculator test with AST", "[general]")
         "  ~_               <-  [ \t\r\n]*                        "
         );
 
-    const int kTagNumber = 0;
-    parser.enable_ast(true, { { "NUMBER", kTagNumber } });
+    parser.enable_ast(true);
 
     function<long (const Ast&)> eval = [&](const Ast& ast) {
-        if (ast.tag == kTagNumber) {
+        if (ast.name == "NUMBER") {
             return stol(ast.token);
         } else {
             const auto& nodes = ast.nodes;
