@@ -19,3 +19,6 @@ calc2 : calc2.cc ../peglib.h
 
 calc3 : calc3.cc ../peglib.h
 	$(CC) -o calc3 $(CFLAGS) -I.. calc3.cc
+
+pl0 : pl0.cc ../peglib.h
+	$(CC) -o pl0 $(CFLAGS) -I.. pl0.cc

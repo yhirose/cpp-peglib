@@ -20,5 +20,8 @@ target_link_libraries(calc2 pthread)
 add_executable(calc3 example/calc3.cc)
 target_link_libraries(calc3 pthread)
 
+add_executable(pl0 example/pl0.cc)
+target_link_libraries(pl0 pthread)
+
 add_executable(culebra language/main.cc)
 target_link_libraries(culebra pthread)
