@@ -1945,7 +1945,7 @@ private:
 
 const int AstDefaultTag = -1;
 
-#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
 inline constexpr unsigned int str2tag(const char* str, int h = 0) {
     return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ str[h];
 }
@@ -1959,14 +1959,14 @@ struct Ast
 {
     Ast(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
         : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
-#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
     Ast(const char* path, size_t line, size_t column, const char* name, const std::string& token)
         : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(true), token(token)
-#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
@@ -1974,7 +1974,7 @@ struct Ast
     Ast(const Ast& ast, const char* original_name)
         : path(ast.path), line(ast.line), column(ast.column), name(ast.name), original_name(original_name)
         , is_token(ast.is_token), token(ast.token), nodes(ast.nodes)
-#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(ast.tag), original_tag(str2tag(original_name))
 #endif
     {}
@@ -1992,7 +1992,7 @@ struct Ast
     const std::string                       token;
     const std::vector<std::shared_ptr<Ast>> nodes;
     std::shared_ptr<Ast>                    parent_node;
-#ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
     const unsigned int                      tag;
     const unsigned int                      original_tag;
 #endif
