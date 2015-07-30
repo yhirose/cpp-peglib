@@ -78,10 +78,10 @@ int main(int argc, const char** argv)
 
     vector<char> source;
     if (!read_file(source_path, source)) {
-       auto beg = source_path;
-       auto end = source_path + strlen(source_path);
-       source.assign(beg, end);
-       source_path = "[commendline]";
+        auto beg = source_path;
+        auto end = source_path + strlen(source_path);
+        source.assign(beg, end);
+        source_path = "[commendline]";
     }
 
     peg.log = [&](auto ln, auto col, const auto& msg) {
