@@ -16,12 +16,6 @@
   <ItemGroup>
     <ClCompile Include="peglint.cc" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="test.peg" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="test.txt" />
-  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F85B641A-7538-4809-8175-C528FF632CF6}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>

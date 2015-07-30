@@ -31,7 +31,7 @@ int main(int argc, const char** argv)
     auto opt_help = false;
     vector<const char*> path_list;
 
-    int argi = 1;
+    auto argi = 1;
     while (argi < argc) {
         auto arg = argv[argi++];
         if (string("--help") == arg) {
@@ -61,7 +61,7 @@ int main(int argc, const char** argv)
 
     peglib::peg peg;
 
-    peg.log = [&](size_t ln, size_t col, const string& msg) {
+    peg.log = [&](auto ln, auto col, const auto& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
@@ -80,11 +80,11 @@ int main(int argc, const char** argv)
     if (!read_file(source_path, source)) {
        auto beg = source_path;
        auto end = source_path + strlen(source_path);
-	    source.assign(beg, end);
+       source.assign(beg, end);
        source_path = "[commendline]";
     }
 
-    peg.log = [&](size_t ln, size_t col, const string& msg) {
+    peg.log = [&](auto ln, auto col, const auto& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
