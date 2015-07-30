@@ -244,6 +244,7 @@ private:
             case "<"_:  return lval < rval;
             case ">="_: return lval >= rval;
             case ">"_:  return lval > rval;
+            default:    throw logic_error("invalid operator");
         }
     }
 
