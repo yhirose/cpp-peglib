@@ -778,8 +778,13 @@ private:
                 case '+': ret += val; break;
                 case '-': ret -= val; break;
                 case '*': ret *= val; break;
-                case '/': ret /= val; break;
                 case '%': ret %= val; break;
+                case '/':
+                    if (val == 0) {
+                        throw std::runtime_error("divide by 0 error");
+                    }
+                    ret /= val;
+                    break;
             }
         }
         return Value(ret);
