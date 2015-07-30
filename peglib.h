@@ -1958,14 +1958,14 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 struct Ast
 {
     Ast(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
-        : path(path), line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
+        : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
     {}
 
     Ast(const char* path, size_t line, size_t column, const char* name, const std::string& token)
-        : path(path), line(line), column(column), name(name), original_name(name), is_token(true), token(token)
+        : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(true), token(token)
 #ifdef PEGLIB_HAS_CONSTEXPR_SUPPORT
         , tag(str2tag(name)), original_tag(tag)
 #endif
