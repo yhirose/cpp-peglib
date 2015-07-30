@@ -2006,15 +2006,23 @@ struct AstPrint
         level_ += 1;
         for (auto i = 0; i < level_; i++) { std::cout << "  "; }
         if (ast.is_token) {
-            std::cout << "- " << ast.name << ": '" << ast.token << "'" << std::endl;
+            std::cout << "- " << name(ast) << ": '" << ast.token << "'" << std::endl;
         } else {
-            std::cout << "+ " << ast.name << std::endl;
+            std::cout << "+ " << name(ast) << std::endl;
         }
         for (auto node : ast.nodes) { print(*node); }
         level_ -= 1;
     }
 
 private:
+    std::string name(const Ast& ast) {
+        if (ast.name == ast.original_name) {
+            return ast.name;
+        } else {
+            return ast.original_name + " (" + ast.name + ")";
+        }
+    }
+
     int level_;
 };
 
