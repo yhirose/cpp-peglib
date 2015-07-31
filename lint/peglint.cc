@@ -89,13 +89,14 @@ int main(int argc, const char** argv)
     };
 
     if (opt_ast) {
-	    peg.enable_ast(opt_optimize_ast_nodes);
+	    peg.enable_ast();
 
 	    std::shared_ptr<peglib::Ast> ast;
 	    if (!peg.parse_n(source.data(), source.size(), ast)) {
 	        return -1;
 	    }
 
+        ast = peglib::AstOptimizer(opt_optimize_ast_nodes).optimize(ast);
 	    peglib::AstPrint().print(*ast);
     } else {
 	    if (!peg.parse_n(source.data(), source.size())) {

@@ -453,7 +453,7 @@ TEST_CASE("Calculator test with AST", "[general]")
         "  ~_               <-  [ \t\r\n]*                        "
         );
 
-    parser.enable_ast(true);
+    parser.enable_ast();
 
     function<long (const Ast&)> eval = [&](const Ast& ast) {
         if (ast.name == "NUMBER") {
@@ -477,6 +477,7 @@ TEST_CASE("Calculator test with AST", "[general]")
 
     shared_ptr<Ast> ast;
     auto ret = parser.parse("1+2*3*(4-5+6)/7-8", ast);
+    ast = peglib::AstOptimizer(true).optimize(ast);
     auto val = eval(*ast);
 
     REQUIRE(ret == true);
@@ -492,7 +493,7 @@ TEST_CASE("Ignore semantic value test", "[general]")
        " _     <- [ \t\r\n]*    "
     );
 
-    parser.enable_ast(false);
+    parser.enable_ast();
 
     shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World", ast);
@@ -512,7 +513,7 @@ TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
        " ~_          <- [ \t\r\n]*               "
     );
 
-    parser.enable_ast(false);
+    parser.enable_ast();
 
     shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World.", ast);
@@ -531,7 +532,7 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
        " ~_          <- [ \t\r\n]*               "
     );
 
-    parser.enable_ast(false);
+    parser.enable_ast();
 
     shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World.", ast);
