@@ -1983,18 +1983,18 @@ struct Ast
 
     void print() const;
 
-    const std::string                       path;
-    const size_t                            line;
-    const size_t                            column;
-    const std::string                       name;
-    const std::string                       original_name;
-    const bool                              is_token;
-    const std::string                       token;
-    const std::vector<std::shared_ptr<Ast>> nodes;
-    std::shared_ptr<Ast>                    parent_node;
+    const std::string                 path;
+    const size_t                      line;
+    const size_t                      column;
+    const std::string                 name;
+    const std::string                 original_name;
+    const bool                        is_token;
+    const std::string                 token;
+    std::vector<std::shared_ptr<Ast>> nodes;
+    std::shared_ptr<Ast>              parent_node;
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-    const unsigned int                      tag;
-    const unsigned int                      original_tag;
+    const unsigned int                tag;
+    const unsigned int                original_tag;
 #endif
 };
 
@@ -2027,18 +2027,47 @@ private:
 };
 
 inline const Ast& Ast::get_smallest_ancestor() const {
-	 assert(nodes.size() <= 1);
-
+    assert(nodes.size() <= 1);
     if (nodes.empty()) {
         return *this;
     }
-
     return nodes[0]->get_smallest_ancestor();
 }
 
 inline void Ast::print() const {
     AstPrint().print(*this);
 }
+
+struct AstOptimizer
+{
+    AstOptimizer(bool optimize_nodes, const std::vector<std::string>& filters = {})
+        : optimize_nodes_(optimize_nodes)
+        , filters_(filters) {}
+
+    std::shared_ptr<Ast> optimize(std::shared_ptr<Ast> original, std::shared_ptr<Ast> parent = nullptr) {
+
+        auto found = std::find(filters_.begin(), filters_.end(), original->name) != filters_.end();
+        bool opt = optimize_nodes_ ? !found : found;
+
+        if (opt && original->nodes.size() == 1) {
+            auto child = optimize(original->nodes[0], parent);
+            return std::make_shared<Ast>(*child, original->name.c_str());
+        }
+
+        auto ast = std::make_shared<Ast>(*original);
+        ast->parent_node = parent;
+        ast->nodes.clear();
+        for (auto node : original->nodes) {
+            auto child = optimize(node, ast);
+            ast->nodes.push_back(child);
+        }
+        return ast;
+    }
+
+private:
+    const bool                     optimize_nodes_;
+    const std::vector<std::string> filters_;
+};
 
 /*-----------------------------------------------------------------------------
  *  peg
@@ -2193,13 +2222,10 @@ public:
         }
     }
 
-    peg& enable_ast(bool optimize_nodes, const std::initializer_list<std::string>& filters = {}) {
+    peg& enable_ast() {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& rule = x.second;
-
-            auto found = std::find(filters.begin(), filters.end(), name) != filters.end();
-            bool opt = optimize_nodes ? !found : found;
 
             if (!rule.action) {
                 auto is_token = rule.is_token;
@@ -2209,13 +2235,9 @@ public:
                         return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
                     }
 
-                    std::shared_ptr<Ast> ast;
-                    if (opt && sv.size() == 1) {
-                        ast = std::make_shared<Ast>(*sv[0].get<std::shared_ptr<Ast>>(), name.c_str());
-                    } else {
-                        auto line = line_info(sv.ss, sv.s);
-                        ast = std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
-                    }
+                    auto line = line_info(sv.ss, sv.s);
+                    auto ast = std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
+
                     for (auto node: ast->nodes) {
                         node->parent_node = ast;
                     }

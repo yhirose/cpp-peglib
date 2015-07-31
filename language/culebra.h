@@ -90,7 +90,7 @@ inline peglib::peg& get_parser()
             throw std::logic_error("invalid peg grammar");
         }
 
-        parser.enable_ast(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY" });
+        parser.enable_ast();
     }
 
     return parser;
@@ -924,6 +924,7 @@ inline bool run(
         };
 
         if (parser.parse_n(expr, len, ast, path.c_str())) {
+            ast = peglib::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY" }).optimize(ast);
             val = Eval(debugger).eval(*ast, env);
             return true;
         }

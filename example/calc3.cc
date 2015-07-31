@@ -49,11 +49,12 @@ int main(int argc, const char** argv)
         "  ~_               <-  [ \t\r\n]*                        "
         );
 
-    parser.enable_ast(true);
+    parser.enable_ast();
 
     auto expr = argv[1];
     shared_ptr<Ast> ast;
     if (parser.parse(expr, ast)) {
+        ast = AstOptimizer(true).optimize(ast);
         ast->print();
         cout << expr << " = " << eval(*ast) << endl;
         return 0;

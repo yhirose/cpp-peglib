@@ -8,6 +8,7 @@
 #include <peglib.h>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 using namespace peglib;
 using namespace std;
@@ -49,52 +50,71 @@ auto grammar = R"(
     ~_         <- [ \t\r\n]*
 )";
 
+string format_error_message(const string& path, size_t ln, size_t col, const string& msg) {
+    stringstream ss;
+    ss << path << ":" << ln << ":" << col << ": " << msg << endl;
+    return ss.str();
+}
+
 struct Environment
 {
-    Environment(shared_ptr<Environment> outer = nullptr) : outer(outer) {}
+    Environment(shared_ptr<Environment> outer = nullptr)
+        : outer_(outer) {}
+
+    bool has_value(const string& ident) const {
+        return has_constant(ident) || has_variable(ident);
+    }
+
+    bool has_variable(const string& ident) const {
+        if (variables.find(ident) != variables.end()) {
+            return true;
+        } else if (!outer_) {
+            return false;
+        }
+        return outer_->has_variable(ident);
+    }
 
     int get_value(const string& ident) const {
-        try {
-            return get_constant(ident);
-        } catch (...) {
-            return get_variable(ident);
-        }
+        return has_constant(ident) ? get_constant(ident) : get_variable(ident);
     }
 
     void set_variable(const string& ident, int val) {
         if (variables.find(ident) != variables.end()) {
             variables[ident] = val;
-        } else if (outer) {
-            return outer->set_variable(ident, val);
-        } else {
-            throw runtime_error("undefined variable");
+            return;
         }
-    }
-
-    int get_constant(const string& ident) const {
-        if (constants.find(ident) != constants.end()) {
-            return constants.at(ident);
-        } else if (outer) {
-            return outer->get_constant(ident);
-        } else {
-            throw runtime_error("undefined constants");
-        }
-    }
-
-    int get_variable(const string& ident) const {
-        if (variables.find(ident) != variables.end()) {
-            return variables.at(ident);
-        } else if (outer) {
-            return outer->get_variable(ident);
-        } else {
-            throw runtime_error("undefined variable");
-        }
+        outer_->set_variable(ident, val);
     }
 
     map<string, int>             constants;
     map<string, int>             variables;
     map<string, shared_ptr<Ast>> procedures;
-    shared_ptr<Environment>      outer;
+
+private:
+    bool has_constant(const string& ident) const {
+        if (constants.find(ident) != constants.end()) {
+            return true;
+        } else if (!outer_) {
+            return false;
+        }
+        return outer_->has_constant(ident);
+    }
+
+    int get_constant(const string& ident) const {
+        if (constants.find(ident) != constants.end()) {
+            return constants.at(ident);
+        }
+        return outer_->get_constant(ident);
+    }
+
+    int get_variable(const string& ident) const {
+        if (variables.find(ident) != variables.end()) {
+            return variables.at(ident);
+        }
+        return outer_->get_variable(ident);
+    }
+
+    shared_ptr<Environment> outer_;
 };
 
 struct Interpreter
@@ -164,7 +184,13 @@ private:
     void exec_assignment(const shared_ptr<Ast> ast, shared_ptr<Environment> env) {
         // assignment <- ident ':=' _ expression
         const auto& ident = ast->nodes[0]->token;
-        auto val = eval(ast->nodes[1], env);
+        if (!env->has_variable(ident)) {
+            string msg = "undefined variable '" + ident + "'...";
+            string s = format_error_message(ast->path, ast->line, ast->column, msg);
+            throw runtime_error(s);
+        }
+        auto expr = ast->nodes[1];
+        auto val = eval(expr, env);
         env->set_variable(ident, val);
     }
 
@@ -185,8 +211,8 @@ private:
     void exec_if(const shared_ptr<Ast> ast, shared_ptr<Environment> env) {
         // if <- 'IF' _ condition 'THEN' _ statement
         auto cond = eval_condition(ast->nodes[0], env);
-        auto stmt = ast->nodes[1];
         if (cond) {
+            auto stmt = ast->nodes[1];
             exec(stmt, env);
         }
     }
@@ -288,7 +314,9 @@ private:
                     break;
                 case '/':
                     if (rval == 0) {
-                        throw runtime_error("divide by 0 error");
+                        string msg = "divide by 0 error";
+                        string s = format_error_message(ast->path, ast->line, ast->column, msg);
+                        throw runtime_error(s);
                     }
                     val = val / rval;
                     break;
@@ -298,7 +326,13 @@ private:
     }
 
     int eval_ident(const shared_ptr<Ast> ast, shared_ptr<Environment> env) {
-        return env->get_value(ast->token);
+        const auto& ident = ast->token;
+        if (!env->has_value(ident)) {
+            string msg = "undefined variable '" + ident + "'...";
+            string s = format_error_message(ast->path, ast->line, ast->column, msg);
+            throw runtime_error(s);
+        }
+        return env->get_value(ident);
     }
 
     int eval_number(const shared_ptr<Ast> ast, shared_ptr<Environment> env) {
@@ -326,6 +360,7 @@ int main(int argc, const char** argv)
         return 1;
     }
 
+    // Read a source file into memory
     auto path = argv[1];
     vector<char> source;
     if (!read_file(path, source)) {
@@ -333,21 +368,34 @@ int main(int argc, const char** argv)
         return -1;
     }
 
+    // Setup a PEG parser
     peg parser(grammar);
-    parser.enable_ast(false, { "program", "statement", "statements", "term", "factor" });
+    parser.enable_ast();
+    parser.log = [&](size_t ln, size_t col, const string& err_msg) {
+        cerr << format_error_message(path, ln, col, err_msg) << endl;
+    };
 
+    // Parse the source and make an AST
     shared_ptr<Ast> ast;
     if (parser.parse_n(source.data(), source.size(), ast, path)) {
+        vector<string> filters = { "program", "statement", "statements", "term", "factor" };
+        ast = AstOptimizer(false, filters).optimize(ast);
+
         if (argc > 2 && string("--ast") == argv[2]) {
             ast->print();
         }
-        Interpreter interp;
-        auto env = make_shared<Environment>();
-        interp.exec(ast, env);
+
+        // Run the AST
+        try {
+            Interpreter interp;
+            auto env = make_shared<Environment>();
+            interp.exec(ast, env);
+        } catch (const runtime_error& e) {
+            cerr << e.what() << endl;
+        }
         return 0;
     }
 
-    cout << "syntax error..." << endl;
     return -1;
 }
 
