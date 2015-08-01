@@ -9,7 +9,7 @@ CC = g++
 CFLAGS = -std=c++1y -g
 endif
 
-all: calc calc2 calc3
+all: calc calc2 calc3 pl0
 
 calc : calc.cc ../peglib.h
 	$(CC) -o calc $(CFLAGS) -I.. calc.cc

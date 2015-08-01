@@ -56,6 +56,24 @@ string format_error_message(const string& path, size_t ln, size_t col, const str
     return ss.str();
 }
 
+template <typename T, typename U>
+bool has_key(const T& cont, const U& key) {
+    return cont.find(key) != cont.end();
+}
+
+bool read_file(const char* path, vector<char>& buff)
+{
+    ifstream ifs(path, ios::in | ios::binary);
+    if (ifs.fail()) {
+        return false;
+    }
+    buff.resize(static_cast<unsigned int>(ifs.seekg(0, ios::end).tellg()));
+    if (!buff.empty()) {
+        ifs.seekg(0, ios::beg).read(&buff[0], static_cast<streamsize>(buff.size()));
+    }
+    return true;
+}
+
 struct Environment
 {
     Environment(shared_ptr<Environment> outer = nullptr)
@@ -66,12 +84,7 @@ struct Environment
     }
 
     bool has_variable(const string& ident) const {
-        if (variables.find(ident) != variables.end()) {
-            return true;
-        } else if (!outer_) {
-            return false;
-        }
-        return outer_->has_variable(ident);
+        return has_key(variables, ident) ? true : (outer_ ? outer_->has_variable(ident) : false);
     }
 
     int get_value(const string& ident) const {
@@ -79,11 +92,11 @@ struct Environment
     }
 
     void set_variable(const string& ident, int val) {
-        if (variables.find(ident) != variables.end()) {
+        if (has_key(variables, ident)) {
             variables[ident] = val;
-            return;
+        } else {
+            outer_->set_variable(ident, val);
         }
-        outer_->set_variable(ident, val);
     }
 
     map<string, int>             constants;
@@ -92,26 +105,15 @@ struct Environment
 
 private:
     bool has_constant(const string& ident) const {
-        if (constants.find(ident) != constants.end()) {
-            return true;
-        } else if (!outer_) {
-            return false;
-        }
-        return outer_->has_constant(ident);
+        return has_key(constants, ident) ? true : (outer_ ? outer_->has_constant(ident) : false);
     }
 
     int get_constant(const string& ident) const {
-        if (constants.find(ident) != constants.end()) {
-            return constants.at(ident);
-        }
-        return outer_->get_constant(ident);
+        return has_key(constants, ident) ? constants.at(ident) : outer_->get_constant(ident);
     }
 
     int get_variable(const string& ident) const {
-        if (variables.find(ident) != variables.end()) {
-            return variables.at(ident);
-        }
-        return outer_->get_variable(ident);
+        return has_key(variables, ident) ? variables.at(ident) : outer_->get_variable(ident);
     }
 
     shared_ptr<Environment> outer_;
@@ -130,7 +132,7 @@ struct Interpreter
             case "while"_:      exec_while(ast, env); break;
             case "out"_:        exec_out(ast, env); break;
             case "in"_:         exec_in(ast, env); break;
-            default:            throw logic_error("invalid Ast type");
+            default:            exec(ast->nodes[0], env); break;
         }
     }
 
@@ -280,7 +282,7 @@ private:
             case "term"_:       return eval_term(ast, env);
             case "ident"_:      return eval_ident(ast, env);
             case "number"_:     return eval_number(ast, env);
-            default:            throw logic_error("invalid Ast type");
+            default:            return eval(ast->nodes[0], env);
         }
     }
 
@@ -315,8 +317,7 @@ private:
                 case '/':
                     if (rval == 0) {
                         string msg = "divide by 0 error";
-                        string s = format_error_message(ast->path, ast->line, ast->column, msg);
-                        throw runtime_error(s);
+                        throw runtime_error(format_error_message(ast->path, ast->line, ast->column, msg));
                     }
                     val = val / rval;
                     break;
@@ -329,8 +330,7 @@ private:
         const auto& ident = ast->token;
         if (!env->has_value(ident)) {
             string msg = "undefined variable '" + ident + "'...";
-            string s = format_error_message(ast->path, ast->line, ast->column, msg);
-            throw runtime_error(s);
+            throw runtime_error(format_error_message(ast->path, ast->line, ast->column, msg));
         }
         return env->get_value(ident);
     }
@@ -339,19 +339,6 @@ private:
         return stol(ast->token);
     }
 };
-
-bool read_file(const char* path, vector<char>& buff)
-{
-    ifstream ifs(path, ios::in | ios::binary);
-    if (ifs.fail()) {
-        return false;
-    }
-    buff.resize(static_cast<unsigned int>(ifs.seekg(0, ios::end).tellg()));
-    if (!buff.empty()) {
-        ifs.seekg(0, ios::beg).read(&buff[0], static_cast<streamsize>(buff.size()));
-    }
-    return true;
-}
 
 int main(int argc, const char** argv)
 {
@@ -378,9 +365,6 @@ int main(int argc, const char** argv)
     // Parse the source and make an AST
     shared_ptr<Ast> ast;
     if (parser.parse_n(source.data(), source.size(), ast, path)) {
-        vector<string> filters = { "program", "statement", "statements", "term", "factor" };
-        ast = AstOptimizer(false, filters).optimize(ast);
-
         if (argc > 2 && string("--ast") == argv[2]) {
             ast->print();
         }
