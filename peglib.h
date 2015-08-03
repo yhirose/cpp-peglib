@@ -1955,54 +1955,78 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 }
 #endif
 
-struct Ast
+template <typename MixedIn>
+struct AstBase : public MixedIn
 {
-    Ast(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<Ast>>& nodes)
-        : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(false), nodes(nodes)
+    AstBase(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<AstBase>>& nodes)
+        : path(path ? path : "")
+        , line(line)
+        , column(column)
+        , name(name)
+        , original_name(name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name)), original_tag(tag)
+        , tag(str2tag(name))
+        , original_tag(tag)
 #endif
+        , is_token(false)
+        , nodes(nodes)
     {}
 
-    Ast(const char* path, size_t line, size_t column, const char* name, const std::string& token)
-        : path(path ? path : ""), line(line), column(column), name(name), original_name(name), is_token(true), token(token)
+    AstBase(const char* path, size_t line, size_t column, const char* name, const std::string& token)
+        : path(path ? path : "")
+        , line(line)
+        , column(column)
+        , name(name)
+        , original_name(name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name)), original_tag(tag)
+        , tag(str2tag(name))
+        , original_tag(tag)
 #endif
+        , is_token(true)
+        , token(token)
     {}
 
-    Ast(const Ast& ast, const char* original_name)
-        : path(ast.path), line(ast.line), column(ast.column), name(ast.name), original_name(original_name)
-        , is_token(ast.is_token), token(ast.token), nodes(ast.nodes)
+    AstBase(const AstBase& ast, const char* original_name)
+        : path(ast.path)
+        , line(ast.line)
+        , column(ast.column)
+        , name(ast.name)
+        , original_name(original_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(ast.tag), original_tag(str2tag(original_name))
+        , tag(ast.tag)
+        , original_tag(str2tag(original_name))
 #endif
+        , is_token(ast.is_token)
+        , token(ast.token)
+        , nodes(ast.nodes)
     {}
-
-    const Ast& get_smallest_ancestor() const;
 
     void print() const;
 
     const std::string                 path;
     const size_t                      line;
     const size_t                      column;
+
     const std::string                 name;
     const std::string                 original_name;
-    const bool                        is_token;
-    const std::string                 token;
-    std::vector<std::shared_ptr<Ast>> nodes;
-    std::shared_ptr<Ast>              parent_node;
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
     const unsigned int                tag;
     const unsigned int                original_tag;
 #endif
+
+    const bool                        is_token;
+    const std::string                 token;
+
+    std::vector<std::shared_ptr<AstBase<MixedIn>>> nodes;
+    std::shared_ptr<AstBase<MixedIn>>              parent_node;
 };
 
-struct AstPrint
+template <typename MixedIn>
+struct AstPrintBase
 {
-    AstPrint() : level_(-1) {}
+    AstPrintBase() : level_(-1) {}
 
-    void print(const Ast& ast) {
+    void print(const AstBase<MixedIn>& ast) {
         level_ += 1;
         for (auto i = 0; i < level_; i++) { std::cout << "  "; }
         if (ast.is_token) {
@@ -2015,7 +2039,7 @@ struct AstPrint
     }
 
 private:
-    std::string name(const Ast& ast) {
+    std::string name(const AstBase<MixedIn>& ast) {
         if (ast.name == ast.original_name) {
             return ast.name;
         } else {
@@ -2026,35 +2050,29 @@ private:
     int level_;
 };
 
-inline const Ast& Ast::get_smallest_ancestor() const {
-    assert(nodes.size() <= 1);
-    if (nodes.empty()) {
-        return *this;
-    }
-    return nodes[0]->get_smallest_ancestor();
+template <typename MixedIn>
+inline void AstBase<MixedIn>::print() const {
+    AstPrintBase<MixedIn>().print(*this);
 }
 
-inline void Ast::print() const {
-    AstPrint().print(*this);
-}
-
-struct AstOptimizer
+template <typename MixedIn>
+struct AstOptimizerBase
 {
-    AstOptimizer(bool optimize_nodes, const std::vector<std::string>& filters = {})
+    AstOptimizerBase(bool optimize_nodes, const std::vector<std::string>& filters = {})
         : optimize_nodes_(optimize_nodes)
         , filters_(filters) {}
 
-    std::shared_ptr<Ast> optimize(std::shared_ptr<Ast> original, std::shared_ptr<Ast> parent = nullptr) {
+    std::shared_ptr<AstBase<MixedIn>> optimize(std::shared_ptr<AstBase<MixedIn>> original, std::shared_ptr<AstBase<MixedIn>> parent = nullptr) {
 
         auto found = std::find(filters_.begin(), filters_.end(), original->name) != filters_.end();
         bool opt = optimize_nodes_ ? !found : found;
 
         if (opt && original->nodes.size() == 1) {
             auto child = optimize(original->nodes[0], parent);
-            return std::make_shared<Ast>(*child, original->name.c_str());
+            return std::make_shared<AstBase<MixedIn>>(*child, original->name.c_str());
         }
 
-        auto ast = std::make_shared<Ast>(*original);
+        auto ast = std::make_shared<AstBase<MixedIn>>(*original);
         ast->parent_node = parent;
         ast->nodes.clear();
         for (auto node : original->nodes) {
@@ -2068,6 +2086,11 @@ private:
     const bool                     optimize_nodes_;
     const std::vector<std::string> filters_;
 };
+
+struct EmptyType {};
+typedef AstBase<EmptyType> Ast;
+typedef AstPrintBase<EmptyType> AstPrint;
+typedef AstOptimizerBase<EmptyType> AstOptimizer;
 
 /*-----------------------------------------------------------------------------
  *  peg
@@ -2222,6 +2245,7 @@ public:
         }
     }
 
+    template <typename T = Ast>
     peg& enable_ast() {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
@@ -2232,11 +2256,11 @@ public:
                 rule.action = [=](const SemanticValues& sv) {
                     if (is_token) {
                         auto line = line_info(sv.ss, sv.s);
-                        return std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
+                        return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
                     }
 
                     auto line = line_info(sv.ss, sv.s);
-                    auto ast = std::make_shared<Ast>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<Ast>>());
+                    auto ast = std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<T>>());
 
                     for (auto node: ast->nodes) {
                         node->parent_node = ast;
