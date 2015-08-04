@@ -1999,6 +1999,7 @@ struct AstBase : public Annotation
         , is_token(ast.is_token)
         , token(ast.token)
         , nodes(ast.nodes)
+        , parent(ast.parent)
     {}
 
     const std::string                 path;
@@ -2016,7 +2017,7 @@ struct AstBase : public Annotation
     const std::string                 token;
 
     std::vector<std::shared_ptr<AstBase<Annotation>>> nodes;
-    std::shared_ptr<AstBase<Annotation>>              parent_node;
+    std::shared_ptr<AstBase<Annotation>>              parent;
 };
 
 struct AstPrint
@@ -2062,7 +2063,7 @@ struct AstOptimizer
         }
 
         auto ast = std::make_shared<T>(*original);
-        ast->parent_node = parent;
+        ast->parent = parent;
         ast->nodes.clear();
         for (auto node : original->nodes) {
             auto child = optimize(node, ast);
@@ -2250,7 +2251,7 @@ public:
                     auto ast = std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<T>>());
 
                     for (auto node: ast->nodes) {
-                        node->parent_node = ast;
+                        node->parent = ast;
                     }
                     return ast;
                 };
