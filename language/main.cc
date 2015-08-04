@@ -101,9 +101,9 @@ struct CommandLineDebugger
     }
 
     shared_ptr<Ast> find_function_node(const Ast& ast) {
-        auto node = ast.parent_node;
-        while (node->parent_node && node->tag != "FUNCTION"_) {
-            node = node->parent_node;
+        auto node = ast.parent;
+        while (node->parent && node->tag != "FUNCTION"_) {
+            node = node->parent;
         }
         return node;
     }
@@ -138,8 +138,12 @@ struct CommandLineDebugger
         set<string> references;
         enum_identifiers(*node, references);
         for (const auto& symbol: references) {
-            const auto& val = env.get(symbol);
-            cout << symbol << ": " << val.str() << endl;
+            if (env.has(symbol)) {
+                const auto& val = env.get(symbol);
+                if (val.type != Value::Function) {
+                    cout << symbol << ": " << val.str() << endl;
+                }
+            }
         }
     }
 
