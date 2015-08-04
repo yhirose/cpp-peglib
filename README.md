@@ -353,7 +353,7 @@ Sample codes
 Tested Compilers
 ----------------
 
-  * Visual Studio 2013
+  * Visual Studio 2015
   * Clang 3.5
 
 TODO
