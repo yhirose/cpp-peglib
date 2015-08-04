@@ -40,10 +40,17 @@ struct CommandLineDebugger
         }
 
         if (force_to_break) {
+            static auto show_initial_usage = true;
+            if (show_initial_usage) {
+                show_initial_usage = false;
+                usage();
+            }
+
             show_lines(ast);
 
             for (;;) {
-                cout << "debug> ";
+                cout << endl << "debug> ";
+
                 string s;
                 std::getline(cin, s);
 
@@ -51,7 +58,7 @@ struct CommandLineDebugger
                 is >> command_;
 
                 if (command_ == "h") {
-                    cout << "(c)ontinue, (n)ext, (s)tep in, step (o)out, (p)ring, (l)ist, (q)uit" << endl;
+                    usage();
                 } else if (command_ == "l") {
                     is >> display_lines_;
                     show_lines(ast);
@@ -79,7 +86,7 @@ struct CommandLineDebugger
     void show_lines(const Ast& ast) {
         prepare_cache(ast.path);
 
-        cout << "break in " << ast.path << ":" << ast.line << endl;
+        cout << endl << "Break in " << ast.path << ":" << ast.line << endl;
 
         auto count = get_line_count(ast.path);
 
@@ -192,6 +199,10 @@ struct CommandLineDebugger
             }
             positions.push_back(i);
         }
+    }
+
+    void usage() {
+        cout << "Usage: (c)ontinue, (n)ext, (s)tep in, step (o)out, (p)ring, (l)ist, (q)uit" << endl;
     }
 
     bool   quit = false;
