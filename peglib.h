@@ -1955,8 +1955,8 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 }
 #endif
 
-template <typename MixedIn>
-struct AstBase : public MixedIn
+template <typename Annotation>
+struct AstBase : public Annotation
 {
     AstBase(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<AstBase>>& nodes)
         : path(path ? path : "")
@@ -2001,8 +2001,6 @@ struct AstBase : public MixedIn
         , nodes(ast.nodes)
     {}
 
-    void print() const;
-
     const std::string                 path;
     const size_t                      line;
     const size_t                      column;
@@ -2017,62 +2015,53 @@ struct AstBase : public MixedIn
     const bool                        is_token;
     const std::string                 token;
 
-    std::vector<std::shared_ptr<AstBase<MixedIn>>> nodes;
-    std::shared_ptr<AstBase<MixedIn>>              parent_node;
+    std::vector<std::shared_ptr<AstBase<Annotation>>> nodes;
+    std::shared_ptr<AstBase<Annotation>>              parent_node;
 };
 
-template <typename MixedIn>
-struct AstPrintBase
+struct AstPrint
 {
-    AstPrintBase() : level_(-1) {}
-
-    void print(const AstBase<MixedIn>& ast) {
-        level_ += 1;
-        for (auto i = 0; i < level_; i++) { std::cout << "  "; }
+    template <typename T>
+    static void print(const std::shared_ptr<T>& ptr, int level = 0) {
+        const auto& ast = *ptr;
+        for (auto i = 0; i < level; i++) { std::cout << "  "; }
         if (ast.is_token) {
             std::cout << "- " << name(ast) << ": '" << ast.token << "'" << std::endl;
         } else {
             std::cout << "+ " << name(ast) << std::endl;
         }
-        for (auto node : ast.nodes) { print(*node); }
-        level_ -= 1;
+        for (auto node : ast.nodes) { print(node, level + 1); }
     }
 
 private:
-    std::string name(const AstBase<MixedIn>& ast) {
+    template <typename T>
+    static std::string name(const T& ast) {
         if (ast.name == ast.original_name) {
             return ast.name;
         } else {
             return ast.original_name + " (" + ast.name + ")";
         }
     }
-
-    int level_;
 };
 
-template <typename MixedIn>
-inline void AstBase<MixedIn>::print() const {
-    AstPrintBase<MixedIn>().print(*this);
-}
-
-template <typename MixedIn>
-struct AstOptimizerBase
+struct AstOptimizer
 {
-    AstOptimizerBase(bool optimize_nodes, const std::vector<std::string>& filters = {})
+    AstOptimizer(bool optimize_nodes, const std::vector<std::string>& filters = {})
         : optimize_nodes_(optimize_nodes)
         , filters_(filters) {}
 
-    std::shared_ptr<AstBase<MixedIn>> optimize(std::shared_ptr<AstBase<MixedIn>> original, std::shared_ptr<AstBase<MixedIn>> parent = nullptr) {
+    template <typename T>
+    std::shared_ptr<T> optimize(std::shared_ptr<T> original, std::shared_ptr<T> parent = nullptr) {
 
         auto found = std::find(filters_.begin(), filters_.end(), original->name) != filters_.end();
         bool opt = optimize_nodes_ ? !found : found;
 
         if (opt && original->nodes.size() == 1) {
             auto child = optimize(original->nodes[0], parent);
-            return std::make_shared<AstBase<MixedIn>>(*child, original->name.c_str());
+            return std::make_shared<T>(*child, original->name.c_str());
         }
 
-        auto ast = std::make_shared<AstBase<MixedIn>>(*original);
+        auto ast = std::make_shared<T>(*original);
         ast->parent_node = parent;
         ast->nodes.clear();
         for (auto node : original->nodes) {
@@ -2089,8 +2078,6 @@ private:
 
 struct EmptyType {};
 typedef AstBase<EmptyType> Ast;
-typedef AstPrintBase<EmptyType> AstPrint;
-typedef AstOptimizerBase<EmptyType> AstOptimizer;
 
 /*-----------------------------------------------------------------------------
  *  peg

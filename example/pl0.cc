@@ -78,11 +78,11 @@ bool read_file(const char* path, vector<char>& buff)
 /*
  * Ast
  */
-struct Scope;
+struct SymbolScope;
 
 struct Annotation
 {
-    shared_ptr<Scope> scope;
+    shared_ptr<SymbolScope> scope;
 };
 
 typedef AstBase<Annotation> AstPL0;
@@ -90,142 +90,124 @@ typedef AstBase<Annotation> AstPL0;
 /*
  * Symbol Table
  */
-struct Symbol {
-    int  value;
-    bool is_constant;
-};
-
-struct Scope
+struct SymbolScope
 {
-    Scope(shared_ptr<Scope> outer = nullptr) : outer(outer) {}
+    SymbolScope(shared_ptr<SymbolScope> outer) : outer(outer) {}
 
     bool has_symbol(const string& ident) const {
-        auto it = symbols.find(ident);
-        if (it != symbols.end()) {
-            return true;
-        }
-        return outer ? outer->has_symbol(ident) : false;
+        auto ret = constants.find(ident) != constants.end() || variables.find(ident) != variables.end();
+        return ret ? true : (outer ? outer->has_symbol(ident) : false);
     }
 
     bool has_constant(const string& ident) const {
-        auto it = symbols.find(ident);
-        if (it != symbols.end() && it->second.is_constant) {
-            return true;
-        }
-        return outer ? outer->has_constant(ident) : false;
+        auto ret = constants.find(ident) != constants.end();
+        return ret ? true : (outer ? outer->has_constant(ident) : false);
     }
 
     bool has_variable(const string& ident) const {
-        auto it = symbols.find(ident);
-        if (it != symbols.end() && !it->second.is_constant) {
-            return true;
-        }
-        return outer ? outer->has_variable(ident) : false;
+        auto ret = variables.find(ident) != variables.end();
+        return ret ? true : (outer ? outer->has_variable(ident) : false);
     }
 
     bool has_procedure(const string& ident) const {
-        auto it = procedures.find(ident);
-        if (it != procedures.end()) {
-            return true;
-        }
-        return outer ? outer->has_procedure(ident) : false;
+        auto ret = procedures.find(ident) != procedures.end();
+        return ret ? true : (outer ? outer->has_procedure(ident) : false);
     }
 
-    shared_ptr<AstPL0> get_procedure(const string& ident) const {
-        auto it = procedures.find(ident);
-        if (it != procedures.end()) {
-            return it->second;
-        }
-        return outer->get_procedure(ident);
-    }
-
-    map<string, Symbol>             symbols;
+    map<string, int>                constants;
+    set<string>                     variables;
     map<string, shared_ptr<AstPL0>> procedures;
 
 private:
-    shared_ptr<Scope> outer;
+    shared_ptr<SymbolScope> outer;
 };
+
+void throw_runtime_error(const shared_ptr<AstPL0> node, const string& msg) {
+    throw runtime_error(format_error_message(node->path, node->line, node->column, msg));
+}
 
 struct SymbolTable
 {
-    static void build(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope = nullptr) {
+    static void build_on_ast(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope = nullptr) {
         switch (ast->tag) {
-            case "block"_:      visit_block(ast, scope); break;
-            case "assignment"_: visit_assignment(ast, scope); break;
-            case "call"_:       visit_call(ast, scope); break;
-            case "ident"_:      visit_ident(ast, scope); break;
-            default:            for (auto node: ast->nodes) { build(node, scope); } break;
+            case "block"_:      block(ast, scope); break;
+            case "assignment"_: assignment(ast, scope); break;
+            case "call"_:       call(ast, scope); break;
+            case "ident"_:      ident(ast, scope); break;
+            default:            for (auto node: ast->nodes) { build_on_ast(node, scope); } break;
         }
     }
 
 private:
-    static void visit_block(const shared_ptr<AstPL0> ast, shared_ptr<Scope> outer) {
+    static void block(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> outer) {
         // block <- const var procedure statement
-        auto scope = make_shared<Scope>(outer);
+        auto scope = make_shared<SymbolScope>(outer);
         const auto& nodes = ast->nodes;
-        visit_constants(nodes[0], scope);
-        visit_variables(nodes[1], scope);
-        visit_procedures(nodes[2], scope);
-        build(nodes[3], scope);
+        constants(nodes[0], scope);
+        variables(nodes[1], scope);
+        procedures(nodes[2], scope);
+        build_on_ast(nodes[3], scope);
         ast->scope = scope;
     }
 
-    static void visit_constants(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void constants(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         // const <- ('CONST' _ ident '=' _ number(',' _ ident '=' _ number)* ';' _) ?
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 2) {
             const auto& ident = nodes[i + 0]->token;
+            if (scope->has_symbol(ident)) {
+                throw_runtime_error(nodes[i], "'" + ident + "' is already defined...");
+            }
             auto number = stoi(nodes[i + 1]->token);
-            scope->symbols.emplace(ident, Symbol{ number, true });
+            scope->constants.emplace(ident, number);
         }
     }
 
-    static void visit_variables(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void variables(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         // var <- ('VAR' _ ident(',' _ ident)* ';' _) ?
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 1) {
             const auto& ident = nodes[i]->token;
-            scope->symbols.emplace(ident, Symbol{ 0, false });
+            if (scope->has_symbol(ident)) {
+                throw_runtime_error(nodes[i], "'" + ident + "' is already defined...");
+            }
+            scope->variables.emplace(ident);
         }
     }
 
-    static void visit_procedures(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void procedures(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         // procedure <- ('PROCEDURE' _ ident ';' _ block ';' _)*
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 2) {
             const auto& ident = nodes[i + 0]->token;
             auto block = nodes[i + 1];
             scope->procedures[ident] = block;
-            build(block, scope);
+            build_on_ast(block, scope);
         }
     }
 
-    static void visit_assignment(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void assignment(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         // assignment <- ident ':=' _ expression
         const auto& ident = ast->nodes[0]->token;
-        if (!scope->has_variable(ident)) {
-            string msg = "undefined variable '" + ident + "'...";
-            string s = format_error_message(ast->path, ast->line, ast->column, msg);
-            throw runtime_error(s);
+        if (scope->has_constant(ident)) {
+            throw_runtime_error(ast->nodes[0], "cannot modify constant value '" + ident + "'...");
+        } else if (!scope->has_variable(ident)) {
+            throw_runtime_error(ast->nodes[0], "undefined variable '" + ident + "'...");
         }
     }
 
-    static void visit_call(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void call(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         // call <- 'CALL' _ ident
         const auto& ident = ast->nodes[0]->token;
         if (!scope->has_procedure(ident)) {
-            string msg = "undefined procedure '" + ident + "'...";
-            string s = format_error_message(ast->path, ast->line, ast->column, msg);
-            throw runtime_error(s);
+            throw_runtime_error(ast->nodes[0], "undefined procedure '" + ident + "'...");
         }
     }
 
-    static void visit_ident(const shared_ptr<AstPL0> ast, shared_ptr<Scope> scope) {
+    static void ident(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
         const auto& ident = ast->token;
         if (!scope->has_symbol(ident)) {
-            string msg = "undefined variable '" + ident + "'...";
-            string s = format_error_message(ast->path, ast->line, ast->column, msg);
-            throw runtime_error(s);
+            throw_runtime_error(ast, "undefined variable '" + ident + "'...");
         }
     }
 };
@@ -235,33 +217,36 @@ private:
  */
 struct Environment
 {
-    Environment(shared_ptr<Scope> scope = nullptr, shared_ptr<Environment> outer = nullptr) : scope(scope), outer(outer) {
-        if (scope) {
-            symbols = scope->symbols;
-        }
-    }
+    Environment(shared_ptr<SymbolScope> scope, shared_ptr<Environment> outer)
+        : scope(scope), outer(outer) {}
 
     int get_value(const string& ident) const {
-        auto it = symbols.find(ident);
-        if (it != symbols.end()) {
-            return it->second.value;
+        auto it = scope->constants.find(ident);
+        if (it != scope->constants.end()) {
+            return it->second;
+        } else if (scope->variables.find(ident) != scope->variables.end()) {
+            return variables.at(ident);
         }
         return outer->get_value(ident);
     }
 
     void set_variable(const string& ident, int val) {
-        auto it = symbols.find(ident);
-        if (it != symbols.end() && !it->second.is_constant) {
-            symbols[ident].value = val;
+        if (scope->variables.find(ident) != scope->variables.end()) {
+            variables[ident] = val;
         } else {
             outer->set_variable(ident, val);
         }
     }
 
-    shared_ptr<Scope> scope;
+    shared_ptr<AstPL0> get_procedure(const string& ident) const {
+        auto it = scope->procedures.find(ident);
+        return it != scope->procedures.end() ? it->second : outer->get_procedure(ident);
+    }
+
+    shared_ptr<SymbolScope> scope;
 
 private:
-    map<string, Symbol>     symbols;
+    map<string, int>        variables;
     shared_ptr<Environment> outer;
 };
 
@@ -270,7 +255,7 @@ private:
  */
 struct Interpreter
 {
-    static void exec(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
+    static void exec(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env = nullptr) {
         switch (ast->tag) {
             case "block"_:      exec_block(ast, env); break;
             case "statement"_:  exec_statement(ast, env); break;
@@ -288,12 +273,11 @@ struct Interpreter
 private:
     static void exec_block(const shared_ptr<AstPL0> ast, shared_ptr<Environment> outer) {
         // block <- const var procedure statement
-        auto env = make_shared<Environment>(ast->scope, outer);
-        exec(ast->nodes[3], env);
+        exec(ast->nodes[3], make_shared<Environment>(ast->scope, outer));
     }
 
     static void exec_statement(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // statement  <-(assignment / call / statements / if / while / out / in) ?
+        // statement  <- (assignment / call / statements / if / while / out / in)?
         if (!ast->nodes.empty()) {
             exec(ast->nodes[0], env);
         }
@@ -301,17 +285,12 @@ private:
 
     static void exec_assignment(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // assignment <- ident ':=' _ expression
-        const auto& ident = ast->nodes[0]->token;
-        auto expr = ast->nodes[1];
-        auto val = eval(expr, env);
-        env->set_variable(ident, val);
+        env->set_variable(ast->nodes[0]->token, eval(ast->nodes[1], env));
     }
 
     static void exec_call(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // call <- 'CALL' _ ident
-        const auto& ident = ast->nodes[0]->token;
-        auto proc = env->scope->get_procedure(ident);
-        exec_block(proc, env);
+        exec_block(env->get_procedure(ast->nodes[0]->token), env);
     }
 
     static void exec_statements(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
@@ -323,10 +302,8 @@ private:
 
     static void exec_if(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // if <- 'IF' _ condition 'THEN' _ statement
-        auto cond = eval_condition(ast->nodes[0], env);
-        if (cond) {
-            auto stmt = ast->nodes[1];
-            exec(stmt, env);
+        if (eval_condition(ast->nodes[0], env)) {
+            exec(ast->nodes[1], env);
         }
     }
 
@@ -334,25 +311,21 @@ private:
         // while <- 'WHILE' _ condition 'DO' _ statement
         auto cond = ast->nodes[0];
         auto stmt = ast->nodes[1];
-        auto ret = eval_condition(cond, env);
-        while (ret) {
+        while (eval_condition(cond, env)) {
             exec(stmt, env);
-            ret = eval_condition(cond, env);
         }
     }
 
     static void exec_out(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // out <- '!' _ expression
-        auto val = eval(ast->nodes[0], env);
-        cout << val << endl;
+        cout << eval(ast->nodes[0], env) << endl;
     }
 
     static void exec_in(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // in <- '?' _ ident
         int val;
         cin >> val;
-        const auto& ident = ast->nodes[0]->token;
-        env->set_variable(ident, val);
+        env->set_variable(ast->nodes[0]->token, val);
     }
 
     static bool eval_condition(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
@@ -367,8 +340,7 @@ private:
 
     static bool eval_odd(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // odd <- 'ODD' _ expression
-        auto val = eval_expression(ast->nodes[0], env);
-        return val != 0;
+        return eval_expression(ast->nodes[0], env) != 0;
     }
 
     static bool eval_compare(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
@@ -427,8 +399,7 @@ private:
                     break;
                 case '/':
                     if (rval == 0) {
-                        string msg = "divide by 0 error";
-                        throw runtime_error(format_error_message(ast->path, ast->line, ast->column, msg));
+                        throw_runtime_error(ast, "divide by 0 error");
                     }
                     val = val / rval;
                     break;
@@ -438,8 +409,7 @@ private:
     }
 
     static int eval_ident(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        const auto& ident = ast->token;
-        return env->get_value(ident);
+        return env->get_value(ast->token);
     }
 
     static int eval_number(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
@@ -468,20 +438,19 @@ int main(int argc, const char** argv)
     // Setup a PEG parser
     peg parser(grammar);
     parser.enable_ast<AstPL0>();
-    parser.log = [&](size_t ln, size_t col, const string& err_msg) {
-        cerr << format_error_message(path, ln, col, err_msg) << endl;
+    parser.log = [&](size_t ln, size_t col, const string& msg) {
+        cerr << format_error_message(path, ln, col, msg) << endl;
     };
 
     // Parse the source and make an AST
     shared_ptr<AstPL0> ast;
     if (parser.parse_n(source.data(), source.size(), ast, path)) {
         if (argc > 2 && string("--ast") == argv[2]) {
-            ast->print();
+            AstPrint::print(ast);
         }
-
         try {
-            SymbolTable::build(ast);
-            Interpreter::exec(ast, make_shared<Environment>());
+            SymbolTable::build_on_ast(ast);
+            Interpreter::exec(ast);
         } catch (const runtime_error& e) {
             cerr << e.what() << endl;
         }

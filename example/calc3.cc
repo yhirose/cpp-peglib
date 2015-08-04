@@ -55,7 +55,7 @@ int main(int argc, const char** argv)
     shared_ptr<Ast> ast;
     if (parser.parse(expr, ast)) {
         ast = AstOptimizer(true).optimize(ast);
-        ast->print();
+        AstPrint::print(ast);
         cout << expr << " = " << eval(*ast) << endl;
         return 0;
     }
