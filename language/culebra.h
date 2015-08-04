@@ -9,9 +9,10 @@ const auto grammar_ = R"(
 
     PROGRAM                  <-  _ STATEMENTS
     STATEMENTS               <-  (STATEMENT (';' _)?)*
-    STATEMENT                <-  DEBUGGER / EXPRESSION
+    STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
 
     DEBUGGER                 <-  'debugger' _
+    RETURN                   <-  'return' __ '\n'  / 'return' _ EXPRESSION?
 
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
@@ -67,10 +68,11 @@ const auto grammar_ = R"(
     MUTABLE                  <-  < 'mut'? > _
 
     ~_                       <-  (Space / EndOfLine / Comment)*
+    ~__                      <-  (Space / Comment)*
     Space                    <-  ' ' / '\t'
     EndOfLine                <-  '\r\n' / '\n' / '\r'
     EndOfFile                <-  !.
-    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* (EndOfLine / EndOfFile)
+    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* &(EndOfLine / EndOfFile)
 
 )";
 
@@ -526,12 +528,21 @@ inline void setup_built_in_functions(Environment& env) {
         false);
 }
 
-struct Eval
+struct Interpreter
 {
-    Eval(Debugger debugger = nullptr)
+    Interpreter(Debugger debugger = nullptr)
         : debugger_(debugger) {
     }
 
+    Value exec(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+        try {
+            return eval(ast, env);
+        } catch (const Value& val) {
+            return val;
+        }
+    }
+
+private:
     Value eval(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         using peglib::operator"" _;
 
@@ -566,6 +577,7 @@ struct Eval
             case "NUMBER"_:              return eval_number(ast, env);
             case "INTERPOLATED_STRING"_: return eval_interpolated_string(ast, env);
             case "DEBUGGER"_:            return Value();
+            case "RETURN"_:              eval_return(ast, env);
         }
 
         if (ast.is_token) {
@@ -576,7 +588,6 @@ struct Eval
         throw std::logic_error("invalid Ast type");
     }
 
-private:
     Value eval_statements(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         if (ast.is_token) {
             return eval(ast, env);
@@ -654,7 +665,11 @@ private:
             }
             callEnv->initialize("__LINE__", Value((long)ast.line), false);
             callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
-            return f.eval(callEnv);
+            try {
+                return f.eval(callEnv);
+            } catch (const Value& val) {
+                return val;
+            }
         }
 
         std::string msg = "arguments error...";
@@ -901,6 +916,14 @@ private:
         return Value(std::move(s));
     };
 
+    void eval_return(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
+        if (ast.nodes.empty()) {
+            throw Value();
+        } else {
+            throw eval(*ast.nodes[0], env);
+        }
+    }
+
     Debugger debugger_;
 };
 
@@ -924,8 +947,8 @@ inline bool run(
         };
 
         if (parser.parse_n(expr, len, ast, path.c_str())) {
-            ast = peglib::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY" }).optimize(ast);
-            val = Eval(debugger).eval(*ast, env);
+            ast = peglib::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN" }).optimize(ast);
+            val = Interpreter(debugger).exec(*ast, env);
             return true;
         }
     } catch (std::runtime_error& e) {

@@ -1,7 +1,30 @@
+/*
+ * Unit tests
+ */
 
 test_call = fn () {
     ret = fn(){[1,fn(){[4,5,6]},3]}()[1]()[1]
     assert(ret == 5)
+}
+
+test_return = fn () {
+    f = fn (x) {
+	    if (x % 2) {
+		    return 'odd'
+		}
+		'even'
+	}
+    assert(f(3) == 'odd')
+    assert(f(4) == 'even')
+
+	mut val = 0
+	f2 = fn () {
+		val = 1
+		return // comment
+		val = 2
+	}
+	f2()
+    assert(val == 1)
 }
 
 test_undefined = fn () {
@@ -162,13 +185,14 @@ test_fib = fn () {
 
 test_interpolated_string = fn () {
     hello = "Hello"
-	world = "World!"
+    world = "World!"
     ret = "{hello} {world}"
     assert(ret == 'Hello World!')
 }
 
 debugger
 test_call()
+test_return()
 test_closure()
 test_undefined()
 test_array()
@@ -176,6 +200,9 @@ test_function()
 test_object()
 test_object_factory()
 test_class()
+debugger
 test_sum()
 test_fib()
 test_interpolated_string()
+
+return // end
