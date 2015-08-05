@@ -11,12 +11,12 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\peglib.h" />
-    <ClInclude Include="..\culebra.h" />
-    <ClInclude Include="..\linenoise.hpp" />
+    <ClInclude Include="..\peglib.h" />
+    <ClInclude Include="culebra.h" />
+    <ClInclude Include="linenoise.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\main.cc" />
+    <ClCompile Include="main.cc" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F85B641A-7538-4809-8175-C528FF632CF6}</ProjectGuid>
