@@ -243,11 +243,10 @@ struct Environment
         return it != scope->procedures.end() ? it->second : outer->get_procedure(ident);
     }
 
-    shared_ptr<SymbolScope> scope;
-
 private:
-    map<string, int>        variables;
+    shared_ptr<SymbolScope> scope;
     shared_ptr<Environment> outer;
+    map<string, int>        variables;
 };
 
 /*
@@ -345,9 +344,10 @@ private:
 
     static bool eval_compare(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // compare <- expression compare_op expression
-        auto lval = eval_expression(ast->nodes[0], env);
-        auto op = peglib::str2tag(ast->nodes[1]->token.c_str());
-        auto rval = eval_expression(ast->nodes[2], env);
+        const auto& nodes = ast->nodes;
+        auto lval = eval_expression(nodes[0], env);
+        auto op = peglib::str2tag(nodes[1]->token.c_str());
+        auto rval = eval_expression(nodes[2], env);
         switch (op) {
             case "="_:  return lval == rval;
             case "#"_:  return lval != rval;
@@ -371,10 +371,10 @@ private:
 
     static int eval_expression(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // expression <- sign term (term_op term)*
-        auto sign = ast->nodes[0]->token;
-        auto sign_val = (sign.empty() || sign == "+") ? 1 : -1;
-        auto val = eval(ast->nodes[1], env) * sign_val;
         const auto& nodes = ast->nodes;
+        auto sign = nodes[0]->token;
+        auto sign_val = (sign.empty() || sign == "+") ? 1 : -1;
+        auto val = eval(nodes[1], env) * sign_val;
         for (auto i = 2u; i < nodes.size(); i += 2) {
             auto ope = nodes[i + 0]->token[0];
             auto rval = eval(nodes[i + 1], env);
@@ -388,8 +388,8 @@ private:
 
     static int eval_term(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
         // term <- factor (factor_op factor)*
-        auto val = eval(ast->nodes[0], env);
         const auto& nodes = ast->nodes;
+        auto val = eval(nodes[0], env);
         for (auto i = 1u; i < nodes.size(); i += 2) {
             auto ope = nodes[i + 0]->token[0];
             auto rval = eval(nodes[i + 1], env);
