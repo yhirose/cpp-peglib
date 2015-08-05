@@ -12,4 +12,4 @@ endif
 all: peglint
 
 peglint : peglint.cc ../peglib.h
-	$(CC) -o peglint $(CFLAGS) -I.. peglint.cc
+	$(CC) -o peglint $(CFLAGS) -I../.. peglint.cc

@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.0)
 include_directories(.)
 add_definitions("-std=c++1y")
 
-add_executable(peglint lint/peglint.cc)
+add_executable(peglint lint/cmdline/peglint.cc)
 target_link_libraries(peglint pthread)
 
-add_executable(playground lint/playground/main.cc)
+add_executable(playground lint/online/main.cc)
 target_link_libraries(playground pthread)
 
 add_executable(test-main test/test.cc)
