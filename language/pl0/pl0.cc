@@ -63,19 +63,6 @@ string format_error_message(const string& path, size_t ln, size_t col, const str
     return ss.str();
 }
 
-bool read_file(const char* path, vector<char>& buff)
-{
-    ifstream ifs(path, ios::in | ios::binary);
-    if (ifs.fail()) {
-        return false;
-    }
-    buff.resize(static_cast<unsigned int>(ifs.seekg(0, ios::end).tellg()));
-    if (!buff.empty()) {
-        ifs.seekg(0, ios::beg).read(&buff[0], static_cast<streamsize>(buff.size()));
-    }
-    return true;
-}
-
 /*
  * Ast
  */
@@ -96,23 +83,20 @@ struct SymbolScope
     SymbolScope(shared_ptr<SymbolScope> outer) : outer(outer) {}
 
     bool has_symbol(const string& ident) const {
-        auto ret = constants.find(ident) != constants.end() || variables.find(ident) != variables.end();
+        auto ret = constants.count(ident) || variables.count(ident);
         return ret ? true : (outer ? outer->has_symbol(ident) : false);
     }
 
     bool has_constant(const string& ident) const {
-        auto ret = constants.find(ident) != constants.end();
-        return ret ? true : (outer ? outer->has_constant(ident) : false);
+        return constants.count(ident) ? true : (outer ? outer->has_constant(ident) : false);
     }
 
     bool has_variable(const string& ident) const {
-        auto ret = variables.find(ident) != variables.end();
-        return ret ? true : (outer ? outer->has_variable(ident) : false);
+        return variables.count(ident) ? true : (outer ? outer->has_variable(ident) : false);
     }
 
     bool has_procedure(const string& ident) const {
-        auto ret = procedures.find(ident) != procedures.end();
-        return ret ? true : (outer ? outer->has_procedure(ident) : false);
+        return procedures.count(ident) ? true : (outer ? outer->has_procedure(ident) : false);
     }
 
     map<string, int>                constants;
@@ -225,14 +209,14 @@ struct Environment
         auto it = scope->constants.find(ident);
         if (it != scope->constants.end()) {
             return it->second;
-        } else if (scope->variables.find(ident) != scope->variables.end()) {
+        } else if (scope->variables.count(ident)) {
             return variables.at(ident);
         }
         return outer->get_value(ident);
     }
 
     void set_variable(const string& ident, int val) {
-        if (scope->variables.find(ident) != scope->variables.end()) {
+        if (scope->variables.count(ident)) {
             variables[ident] = val;
         } else {
             outer->set_variable(ident, val);
@@ -431,9 +415,15 @@ int main(int argc, const char** argv)
     // Read a source file into memory
     auto path = argv[1];
     vector<char> source;
-    if (!read_file(path, source)) {
+
+    ifstream ifs(path, ios::in | ios::binary);
+    if (ifs.fail()) {
         cerr << "can't open the source file." << endl;
         return -1;
+    }
+    source.resize(static_cast<unsigned int>(ifs.seekg(0, ios::end).tellg()));
+    if (!source.empty()) {
+        ifs.seekg(0, ios::beg).read(&source[0], static_cast<streamsize>(source.size()));
     }
 
     // Setup a PEG parser

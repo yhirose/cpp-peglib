@@ -1313,7 +1313,7 @@ inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder& ope) {
     auto p = (void*)ope.outer_;
-    if (ids.find(p) != ids.end()) {
+    if (ids.count(p)) {
         return;
     }
     auto id = ids.size();
@@ -1554,7 +1554,7 @@ private:
         void visit(DefinitionReference& ope) override {
             if (ope.name_ == name_) {
                 s_ = ope.s_;
-            } else if (refs_.find(ope.name_) != refs_.end()) {
+            } else if (refs_.count(ope.name_)) {
                 ;
             } else {
                 refs_.insert(ope.name_);
@@ -1645,7 +1645,7 @@ private:
             auto ope = sv[baseId + 2].get<std::shared_ptr<Ope>>();
 
             auto& grammar = *data.grammar;
-            if (grammar.find(name) == grammar.end()) {
+            if (!grammar.count(name)) {
                 auto& rule = grammar[name];
                 rule <= ope;
                 rule.name = name;
@@ -1729,7 +1729,7 @@ private:
 
                     const auto& ident = sv[baseId].get<std::string>();
 
-                    if (data.references.find(ident) == data.references.end()) {
+                    if (!data.references.count(ident)) {
                         data.references[ident] = sv.s; // for error handling
                     }
 
@@ -1835,7 +1835,7 @@ private:
         for (const auto& x : data.references) {
             const auto& name = x.first;
             auto ptr = x.second;
-            if (grammar.find(name) == grammar.end()) {
+            if (!grammar.count(name)) {
                 if (log) {
                     auto line = line_info(s, ptr);
                     log(line.first, line.second, "'" + name + "' is not defined.");
