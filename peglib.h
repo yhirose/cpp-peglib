@@ -652,6 +652,7 @@ public:
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
+                sv.rewind(s + i);
                 break;
             }
             i += len;
