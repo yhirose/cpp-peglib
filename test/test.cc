@@ -251,6 +251,21 @@ TEST_CASE("Backtracking test", "[general]")
     REQUIRE(count == 1); // Skip second time
 }
 
+TEST_CASE("Backtracking with AST", "[general]")
+{
+    peg parser(R"(
+        S <- A? B (A B)* A
+        A <- 'a'
+        B <- 'b'
+    )");
+
+    parser.enable_ast();
+    shared_ptr<Ast> ast;
+    bool ret = parser.parse("ba", ast);
+    REQUIRE(ret == true);
+    REQUIRE(ast->nodes.size() == 2);
+}
+
 TEST_CASE("Octal/Hex value test", "[general]")
 {
     peglib::peg parser(

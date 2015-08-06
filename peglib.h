@@ -221,6 +221,16 @@ struct SemanticValues : protected std::vector<SemanticValue>
         return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
     }
 
+    void rewind(const char* s) {
+        auto it = rbegin();
+        while (it != rend() && it->s >= s) {
+            ++it;
+        }
+        if (it != rbegin()) {
+            erase(it.base());
+        }
+    }
+
 private:
     template <typename F>
     auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
@@ -410,13 +420,14 @@ struct Context
 {
     const char*                                  path;
     const char*                                  s;
-    size_t                                       l;
+    const size_t                                 l;
 
     const char*                                  error_pos;
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
-    size_t                                       def_count;
+    const size_t                                 def_count;
+    const bool                                   enablePackratParsing;
     std::vector<bool>                            cache_register;
     std::vector<bool>                            cache_success;
 
@@ -432,6 +443,7 @@ struct Context
         , error_pos(nullptr)
         , message_pos(nullptr)
         , def_count(def_count)
+        , enablePackratParsing(enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , stack_size(0)
@@ -440,7 +452,7 @@ struct Context
 
     template <typename T>
     void packrat(const char* s, size_t def_id, size_t& len, any& val, T fn) {
-        if (cache_register.empty()) {
+        if (!enablePackratParsing) {
             fn(val);
             return;
         }
@@ -611,6 +623,7 @@ public:
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
+                sv.rewind(s + i);
                 break;
             }
             i += len;
