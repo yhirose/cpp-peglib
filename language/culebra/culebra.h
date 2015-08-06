@@ -12,7 +12,7 @@ const auto grammar_ = R"(
     STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
 
     DEBUGGER                 <-  debugger
-    RETURN                   <-  return nl / return EXPRESSION?
+    RETURN                   <-  return End _ / return EXPRESSION
 
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
@@ -50,7 +50,7 @@ const auto grammar_ = R"(
     UNARY_NOT_OPERATOR       <-  < '!' > _
     MULTIPLICATIVE_OPERATOR  <-  < [*/%] > _
 
-    IDENTIFIER               <-  < [a-zA-Z_][a-zA-Z0-9_]* > _
+    IDENTIFIER               <-  < IdentInitChar IdentChar* > _
 
     OBJECT                   <-  '{' _ (OBJECT_PROPERTY (',' _ OBJECT_PROPERTY)*)? '}' _
     OBJECT_PROPERTY          <-  MUTABLE IDENTIFIER ':' _ EXPRESSION
@@ -62,7 +62,7 @@ const auto grammar_ = R"(
     MUTABLE                  <-  (< 'mut' > __)?
 
     ~debugger                <-  'debugger' __
-    ~return                  <-  'return' __
+    ~return                  <-  'return' !IdentInitChar Space*
     ~while                   <-  'while' __
     ~if                      <-  'if' __
     ~else                    <-  'else' __
@@ -75,13 +75,14 @@ const auto grammar_ = R"(
     INTERPOLATED_CONTENT     <-  (!["{] .) (!["{] .)*
 
     ~_                       <-  (Space / End)*
-    __                       <-  ![a-zA-Z0-9_] (Space / End)*
-    ~nl                      <-  Space* End _
+    __                       <-  !IdentInitChar (Space / End)*
     ~Space                   <-  ' ' / '\t' / Comment
     ~End                     <-  EndOfLine / EndOfFile
     Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!End .)* &End
     EndOfLine                <-  '\r\n' / '\n' / '\r'
     EndOfFile                <-  !.
+    IdentInitChar            <-  [a-zA-Z_]
+    IdentChar                <-  [a-zA-Z0-9_]
 
 )";
 
