@@ -11,8 +11,8 @@ const auto grammar_ = R"(
     STATEMENTS               <-  (STATEMENT (';' _)?)*
     STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
 
-    DEBUGGER                 <-  'debugger' _
-    RETURN                   <-  'return' __ '\n'  / 'return' _ EXPRESSION?
+    DEBUGGER                 <-  debugger
+    RETURN                   <-  return nl / return EXPRESSION?
 
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
@@ -32,12 +32,12 @@ const auto grammar_ = R"(
     INDEX                    <-  '[' _ EXPRESSION ']' _
     DOT                      <-  '.' _ IDENTIFIER
 
-    WHILE                    <-  'while' _ EXPRESSION BLOCK
-    IF                       <-  'if' _ EXPRESSION BLOCK ('else' _ 'if' _ EXPRESSION BLOCK)* ('else' _ BLOCK)?
+    WHILE                    <-  while EXPRESSION BLOCK
+    IF                       <-  if EXPRESSION BLOCK (else if EXPRESSION BLOCK)* (else BLOCK)?
 
     PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
 
-    FUNCTION                 <-  'fn' _ PARAMETERS BLOCK
+    FUNCTION                 <-  fn PARAMETERS BLOCK
     PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
     PARAMETER                <-  MUTABLE IDENTIFIER
 
@@ -57,22 +57,31 @@ const auto grammar_ = R"(
 
     ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
 
-    UNDEFINED                <-  < 'undefined' > _
-    BOOLEAN                  <-  < ('true' / 'false') > _
+    UNDEFINED                <-  < 'undefined' > __
+    BOOLEAN                  <-  < ('true' / 'false') > __
+    MUTABLE                  <-  (< 'mut' > __)?
+
+    ~debugger                <-  'debugger' __
+    ~return                  <-  'return' __
+    ~while                   <-  'while' __
+    ~if                      <-  'if' __
+    ~else                    <-  'else' __
+    ~fn                      <-  'fn' __
+
     NUMBER                   <-  < [0-9]+ > _
     STRING                   <-  ['] < (!['] .)* > ['] _
 
     INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
     INTERPOLATED_CONTENT     <-  (!["{] .) (!["{] .)*
 
-    MUTABLE                  <-  < 'mut'? > _
-
-    ~_                       <-  (Space / EndOfLine / Comment)*
-    ~__                      <-  (Space / Comment)*
-    Space                    <-  ' ' / '\t'
+    ~_                       <-  (Space / End)*
+    __                       <-  ![a-zA-Z0-9_] (Space / End)*
+    ~nl                      <-  Space* End _
+    ~Space                   <-  ' ' / '\t' / Comment
+    ~End                     <-  EndOfLine / EndOfFile
+    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!End .)* &End
     EndOfLine                <-  '\r\n' / '\n' / '\r'
     EndOfFile                <-  !.
-    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!(EndOfLine / EndOfFile) .)* &(EndOfLine / EndOfFile)
 
 )";
 
@@ -805,6 +814,11 @@ private:
         return Value(ret);
     }
 
+    bool is_keyword(const std::string& ident)  const {
+        static std::set<std::string> keywords = { "undefined", "true", "false", "mut", "debugger", "return", "while", "if", "else", "fn" };
+        return keywords.find(ident) != keywords.end();
+    }
+
     Value eval_assignment(const peglib::Ast& ast, std::shared_ptr<Environment> env) {
         auto end = ast.nodes.size() - 1;
 
@@ -812,11 +826,13 @@ private:
         auto val = eval(*ast.nodes[end], env);
 
         if (ast.nodes.size() == 3) {
-            const auto& var = ast.nodes[1]->token;
-            if (env->has(var)) {
-                env->assign(var, val);
+            const auto& ident = ast.nodes[1]->token;
+            if (env->has(ident)) {
+                env->assign(ident, val);
+            } else if (is_keyword(ident)) {
+                throw std::runtime_error("left-hand side is invalid variable name.");
             } else {
-                env->initialize(var, val, mut);
+                env->initialize(ident, val, mut);
             }
             return std::move(val);
         } else {
