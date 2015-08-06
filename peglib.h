@@ -387,8 +387,7 @@ private:
 /*
  * Semantic predicate
  */
-typedef std::function<bool (const SemanticValues& sv, const any& dt)> SemanticPredicate;
-
+// Note: 'parser_error' exception class should be be used in sematic action handlers to reject the rule.
 struct parse_error {
     parse_error() = default;
     parse_error(const char* s) : s_(s) {}
