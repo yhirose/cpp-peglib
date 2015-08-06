@@ -673,7 +673,12 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
-        return success(len) ? len : 0;
+        if (success(len)) {
+            return len;
+        } else {
+            sv.rewind(s);
+            return 0;
+        }
     }
 
     void accept(Visitor& v) override;
@@ -716,6 +721,7 @@ public:
             c.set_error_pos(s);
             return -1;
         } else {
+            sv.rewind(s);
             c.error_pos = error_pos;
             return 0;
         }
