@@ -34,15 +34,15 @@ int main(int argc, const char** argv)
         return result;
     };
 
-    peg parser(
-        "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
-        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
-        "  TERM_OPERATOR    <-  < [-+] > _                        "
-        "  FACTOR_OPERATOR  <-  < [/*] > _                        "
-        "  NUMBER           <-  < [0-9]+ > _                      "
-        "  ~_               <-  [ \t\r\n]*                        "
-        );
+    peg parser(R"(
+        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
+        TERM_OPERATOR    <-  < [-+] > _
+        FACTOR_OPERATOR  <-  < [/*] > _
+        NUMBER           <-  < [0-9]+ > _
+        ~_               <-  [ \t\r\n]*
+    )");
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
