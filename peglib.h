@@ -990,13 +990,13 @@ struct Ope::Visitor
 struct AssignIDToDefinition : public Ope::Visitor
 {
     void visit(Sequence& ope) override {
-        for (auto ope: ope.opes_) {
-            ope->accept(*this);
+        for (auto op: ope.opes_) {
+            op->accept(*this);
         }
     }
     void visit(PrioritizedChoice& ope) override {
-        for (auto ope: ope.opes_) {
-            ope->accept(*this);
+        for (auto op: ope.opes_) {
+            op->accept(*this);
         }
     }
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
@@ -1019,13 +1019,13 @@ struct IsToken : public Ope::Visitor
     IsToken() : has_anchor(false), has_rule(false) {}
 
     void visit(Sequence& ope) override {
-        for (auto ope: ope.opes_) {
-            ope->accept(*this);
+        for (auto op: ope.opes_) {
+            op->accept(*this);
         }
     }
     void visit(PrioritizedChoice& ope) override {
-        for (auto ope: ope.opes_) {
-            ope->accept(*this);
+        for (auto op: ope.opes_) {
+            op->accept(*this);
         }
     }
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
@@ -1482,8 +1482,8 @@ private:
             : s_(nullptr), name_(name), done_(false) {}
 
         void visit(Sequence& ope) override {
-            for (auto ope: ope.opes_) {
-                ope->accept(*this);
+            for (auto op: ope.opes_) {
+                op->accept(*this);
                 if (done_) {
                     break;
                 } else if (s_) {
@@ -1493,8 +1493,8 @@ private:
             }
         }
         void visit(PrioritizedChoice& ope) override {
-            for (auto ope: ope.opes_) {
-                ope->accept(*this);
+            for (auto op: ope.opes_) {
+                op->accept(*this);
                 if (s_) {
                     done_ = true;
                     break;
