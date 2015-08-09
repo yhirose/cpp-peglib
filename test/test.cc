@@ -653,6 +653,24 @@ TEST_CASE("Semantic predicate test", "[predicate]")
     REQUIRE(ret == false);
 }
 
+TEST_CASE("Japanese character", "[unicode]")
+{
+    peglib::peg parser(R"(
+        文 <- 修飾語? 主語 述語 '。'
+        主語 <- 名詞 助詞
+        述語 <- 動詞 助詞
+        修飾語 <- 形容詞
+        名詞 <- 'サーバー' / 'クライアント'
+        形容詞 <- '古い' / '新しい'
+        動詞 <- '落ち' / '復旧し'
+        助詞 <- 'が' / 'を' / 'た' / 'ます' / 'に'
+    )");
+
+    auto ret = parser.parse(R"(サーバーを復旧します。)");
+
+    REQUIRE(ret == true);
+}
+
 bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);

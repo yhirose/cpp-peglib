@@ -1588,7 +1588,7 @@ private:
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
         g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-        g["IdentStart"] <= cls("a-zA-Z_");
+        g["IdentStart"] <= cls("a-zA-Z_\x80-\xff");
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
         g["Literal"]    <= cho(seq(cls("'"), anc(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
