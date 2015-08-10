@@ -22,9 +22,12 @@
 #include <iostream>
 int main(void) {
     std::cout << "hello world!\n";
-}```
+}
+```
 
-では，さっそく始めましょう！
+ではさっそく始めましょう！
+
+Happy Hacking!
 
 [Link_PEG]: https://ja.wikipedia.org/wiki/Parsing_Expression_Grammar
 [Link_Paper]: http://bford.info/pub/lang/peg
