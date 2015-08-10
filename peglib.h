@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace peglib {
+namespace peg {
 
 extern void* enabler;
 
@@ -846,10 +846,10 @@ private:
     std::string          name_;
 };
 
-class Anchor : public Ope
+class TokenBoundary : public Ope
 {
 public:
-    Anchor(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    TokenBoundary(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
@@ -979,7 +979,7 @@ struct Ope::Visitor
     virtual void visit(Character& ope) {}
     virtual void visit(AnyCharacter& ope) {}
     virtual void visit(Capture& ope) {}
-    virtual void visit(Anchor& ope) {}
+    virtual void visit(TokenBoundary& ope) {}
     virtual void visit(Ignore& ope) {}
     virtual void visit(User& ope) {}
     virtual void visit(WeakHolder& ope) {}
@@ -1005,7 +1005,7 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
     void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(Anchor& ope) override { ope.ope_->accept(*this); }
+    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override;
@@ -1016,7 +1016,7 @@ struct AssignIDToDefinition : public Ope::Visitor
 
 struct IsToken : public Ope::Visitor
 {
-    IsToken() : has_anchor(false), has_rule(false) {}
+    IsToken() : has_token_boundary(false), has_rule(false) {}
 
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1032,16 +1032,16 @@ struct IsToken : public Ope::Visitor
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(Anchor& ope) override { has_anchor = true; }
+    void visit(TokenBoundary& ope) override { has_token_boundary = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(DefinitionReference& ope) override { has_rule = true; }
 
     bool is_token() const {
-        return has_anchor || !has_rule;
+        return has_token_boundary || !has_rule;
     }
 
-    bool has_anchor;
+    bool has_token_boundary;
     bool has_rule;
 };
 
@@ -1219,8 +1219,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     size_t      len;
     any         val;
-    const char* anchors = s;
-    size_t      anchorn = n;
+    const char* token_boundary_s = s;
+    size_t      token_boundary_n = n;
 
     c.packrat(s, outer_->id, len, val, [&](any& val) {
         auto& chldsv = c.push();
@@ -1228,13 +1228,13 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         const auto& rule = *ope_;
         len = rule.parse(s, n, chldsv, c, dt);
 
-        anchorn = len;
+        token_boundary_n = len;
 
         // Invoke action
         if (success(len)) {
             if (chldsv.s) {
-                anchors = chldsv.s;
-                anchorn = chldsv.n;
+                token_boundary_s = chldsv.s;
+                token_boundary_n = chldsv.n;
             } else {
                 chldsv.s = s;
                 chldsv.n = len;
@@ -1255,7 +1255,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     });
 
     if (success(len) && !outer_->ignoreSemanticValue) {
-        sv.emplace_back(val, outer_->name.c_str(), anchors, anchorn);
+        sv.emplace_back(val, outer_->name.c_str(), token_boundary_s, token_boundary_n);
     }
 
     if (fail(len) && outer_->error_message && !c.message_pos) {
@@ -1304,7 +1304,7 @@ inline void CharacterClass::accept(Visitor& v) { v.visit(*this); }
 inline void Character::accept(Visitor& v) { v.visit(*this); }
 inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
 inline void Capture::accept(Visitor& v) { v.visit(*this); }
-inline void Anchor::accept(Visitor& v) { v.visit(*this); }
+inline void TokenBoundary::accept(Visitor& v) { v.visit(*this); }
 inline void Ignore::accept(Visitor& v) { v.visit(*this); }
 inline void User::accept(Visitor& v) { v.visit(*this); }
 inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
@@ -1379,8 +1379,8 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma)
     return std::make_shared<Capture>(ope, ma, (size_t)-1, std::string());
 }
 
-inline std::shared_ptr<Ope> anc(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Anchor>(ope);
+inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<TokenBoundary>(ope);
 }
 
 inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope>& ope) {
@@ -1422,7 +1422,7 @@ typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
 typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 
-class PEGParser
+class ParserGenerator
 {
 public:
     static std::shared_ptr<Grammar> parse(
@@ -1453,12 +1453,12 @@ public:
     }
 
 private:
-    static PEGParser& get_instance() {
-        static PEGParser instance;
+    static ParserGenerator& get_instance() {
+        static ParserGenerator instance;
         return instance;
     }
 
-    PEGParser() {
+    ParserGenerator() {
         make_grammar();
         setup_actions();
     }
@@ -1536,7 +1536,7 @@ private:
         void visit(Capture& ope) override {
             ope.ope_->accept(*this);
         }
-        void visit(Anchor& ope) override {
+        void visit(TokenBoundary& ope) override {
             ope.ope_->accept(*this);
         }
         void visit(Ignore& ope) override {
@@ -1591,10 +1591,10 @@ private:
         g["IdentStart"] <= cls("a-zA-Z_\x80-\xff");
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
-        g["Literal"]    <= cho(seq(cls("'"), anc(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
-                               seq(cls("\""), anc(zom(seq(npd(cls("\"")), g["Char"]))), cls("\""), g["Spacing"]));
+        g["Literal"]    <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
+                               seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), cls("\""), g["Spacing"]));
 
-        g["Class"]      <= seq(chr('['), anc(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
+        g["Class"]      <= seq(chr('['), tok(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
         g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
@@ -1623,7 +1623,7 @@ private:
         g["Begin"]      <= seq(chr('<'), g["Spacing"]);
         g["End"]        <= seq(chr('>'), g["Spacing"]);
 
-        g["BeginCap"]   <= seq(chr('$'), anc(opt(g["Identifier"])), chr('<'), g["Spacing"]);
+        g["BeginCap"]   <= seq(chr('$'), tok(opt(g["Identifier"])), chr('<'), g["Spacing"]);
         g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
 
         g["IGNORE"]     <= chr('~');
@@ -1742,8 +1742,8 @@ private:
                 case 1: { // (Expression)
                     return sv[1].get<std::shared_ptr<Ope>>();
                 }
-                case 2: { // Anchor
-                    return anc(sv[1].get<std::shared_ptr<Ope>>());
+                case 2: { // TokenBoundary
+                    return tok(sv[1].get<std::shared_ptr<Ope>>());
                 }
                 case 3: { // Capture
                     auto name = std::string(sv[0].s, sv[0].n);
@@ -2100,33 +2100,33 @@ struct EmptyType {};
 typedef AstBase<EmptyType> Ast;
 
 /*-----------------------------------------------------------------------------
- *  peg
+ *  parser
  *---------------------------------------------------------------------------*/
 
-class peg
+class parser
 {
 public:
-    peg() = default;
+    parser() = default;
 
-    peg(const char* s, size_t n, const Rules& rules) {
+    parser(const char* s, size_t n, const Rules& rules) {
         load_grammar(s, n, rules);
     }
 
-    peg(const char* s, const Rules& rules)
-        : peg(s, strlen(s), rules) {}
+    parser(const char* s, const Rules& rules)
+        : parser(s, strlen(s), rules) {}
 
-    peg(const char* s, size_t n)
-        : peg(s, n, Rules()) {}
+    parser(const char* s, size_t n)
+        : parser(s, n, Rules()) {}
 
-    peg(const char* s)
-        : peg(s, strlen(s), Rules()) {}
+    parser(const char* s)
+        : parser(s, strlen(s), Rules()) {}
 
     operator bool() {
         return grammar_ != nullptr;
     }
 
     bool load_grammar(const char* s, size_t n, const Rules& rules) {
-        grammar_ = PEGParser::parse(
+        grammar_ = ParserGenerator::parse(
             s, n,
             rules,
             start_,
@@ -2253,7 +2253,7 @@ public:
     }
 
     template <typename T = Ast>
-    peg& enable_ast() {
+    parser& enable_ast() {
         for (auto& x: *grammar_) {
             const auto& name = x.first;
             auto& rule = x.second;
@@ -2396,7 +2396,7 @@ struct match
 inline bool peg_match(const char* syntax, const char* s, match& m) {
     m.matches.clear();
 
-    peg pg(syntax);
+    parser pg(syntax);
     pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
         m.matches.push_back(match::Item{ s, n, id, name });
     };
@@ -2411,11 +2411,11 @@ inline bool peg_match(const char* syntax, const char* s, match& m) {
 }
 
 inline bool peg_match(const char* syntax, const char* s) {
-    peg pg(syntax);
-    return pg.parse(s);
+    parser parser(syntax);
+    return parser.parse(s);
 }
 
-inline bool peg_search(peg& pg, const char* s, size_t n, match& m) {
+inline bool peg_search(parser& pg, const char* s, size_t n, match& m) {
     m.matches.clear();
 
     pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
@@ -2432,18 +2432,18 @@ inline bool peg_search(peg& pg, const char* s, size_t n, match& m) {
     return false;
 }
 
-inline bool peg_search(peg& pg, const char* s, match& m) {
+inline bool peg_search(parser& pg, const char* s, match& m) {
     auto n = strlen(s);
     return peg_search(pg, s, n, m);
 }
 
 inline bool peg_search(const char* syntax, const char* s, size_t n, match& m) {
-    peg pg(syntax);
+    parser pg(syntax);
     return peg_search(pg, s, n, m);
 }
 
 inline bool peg_search(const char* syntax, const char* s, match& m) {
-    peg pg(syntax);
+    parser pg(syntax);
     auto n = strlen(s);
     return peg_search(pg, s, n, m);
 }
@@ -2513,7 +2513,7 @@ private:
         }
     }
 
-    peg         peg_;
+    parser      peg_;
     const char* s_;
     size_t      l_;
     size_t      pos_;
@@ -2549,7 +2549,7 @@ private:
     peg_token_iterator end_iter;
 };
 
-} // namespace peglib
+} // namespace peg
 
 #endif
 

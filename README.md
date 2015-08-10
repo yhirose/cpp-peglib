@@ -7,7 +7,7 @@ C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
-  * `<` ... `>` (Anchor operator)
+  * `<` ... `>` (Token boundary operator)
   * `$<` ... `>` (Capture operator)
   * `$name<` ... `>` (Named capture operator)
   * `~` (Ignore operator)
@@ -25,7 +25,7 @@ This is a simple calculator sample. It shows how to define grammar, associate sa
 #include <peglib.h>
 #include <assert.h>
 
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 int main(void) {
@@ -38,7 +38,7 @@ int main(void) {
         Number    <- [0-9]+
     )";
 
-    peg parser(syntax);
+    parser parser(syntax);
 
     // (3) Setup an action
     parser["Additive"] = [](const SemanticValues& sv) {
@@ -111,13 +111,13 @@ struct SemanticValues : protected std::vector<SemanticValue>
 }
 ```
 
-`peglib::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
+`peg::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
 
 `const char* s, size_t n` gives a pointer and length of the matched string. This is same as `sv.s` and `sv.n`.
 
 `any& dt` is a data object which can be used by the user for whatever purposes.
 
-The following example uses `<` ... ` >` operators. They are the *anchor* operators. Each anchor operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+The following example uses `<` ... ` >` operators. They are the *token boundary* operators. Each token boundary operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
 ```c++
 auto syntax = R"(
@@ -139,7 +139,7 @@ auto ret = pg.parse(" token1, token2 ");
 We can ignore unnecessary semantic values from the list by using `~` operator.
 
 ```c++
-peglib::peg parser(
+peg::pegparser parser(
     "  ROOT  <-  _ ITEM (',' _ ITEM _)*  "
     "  ITEM  <-  ([a-z])+                "
     "  ~_    <-  [ \t]*                  "
@@ -155,22 +155,22 @@ auto ret = parser.parse(" item1, item2 ");
 The following grammar is same as the above.
 
 ```c++
-peglib::peg parser(
+peg::parser parser(
     "  ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*  "
     "  ITEM  <-  ([a-z])+                   "
     "  _     <-  [ \t]*                     "
 );
 ```
 
-*Semantic predicate* support is available. We can do it by throwing a `peglib::parse_error` exception in a semantic action.
+*Semantic predicate* support is available. We can do it by throwing a `peg::parse_error` exception in a semantic action.
 
 ```c++
-peglib::peg parser("NUMBER  <-  [0-9]+");
+peg::parser parser("NUMBER  <-  [0-9]+");
 
 parser["NUMBER"] = [](const SemanticValues& sv) {
     auto val = stol(sv.str(), nullptr, 10);
     if (val != 100) {
-        throw peglib::parse_error("value error!!");
+        throw peg::parse_error("value error!!");
     }
     return val;
 };
@@ -189,12 +189,12 @@ Simple interface
 
 *cpp-peglib* provides std::regex-like simple interface for trivial tasks.
 
-`peglib::peg_match` tries to capture strings in the `$< ... >` operator and store them into `peglib::match` object.
+`peg::peg_match` tries to capture strings in the `$< ... >` operator and store them into `peg::match` object.
 
 ```c++
-peglib::match m;
+peg::match m;
 
-auto ret = peglib::peg_match(
+auto ret = peg::peg_match(
     R"(
         ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*
         TAG_NAME  <-  (!']' .)+
@@ -213,9 +213,9 @@ assert(m.str(3) == "tag-3");
 It also supports named capture with the `$name<` ... `>` operator.
 
 ```c++
-peglib::match m;
+peg::match m;
 
-auto ret = peglib::peg_match(
+auto ret = peg::peg_match(
     R"(
         ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*
         TAG_NAME  <-  (!']' .)+
@@ -235,7 +235,7 @@ REQUIRE(m.str(cap[2]) == "tag-3");
 There are some ways to *search* a peg pattern in a document.
 
 ```c++
-using namespace peglib;
+using namespace peg;
 
 auto syntax = R"(
     ROOT <- '[' $< [a-z0-9]+ > ']'
@@ -243,8 +243,8 @@ auto syntax = R"(
 
 auto s = " [tag1] [tag2] [tag3] ";
 
-// peglib::peg_search
-peg pg(syntax);
+// peg::peg_search
+parser pg(syntax);
 size_t pos = 0;
 auto n = strlen(s);
 match m;
@@ -254,7 +254,7 @@ while (peg_search(pg, s + pos, n - pos, m)) {
     pos += m.length();
 }
 
-// peglib::peg_token_iterator
+// peg::peg_token_iterator
 peg_token_iterator it(syntax, s);
 while (it != peg_token_iterator()) {
     cout << it->str()  << endl; // entire match
@@ -262,7 +262,7 @@ while (it != peg_token_iterator()) {
     ++it;
 }
 
-// peglib::peg_token_range
+// peg::peg_token_range
 for (auto& m: peg_token_range(syntax, s)) {
     cout << m.str()  << endl; // entire match
     cout << m.str(1) << endl; // submatch #1
@@ -275,7 +275,7 @@ Make a parser with parser operators
 Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser operators*. Here is an example:
 
 ```c++
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 vector<string> tags;
@@ -305,7 +305,7 @@ The following are available operators:
 | cls      | Character class       |
 | chr      | Character             |
 | dot      | Any character         |
-| anc      | Anchor character      |
+| tok      | Token boundary        |
 | ign      | Ignore semantic value |
 | cap      | Capture character     |
 | usr      | User defiend parser   |
@@ -337,7 +337,7 @@ Rules additional_rules = {
     }
 };
 
-peg g = peg(syntax, additional_rules);
+auto g = parser(syntax, additional_rules);
 
 assert(g.parse(" Hello BNF! "));
 ```

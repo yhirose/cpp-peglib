@@ -7,7 +7,7 @@
 
 TEST_CASE("Simple syntax test", "[general]")
 {
-    peglib::peg parser(
+    peg::parser parser(
         " ROOT <- _ "
         " _ <- ' ' "
     );
@@ -18,14 +18,14 @@ TEST_CASE("Simple syntax test", "[general]")
 
 TEST_CASE("Empty syntax test", "[general]")
 {
-    peglib::peg parser("");
+    peg::parser parser("");
     bool ret = parser;
     REQUIRE(ret == false);
 }
 
 TEST_CASE("String capture test", "[general]")
 {
-    peglib::peg parser(
+    peg::parser parser(
         "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   "
@@ -33,7 +33,7 @@ TEST_CASE("String capture test", "[general]")
 
     std::vector<std::string> tags;
 
-    parser["TAG_NAME"] = [&](const peglib::SemanticValues& sv) {
+    parser["TAG_NAME"] = [&](const peg::SemanticValues& sv) {
         tags.push_back(sv.str());
     };
 
@@ -48,8 +48,8 @@ TEST_CASE("String capture test", "[general]")
 
 TEST_CASE("String capture test with match", "[general]")
 {
-    peglib::match m;
-    auto ret = peglib::peg_match(
+    peg::match m;
+    auto ret = peg::peg_match(
         "  ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   ",
@@ -63,7 +63,7 @@ TEST_CASE("String capture test with match", "[general]")
     REQUIRE(m.str(3) == "tag-3");
 }
 
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 TEST_CASE("String capture test2", "[general]")
@@ -93,7 +93,7 @@ TEST_CASE("String capture test3", "[general]")
        " _     <- [ \t\r\n]*              "
        ;
 
-   peg pg(syntax);
+   parser pg(syntax);
 
    std::vector<std::string> tags;
 
@@ -112,9 +112,9 @@ TEST_CASE("String capture test3", "[general]")
 
 TEST_CASE("Named capture test", "[general]")
 {
-    peglib::match m;
+    peg::match m;
 
-    auto ret = peglib::peg_match(
+    auto ret = peg::peg_match(
         "  ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*  "
         "  TAG_NAME  <-  (!']' .)+                "
         "  _         <-  [ \t]*                   ",
@@ -180,14 +180,14 @@ TEST_CASE("Visit test", "[general]")
 
 TEST_CASE("Token check test", "[general]")
 {
-    peg parser(
+    parser parser(
         "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
         "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
         "  TERM_OPERATOR    <-  < [-+] > _                        "
         "  FACTOR_OPERATOR  <-  < [/*] > _                        "
         "  NUMBER           <-  < [0-9]+ > _                      "
-        "  ~_               <-  [ \t\r\n]*                        "
+        "  _               <-  [ \t\r\n]*                        "
         );
 
     REQUIRE(parser["EXPRESSION"].is_token == false);
@@ -199,7 +199,7 @@ TEST_CASE("Token check test", "[general]")
 
 TEST_CASE("Lambda action test", "[general]")
 {
-    peg parser(
+    parser parser(
        "  START <- (CHAR)* "
        "  CHAR  <- .       ");
 
@@ -215,7 +215,7 @@ TEST_CASE("Lambda action test", "[general]")
 
 TEST_CASE("Skip token test", "[general]")
 {
-    peglib::peg parser(
+    peg::parser parser(
         "  ROOT  <-  _ ITEM (',' _ ITEM _)* "
         "  ITEM  <-  ([a-z0-9])+  "
         "  ~_    <-  [ \t]*    "
@@ -232,7 +232,7 @@ TEST_CASE("Skip token test", "[general]")
 
 TEST_CASE("Backtracking test", "[general]")
 {
-    peg parser(
+    parser parser(
        "  START <- PAT1 / PAT2  "
        "  PAT1  <- HELLO ' One' "
        "  PAT2  <- HELLO ' Two' "
@@ -253,7 +253,7 @@ TEST_CASE("Backtracking test", "[general]")
 
 TEST_CASE("Backtracking with AST", "[general]")
 {
-    peg parser(R"(
+    parser parser(R"(
         S <- A? B (A B)* A
         A <- 'a'
         B <- 'b'
@@ -268,7 +268,7 @@ TEST_CASE("Backtracking with AST", "[general]")
 
 TEST_CASE("Octal/Hex value test", "[general]")
 {
-    peglib::peg parser(
+    peg::parser parser(
         R"( ROOT <- '\132\x7a' )"
     );
 
@@ -281,7 +281,7 @@ TEST_CASE("mutable lambda test", "[general]")
 {
     vector<string> vec;
 
-    peg pg("ROOT <- 'mutable lambda test'");
+    parser pg("ROOT <- 'mutable lambda test'");
 
     // This test makes sure if the following code can be compiled.
     pg["TOKEN"] = [=](const SemanticValues& sv) mutable {
@@ -297,7 +297,7 @@ TEST_CASE("Simple calculator test", "[general]")
         " Primary   <- '(' Additive ')' / Number "
         " Number    <- [0-9]+ ";
 
-    peg parser(syntax);
+    parser parser(syntax);
 
     parser["Additive"] = [](const SemanticValues& sv) {
         switch (sv.choice) {
@@ -382,7 +382,7 @@ TEST_CASE("Calculator test2", "[general]")
         ;
 
     string start;
-    auto grammar = PEGParser::parse(syntax, strlen(syntax), start, nullptr, nullptr);
+    auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr, nullptr);
     auto& g = *grammar;
 
     // Setup actions
@@ -417,7 +417,7 @@ TEST_CASE("Calculator test2", "[general]")
 TEST_CASE("Calculator test3", "[general]")
 {
     // Parse syntax
-    peg parser(
+    parser parser(
         "  # Grammar for Calculator...\n                          "
         "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
@@ -458,7 +458,7 @@ TEST_CASE("Calculator test3", "[general]")
 
 TEST_CASE("Calculator test with AST", "[general]")
 {
-    peg parser(
+    parser parser(
         "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
         "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
         "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
@@ -492,7 +492,7 @@ TEST_CASE("Calculator test with AST", "[general]")
 
     shared_ptr<Ast> ast;
     auto ret = parser.parse("1+2*3*(4-5+6)/7-8", ast);
-    ast = peglib::AstOptimizer(true).optimize(ast);
+    ast = peg::AstOptimizer(true).optimize(ast);
     auto val = eval(*ast);
 
     REQUIRE(ret == true);
@@ -501,7 +501,7 @@ TEST_CASE("Calculator test with AST", "[general]")
 
 TEST_CASE("Ignore semantic value test", "[general]")
 {
-    peg parser(
+    parser parser(
        " START <-  ~HELLO WORLD "
        " HELLO <- 'Hello' _     "
        " WORLD <- 'World' _     "
@@ -520,7 +520,7 @@ TEST_CASE("Ignore semantic value test", "[general]")
 
 TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
 {
-    peg parser(
+    parser parser(
        " START       <- _ !DUMMY HELLO_WORLD '.' "
        " HELLO_WORLD <- HELLO 'World' _          "
        " HELLO       <- 'Hello' _                "
@@ -540,7 +540,7 @@ TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
 
 TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
 {
-    peg parser(
+    parser parser(
        " START       <- _ &HELLO HELLO_WORLD '.' "
        " HELLO_WORLD <- HELLO 'World' _          "
        " HELLO       <- 'Hello' _                "
@@ -559,7 +559,7 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
 
 TEST_CASE("Definition duplicates test", "[general]")
 {
-    peg parser(
+    parser parser(
         " A <- ''"
         " A <- ''"
     );
@@ -569,7 +569,7 @@ TEST_CASE("Definition duplicates test", "[general]")
 
 TEST_CASE("Left recursive test", "[left recursive]")
 {
-    peg parser(
+    parser parser(
         " A <- A 'a'"
         " B <- A 'a'"
     );
@@ -579,7 +579,7 @@ TEST_CASE("Left recursive test", "[left recursive]")
 
 TEST_CASE("Left recursive with option test", "[left recursive]")
 {
-    peg parser(
+    parser parser(
         " A  <- 'a' / 'b'? B 'c' "
         " B  <- A                "
     );
@@ -589,7 +589,7 @@ TEST_CASE("Left recursive with option test", "[left recursive]")
 
 TEST_CASE("Left recursive with zom test", "[left recursive]")
 {
-    peg parser(
+    parser parser(
         " A <- 'a'* A* "
     );
 
@@ -598,7 +598,7 @@ TEST_CASE("Left recursive with zom test", "[left recursive]")
 
 TEST_CASE("Left recursive with empty string test", "[left recursive]")
 {
-    peg parser(
+    parser parser(
         " A <- '' A"
     );
 
@@ -626,7 +626,7 @@ TEST_CASE("User rule test", "[user rule]")
         }
     };
 
-    peg g = peg(syntax, rules);
+    auto g = parser(syntax, rules);
 
     REQUIRE(g.parse(" Hello BNF! ") == true);
 }
@@ -634,7 +634,7 @@ TEST_CASE("User rule test", "[user rule]")
 
 TEST_CASE("Semantic predicate test", "[predicate]")
 {
-    peg parser("NUMBER  <-  [0-9]+");
+    parser parser("NUMBER  <-  [0-9]+");
 
     parser["NUMBER"] = [](const SemanticValues& sv) {
         auto val = stol(sv.str(), nullptr, 10);
@@ -655,7 +655,7 @@ TEST_CASE("Semantic predicate test", "[predicate]")
 
 TEST_CASE("Japanese character", "[unicode]")
 {
-    peglib::peg parser(R"(
+    peg::parser parser(R"(
         文 <- 修飾語? 主語 述語 '。'
         主語 <- 名詞 助詞
         述語 <- 動詞 助詞
@@ -678,18 +678,18 @@ bool exact(Grammar& g, const char* d, const char* s) {
 }
 
 Grammar& make_peg_grammar() {
-    return PEGParser::grammar();
+    return ParserGenerator::grammar();
 }
 
 TEST_CASE("PEG Grammar", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Grammar", " Definition <- a / ( b c ) / d \n rule2 <- [a-zA-Z][a-z0-9-]+ ") == true);
 }
 
 TEST_CASE("PEG Definition", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Definition", "Definition <- a / (b c) / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition <- a / b c / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition ") == false);
@@ -700,7 +700,7 @@ TEST_CASE("PEG Definition", "[peg]")
 
 TEST_CASE("PEG Expression", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Expression", "a / (b c) / d ") == true);
     REQUIRE(exact(g, "Expression", "a / b c / d ") == true);
     REQUIRE(exact(g, "Expression", "a b ") == true);
@@ -711,7 +711,7 @@ TEST_CASE("PEG Expression", "[peg]")
 
 TEST_CASE("PEG Sequence", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Sequence", "a b c d ") == true);
     REQUIRE(exact(g, "Sequence", "") == true);
     REQUIRE(exact(g, "Sequence", "!") == false);
@@ -721,7 +721,7 @@ TEST_CASE("PEG Sequence", "[peg]")
 
 TEST_CASE("PEG Prefix", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Prefix", "&[a]") == true);
     REQUIRE(exact(g, "Prefix", "![']") == true);
     REQUIRE(exact(g, "Prefix", "-[']") == false);
@@ -731,7 +731,7 @@ TEST_CASE("PEG Prefix", "[peg]")
 
 TEST_CASE("PEG Suffix", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Suffix", "aaa ") == true);
     REQUIRE(exact(g, "Suffix", "aaa? ") == true);
     REQUIRE(exact(g, "Suffix", "aaa* ") == true);
@@ -744,7 +744,7 @@ TEST_CASE("PEG Suffix", "[peg]")
 
 TEST_CASE("PEG Primary", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Primary", "_Identifier0_ ") == true);
     REQUIRE(exact(g, "Primary", "_Identifier0_<-") == false);
     REQUIRE(exact(g, "Primary", "( _Identifier0_ _Identifier1_ )") == true);
@@ -760,7 +760,7 @@ TEST_CASE("PEG Primary", "[peg]")
 
 TEST_CASE("PEG Identifier", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Identifier", "_Identifier0_ ") == true);
     REQUIRE(exact(g, "Identifier", "0Identifier_ ") == false);
     REQUIRE(exact(g, "Identifier", "Iden|t ") == false);
@@ -771,7 +771,7 @@ TEST_CASE("PEG Identifier", "[peg]")
 
 TEST_CASE("PEG IdentStart", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "IdentStart", "_") == true);
     REQUIRE(exact(g, "IdentStart", "a") == true);
     REQUIRE(exact(g, "IdentStart", "Z") == true);
@@ -782,7 +782,7 @@ TEST_CASE("PEG IdentStart", "[peg]")
 
 TEST_CASE("PEG IdentRest", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "IdentRest", "_") == true);
     REQUIRE(exact(g, "IdentRest", "a") == true);
     REQUIRE(exact(g, "IdentRest", "Z") == true);
@@ -793,7 +793,7 @@ TEST_CASE("PEG IdentRest", "[peg]")
 
 TEST_CASE("PEG Literal", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Literal", "'abc' ") == true);
     REQUIRE(exact(g, "Literal", "'a\\nb\\tc' ") == true);
     REQUIRE(exact(g, "Literal", "'a\\277\tc' ") == true);
@@ -812,7 +812,7 @@ TEST_CASE("PEG Literal", "[peg]")
 
 TEST_CASE("PEG Class", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Class", "[]") == true);
     REQUIRE(exact(g, "Class", "[a]") == true);
     REQUIRE(exact(g, "Class", "[a-z]") == true);
@@ -832,7 +832,7 @@ TEST_CASE("PEG Class", "[peg]")
 
 TEST_CASE("PEG Range", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Range", "a") == true);
     REQUIRE(exact(g, "Range", "a-z") == true);
     REQUIRE(exact(g, "Range", "az") == false);
@@ -843,7 +843,7 @@ TEST_CASE("PEG Range", "[peg]")
 
 TEST_CASE("PEG Char", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Char", "\\n") == true);
     REQUIRE(exact(g, "Char", "\\r") == true);
     REQUIRE(exact(g, "Char", "\\t") == true);
@@ -876,7 +876,7 @@ TEST_CASE("PEG Char", "[peg]")
 
 TEST_CASE("PEG Operators", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "LEFTARROW", "<-") == true);
     REQUIRE(exact(g, "SLASH", "/ ") == true);
     REQUIRE(exact(g, "AND", "& ") == true);
@@ -891,7 +891,7 @@ TEST_CASE("PEG Operators", "[peg]")
 
 TEST_CASE("PEG Comment", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Comment", "# Comment.\n") == true);
     REQUIRE(exact(g, "Comment", "# Comment.") == false);
     REQUIRE(exact(g, "Comment", " ") == false);
@@ -900,7 +900,7 @@ TEST_CASE("PEG Comment", "[peg]")
 
 TEST_CASE("PEG Space", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Space", " ") == true);
     REQUIRE(exact(g, "Space", "\t") == true);
     REQUIRE(exact(g, "Space", "\n") == true);
@@ -910,7 +910,7 @@ TEST_CASE("PEG Space", "[peg]")
 
 TEST_CASE("PEG EndOfLine", "[peg]")
 {
-    auto g = PEGParser::grammar();
+    auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "EndOfLine", "\r\n") == true);
     REQUIRE(exact(g, "EndOfLine", "\n") == true);
     REQUIRE(exact(g, "EndOfLine", "\r") == true);

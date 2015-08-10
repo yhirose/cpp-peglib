@@ -10,7 +10,7 @@
 #include <iostream>
 #include <sstream>
 
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 /*
@@ -331,7 +331,7 @@ private:
         // compare <- expression compare_op expression
         const auto& nodes = ast->nodes;
         auto lval = eval_expression(nodes[0], env);
-        auto op = peglib::str2tag(nodes[1]->token.c_str());
+        auto op = peg::str2tag(nodes[1]->token.c_str());
         auto rval = eval_expression(nodes[2], env);
         switch (op) {
             case "="_:  return lval == rval;
@@ -427,7 +427,7 @@ int main(int argc, const char** argv)
     }
 
     // Setup a PEG parser
-    peg parser(grammar);
+    parser parser(grammar);
     parser.enable_ast<AstPL0>();
     parser.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << format_error_message(path, ln, col, msg) << endl;

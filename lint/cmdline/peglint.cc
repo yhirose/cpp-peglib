@@ -59,13 +59,13 @@ int main(int argc, const char** argv)
         return -1;
     }
 
-    peglib::peg peg;
+    peg::parser parser;
 
-    peg.log = [&](auto ln, auto col, const auto& msg) {
+    parser.log = [&](auto ln, auto col, const auto& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
-    if (!peg.load_grammar(syntax.data(), syntax.size())) {
+    if (!parser.load_grammar(syntax.data(), syntax.size())) {
         return -1;
     }
 
@@ -84,22 +84,22 @@ int main(int argc, const char** argv)
         source_path = "[commendline]";
     }
 
-    peg.log = [&](auto ln, auto col, const auto& msg) {
+    parser.log = [&](auto ln, auto col, const auto& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
     if (opt_ast) {
-	    peg.enable_ast();
+	    parser.enable_ast();
 
-	    std::shared_ptr<peglib::Ast> ast;
-	    if (!peg.parse_n(source.data(), source.size(), ast)) {
+	    std::shared_ptr<peg::Ast> ast;
+	    if (!parser.parse_n(source.data(), source.size(), ast)) {
 	        return -1;
 	    }
 
-        ast = peglib::AstOptimizer(opt_optimize_ast_nodes).optimize(ast);
-	    peglib::AstPrint::print(ast);
+        ast = peg::AstOptimizer(opt_optimize_ast_nodes).optimize(ast);
+	    peg::AstPrint::print(ast);
     } else {
-	    if (!peg.parse_n(source.data(), source.size())) {
+	    if (!parser.parse_n(source.data(), source.size())) {
 	        return -1;
 	    }
     }

@@ -6,7 +6,7 @@
 #include <vector>
 
 using namespace culebra;
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 bool read_file(const char* path, vector<char>& buff)

@@ -9,7 +9,7 @@
 #include <iostream>
 #include <cstdlib>
 
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 int main(int argc, const char** argv)
@@ -39,7 +39,7 @@ int main(int argc, const char** argv)
         }
     };
 
-    peg parser(R"(
+    parser parser(R"(
         EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
         FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _

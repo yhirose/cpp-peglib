@@ -9,7 +9,7 @@
 #include <iostream>
 #include <cstdlib>
 
-using namespace peglib;
+using namespace peg;
 using namespace std;
 
 //
