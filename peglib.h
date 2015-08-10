@@ -617,7 +617,7 @@ public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto i = 0;
+        size_t i = 0;
         while (n - i > 0) {
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
@@ -1922,7 +1922,7 @@ private:
         std::string r;
         r.reserve(n);
 
-        auto i = 0u;
+        size_t i = 0;
         while (i < n) {
             auto ch = s[i];
             if (ch == '\\') {
