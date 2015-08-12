@@ -20,7 +20,7 @@ const auto grammar = R"(
 int main(void)
 {
     // 文法を読み込んでパーサーを生成
-    peglib::peg parser(grammar);
+    peg::parser parser(grammar);
 
     // 文法に誤りがあったかチェック
     if (!parser) {
@@ -58,7 +58,7 @@ g++ 5.1でもほとんど同じで，
 
 Visual C++ 14 (Visual Studio 2015) では，
 
-    cl -DUNICODE /EHsc hello.cc User32.lib
+    cl -DUNICODE /EHsc hello.cc
 
 とするとコンパイルできました。
 
@@ -94,13 +94,11 @@ const auto grammar = R"(
 )";
 ```
 
-脇にそれますが，この文法には一つ大きなバグがあります。実は「helloworld!」のように言葉をくっつけて入力しても結果が「OK」になってしまいます。このバグの解決法は後の章で説明します。
-
 この文法を理解するPEGパーサーを生成しましょう。`peglib::peg`がパーサーです。先ほどの定義した文法をコンストラクタに渡してパーサーを生成します。
 
 ```cpp
     // 文法を読み込んでパーサーを生成
-    peglib::peg parser(grammar);
+    peg::parser parser(grammar);
 
     // 文法に誤りがあったかチェック
     if (!parser) {
@@ -111,7 +109,7 @@ const auto grammar = R"(
 
 文法にエラーがあると、上記のように`parser`オブジェクトの真偽値が'false'になります。
 
-最後に`parser.parse`メソッドを呼び、ユーザーの入力した文字列をパースします。成功すると`true`が返ります。
+最後に`parse`メソッドを呼び、ユーザーの入力した文字列をパースします。成功すると`true`が返ります。
 
 ```cpp
         // ユーザーからの入力をパース
@@ -133,4 +131,4 @@ const auto grammar = R"(
 
 PEGライブラリはステップ2と3のみ扱い，残りは自分で扱わなければなりません。しかし，この文法定義とインタープリタ作成の部分が個性を出せる一番面白いところで，デザインセンスと実装技術の見せ所です。
 
-では最初に，PEG記法を使ってどのように言語を定義していくのか見てみましょう。
+次章では，PEGがどんなものかを見てみましょう。

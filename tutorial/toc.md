@@ -7,4 +7,4 @@
 ## 章
 
   1. [まずは，Hello world](chap_01.md)
-  2. [PEGで言語をデザインしてみよう](chap_02.md)
+  2. [はじめてのPEG](chap_02.md)
