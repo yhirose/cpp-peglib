@@ -5,13 +5,13 @@ C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 *cpp-peglib* tries to provide more expressive parsing experience in a simple way. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
 
-The PEG syntax is well described on page 2 in the [document](http://pdos.csail.mit.edu/papers/parsing:popl04.pdf). *cpp-peglib* also supports the following additional syntax for now:
+The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
   * `<` ... `>` (Token boundary operator)
-  * `$<` ... `>` (Capture operator)
-  * `$name<` ... `>` (Named capture operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)
+  * `$<` ... `>` (Capture operator)
+  * `$name<` ... `>` (Named capture operator)
 
 This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
@@ -269,10 +269,10 @@ for (auto& m: peg_token_range(syntax, s)) {
 }
 ```
 
-Make a parser with parser operators
------------------------------------
+Make a parser with parser combinators
+-------------------------------------
 
-Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser operators*. Here is an example:
+Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser combinatorss*. Here is an example:
 
 ```c++
 using namespace peg;
@@ -342,6 +342,11 @@ auto g = parser(syntax, additional_rules);
 assert(g.parse(" Hello BNF! "));
 ```
 
+Unicode support
+---------------
+
+Since cpp-peglib only accepts 8 bits characters, it probably accepts UTF-8 text. But `.` matches only a byte, not a Unicode character. Also, it dosn't support `\u????`. 
+
 Sample codes
 ------------
 
@@ -351,7 +356,7 @@ Sample codes
   * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/cmdline/peglint.cc)
   * [PL/0 Interpreter](https://github.com/yhirose/cpp-peglib/blob/master/language/pl0/pl0.cc)
 
-Tested Compilers
+Tested compilers
 ----------------
 
   * Visual Studio 2015
@@ -360,7 +365,10 @@ Tested Compilers
 TODO
 ----
 
-  * Unicode support
+  * ٍSemantic predicate (`&{ expr }` and `!{ expr }`)
+  * Unicode support (`.` matches a Unicode char. `\u????`, `\p{L}`)
+  * Ignore white spaces after string literals and tokens
+  * Allow `←` and `ε`
 
 License
 -------
