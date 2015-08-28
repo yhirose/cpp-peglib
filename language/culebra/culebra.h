@@ -150,23 +150,14 @@ struct Value
 {
     enum Type { Undefined, Bool, Long, String, Object, Array, Function };
 
-    Value() : type(Undefined) {
-        //std::cout << "Val::def ctor: " << std::endl;
-    }
-
-    Value(const Value& rhs) : type(rhs.type), v(rhs.v) {
-        //std::cout << "Val::copy ctor: " << *this << std::endl;
-    }
-
-    Value(Value&& rhs) : type(rhs.type), v(rhs.v) {
-        //std::cout << "Val::move ctor: " << *this << std::endl;
-    }
+    Value() : type(Undefined) {}
+    Value(const Value& rhs) : type(rhs.type), v(rhs.v) {}
+    Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
 
     Value& operator=(const Value& rhs) {
         if (this != &rhs) {
             type = rhs.type;
             v = rhs.v;
-            //std::cout << "Val::copy=: " << *this << std::endl;
         }
         return *this;
     }
@@ -174,7 +165,6 @@ struct Value
     Value& operator=(Value&& rhs) {
         type = rhs.type;
         v = rhs.v;
-        //std::cout << "Val::move=: " << *this << std::endl;
         return *this;
     }
 
@@ -195,7 +185,7 @@ struct Value
 
     long to_long() const {
         switch (type) {
-            case Bool: return v.get<bool>();
+            //case Bool: return v.get<bool>();
             case Long: return v.get<long>();
             default: throw std::runtime_error("type error.");
         }
@@ -218,7 +208,6 @@ struct Value
     const ObjectValue& to_object() const {
         switch (type) {
             case Object: return v.get<ObjectValue>();
-            case Array: return v.get<ArrayValue>();
             default: throw std::runtime_error("type error.");
         }
     }
@@ -226,7 +215,6 @@ struct Value
     ObjectValue& to_object() {
         switch (type) {
             case Object: return v.get<ObjectValue>();
-            case Array: return v.get<ArrayValue>();
             default: throw std::runtime_error("type error.");
         }
     }
@@ -336,7 +324,7 @@ struct Value
         // NOTREACHED
     }
 
-    Type        type;
+    Type     type;
     peg::any v;
 };
 
@@ -371,11 +359,10 @@ struct Environment
         return outer && outer->has(s);
     }
 
-    Value get(const std::string& s) const {
+    const Value& get(const std::string& s) const {
         if (dictionary.find(s) != dictionary.end()) {
             return dictionary.at(s).val;
-        }
-        if (outer) {
+        } else if (outer) {
             return outer->get(s);
         }
         std::string msg = "undefined variable '" + s + "'...";
@@ -390,7 +377,6 @@ struct Environment
                 std::string msg = "immutable variable '" + s + "'...";
                 throw std::runtime_error(msg);
             }
-            //std::cout << "Env::assgin: " << s << std::endl;
             sym.val = val;
             return;
         }
@@ -399,8 +385,11 @@ struct Environment
     }
 
     void initialize(const std::string& s, const Value& val, bool mut) {
-        //std::cout << "Env::initialize: " << s << std::endl;
         dictionary[s] = Symbol{ val, mut };
+    }
+
+    void initialize(const std::string& s, Value&& val, bool mut) {
+        dictionary[s] = Symbol{ std::move(val), mut };
     }
 
     size_t                        level;
@@ -547,8 +536,8 @@ struct Interpreter
     Value exec(const peg::Ast& ast, std::shared_ptr<Environment> env) {
         try {
             return eval(ast, env);
-        } catch (const Value& val) {
-            return val;
+        } catch (...) {
+            return Value();
         }
     }
 
@@ -677,8 +666,8 @@ private:
             callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
             try {
                 return f.eval(callEnv);
-            } catch (const Value& val) {
-                return val;
+            } catch (...) {
+                return Value();
             }
         }
 
@@ -733,7 +722,7 @@ private:
             }
         }
 
-        return std::move(val);
+        return val;
     }
 
     Value eval_block(const peg::Ast& ast, std::shared_ptr<Environment> env) {
@@ -746,10 +735,10 @@ private:
         for (auto node: ast.nodes) {
             val = eval(*node, env);
             if (val.to_bool()) {
-                return std::move(val);
+                return val;
             }
         }
-        return std::move(val);
+        return val;
     }
 
     Value eval_logical_and(const peg::Ast& ast, std::shared_ptr<Environment> env) {
@@ -757,15 +746,13 @@ private:
         for (auto node: ast.nodes) {
             val = eval(*node, env);
             if (!val.to_bool()) {
-                return std::move(val);
+                return val;
             }
         }
-        return std::move(val);
+        return val;
     }
 
     Value eval_condition(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        assert(ast.nodes.size() == 3); // if the size is 1, thes node will be hoisted.
-
         auto lhs = eval(*ast.nodes[0], env);
         auto ope = eval(*ast.nodes[1], env).to_string();
         auto rhs = eval(*ast.nodes[2], env);
@@ -780,17 +767,14 @@ private:
     }
 
     Value eval_unary_plus(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return eval(*ast.nodes[1], env);
     }
 
     Value eval_unary_minus(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return Value(eval(*ast.nodes[1], env).to_long() * -1);
     }
 
     Value eval_unary_not(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        assert(ast.nodes.size() == 2); // if the size is 1, thes node will be hoisted.
         return Value(!eval(*ast.nodes[1], env).to_bool());
     }
 
@@ -835,7 +819,7 @@ private:
             } else {
                 env->initialize(ident, val, mut);
             }
-            return std::move(val);
+            return val;
         } else {
             using peg::operator"" _;
 
@@ -893,7 +877,7 @@ private:
             auto mut = prop.nodes[0]->token == "mut";
             const auto& name = prop.nodes[1]->token;
             auto val = eval(*prop.nodes[2], env);
-            obj.properties->emplace(name, Symbol{ val, mut });
+            obj.properties->emplace(name, Symbol{ std::move(val), mut });
         }
         return Value(std::move(obj));
     }
@@ -903,7 +887,7 @@ private:
         for (auto i = 0u; i < ast.nodes.size(); i++) {
             auto expr = ast.nodes[i];
             auto val = eval(*expr, env);
-            arr.values->push_back(val);
+            arr.values->push_back(std::move(val));
         }
         return Value(std::move(arr));
     }
