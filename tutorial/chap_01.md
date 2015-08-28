@@ -1,6 +1,6 @@
-# まずは，Hello world
+# まずは"Hello world!"
 
-はじめに取り組むプログラムは，もちろん**Hello world**ですよね。
+はじめに取り組むプログラムは，もちろん**Hello world!**ですよね。
 
 では「hello world!」と正しく入力できたら「OK」，そうでなければ「NG」と表示するプログラムを作ってみましょう！以下がソースコードです。
 
@@ -8,47 +8,48 @@
 // hello.cc
 #include <iostream>
 #include "peglib.h"
-
+#include "linenoise.hpp"
 using namespace std;
-
-// 文法定義
-const auto grammar = R"(
-    PROGRAM <- _ 'hello' _ 'world' '!' _
-    _       <- [ \t]*
-)";
 
 int main(void)
 {
     // 文法を読み込んでパーサーを生成
-    peg::parser parser(grammar);
+    peg::parser parser(R"(
+        PROGRAM <- _ HELLO _ WORLD '!' _
+        HELLO   <- [hH] 'ello'
+        WORLD   <- [wW] 'orld'
+        _       <- [ \t]*
+    )");
 
-    // 文法に誤りがあったかチェック
-    if (!parser) {
+    if (!parser) { // 文法に誤りがあったかチェック
         cerr << "grammar error..." << endl;
         return -1;
     }
 
     while (true) {
-        // 文字列を一行読み込み
-        cout << "> ";
-        string line;
-        getline(cin, line);
+        auto line = linenoise::Readline("> "); // 文字列を一行読み込み
 
-        // ユーザーからの入力をパース
-        if (parser.parse(line.c_str())) {
+        if (line == "exit") { break; }         // 終了
+
+        if (parser.parse(line.c_str())) {      // ユーザーからの入力をパース
             cout << "OK" << endl;
         } else {
             cout << "NG" << endl;
         }
+
+        linenoise::AddHistory(line.c_str());   // 入力履歴に追加
     }
 
     return 0;
 }
 ```
 
-このコードを`hello.cc`に保存して，それからコンパイルしてみましょう。このコードはPEGパーサライブラリを使用するので，[ここから](https://raw.githubusercontent.com/yhirose/cpp-peglib/master/peglib.h)`peglib.h`ダウンロードして`hello.cc`があるディレクトリに保存してください。
+このコードを`hello.cc`として保存してください。このコードは以下の2つのライブラリを使用するので，ダウンロードして`hello.cc`と同じディレクトリに保存してください。
 
-コンパイル時にはC++11の機能を有効にする必要があります。`clang++`のパージョン3.5ではこんな感じになります。
+  * cpp-peglib C++ PEG parser library - [peblib.h](https://raw.githubusercontent.com/yhirose/cpp-peglib/master/peglib.h)
+  * cpp-linenoise C++ Readline library - [linenoise.hpp](https://raw.githubusercontent.com/yhirose/cpp-linenoise/master/linenoise.hpp)
+
+ではコンパイルしましょう。コンパイル時にはC++11の機能を有効にする必要があります。`clang++`のパージョン3.5ではこんな感じになります。
 
     clang++ -std='c++11' -o hello hello.cc
 
@@ -73,7 +74,7 @@ OK
 OK
 ```
 
-見事にPEG版Hello worldをクリアです！（プログラムを終了したい時は`Ctrl+C`を押してください。）
+見事にPEG版Hello worldをクリアです！（プログラムを終了したい時は`exit`を入力してください。）
 
 --
 
@@ -87,21 +88,23 @@ OK
 
 続いてPEGで文法を定義します。この文法は「hello world!」という文字列を受け付けるだけのとても簡単なものです。入力文字列の前後や「hello」と「world」の間には，任意の長さのスペースやタブを入れることができます。(ちなみに「world」と「!」の間には入れることができません。)
 
-```cpp
-const auto grammar = R"(
+```
     PROGRAM <- _ 'hello' _ 'world' '!' _
     _       <- [ \t]*
-)";
 ```
 
 この文法を理解するPEGパーサーを生成しましょう。`peglib::peg`がパーサーです。先ほどの定義した文法をコンストラクタに渡してパーサーを生成します。
 
 ```cpp
     // 文法を読み込んでパーサーを生成
-    peg::parser parser(grammar);
+    peg::parser parser(R"(
+        PROGRAM <- _ HELLO _ WORLD '!' _
+        HELLO   <- [hH] 'ello'
+        WORLD   <- [wW] 'orld'
+        _       <- [ \t]*
+    )");
 
-    // 文法に誤りがあったかチェック
-    if (!parser) {
+    if (!parser) { // 文法に誤りがあったかチェック
         cerr << "grammar error..." << endl;
         return -1;
     }
@@ -112,8 +115,7 @@ const auto grammar = R"(
 最後に`parse`メソッドを呼び、ユーザーの入力した文字列をパースします。成功すると`true`が返ります。
 
 ```cpp
-        // ユーザーからの入力をパース
-        if (parser.parse(line.c_str())) {
+        if (parser.parse(line.c_str())) {      // ユーザーからの入力をパース
             cout << "OK" << endl;
         } else {
             cout << "NG" << endl;
