@@ -2,21 +2,21 @@
 program    <- _ block '.' _
 
 block      <- const var procedure statement
-const      <- ('CONST' _ ident '=' _ number (',' _ ident '=' _ number)* ';' _)?
-var        <- ('VAR' _ ident (',' _ ident)* ';' _)?
-procedure  <- ('PROCEDURE' _ ident ';' _ block ';' _)*
+const      <- ('CONST' __ ident '=' _ number (',' _ ident '=' _ number)* ';' _)?
+var        <- ('VAR' __ ident (',' _ ident)* ';' _)?
+procedure  <- ('PROCEDURE' __ ident ';' _ block ';' _)*
 
 statement  <- (assignment / call / statements / if / while / out / in)?
 assignment <- ident ':=' _ expression
-call       <- 'CALL' _ ident
-statements <- 'BEGIN' _ statement (';' _ statement )* 'END' _
-if         <- 'IF' _ condition 'THEN' _ statement
-while      <- 'WHILE' _ condition 'DO' _ statement
-out        <- ('out' / 'write' / '!') _ expression
-in         <- ('in' / 'read' / '?') _ ident
+call       <- 'CALL' __ ident
+statements <- 'BEGIN' __ statement (';' _ statement )* 'END' __
+if         <- 'IF' __ condition 'THEN' __ statement
+while      <- 'WHILE' __ condition 'DO' __ statement
+out        <- ('out' __ / 'write' __ / '!' _) expression
+in         <- ('in' __ / 'read' __ / '?' _) ident
 
 condition  <- odd / compare
-odd        <- 'ODD' _ expression
+odd        <- 'ODD' __ expression
 compare    <- expression compare_op expression
 compare_op <- < '=' / '#' / '<=' / '<' / '>=' / '>' > _
 
@@ -29,8 +29,9 @@ factor_op  <- < [*/] > _
 
 factor     <- ident / number / '(' _ expression ')' _
 
-ident      <- < [a-z] ([a-z] / [0-9])* > _
+ident      <- < [a-z] [a-z0-9]* > _
 number     <- < [0-9]+ > _
 
 ~_         <- [ \t\r\n]*
+~__        <- ![a-z0-9_] _
 

@@ -136,7 +136,7 @@ private:
     }
 
     static void constants(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
-        // const <- ('CONST' _ ident '=' _ number(',' _ ident '=' _ number)* ';' _) ?
+        // const <- ('CONST' __ ident '=' _ number(',' _ ident '=' _ number)* ';' _) ?
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 2) {
             const auto& ident = nodes[i + 0]->token;
@@ -149,7 +149,7 @@ private:
     }
 
     static void variables(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
-        // var <- ('VAR' _ ident(',' _ ident)* ';' _) ?
+        // var <- ('VAR' __ ident(',' _ ident)* ';' _) ?
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 1) {
             const auto& ident = nodes[i]->token;
@@ -161,7 +161,7 @@ private:
     }
 
     static void procedures(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
-        // procedure <- ('PROCEDURE' _ ident ';' _ block ';' _)*
+        // procedure <- ('PROCEDURE' __ ident ';' _ block ';' _)*
         const auto& nodes = ast->nodes;
         for (auto i = 0u; i < nodes.size(); i += 2) {
             const auto& ident = nodes[i + 0]->token;
@@ -182,7 +182,7 @@ private:
     }
 
     static void call(const shared_ptr<AstPL0> ast, shared_ptr<SymbolScope> scope) {
-        // call <- 'CALL' _ ident
+        // call <- 'CALL' __ ident
         const auto& ident = ast->nodes[0]->token;
         if (!scope->has_procedure(ident)) {
             throw_runtime_error(ast->nodes[0], "undefined procedure '" + ident + "'...");
@@ -273,26 +273,26 @@ private:
     }
 
     static void exec_call(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // call <- 'CALL' _ ident
+        // call <- 'CALL' __ ident
         exec_block(env->get_procedure(ast->nodes[0]->token), env);
     }
 
     static void exec_statements(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // statements <- 'BEGIN' _ statement (';' _ statement )* 'END' _
+        // statements <- 'BEGIN' __ statement (';' _ statement )* 'END' __
         for (auto stmt: ast->nodes) {
             exec(stmt, env);
         }
     }
 
     static void exec_if(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // if <- 'IF' _ condition 'THEN' _ statement
+        // if <- 'IF' __ condition 'THEN' __ statement
         if (eval_condition(ast->nodes[0], env)) {
             exec(ast->nodes[1], env);
         }
     }
 
     static void exec_while(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // while <- 'WHILE' _ condition 'DO' _ statement
+        // while <- 'WHILE' __ condition 'DO' __ statement
         auto cond = ast->nodes[0];
         auto stmt = ast->nodes[1];
         while (eval_condition(cond, env)) {
@@ -301,12 +301,12 @@ private:
     }
 
     static void exec_out(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // out <- '!' _ expression
+        // out <- ('out' __ / 'write' __ / '!' _) expression
         cout << eval(ast->nodes[0], env) << endl;
     }
 
     static void exec_in(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // in <- '?' _ ident
+        // in <- ('in' __ / 'read' __ / '?' _) ident
         int val;
         cin >> val;
         env->set_variable(ast->nodes[0]->token, val);
@@ -323,7 +323,7 @@ private:
     }
 
     static bool eval_odd(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        // odd <- 'ODD' _ expression
+        // odd <- 'ODD' __ expression
         return eval_expression(ast->nodes[0], env) != 0;
     }
 
