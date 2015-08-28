@@ -24,7 +24,7 @@ function<void (size_t, size_t, const string&)> makeJSONFormatter(string& json)
     };
 }
 
-bool parse_grammar(const string& text, peglib::peg& peg, string& json)
+bool parse_grammar(const string& text, peg::parser& peg, string& json)
 {
     peg.log = makeJSONFormatter(json);
     json += "[";
@@ -33,7 +33,7 @@ bool parse_grammar(const string& text, peglib::peg& peg, string& json)
     return ret;
 }
 
-bool parse_code(const string& text, peglib::peg& peg, string& json)
+bool parse_code(const string& text, peg::parser& peg, string& json)
 {
     peg.log = makeJSONFormatter(json);
     json += "[";
@@ -57,7 +57,7 @@ int main(void)
         string grammarResult;
         string codeResult;
 
-        peglib::peg peg;
+        peg::parser peg;
         auto ret = parse_grammar(grammarText, peg, grammarResult);
 
         if (ret && peg) {

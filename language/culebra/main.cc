@@ -228,7 +228,7 @@ int repl(shared_ptr<Environment> env, bool print_ast)
             auto ret = run("(repl)", env, line.c_str(), line.size(), val, msgs, ast);
             if (ret) {
                 if (print_ast) {
-                    AstPrint::print(ast);
+                    peg::print_ast(ast);
                 }
                 cout << val << endl;
                 linenoise::AddHistory(line.c_str());
@@ -297,7 +297,7 @@ int main(int argc, const char** argv)
                 }
                 return -1;
             } else if (print_ast) {
-                AstPrint::print(ast);
+                peg::print_ast(ast);
             }
         }
 

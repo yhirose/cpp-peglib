@@ -97,7 +97,7 @@ int main(int argc, const char** argv)
 	    }
 
         ast = peg::AstOptimizer(opt_optimize_ast_nodes).optimize(ast);
-	    peg::AstPrint::print(ast);
+	    peg::print_ast(ast);
     } else {
 	    if (!parser.parse_n(source.data(), source.size())) {
 	        return -1;

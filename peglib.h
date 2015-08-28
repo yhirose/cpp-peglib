@@ -2039,30 +2039,23 @@ struct AstBase : public Annotation
     std::shared_ptr<AstBase<Annotation>>              parent;
 };
 
-struct AstPrint
-{
-    template <typename T>
-    static void print(const std::shared_ptr<T>& ptr, int level = 0) {
-        const auto& ast = *ptr;
-        for (auto i = 0; i < level; i++) { std::cout << "  "; }
-        if (ast.is_token) {
-            std::cout << "- " << name(ast) << ": '" << ast.token << "'" << std::endl;
-        } else {
-            std::cout << "+ " << name(ast) << std::endl;
-        }
-        for (auto node : ast.nodes) { print(node, level + 1); }
+template <typename T>
+void print_ast(const std::shared_ptr<T>& ptr, int level = 0) {
+    const auto& ast = *ptr;
+    for (auto i = 0; i < level; i++) { std::cout << "  "; }
+    std::string name;
+    if (ast.name == ast.original_name) {
+        name = ast.name;
+    } else {
+        name = ast.original_name + " (" + ast.name + ")";
     }
-
-private:
-    template <typename T>
-    static std::string name(const T& ast) {
-        if (ast.name == ast.original_name) {
-            return ast.name;
-        } else {
-            return ast.original_name + " (" + ast.name + ")";
-        }
+    if (ast.is_token) {
+        std::cout << "- " << name << ": '" << ast.token << "'" << std::endl;
+    } else {
+        std::cout << "+ " << name << std::endl;
     }
-};
+    for (auto node : ast.nodes) { print_ast(node, level + 1); }
+}
 
 struct AstOptimizer
 {

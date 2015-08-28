@@ -437,7 +437,7 @@ int main(int argc, const char** argv)
     shared_ptr<AstPL0> ast;
     if (parser.parse_n(source.data(), source.size(), ast, path)) {
         if (argc > 2 && string("--ast") == argv[2]) {
-            AstPrint::print(ast);
+            print_ast(ast);
         }
         try {
             SymbolTable::build_on_ast(ast);
@@ -452,3 +452,4 @@ int main(int argc, const char** argv)
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix
+
