@@ -667,8 +667,8 @@ private:
             callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
             try {
                 return f.eval(callEnv);
-            } catch (const Value& val) {
-                return val;
+            } catch (const Value& e) {
+                return e;
             }
         }
 
@@ -929,30 +929,41 @@ private:
     Debugger debugger_;
 };
 
-inline bool run(
-    const std::string&            path,
-    std::shared_ptr<Environment>  env,
-    const char*                   expr,
-    size_t                        len,
-    Value&                        val,
-    std::vector<std::string>&     msgs,
-    std::shared_ptr<peg::Ast>&    ast,
-    Debugger                      debugger = nullptr)
+inline std::shared_ptr<peg::Ast> parse(
+    const std::string&         path,
+    const char*                expr,
+    size_t                     len,
+    std::vector<std::string>&  msgs)
+{
+    auto& parser = get_parser();
+
+    parser.log = [&](size_t ln, size_t col, const std::string& err_msg) {
+        std::stringstream ss;
+        ss << path << ":" << ln << ":" << col << ": " << err_msg << std::endl;
+        msgs.push_back(ss.str());
+    };
+
+    std::shared_ptr<peg::Ast> ast;
+    if (parser.parse_n(expr, len, ast, path.c_str())) {
+        return peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN" }).optimize(ast);
+    }
+
+    return nullptr;
+}
+
+inline bool interpret(
+    const std::shared_ptr<peg::Ast>& ast,
+    std::shared_ptr<Environment>     env,
+    Value&                           val,
+    std::vector<std::string>&        msgs,
+    Debugger                         debugger = nullptr)
 {
     try {
-        auto& parser = get_parser();
-
-        parser.log = [&](size_t ln, size_t col, const std::string& err_msg) {
-            std::stringstream ss;
-            ss << path << ":" << ln << ":" << col << ": " << err_msg << std::endl;
-            msgs.push_back(ss.str());
-        };
-
-        if (parser.parse_n(expr, len, ast, path.c_str())) {
-            ast = peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN" }).optimize(ast);
-            val = Interpreter(debugger).eval(*ast, env);
-            return true;
-        }
+        val = Interpreter(debugger).eval(*ast, env);
+        return true;
+    } catch (const Value& e) {
+        val = e;
+        return true;
     } catch (std::runtime_error& e) {
         msgs.push_back(e.what());
     }

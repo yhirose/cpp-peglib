@@ -222,20 +222,23 @@ int repl(shared_ptr<Environment> env, bool print_ast)
         }
 
         if (!line.empty()) {
-            Value           val;
             vector<string>  msgs;
-            shared_ptr<Ast> ast;
-            auto ret = run("(repl)", env, line.c_str(), line.size(), val, msgs, ast);
-            if (ret) {
+            auto ast = parse("(repl)", line.data(), line.size(), msgs);
+            if (ast) {
                 if (print_ast) {
                     peg::print_ast(ast);
                 }
-                cout << val << endl;
-                linenoise::AddHistory(line.c_str());
-            } else if (!msgs.empty()) {
-                for (const auto& msg: msgs) {
-                    cout << msg << endl;;
+
+                Value val;
+                if (interpret(ast, env, val, msgs)) {
+                    cout << val << endl;
+                    linenoise::AddHistory(line.c_str());
+                    continue;
                 }
+            }
+
+            for (const auto& msg : msgs) {
+                cout << msg << endl;;
             }
         }
     }
@@ -279,26 +282,24 @@ int main(int argc, const char** argv)
                 return -1;
             }
 
-            Value           val;
             vector<string>  msgs;
-            shared_ptr<Ast> ast;
-            Debugger        dbg;
-
-            CommandLineDebugger debugger;
-            if (debug) {
-                dbg = debugger;
-            }
-
-            auto ret = run(path, env, buff.data(), buff.size(), val, msgs, ast, dbg);
-
-            if (!ret) {
-                for (const auto& msg: msgs) {
-                    cerr << msg << endl;
+            auto ast = parse(path, buff.data(), buff.size(), msgs);
+            if (ast) {
+                if (print_ast) {
+                    peg::print_ast(ast);
                 }
-                return -1;
-            } else if (print_ast) {
-                peg::print_ast(ast);
+
+                Value val;
+                auto  dbg = debug ? CommandLineDebugger() : Debugger();
+                if (interpret(ast, env, val, msgs, dbg)) {
+                    return 0;
+                }
             }
+
+            for (const auto& msg : msgs) {
+                cerr << msg << endl;
+            }
+            return -1;
         }
 
         if (shell) {
