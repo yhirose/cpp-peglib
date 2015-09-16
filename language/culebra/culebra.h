@@ -57,7 +57,7 @@ const auto grammar_ = R"(
     OBJECT                   <-  '{' _ (OBJECT_PROPERTY (_ ',' _ OBJECT_PROPERTY)*)? _ '}'
     OBJECT_PROPERTY          <-  MUTABLE _ IDENTIFIER _ ':' _ EXPRESSION
 
-    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']'
+    ARRAY                    <-  '[' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ']'
 
     UNDEFINED                <-  < 'undefined' _wd_ >
     BOOLEAN                  <-  < ('true' / 'false')  _wd_ >
