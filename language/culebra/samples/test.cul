@@ -9,21 +9,21 @@ test_call = fn () {
 
 test_return = fn () {
     f = fn (x) {
-	    if (x % 2) {
-		    return 'odd'
-		}
-		'even'
-	}
+        if x % 2 {
+            return 'odd'
+        }
+        'even'
+    }
     assert(f(3) == 'odd')
     assert(f(4) == 'even')
 
-	mut val = 0
-	f2 = fn () {
-		val = 1
-		return // comment
-		val = 2
-	}
-	f2()
+    mut val = 0
+    f2 = fn () {
+        val = 1
+        return // comment
+        val = 2
+    }
+    f2()
     assert(val == 1)
 }
 
@@ -94,10 +94,10 @@ test_function = fn () {
 test_object = fn () {
     n = 1
     o = {
-    	n: 123,
-    	s: 'str',
-    	f1: fn (x) { x + this.n },
-    	f2: fn (x) { x + n }
+        n: 123,
+        s: 'str',
+        f1: fn (x) { x + this.n },
+        f2: fn (x) { x + n }
     }
     assert(o.size() == 4)
     assert(o.f1(10) == 133)

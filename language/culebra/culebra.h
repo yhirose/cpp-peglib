@@ -7,82 +7,90 @@ namespace culebra {
 
 const auto grammar_ = R"(
 
-    PROGRAM                  <-  _ STATEMENTS
-    STATEMENTS               <-  (STATEMENT (';' _)?)*
+    PROGRAM                  <-  _ STATEMENTS _
+    STATEMENTS               <-  (STATEMENT (_sp_ (';' / _nl_) (_ STATEMENT)?)*)?
     STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
 
     DEBUGGER                 <-  debugger
-    RETURN                   <-  return End _ / return EXPRESSION
+    RETURN                   <-  return (_sp_ !_nl_ EXPRESSION)?
 
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
-    ASSIGNMENT               <-  MUTABLE PRIMARY (ARGUMENTS / INDEX / DOT)* '=' _ EXPRESSION
+    ASSIGNMENT               <-  MUTABLE _ PRIMARY (_ (ARGUMENTS / INDEX / DOT))* _ '=' _ EXPRESSION
 
-    LOGICAL_OR               <-  LOGICAL_AND ('||' _ LOGICAL_AND)*
-    LOGICAL_AND              <-  CONDITION ('&&' _  CONDITION)*
-    CONDITION                <-  ADDITIVE (CONDITION_OPERATOR ADDITIVE)*
-    ADDITIVE                 <-  UNARY_PLUS (ADDITIVE_OPERATOR UNARY_PLUS)*
+    LOGICAL_OR               <-  LOGICAL_AND (_ '||' _ LOGICAL_AND)*
+    LOGICAL_AND              <-  CONDITION (_ '&&' _  CONDITION)*
+    CONDITION                <-  ADDITIVE (_ CONDITION_OPERATOR _ ADDITIVE)*
+    ADDITIVE                 <-  UNARY_PLUS (_ ADDITIVE_OPERATOR _ UNARY_PLUS)*
     UNARY_PLUS               <-  UNARY_PLUS_OPERATOR? UNARY_MINUS
     UNARY_MINUS              <-  UNARY_MINUS_OPERATOR? UNARY_NOT
     UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
-    MULTIPLICATIVE           <-  CALL (MULTIPLICATIVE_OPERATOR CALL)*
+    MULTIPLICATIVE           <-  CALL (_ MULTIPLICATIVE_OPERATOR _ CALL)*
 
-    CALL                     <-  PRIMARY (ARGUMENTS / INDEX / DOT)*
-    ARGUMENTS                <-  '(' _ (EXPRESSION (',' _ EXPRESSION)*)? ')' _
-    INDEX                    <-  '[' _ EXPRESSION ']' _
+    CALL                     <-  PRIMARY (_ (ARGUMENTS / INDEX / DOT))*
+    ARGUMENTS                <-  '(' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ')'
+    INDEX                    <-  '[' _ EXPRESSION _ ']'
     DOT                      <-  '.' _ IDENTIFIER
 
-    WHILE                    <-  while EXPRESSION BLOCK
-    IF                       <-  if EXPRESSION BLOCK (else if EXPRESSION BLOCK)* (else BLOCK)?
+    WHILE                    <-  while _ EXPRESSION _ BLOCK
+    IF                       <-  if _ EXPRESSION _ BLOCK (_ else _ if _ EXPRESSION _ BLOCK)* (_ else _ BLOCK)?
 
-    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION ')' _
+    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION _ ')'
 
-    FUNCTION                 <-  fn PARAMETERS BLOCK
-    PARAMETERS               <-  '(' _ (PARAMETER (',' _ PARAMETER)*)? ')' _
-    PARAMETER                <-  MUTABLE IDENTIFIER
+    FUNCTION                 <-  fn _ PARAMETERS _ BLOCK
+    PARAMETERS               <-  '(' _ (PARAMETER (_ ',' _ PARAMETER)*)? _ ')'
+    PARAMETER                <-  MUTABLE _ IDENTIFIER
 
-    BLOCK                    <-  '{' _ STATEMENTS '}' _
+    BLOCK                    <-  '{' _ STATEMENTS _ '}'
 
-    CONDITION_OPERATOR       <-  < ('==' / '!=' / '<=' / '<' / '>=' / '>') > _
-    ADDITIVE_OPERATOR        <-  < [-+] > _
-    UNARY_PLUS_OPERATOR      <-  < '+' > _
-    UNARY_MINUS_OPERATOR     <-  < '-' > _
-    UNARY_NOT_OPERATOR       <-  < '!' > _
-    MULTIPLICATIVE_OPERATOR  <-  < [*/%] > _
+    CONDITION_OPERATOR       <-  '==' / '!=' / '<=' / '<' / '>=' / '>'
+    ADDITIVE_OPERATOR        <-  [-+]
+    UNARY_PLUS_OPERATOR      <-  '+'
+    UNARY_MINUS_OPERATOR     <-  '-'
+    UNARY_NOT_OPERATOR       <-  '!'
+    MULTIPLICATIVE_OPERATOR  <-  [*/%]
 
-    IDENTIFIER               <-  < IdentInitChar IdentChar* > _
+    MUTABLE                  <-  < ('mut' _wd_)? >
 
-    OBJECT                   <-  '{' _ (OBJECT_PROPERTY (',' _ OBJECT_PROPERTY)*)? '}' _
-    OBJECT_PROPERTY          <-  MUTABLE IDENTIFIER ':' _ EXPRESSION
+    IDENTIFIER               <-  < IdentInitChar IdentChar* >
 
-    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']' _
+    OBJECT                   <-  '{' _ (OBJECT_PROPERTY (_ ',' _ OBJECT_PROPERTY)*)? _ '}'
+    OBJECT_PROPERTY          <-  MUTABLE _ IDENTIFIER _ ':' _ EXPRESSION
 
-    UNDEFINED                <-  < 'undefined' > __
-    BOOLEAN                  <-  < ('true' / 'false') > __
-    MUTABLE                  <-  (< 'mut' > __)?
+    ARRAY                    <-  '[' _ (EXPRESSION (',' _ EXPRESSION)*)? ']'
 
-    ~debugger                <-  'debugger' __
-    ~return                  <-  'return' !IdentInitChar Space*
-    ~while                   <-  'while' __
-    ~if                      <-  'if' __
-    ~else                    <-  'else' __
-    ~fn                      <-  'fn' __
+    UNDEFINED                <-  < 'undefined' _wd_ >
+    BOOLEAN                  <-  < ('true' / 'false')  _wd_ >
 
-    NUMBER                   <-  < [0-9]+ > _
-    STRING                   <-  ['] < (!['] .)* > ['] _
+    NUMBER                   <-  < [0-9]+ >
+    STRING                   <-  ['] < (!['] .)* > [']
 
-    INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION '}' / INTERPOLATED_CONTENT)* '"' _
+    INTERPOLATED_STRING      <-  '"' ('{' _ EXPRESSION _ '}' / INTERPOLATED_CONTENT)* '"'
     INTERPOLATED_CONTENT     <-  (!["{] .) (!["{] .)*
 
-    ~_                       <-  (Space / End)*
-    __                       <-  !IdentInitChar (Space / End)*
-    ~Space                   <-  ' ' / '\t' / Comment
-    ~End                     <-  EndOfLine / EndOfFile
-    Comment                  <-  '/*' (!'*/' .)* '*/' /  ('#' / '//') (!End .)* &End
+    ~debugger                <- 'debugger' _wd_
+    ~while                   <- 'while' _wd_
+    ~if                      <- 'if' _wd_
+    ~else                    <- 'else' _wd_
+    ~fn                      <- 'fn' _wd_
+    ~return                  <- 'return' _wd_
+
+    ~_                       <-  (WhiteSpace / End)*
+    ~_sp_                    <-  SpaceChar*
+    ~_nl_                    <-  LineComment? End
+    ~_wd_                    <-  !IdentInitChar
+
+    WhiteSpace               <-  SpaceChar / Comment
+    End                      <-  EndOfLine / EndOfFile
+    Comment                  <-  BlockComment / LineComment
+
+    SpaceChar                <-  ' ' / '\t'
     EndOfLine                <-  '\r\n' / '\n' / '\r'
     EndOfFile                <-  !.
     IdentInitChar            <-  [a-zA-Z_]
     IdentChar                <-  [a-zA-Z0-9_]
+    BlockComment             <-  '/*' (!'*/' .)* '*/'
+    LineComment              <-  ('#' / '//') (!End .)* &End
 
 )";
 
@@ -208,6 +216,7 @@ struct Value
     const ObjectValue& to_object() const {
         switch (type) {
             case Object: return v.get<ObjectValue>();
+            case Array: return v.get<ArrayValue>();
             default: throw std::runtime_error("type error.");
         }
     }
@@ -533,15 +542,6 @@ struct Interpreter
         : debugger_(debugger) {
     }
 
-    Value exec(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        try {
-            return eval(ast, env);
-        } catch (...) {
-            return Value();
-        }
-    }
-
-private:
     Value eval(const peg::Ast& ast, std::shared_ptr<Environment> env) {
         using peg::operator"" _;
 
@@ -587,6 +587,7 @@ private:
         throw std::logic_error("invalid Ast type");
     }
 
+private:
     Value eval_statements(const peg::Ast& ast, std::shared_ptr<Environment> env) {
         if (ast.is_token) {
             return eval(ast, env);
@@ -666,8 +667,8 @@ private:
             callEnv->initialize("__COLUMN__", Value((long)ast.column), false);
             try {
                 return f.eval(callEnv);
-            } catch (...) {
-                return Value();
+            } catch (const Value& val) {
+                return val;
             }
         }
 
@@ -935,7 +936,7 @@ inline bool run(
     size_t                        len,
     Value&                        val,
     std::vector<std::string>&     msgs,
-    std::shared_ptr<peg::Ast>& ast,
+    std::shared_ptr<peg::Ast>&    ast,
     Debugger                      debugger = nullptr)
 {
     try {
@@ -949,7 +950,7 @@ inline bool run(
 
         if (parser.parse_n(expr, len, ast, path.c_str())) {
             ast = peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN" }).optimize(ast);
-            val = Interpreter(debugger).exec(*ast, env);
+            val = Interpreter(debugger).eval(*ast, env);
             return true;
         }
     } catch (std::runtime_error& e) {
