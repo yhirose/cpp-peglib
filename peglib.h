@@ -540,7 +540,7 @@ public:
 #endif
 
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
+    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         size_t i = 0;
@@ -580,7 +580,7 @@ public:
 #endif
 
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(std::move(opes)) {}
+    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         size_t id = 0;
