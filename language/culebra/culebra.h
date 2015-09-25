@@ -9,14 +9,15 @@ const auto grammar_ = R"(
 
     PROGRAM                  <-  _ STATEMENTS _
     STATEMENTS               <-  (STATEMENT (_sp_ (';' / _nl_) (_ STATEMENT)?)*)?
-    STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
+    STATEMENT                <-  DEBUGGER / RETURN / LEXICAL_SCOPE / EXPRESSION
 
     DEBUGGER                 <-  debugger
     RETURN                   <-  return (_sp_ !_nl_ EXPRESSION)?
+    LEXICAL_SCOPE            <-  BLOCK
 
     EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
-    ASSIGNMENT               <-  MUTABLE _ PRIMARY (_ (ARGUMENTS / INDEX / DOT))* _ '=' _ EXPRESSION
+    ASSIGNMENT               <-  LET _ MUTABLE _ PRIMARY (_ (ARGUMENTS / INDEX / DOT))* _ '=' _ EXPRESSION
 
     LOGICAL_OR               <-  LOGICAL_AND (_ '||' _ LOGICAL_AND)*
     LOGICAL_AND              <-  CONDITION (_ '&&' _  CONDITION)*
@@ -50,6 +51,7 @@ const auto grammar_ = R"(
     UNARY_NOT_OPERATOR       <-  '!'
     MULTIPLICATIVE_OPERATOR  <-  [*/%]
 
+    LET                      <-  < ('let' _wd_)? >
     MUTABLE                  <-  < ('mut' _wd_)? >
 
     IDENTIFIER               <-  < IdentInitChar IdentChar* >
@@ -558,7 +560,7 @@ struct Interpreter
             case "IF"_:                  return eval_if(ast, env);
             case "FUNCTION"_:            return eval_function(ast, env);
             case "CALL"_:                return eval_call(ast, env);
-            case "BLOCK"_:               return eval_block(ast, env);
+            case "LEXICAL_SCOPE"_:       return eval_lexical_scope(ast, env);
             case "ASSIGNMENT"_:          return eval_assignment(ast, env);
             case "LOGICAL_OR"_:          return eval_logical_or(ast, env);
             case "LOGICAL_AND"_:         return eval_logical_and(ast, env);
@@ -726,7 +728,12 @@ private:
         return val;
     }
 
-    Value eval_block(const peg::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_lexical_scope(const peg::Ast& ast, std::shared_ptr<Environment> env) {
+        auto scopeEnv = std::make_shared<Environment>();
+        scopeEnv->append_outer(env);
+        for (auto node: ast.nodes) {
+            eval(*node, scopeEnv);
+        }
         return Value();
     }
 
@@ -806,28 +813,30 @@ private:
     }
 
     Value eval_assignment(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        auto end = ast.nodes.size() - 1;
+        auto lvaloff = 2;
+        auto lvalcnt = ast.nodes.size() - 3;
 
-        auto mut = ast.nodes[0]->token == "mut";
-        auto val = eval(*ast.nodes[end], env);
+        auto let = ast.nodes[0]->token == "let";
+        auto mut = ast.nodes[1]->token == "mut";
+        auto rval = eval(*ast.nodes.back(), env);
 
-        if (ast.nodes.size() == 3) {
-            const auto& ident = ast.nodes[1]->token;
-            if (env->has(ident)) {
-                env->assign(ident, val);
+        if (lvalcnt == 1) {
+            const auto& ident = ast.nodes[lvaloff]->token;
+            if (!let && env->has(ident)) {
+                env->assign(ident, rval);
             } else if (is_keyword(ident)) {
                 throw std::runtime_error("left-hand side is invalid variable name.");
             } else {
-                env->initialize(ident, val, mut);
+                env->initialize(ident, rval, mut);
             }
-            return val;
+            return rval;
         } else {
             using peg::operator"" _;
 
-            Value lval = eval(*ast.nodes[1], env);
+            Value lval = eval(*ast.nodes[lvaloff], env);
 
-            auto end = ast.nodes.size() - 2;
-            for (auto i = 2u; i < end; i++) {
+            auto end = lvaloff + lvalcnt - 1;
+            for (auto i = lvaloff + 1; i < end; i++) {
                 const auto& postfix = *ast.nodes[i];
 
                 switch (postfix.original_tag) {
@@ -845,21 +854,21 @@ private:
                     const auto& arr = lval.to_array();
                     auto idx = eval(postfix, env).to_long();
                     if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
-                        arr.values->at(idx) = val;
+                        arr.values->at(idx) = rval;
                     } else {
-                        // TODO: error? or set 'undefined'?
+                        throw std::logic_error("index out of range.");
                     }
-                    return val;
+                    return rval;
                 }
                 case "DOT"_: {
                     auto& obj = lval.to_object();
                     auto name = postfix.token;
                     if (obj.has(name)) {
-                        obj.assign(name, val);
+                        obj.assign(name, rval);
                     } else {
-                        obj.initialize(name, val, mut);
+                        obj.initialize(name, rval, mut);
                     }
-                    return val;
+                    return rval;
                 }
                 default:
                     throw std::logic_error("invalid internal condition.");
@@ -945,7 +954,7 @@ inline std::shared_ptr<peg::Ast> parse(
 
     std::shared_ptr<peg::Ast> ast;
     if (parser.parse_n(expr, len, ast, path.c_str())) {
-        return peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN" }).optimize(ast);
+        return peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN", "LEXICAL_SCOPE" }).optimize(ast);
     }
 
     return nullptr;

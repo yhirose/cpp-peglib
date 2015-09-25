@@ -190,6 +190,36 @@ test_interpolated_string = fn () {
     assert(ret == 'Hello World!')
 }
 
+test_lexical_scope = fn () {
+	a = 0
+	{
+		let a = 1;
+		assert(a == 1)
+	}
+	assert(a == 0)
+
+	mut b = 0
+	{
+		b = 1;
+		assert(b == 1)
+	}
+	assert(b == 1)
+
+	c = 0
+	{
+		let mut c = 0;
+		c = 1
+		assert(c == 1)
+	}
+	assert(c == 0)
+
+	obj = {
+		name: 'object'
+	}
+
+	assert(obj.name == 'object')
+}
+
 debugger
 test_call()
 test_return()
@@ -204,5 +234,6 @@ debugger
 test_sum()
 test_fib()
 test_interpolated_string()
+test_lexical_scope()
 
 return // end
