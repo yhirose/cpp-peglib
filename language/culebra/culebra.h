@@ -29,9 +29,11 @@ const auto grammar_ = R"(
     MULTIPLICATIVE           <-  CALL (_ MULTIPLICATIVE_OPERATOR _ CALL)*
 
     CALL                     <-  PRIMARY (_ (ARGUMENTS / INDEX / DOT))*
-    ARGUMENTS                <-  '(' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ')'
+    ARGUMENTS                <-  '(' _ SEQUENCE _ ')'
     INDEX                    <-  '[' _ EXPRESSION _ ']'
     DOT                      <-  '.' _ IDENTIFIER
+
+    SEQUENCE                 <-  (EXPRESSION (_ ',' _ EXPRESSION)*)?
 
     WHILE                    <-  while _ EXPRESSION _ BLOCK
     IF                       <-  if _ EXPRESSION _ BLOCK (_ else _ if _ EXPRESSION _ BLOCK)* (_ else _ BLOCK)?
@@ -59,7 +61,7 @@ const auto grammar_ = R"(
     OBJECT                   <-  '{' _ (OBJECT_PROPERTY (_ ',' _ OBJECT_PROPERTY)*)? _ '}'
     OBJECT_PROPERTY          <-  MUTABLE _ IDENTIFIER _ ':' _ EXPRESSION
 
-    ARRAY                    <-  '[' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ']'
+    ARRAY                    <-  '[' _ SEQUENCE _ ']' (_ '(' _ EXPRESSION (_ ',' _ EXPRESSION)? _ ')')?
 
     UNDEFINED                <-  < 'undefined' _wd_ >
     BOOLEAN                  <-  < ('true' / 'false')  _wd_ >
@@ -681,10 +683,13 @@ private:
     Value eval_array_reference(const peg::Ast& ast, std::shared_ptr<Environment> env, const Value& val) {
         const auto& arr = val.to_array();
         auto idx = eval(ast, env).to_long();
+        if (idx < 0) {
+            idx = arr.values->size() + idx;
+        }
         if (0 <= idx && idx < static_cast<long>(arr.values->size())) {
             return arr.values->at(idx);
         } else {
-            // TODO: error? or 'undefined'?
+            throw std::logic_error("index out of range.");
         }
         return val;
     }
@@ -894,11 +899,28 @@ private:
 
     Value eval_array(const peg::Ast& ast, std::shared_ptr<Environment> env) {
         ArrayValue arr;
-        for (auto i = 0u; i < ast.nodes.size(); i++) {
-            auto expr = ast.nodes[i];
-            auto val = eval(*expr, env);
-            arr.values->push_back(std::move(val));
+
+        if (ast.nodes.size() >= 2) {
+            auto count = eval(*ast.nodes[1], env).to_long();
+            if (ast.nodes.size() == 3) {
+                auto val = eval(*ast.nodes[2], env);
+                arr.values->resize(count, std::move(val));
+            } else {
+                arr.values->resize(count);
+            }
         }
+
+        const auto& nodes = ast.nodes[0]->nodes;
+        for (auto i = 0u; i < nodes.size(); i++) {
+            auto expr = nodes[i];
+            auto val = eval(*expr, env);
+            if (i < arr.values->size()) {
+                arr.values->at(i) = std::move(val);
+            } else {
+                arr.values->push_back(std::move(val));
+            }
+        }
+
         return Value(std::move(arr));
     }
 
@@ -954,7 +976,7 @@ inline std::shared_ptr<peg::Ast> parse(
 
     std::shared_ptr<peg::Ast> ast;
     if (parser.parse_n(expr, len, ast, path.c_str())) {
-        return peg::AstOptimizer(true, { "PARAMETERS", "ARGUMENTS", "OBJECT", "ARRAY", "RETURN", "LEXICAL_SCOPE" }).optimize(ast);
+        return peg::AstOptimizer(true, { "PARAMETERS", "SEQUENCE", "OBJECT", "ARRAY", "RETURN", "LEXICAL_SCOPE" }).optimize(ast);
     }
 
     return nullptr;
