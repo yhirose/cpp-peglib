@@ -38,7 +38,7 @@ const auto grammar_ = R"(
     WHILE                    <-  while _ EXPRESSION _ BLOCK
     IF                       <-  if _ EXPRESSION _ BLOCK (_ else _ if _ EXPRESSION _ BLOCK)* (_ else _ BLOCK)?
 
-    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION _ ')'
+    PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / NIL / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION _ ')'
 
     FUNCTION                 <-  fn _ PARAMETERS _ BLOCK
     PARAMETERS               <-  '(' _ (PARAMETER (_ ',' _ PARAMETER)*)? _ ')'
@@ -63,7 +63,7 @@ const auto grammar_ = R"(
 
     ARRAY                    <-  '[' _ SEQUENCE _ ']' (_ '(' _ EXPRESSION (_ ',' _ EXPRESSION)? _ ')')?
 
-    UNDEFINED                <-  < 'undefined' _wd_ >
+    NIL                      <-  < 'nil' _wd_ >
     BOOLEAN                  <-  < ('true' / 'false')  _wd_ >
 
     NUMBER                   <-  < [0-9]+ >
@@ -160,9 +160,9 @@ struct ArrayValue : public ObjectValue {
 
 struct Value
 {
-    enum Type { Undefined, Bool, Long, String, Object, Array, Function };
+    enum Type { Nil, Bool, Long, String, Object, Array, Function };
 
-    Value() : type(Undefined) {}
+    Value() : type(Nil) {}
     Value(const Value& rhs) : type(rhs.type), v(rhs.v) {}
     Value(Value&& rhs) : type(rhs.type), v(rhs.v) {}
 
@@ -256,7 +256,7 @@ struct Value
 
     std::string str() const {
         switch (type) {
-            case Undefined: return "undefined";
+            case Nil:       return "nil";
             case Bool:      return to_bool() ? "true" : "false";
             case Long:      return std::to_string(to_long());
             case String:    return "'" + to_string() + "'";
@@ -275,10 +275,10 @@ struct Value
 
     bool operator==(const Value& rhs) const {
         switch (type) {
-            case Undefined: return rhs.type == Undefined;
-            case Bool:      return to_bool() == rhs.to_bool();
-            case Long:      return to_long() == rhs.to_long();
-            case String:    return to_string() == rhs.to_string();
+            case Nil:    return rhs.type == Nil;
+            case Bool:   return to_bool() == rhs.to_bool();
+            case Long:   return to_long() == rhs.to_long();
+            case String: return to_string() == rhs.to_string();
             // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
@@ -291,10 +291,10 @@ struct Value
 
     bool operator<=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false;
-            case Bool:      return to_bool() <= rhs.to_bool();
-            case Long:      return to_long() <= rhs.to_long();
-            case String:    return to_string() <= rhs.to_string();
+            case Nil:    return false;
+            case Bool:   return to_bool() <= rhs.to_bool();
+            case Long:   return to_long() <= rhs.to_long();
+            case String: return to_string() <= rhs.to_string();
             // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
@@ -303,10 +303,10 @@ struct Value
 
     bool operator<(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false;
-            case Bool:      return to_bool() < rhs.to_bool();
-            case Long:      return to_long() < rhs.to_long();
-            case String:    return to_string() < rhs.to_string();
+            case Nil:    return false;
+            case Bool:   return to_bool() < rhs.to_bool();
+            case Long:   return to_long() < rhs.to_long();
+            case String: return to_string() < rhs.to_string();
             // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
@@ -315,10 +315,10 @@ struct Value
 
     bool operator>=(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false;
-            case Bool:      return to_bool() >= rhs.to_bool();
-            case Long:      return to_long() >= rhs.to_long();
-            case String:    return to_string() >= rhs.to_string();
+            case Nil:    return false;
+            case Bool:   return to_bool() >= rhs.to_bool();
+            case Long:   return to_long() >= rhs.to_long();
+            case String: return to_string() >= rhs.to_string();
             // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
@@ -327,10 +327,10 @@ struct Value
 
     bool operator>(const Value& rhs) const {
         switch (type) {
-            case Undefined: return false;
-            case Bool:      return to_bool() > rhs.to_bool();
-            case Long:      return to_long() > rhs.to_long();
-            case String:    return to_string() > rhs.to_string();
+            case Nil:    return false;
+            case Bool:   return to_bool() > rhs.to_bool();
+            case Long:   return to_long() > rhs.to_long();
+            case String: return to_string() > rhs.to_string();
             // TODO: Object and Array support
             default: throw std::logic_error("invalid internal condition.");
         }
@@ -575,7 +575,7 @@ struct Interpreter
             case "IDENTIFIER"_:          return eval_identifier(ast, env);
             case "OBJECT"_:              return eval_object(ast, env);
             case "ARRAY"_:               return eval_array(ast, env);
-            case "UNDEFINED"_:           return eval_undefined(ast, env);
+            case "NIL"_:                 return eval_nil(ast, env);
             case "BOOLEAN"_:             return eval_bool(ast, env);
             case "NUMBER"_:              return eval_number(ast, env);
             case "INTERPOLATED_STRING"_: return eval_interpolated_string(ast, env);
@@ -813,7 +813,7 @@ private:
     }
 
     bool is_keyword(const std::string& ident)  const {
-        static std::set<std::string> keywords = { "undefined", "true", "false", "mut", "debugger", "return", "while", "if", "else", "fn" };
+        static std::set<std::string> keywords = { "nil", "true", "false", "mut", "debugger", "return", "while", "if", "else", "fn" };
         return keywords.find(ident) != keywords.end();
     }
 
@@ -924,7 +924,7 @@ private:
         return Value(std::move(arr));
     }
 
-    Value eval_undefined(const peg::Ast& ast, std::shared_ptr<Environment> env) {
+    Value eval_nil(const peg::Ast& ast, std::shared_ptr<Environment> env) {
         return Value();
     };
 

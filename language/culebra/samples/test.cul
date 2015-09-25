@@ -27,23 +27,23 @@ test_return = fn () {
     assert(val == 1)
 }
 
-test_undefined = fn () {
-    assert(undefined == undefined)
-    assert(!(undefined != undefined))
+test_nil = fn () {
+    assert(nil == nil)
+    assert(!(nil != nil))
 
-    a = undefined
-    assert(a == undefined)
-    assert(!(a != undefined))
-    assert(!(a <= undefined))
-    assert(!(a < undefined))
-    assert(!(a >= undefined))
-    assert(!(a > undefined))
-    assert(undefined == a)
-    assert(!(undefined != a))
-    assert(!(undefined <= a))
-    assert(!(undefined < a))
-    assert(!(undefined >= a))
-    assert(!(undefined > a))
+    a = nil
+    assert(a == nil)
+    assert(!(a != nil))
+    assert(!(a <= nil))
+    assert(!(a < nil))
+    assert(!(a >= nil))
+    assert(!(a > nil))
+    assert(nil == a)
+    assert(!(nil != a))
+    assert(!(nil <= a))
+    assert(!(nil < a))
+    assert(!(nil >= a))
+    assert(!(nil > a))
 }
 
 test_closure = fn () {
@@ -83,7 +83,7 @@ test_array = fn () {
 	assert(e.size() == 3 && e[-1] == 3)
 
 	f = [1,2,3](5)
-	assert(f.size() == 5 && f[-1] == undefined)
+	assert(f.size() == 5 && f[-1] == nil)
 }
 
 g_ = 1
@@ -114,7 +114,7 @@ test_object = fn () {
 
     a = {}
     a.b = 1
-    assert(a.a == undefined)
+    assert(a.a == nil)
     assert(a.b == 1)
     assert(a.size() == 1)
 }
@@ -233,7 +233,7 @@ debugger
 test_call()
 test_return()
 test_closure()
-test_undefined()
+test_nil()
 test_array()
 test_function()
 test_object()
