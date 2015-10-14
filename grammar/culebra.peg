@@ -1,14 +1,15 @@
 
 PROGRAM                  <-  _ STATEMENTS _
 STATEMENTS               <-  (STATEMENT (_sp_ (';' / _nl_) (_ STATEMENT)?)*)?
-STATEMENT                <-  DEBUGGER / RETURN / EXPRESSION
+STATEMENT                <-  DEBUGGER / RETURN / LEXICAL_SCOPE / EXPRESSION
 
 DEBUGGER                 <-  debugger
 RETURN                   <-  return (_sp_ !_nl_ EXPRESSION)?
+LEXICAL_SCOPE            <-  BLOCK
 
 EXPRESSION               <-  ASSIGNMENT / LOGICAL_OR
 
-ASSIGNMENT               <-  MUTABLE _ PRIMARY (_ (ARGUMENTS / INDEX / DOT))* _ '=' _ EXPRESSION
+ASSIGNMENT               <-  LET _ MUTABLE _ PRIMARY (_ (ARGUMENTS / INDEX / DOT))* _ '=' _ EXPRESSION
 
 LOGICAL_OR               <-  LOGICAL_AND (_ '||' _ LOGICAL_AND)*
 LOGICAL_AND              <-  CONDITION (_ '&&' _  CONDITION)*
@@ -20,14 +21,15 @@ UNARY_NOT                <-  UNARY_NOT_OPERATOR? MULTIPLICATIVE
 MULTIPLICATIVE           <-  CALL (_ MULTIPLICATIVE_OPERATOR _ CALL)*
 
 CALL                     <-  PRIMARY (_ (ARGUMENTS / INDEX / DOT))*
-ARGUMENTS                <-  '(' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ')'
+ARGUMENTS                <-  '(' _ SEQUENCE _ ')'
 INDEX                    <-  '[' _ EXPRESSION _ ']'
 DOT                      <-  '.' _ IDENTIFIER
+SEQUENCE                 <-  (EXPRESSION (_ ',' _ EXPRESSION)*)?
 
 WHILE                    <-  while _ EXPRESSION _ BLOCK
 IF                       <-  if _ EXPRESSION _ BLOCK (_ else _ if _ EXPRESSION _ BLOCK)* (_ else _ BLOCK)?
 
-PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / UNDEFINED / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION _ ')'
+PRIMARY                  <-  WHILE / IF / FUNCTION / OBJECT / ARRAY / NIL / BOOLEAN / NUMBER / IDENTIFIER / STRING / INTERPOLATED_STRING / '(' _ EXPRESSION _ ')'
 
 FUNCTION                 <-  fn _ PARAMETERS _ BLOCK
 PARAMETERS               <-  '(' _ (PARAMETER (_ ',' _ PARAMETER)*)? _ ')'
@@ -42,6 +44,7 @@ UNARY_MINUS_OPERATOR     <-  '-'
 UNARY_NOT_OPERATOR       <-  '!'
 MULTIPLICATIVE_OPERATOR  <-  [*/%]
 
+LET                      <-  < ('let' _wd_)? >
 MUTABLE                  <-  < ('mut' _wd_)? >
 
 IDENTIFIER               <-  < IdentInitChar IdentChar* >
@@ -49,9 +52,9 @@ IDENTIFIER               <-  < IdentInitChar IdentChar* >
 OBJECT                   <-  '{' _ (OBJECT_PROPERTY (_ ',' _ OBJECT_PROPERTY)*)? _ '}'
 OBJECT_PROPERTY          <-  MUTABLE _ IDENTIFIER _ ':' _ EXPRESSION
 
-ARRAY                    <-  '[' _ (EXPRESSION (_ ',' _ EXPRESSION)*)? _ ']'
+ARRAY                    <-  '[' _ SEQUENCE _ ']' (_ '(' _ EXPRESSION (_ ',' _ EXPRESSION)? _ ')')?
 
-UNDEFINED                <-  < 'undefined' _wd_ >
+NIL                      <-  < 'nil' _wd_ >
 BOOLEAN                  <-  < ('true' / 'false')  _wd_ >
 
 NUMBER                   <-  < [0-9]+ >

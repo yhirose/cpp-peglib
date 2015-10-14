@@ -106,7 +106,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
     // Get token
     std::string str() const;
 
-    // Transform the semantice value vector to another vector
+    // Transform the semantic value vector to another vector
     template <typename T> vector<T> transform(size_t beg = 0, size_t end = -1) const;
 }
 ```
