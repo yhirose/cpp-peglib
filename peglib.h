@@ -617,12 +617,14 @@ public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        auto save_error_pos = c.error_pos;
         size_t i = 0;
         while (n - i > 0) {
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 sv.rewind(s + i);
+                c.error_pos = save_error_pos;
                 break;
             }
             i += len;
@@ -646,12 +648,14 @@ public:
         if (fail(len)) {
             return -1;
         }
+        auto save_error_pos = c.error_pos;
         auto i = len;
         while (n - i > 0) {
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 sv.rewind(s + i);
+                c.error_pos = save_error_pos;
                 break;
             }
             i += len;
@@ -670,12 +674,14 @@ public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        auto save_error_pos = c.error_pos;
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             return len;
         } else {
             sv.rewind(s);
+            c.error_pos = save_error_pos;
             return 0;
         }
     }
@@ -713,15 +719,15 @@ public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        auto save_error_pos = c.error_pos;
         const auto& rule = *ope_;
-        auto error_pos = c.error_pos;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             c.set_error_pos(s);
             return -1;
         } else {
             sv.rewind(s);
-            c.error_pos = error_pos;
+            c.error_pos = save_error_pos;
             return 0;
         }
     }
@@ -1250,8 +1256,10 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                 val = reduce(chldsv, dt);
             } catch (const parse_error& e) {
                 if (e.what()) {
-                    c.message_pos = s;
-                    c.message = e.what();
+                    if (c.message_pos < s) {
+                        c.message_pos = s;
+                        c.message = e.what();
+                    }
                 }
                 len = -1;
             }
@@ -1264,13 +1272,17 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         c.pop();
     });
 
-    if (success(len) && !outer_->ignoreSemanticValue) {
-        sv.emplace_back(val, outer_->name.c_str(), token_boundary_s, token_boundary_n);
-    }
-
-    if (fail(len) && outer_->error_message && !c.message_pos) {
-        c.message_pos = s;
-        c.message = outer_->error_message();
+    if (success(len)) {
+        if (!outer_->ignoreSemanticValue) {
+            sv.emplace_back(val, outer_->name.c_str(), token_boundary_s, token_boundary_n);
+        }
+    } else {
+        if (outer_->error_message) {
+            if (c.message_pos < s) {
+                c.message_pos = s;
+                c.message = outer_->error_message();
+            }
+        }
     }
 
     return len;
