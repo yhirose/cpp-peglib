@@ -1182,13 +1182,15 @@ public:
         holder_->accept(v);
     }
 
-    std::string                   name;
-    size_t                        id;
-    Action                        action;
-    std::function<std::string ()> error_message;
-    bool                          ignoreSemanticValue;
-    bool                          enablePackratParsing;
-    bool                          is_token;
+    std::string                    name;
+    size_t                         id;
+    Action                         action;
+    std::function<void (any& dt)>  before;
+    std::function<void (any& dt)>  after;
+    std::function<std::string ()>  error_message;
+    bool                           ignoreSemanticValue;
+    bool                           enablePackratParsing;
+    bool                           is_token;
 
 private:
     friend class DefinitionReference;
@@ -1225,6 +1227,10 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     c.packrat(s, outer_->id, len, val, [&](any& val) {
         auto& chldsv = c.push();
 
+        if (outer_->before) {
+            outer_->before(dt);
+        }
+
         const auto& rule = *ope_;
         len = rule.parse(s, n, chldsv, c, dt);
 
@@ -1249,6 +1255,10 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                 }
                 len = -1;
             }
+        }
+
+        if (outer_->after) {
+            outer_->after(dt);
         }
 
         c.pop();
@@ -1793,8 +1803,13 @@ private:
 
         if (!r.ret) {
             if (log) {
-                auto line = line_info(s, r.error_pos);
-                log(line.first, line.second, r.message.empty() ? "syntax error" : r.message);
+                if (r.message_pos) {
+                    auto line = line_info(s, r.message_pos);
+                    log(line.first, line.second, r.message);
+                } else {
+                    auto line = line_info(s, r.error_pos);
+                    log(line.first, line.second, "syntax error");
+                }
             }
             return nullptr;
         }
@@ -2279,8 +2294,13 @@ private:
     void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
         if (log) {
             if (!r.ret) { 
-                auto line = line_info(s, r.error_pos);
-                log(line.first, line.second, r.message.empty() ? "syntax error" : r.message);
+                if (r.message_pos) {
+                    auto line = line_info(s, r.message_pos);
+                    log(line.first, line.second, r.message);
+                } else {
+                    auto line = line_info(s, r.error_pos);
+                    log(line.first, line.second, "syntax error");
+                }
             } else if (r.len != n) {
                 auto line = line_info(s, s + r.len);
                 log(line.first, line.second, "syntax error");
