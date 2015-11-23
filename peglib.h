@@ -23,6 +23,18 @@
 #include <unordered_map>
 #include <vector>
 
+// guard for older versions of VC++
+#ifdef _MSC_VER
+// VS2013 has no constexpr
+#if (_MSC_VER == 1800)
+#define PEGLIB_NO_CONSTEXPR_SUPPORT
+#elif (_MSC_VER >= 1800)
+// good to go
+#else (_MSC_VER < 1800)
+#error "Requires C+11 support"
+#endif
+#endif
+
 namespace peg {
 
 extern void* enabler;
@@ -2479,7 +2491,7 @@ public:
     peg_token_iterator()
         : s_(nullptr)
         , l_(0)
-        , pos_(std::numeric_limits<size_t>::max()) {}
+        , pos_((std::numeric_limits<size_t>::max)()) {}
 
     peg_token_iterator(const char* syntax, const char* s)
         : peg_(syntax)
@@ -2534,7 +2546,7 @@ private:
             m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0 });
             pos_ += mpos + mlen;
         } else {
-            pos_ = std::numeric_limits<size_t>::max();
+            pos_ = (std::numeric_limits<size_t>::max)();
         }
     }
 
