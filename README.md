@@ -20,7 +20,7 @@ How to use
 
 This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar and handle semantic values.
 
-```c++
+```cpp
 // (1) Include the header file
 #include <peglib.h>
 #include <assert.h>
@@ -75,14 +75,14 @@ int main(void) {
 
 Here are available actions:
 
-```c++
+```cpp
 [](const SemanticValues& sv, any& dt)
 [](const SemanticValues& sv)
 ```
 
 `const SemanticValues& sv` contains semantic values. `SemanticValues` structure is defined as follows.
 
-```c++
+```cpp
 struct SemanticValue {
     any         val;  // Semantic value
     const char* name; // Definition name for the sematic value
@@ -119,7 +119,7 @@ struct SemanticValues : protected std::vector<SemanticValue>
 
 The following example uses `<` ... ` >` operators. They are the *token boundary* operators. Each token boundary operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
 
-```c++
+```cpp
 auto syntax = R"(
     ROOT  <- _ TOKEN (',' _ TOKEN)*
     TOKEN <- < [a-z0-9]+ > _
@@ -138,7 +138,7 @@ auto ret = pg.parse(" token1, token2 ");
 
 We can ignore unnecessary semantic values from the list by using `~` operator.
 
-```c++
+```cpp
 peg::pegparser parser(
     "  ROOT  <-  _ ITEM (',' _ ITEM _)*  "
     "  ITEM  <-  ([a-z])+                "
@@ -154,7 +154,7 @@ auto ret = parser.parse(" item1, item2 ");
 
 The following grammar is same as the above.
 
-```c++
+```cpp
 peg::parser parser(
     "  ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*  "
     "  ITEM  <-  ([a-z])+                   "
@@ -164,7 +164,7 @@ peg::parser parser(
 
 *Semantic predicate* support is available. We can do it by throwing a `peg::parse_error` exception in a semantic action.
 
-```c++
+```cpp
 peg::parser parser("NUMBER  <-  [0-9]+");
 
 parser["NUMBER"] = [](const SemanticValues& sv) {
@@ -184,6 +184,22 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
+*before* and *after* actions are also avalable.
+
+```cpp
+parser["RULE"].before = [](any& dt) {
+    std::cout << "before" << std::cout;
+};
+
+parser["RULE"] = [](const SemanticValues& sv, any& dt) {
+    std::cout << "action!" << std::cout;
+};
+
+parser["RULE"].after = [](any& dt) {
+    std::cout << "after" << std::cout;
+};
+```
+
 Simple interface
 ----------------
 
@@ -191,7 +207,7 @@ Simple interface
 
 `peg::peg_match` tries to capture strings in the `$< ... >` operator and store them into `peg::match` object.
 
-```c++
+```cpp
 peg::match m;
 
 auto ret = peg::peg_match(
@@ -212,7 +228,7 @@ assert(m.str(3) == "tag-3");
 
 It also supports named capture with the `$name<` ... `>` operator.
 
-```c++
+```cpp
 peg::match m;
 
 auto ret = peg::peg_match(
@@ -234,7 +250,7 @@ REQUIRE(m.str(cap[2]) == "tag-3");
 
 There are some ways to *search* a peg pattern in a document.
 
-```c++
+```cpp
 using namespace peg;
 
 auto syntax = R"(
@@ -274,7 +290,7 @@ Make a parser with parser combinators
 
 Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser combinatorss*. Here is an example:
 
-```c++
+```cpp
 using namespace peg;
 using namespace std;
 
@@ -315,7 +331,7 @@ Adjust definitions
 
 It's possible to add/override definitions.
 
-```c++
+```cpp
 auto syntax = R"(
     ROOT <- _ 'Hello' _ NAME '!' _
 )";
