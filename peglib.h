@@ -374,7 +374,7 @@ private:
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const SemanticValues& sv)) {
+    Fty make_adaptor(F fn, R (*mf)(const SemanticValues& sv)) {
         return TypeAdaptor<R>(fn);
     }
 
@@ -427,6 +427,9 @@ inline bool fail(size_t len) {
 /*
  * Context
  */
+class Definition;
+class Ope;
+
 struct Context
 {
     const char*                                  path;
@@ -437,27 +440,38 @@ struct Context
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
+    std::vector<Definition*>                     definition_stack;
+
+    std::vector<std::shared_ptr<SemanticValues>> value_stack;
+    size_t                                       value_stack_size;
+
+    std::shared_ptr<Ope>                         whiteSpaceOpe;
+
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
     std::vector<bool>                            cache_register;
     std::vector<bool>                            cache_success;
 
-    std::vector<std::shared_ptr<SemanticValues>> stack;
-    size_t                                       stack_size;
-
     std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
 
-    Context(const char* path, const char* s, size_t l, size_t def_count, bool enablePackratParsing)
+    Context(
+        const char*          path,
+        const char*          s,
+        size_t               l,
+        size_t               def_count,
+        std::shared_ptr<Ope> whiteSpaceOpe,
+        bool                 enablePackratParsing)
         : path(path)
         , s(s)
         , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
+        , whiteSpaceOpe(whiteSpaceOpe)
+        , value_stack_size(0)
         , def_count(def_count)
         , enablePackratParsing(enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
-        , stack_size(0)
     {
     }
 
@@ -493,11 +507,11 @@ struct Context
     }
 
     inline SemanticValues& push() {
-        assert(stack_size <= stack.size());
-        if (stack_size == stack.size()) {
-            stack.emplace_back(std::make_shared<SemanticValues>());
+        assert(value_stack_size <= value_stack.size());
+        if (value_stack_size == value_stack.size()) {
+            value_stack.emplace_back(std::make_shared<SemanticValues>());
         }
-        auto& sv = *stack[stack_size++];
+        auto& sv = *value_stack[value_stack_size++];
         if (!sv.empty()) {
             sv.clear();
         }
@@ -509,7 +523,7 @@ struct Context
     }
 
     void pop() {
-        stack_size--;
+        value_stack_size--;
     }
 
     void set_error_pos(const char* s) {
@@ -754,16 +768,7 @@ class LiteralString : public Ope
 public:
     LiteralString(const std::string& s) : lit_(s) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto i = 0u;
-        for (; i < lit_.size(); i++) {
-            if (i >= n || s[i] != lit_[i]) {
-                c.set_error_pos(s);
-                return -1;
-            }
-        }
-        return i;
-    }
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
@@ -936,8 +941,6 @@ public:
     std::weak_ptr<Ope> weak_;
 };
 
-class Definition;
-
 class Holder : public Ope
 {
 public:
@@ -1063,6 +1066,8 @@ struct IsToken : public Ope::Visitor
     bool has_rule;
 };
 
+const char* WHITESPACE_DEFINITION_NAME = "%whitespace";
+
 /*
  * Definition
  */
@@ -1096,6 +1101,7 @@ public:
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
+        , whiteSpaceOpe(rhs.whiteSpaceOpe)
         , enablePackratParsing(rhs.enablePackratParsing)
         , is_token(rhs.is_token)
         , holder_(std::move(rhs.holder_))
@@ -1200,6 +1206,10 @@ public:
         holder_->accept(v);
     }
 
+    std::shared_ptr<Ope> get_core_operator() {
+        return holder_->ope_;
+    }
+
     std::string                    name;
     size_t                         id;
     Action                         action;
@@ -1207,6 +1217,7 @@ public:
     std::function<void (any& dt)>  after;
     std::function<std::string ()>  error_message;
     bool                           ignoreSemanticValue;
+    std::shared_ptr<Ope>           whiteSpaceOpe;
     bool                           enablePackratParsing;
     bool                           is_token;
 
@@ -1220,7 +1231,7 @@ private:
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
-        Context cxt(path, s, n, assignId.ids.size(), enablePackratParsing);
+        Context cxt(path, s, n, assignId.ids.size(), whiteSpaceOpe, enablePackratParsing);
         auto len = holder_->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1231,6 +1242,28 @@ private:
 /*
  * Implementations
  */
+
+inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    auto i = 0u;
+    for (; i < lit_.size(); i++) {
+        if (i >= n || s[i] != lit_[i]) {
+            c.set_error_pos(s);
+            return -1;
+        }
+    }
+
+    // Skip whiltespace
+    const auto d = c.definition_stack.back();
+    if (!d->is_token && c.whiteSpaceOpe) {
+        auto len = c.whiteSpaceOpe->parse(s + i, n - i, sv, c, dt);
+        if (fail(len)) {
+            return -1;
+        }
+        i += len;
+    }
+
+    return i;
+}
 
 inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     if (!ope_) {
@@ -1243,13 +1276,23 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     size_t      token_boundary_n = n;
 
     c.packrat(s, outer_->id, len, val, [&](any& val) {
+        c.definition_stack.push_back(outer_);
+
         auto& chldsv = c.push();
 
         if (outer_->before) {
             outer_->before(dt);
         }
 
-        const auto& rule = *ope_;
+        auto ope = ope_;
+
+        if (outer_->whiteSpaceOpe) {
+            ope = std::make_shared<Sequence>(outer_->whiteSpaceOpe, ope_);
+        } else if (outer_->is_token && c.whiteSpaceOpe) {
+            ope = std::make_shared<Sequence>(std::make_shared<TokenBoundary>(ope_), c.whiteSpaceOpe);
+        }
+
+        const auto& rule = *ope;
         len = rule.parse(s, n, chldsv, c, dt);
 
         token_boundary_n = len;
@@ -1282,6 +1325,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         }
 
         c.pop();
+        c.definition_stack.pop_back();
     });
 
     if (success(len)) {
@@ -1622,7 +1666,7 @@ private:
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
         g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-        g["IdentStart"] <= cls("a-zA-Z_\x80-\xff");
+        g["IdentStart"] <= cls("a-zA-Z_\x80-\xff%");
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
         g["Literal"]    <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
@@ -1911,6 +1955,12 @@ private:
 
         // Set root definition
         start = data.start;
+
+        // Automatic whitespace skipping
+        if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
+            auto& rule = (*data.grammar)[start];
+            rule.whiteSpaceOpe = (*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator();
+        }
 
         return data.grammar;
     }
@@ -2317,7 +2367,7 @@ public:
 private:
     void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
         if (log) {
-            if (!r.ret) { 
+            if (!r.ret) {
                 if (r.message_pos) {
                     auto line = line_info(s, r.message_pos);
                     log(line.first, line.second, r.message);

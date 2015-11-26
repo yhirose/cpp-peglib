@@ -40,13 +40,15 @@ int main(int argc, const char** argv)
     };
 
     parser parser(R"(
-        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+        EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
-        TERM_OPERATOR    <-  < [-+] > _
-        FACTOR_OPERATOR  <-  < [/*] > _
-        NUMBER           <-  < [0-9]+ > _
-        ~_               <-  [ \t\r\n]*
+        FACTOR           <-  NUMBER / '(' EXPRESSION ')'
+
+        TERM_OPERATOR    <-  [-+]
+        FACTOR_OPERATOR  <-  [/*]
+        NUMBER           <-  [0-9]+
+
+        %whitespace      <-  [ \t\r\n]*
     )");
 
     parser.enable_ast();

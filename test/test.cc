@@ -255,6 +255,25 @@ TEST_CASE("before/after handlers test", "[general]")
     parser.parse("hello=world", dt);
 }
 
+TEST_CASE("WHITESPACE test", "[general]")
+{
+    peg::parser parser(R"(
+        # Rules
+        ROOT         <-  ITEM (',' ITEM)*
+        ITEM         <-  WORD / PHRASE
+
+        # Tokens
+        WORD         <-  [a-zA-Z0-9_]+
+        PHRASE       <-  '"' (!'"' .)* '"'
+
+        %whitespace  <-  [ \t\r\n]*
+    )");
+
+    auto ret = parser.parse(R"(  one, 	 "two, three",   four  )");
+
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("Skip token test", "[general]")
 {
     peg::parser parser(
@@ -262,6 +281,23 @@ TEST_CASE("Skip token test", "[general]")
         "  ITEM  <-  ([a-z0-9])+  "
         "  ~_    <-  [ \t]*    "
     );
+
+    parser["ROOT"] = [&](const SemanticValues& sv) {
+        REQUIRE(sv.size() == 2);
+    };
+
+    auto ret = parser.parse(" item1, item2 ");
+
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("Skip token test2", "[general]")
+{
+    peg::parser parser(R"(
+        ROOT        <-  ITEM (',' ITEM)*
+        ITEM        <-  ([a-z0-9])+
+        %whitespace <-  [ \t]*
+    )");
 
     parser["ROOT"] = [&](const SemanticValues& sv) {
         REQUIRE(sv.size() == 2);
