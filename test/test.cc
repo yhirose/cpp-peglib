@@ -609,6 +609,58 @@ TEST_CASE("Definition duplicates test", "[general]")
     REQUIRE(parser == false);
 }
 
+TEST_CASE("Literal token on AST test1", "[general]")
+{
+    parser parser(R"(
+        STRING_LITERAL  <- '"' (('\\"' / '\\t' / '\\n') / (!["] .))* '"'
+    )");
+    parser.enable_ast();
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse(R"("a\tb")", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->is_token == true);
+    REQUIRE(ast->token == R"("a\tb")");
+    REQUIRE(ast->nodes.empty());
+}
+
+TEST_CASE("Literal token on AST test2", "[general]")
+{
+    parser parser(R"(
+        STRING_LITERAL  <-  '"' (ESC / CHAR)* '"' 
+        ESC             <-  ('\\"' / '\\t' / '\\n')
+        CHAR            <-  (!["] .)
+    )");
+    parser.enable_ast();
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse(R"("a\tb")", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->is_token == false);
+    REQUIRE(ast->token.empty());
+    REQUIRE(ast->nodes.size() == 3);
+}
+
+TEST_CASE("Literal token on AST test3", "[general]")
+{
+    parser parser(R"(
+        STRING_LITERAL  <-  < '"' (ESC / CHAR)* '"' >
+        ESC             <-  ('\\"' / '\\t' / '\\n')
+        CHAR            <-  (!["] .)
+    )");
+    parser.enable_ast();
+
+    shared_ptr<Ast> ast;
+    auto ret = parser.parse(R"("a\tb")", ast);
+
+    REQUIRE(ret == true);
+    REQUIRE(ast->is_token == true);
+    REQUIRE(ast->token == R"("a\tb")");
+    REQUIRE(ast->nodes.empty());
+}
+
 TEST_CASE("Left recursive test", "[left recursive]")
 {
     parser parser(
