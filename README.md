@@ -412,9 +412,8 @@ Tested compilers
 TODO
 ----
 
-  * ٍSemantic predicate (`&{ expr }` and `!{ expr }`)
+  * Semantic predicate (`&{ expr }` and `!{ expr }`)
   * Unicode support (`.` matches a Unicode char. `\u????`, `\p{L}`)
-  * Ignore white spaces after string literals and tokens
   * Allow `←` and `ε`
 
 License
