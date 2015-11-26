@@ -256,7 +256,7 @@ private:
     template <typename F>
     auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
         vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
-        end = std::min(end, size());
+        end = (std::min)(end, size());
         for (size_t i = beg; i < end; i++) {
             r.emplace_back(f((*this)[i]));
         }
