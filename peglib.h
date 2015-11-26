@@ -1066,7 +1066,7 @@ struct IsToken : public Ope::Visitor
     bool has_rule;
 };
 
-const char* WHITESPACE_DEFINITION_NAME = "%whitespace";
+static const char* WHITESPACE_DEFINITION_NAME = "%whitespace";
 
 /*
  * Definition
