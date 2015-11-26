@@ -32,10 +32,11 @@ int main(void) {
     // (2) Make a parser
     auto syntax = R"(
         # Grammar for Calculator...
-        Additive  <- Multitive '+' Additive / Multitive
-        Multitive <- Primary '*' Multitive / Primary
-        Primary   <- '(' Additive ')' / Number
-        Number    <- [0-9]+
+        Additive    <- Multitive '+' Additive / Multitive
+        Multitive   <- Primary '*' Multitive / Primary
+        Primary     <- '(' Additive ')' / Number
+        Number      <- [0-9]+
+        %whitespace <- [ \t]*
     )";
 
     parser parser(syntax);
@@ -67,7 +68,7 @@ int main(void) {
     parser.packrat_parsing(); // Enable packrat parsing.
 
     int val;
-    parser.parse("(1+2)*3", val);
+    parser.parse(" (1 + 2) * 3 ", val);
 
     assert(val == 9);
 }
@@ -198,6 +199,36 @@ parser["RULE"] = [](const SemanticValues& sv, any& dt) {
 parser["RULE"].after = [](any& dt) {
     std::cout << "after" << std::cout;
 };
+```
+
+Ignoring Whitespaces
+--------------------
+
+As you can see in the first example, we can ignore whitespaces between tokens automatically with `%whitespace` rule.
+
+`%whitespace` rule can be applied to the following three conditions:
+
+  * trailing spaces on tokens
+  * leading spaces on text
+  * trailing spaces on literal strings in rules
+
+These are valid tokens:
+
+```
+KEYWORD  <- 'keyword'
+WORD     <-  [a-zA-Z0-9] [a-zA-Z0-9-_]*        # no reference rule is used
+IDNET    <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
+```
+
+The following grammar accepts ` one, "two three", four `.
+
+```
+ROOT         <- ITEM (',' ITEM)*
+ITEM         <- WORD / PHRASE
+WORD         <- [a-z]+
+PHRASE       <- '"' (!'"' .)* '"'
+
+%whitespace  <-  [ \t\r\n]*
 ```
 
 Simple interface
