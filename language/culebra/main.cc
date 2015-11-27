@@ -226,7 +226,7 @@ int repl(shared_ptr<Environment> env, bool print_ast)
             auto ast = parse("(repl)", line.data(), line.size(), msgs);
             if (ast) {
                 if (print_ast) {
-                    peg::print_ast(ast);
+                    cout << peg::ast_to_s(ast);
                 }
 
                 Value val;
@@ -286,7 +286,7 @@ int main(int argc, const char** argv)
             auto ast = parse(path, buff.data(), buff.size(), msgs);
             if (ast) {
                 if (print_ast) {
-                    peg::print_ast(ast);
+                    cout << peg::ast_to_s(ast);
                 }
 
                 Value val;

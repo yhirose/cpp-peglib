@@ -437,7 +437,7 @@ int main(int argc, const char** argv)
     shared_ptr<AstPL0> ast;
     if (parser.parse_n(source.data(), source.size(), ast, path)) {
         if (argc > 2 && string("--ast") == argv[2]) {
-            print_ast(ast);
+            cout << ast_to_s(ast);
         }
         try {
             SymbolTable::build_on_ast(ast);
