@@ -89,13 +89,13 @@ body {
             <li><span id="grammar-validation" class="editor-validation">Valid</span></li>
         </ul>
         <pre id="grammar-editor" class="editor-area">
-EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
 TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
-TERM_OPERATOR    <-  < [-+] > _
-FACTOR_OPERATOR  <-  < [/*] > _
-NUMBER           <-  < [0-9]+ > _
-~_               <-  [ \t\r\n]*</pre>
+FACTOR           <-  NUMBER / '(' EXPRESSION ')'
+TERM_OPERATOR    <-  [-+]
+FACTOR_OPERATOR  <-  [/*]
+NUMBER           <-  [0-9]+
+%whitespace      <-  [ \t\r\n]*</pre>
         <div id="grammar-info" class="editor-info"></div>
     </div>
     <div class="editor-container">
@@ -103,7 +103,9 @@ NUMBER           <-  < [0-9]+ > _
             <li><span>Code:</span></li>
             <li><span id="code-validation" class="editor-validation">Valid</span></li>
         </ul>
-        <pre id="code-editor"  class="editor-area">2 * (3 + 4)</pre>
+        <pre id="code-editor" class="editor-area">2 * (3 + 4)</pre>
+        <pre id="code-ast" class="editor-area"></pre>
+        <pre id="code-ast-optimized" class="editor-area"></pre>
         <div id="code-info" class="editor-info"></div>
     </div>
 </div>
@@ -117,6 +119,24 @@ NUMBER           <-  < [0-9]+ > _
 
     var code = ace.edit("code-editor");
     code.setShowPrintMargin(false);
+
+    var codeAst = ace.edit("code-ast");
+    codeAst.setShowPrintMargin(false);
+    codeAst.setOptions({
+        readOnly: true,
+        highlightActiveLine: false,
+        highlightGutterLine: false
+    })
+    codeAst.renderer.$cursorLayer.element.style.opacity=0;
+
+    var codeAstOptimized = ace.edit("code-ast-optimized");
+    codeAstOptimized.setShowPrintMargin(false);
+    codeAstOptimized.setOptions({
+        readOnly: true,
+        highlightActiveLine: false,
+        highlightGutterLine: false
+    })
+    codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
 
     var generateErrorListHTML = function (errors) {
         var html = '<ul>';
@@ -148,15 +168,20 @@ NUMBER           <-  < [0-9]+ > _
                 $grammarInfo.html('');
                 $grammarValidation.removeClass('editor-validation-invalid').text('Valid');
 
-	            var isValid = data.code.length === 0;
+                codeAst.setValue('');
+                codeAstOptimized.setValue('');
+
+                var isValid = data.code.length === 0;
 	            if (isValid) {
 	                $codeInfo.html('');
 	                $codeValidation.removeClass('editor-validation-invalid').text('Valid');
-	            } else {
+	                codeAst.insert(data.ast);
+	                codeAstOptimized.insert(data.astOptimized);
+                } else {
 				    var html = generateErrorListHTML(data.code);
 	                $codeInfo.html(html);
 	                $codeValidation.addClass('editor-validation-invalid').text('Invalid');
-	            }
+                }
                 $codeValidation.show();
             } else {
 			    var html = generateErrorListHTML(data.grammar);

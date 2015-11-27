@@ -33,13 +33,37 @@ bool parse_grammar(const string& text, peg::parser& peg, string& json)
     return ret;
 }
 
-bool parse_code(const string& text, peg::parser& peg, string& json)
+bool parse_code(const string& text, peg::parser& peg, string& json, shared_ptr<peg::Ast>& ast)
 {
+    peg.enable_ast();
     peg.log = makeJSONFormatter(json);
     json += "[";
-    auto ret = peg.parse_n(text.data(), text.size());
+    auto ret = peg.parse_n(text.data(), text.size(), ast);
     json += "]";
     return ret;
+}
+
+template <typename T>
+void dump_ast(const shared_ptr<T>& ptr, string& json, int level = 0)
+{
+    const auto& ast = *ptr;
+    for (auto i = 0; i < level; i++) {
+        json += "  ";
+    }
+    string name;
+    if (ast.name == ast.original_name) {
+        name = ast.name;
+    } else {
+        name = ast.original_name + " (" + ast.name + ")";
+    }
+    if (ast.is_token) {
+        json += "- " + name + "(" + ast.token + ")\\n";
+    } else {
+        json += "+ " + name +"\\n";
+    }
+    for (auto node : ast.nodes) {
+        dump_ast(node, json, level + 1);
+    }
 }
 
 int main(void)
@@ -56,21 +80,28 @@ int main(void)
 
         string grammarResult;
         string codeResult;
+        string astResult;
+        string astResultOptimized;
 
         peg::parser peg;
         auto ret = parse_grammar(grammarText, peg, grammarResult);
 
         if (ret && peg) {
             const auto& codeText = req.params.at("code");
-            parse_code(codeText, peg, codeResult);
+            shared_ptr<peg::Ast> ast;
+            if (parse_code(codeText, peg, codeResult, ast)) {
+                dump_ast(ast, astResult);
+                dump_ast(peg::AstOptimizer(true).optimize(ast), astResultOptimized);
+            }
         }
 
         string json;
         json += "{";
         json += "\"grammar\":" + grammarResult;
         if (!codeResult.empty()) {
-            json += +",";
-            json += "\"code\":" + codeResult;
+            json += ",\"code\":" + codeResult;
+            json += ",\"ast\":\"" + astResult + "\"";
+            json += ",\"astOptimized\":\"" + astResultOptimized + "\"";
         }
         json += "}";
 
