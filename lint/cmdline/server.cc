@@ -265,29 +265,6 @@ bool parse_code(const string& text, peg::parser& peg, string& json, shared_ptr<p
     return ret;
 }
 
-template <typename T>
-void dump_ast(const shared_ptr<T>& ptr, string& json, int level = 0)
-{
-    const auto& ast = *ptr;
-    for (auto i = 0; i < level; i++) {
-        json += "  ";
-    }
-    string name;
-    if (ast.name == ast.original_name) {
-        name = ast.name;
-    } else {
-        name = ast.original_name + " (" + ast.name + ")";
-    }
-    if (ast.is_token) {
-        json += "- " + name + "(" + ast.token + ")\\n";
-    } else {
-        json += "+ " + name +"\\n";
-    }
-    for (auto node : ast.nodes) {
-        dump_ast(node, json, level + 1);
-    }
-}
-
 std::string replace_text(std::string &s, const std::string &toReplace, const std::string &replaceWith)
 {
     return(s.replace(s.find(toReplace), toReplace.length(), replaceWith));
@@ -319,8 +296,8 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
             const auto& codeText = req.params.at("code");
             shared_ptr<peg::Ast> ast;
             if (parse_code(codeText, peg, codeResult, ast)) {
-                dump_ast(ast, astResult);
-                dump_ast(peg::AstOptimizer(true).optimize(ast), astResultOptimized);
+                astResult = peg::ast_to_s(ast);
+                astResultOptimized = peg::ast_to_s(peg::AstOptimizer(true).optimize(ast));
             }
         }
 

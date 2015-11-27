@@ -2129,21 +2129,34 @@ struct AstBase : public Annotation
 };
 
 template <typename T>
-void print_ast(const std::shared_ptr<T>& ptr, int level = 0) {
+void ast_to_s(const std::shared_ptr<T>& ptr, std::string& s, int level = 0) {
     const auto& ast = *ptr;
-    for (auto i = 0; i < level; i++) { std::cout << "  "; }
+    for (auto i = 0; i < level; i++) {
+        s += "  ";
+    }
     std::string name;
     if (ast.name == ast.original_name) {
         name = ast.name;
-    } else {
+    }
+    else {
         name = ast.original_name + " (" + ast.name + ")";
     }
     if (ast.is_token) {
-        std::cout << "- " << name << ": '" << ast.token << "'" << std::endl;
-    } else {
-        std::cout << "+ " << name << std::endl;
+        s += "- " + name + "(" + ast.token + ")\\n";
     }
-    for (auto node : ast.nodes) { print_ast(node, level + 1); }
+    else {
+        s += "+ " + name + "\\n";
+    }
+    for (auto node : ast.nodes) {
+        ast_to_s(node, s, level + 1);
+    }
+}
+
+template <typename T>
+std::string ast_to_s(const std::shared_ptr<T>& ptr) {
+    std::string s;
+    ast_to_s(ptr, s);
+    return s;
 }
 
 struct AstOptimizer
