@@ -376,7 +376,7 @@ Tested compilers
 ----------------
 
   * Visual Studio 2015
-  * Visual Studio 2013 with Update 5
+  * Visual Studio 2013 with update 5
   * Clang 3.5
 
 TODO
