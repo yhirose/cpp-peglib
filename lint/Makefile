@@ -11,5 +11,5 @@ endif
 
 all: peglint
 
-peglint : peglint.cc ../peglib.h
-	$(CC) -o peglint $(CFLAGS) -I.. peglint.cc
+peglint : peglint.cc server.cc ../peglib.h
+	$(CC) -o peglint $(CFLAGS) -I.. peglint.cc server.cc
