@@ -265,9 +265,25 @@ bool parse_code(const string& text, peg::parser& peg, string& json, shared_ptr<p
     return ret;
 }
 
-std::string replace_text(std::string &s, const std::string &toReplace, const std::string &replaceWith)
+string replace_all(const string& str, const char* from, const char* to)
 {
-    return(s.replace(s.find(toReplace), toReplace.length(), replaceWith));
+    string ret;
+    ret.reserve(str.length());
+
+    size_t from_len = 0;
+    while (from[from_len]) {
+        from_len++;
+    }
+
+    size_t start_pos = 0, pos;
+    while ((pos = str.find(from, start_pos)) != string::npos) {
+        ret += str.substr(start_pos, pos - start_pos);
+        ret += to;
+        pos += from_len;
+        start_pos = pos;
+    }
+    ret += str.substr(start_pos);
+    return ret;
 }
 
 int run_server(int port, const vector<char>& syntax, const vector<char>& source)
@@ -275,8 +291,8 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
     Server svr;
 
     svr.get("/", [&](const Request& req, Response& res) {
-        replace_text(indexHTML, "{{syntax}}", string(syntax.data(), syntax.size()));
-        replace_text(indexHTML, "{{source}}", string(source.data(), source.size()));
+        indexHTML = replace_all(indexHTML, "{{syntax}}", string(syntax.data(), syntax.size()).c_str());
+        indexHTML = replace_all(indexHTML, "{{source}}", string(source.data(), source.size()).c_str());
 
         res.set_content(indexHTML, "text/html");
     });
@@ -297,7 +313,10 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
             shared_ptr<peg::Ast> ast;
             if (parse_code(codeText, peg, codeResult, ast)) {
                 astResult = peg::ast_to_s(ast);
+                astResult = replace_all(astResult, "\n", "\\n");
+
                 astResultOptimized = peg::ast_to_s(peg::AstOptimizer(true).optimize(ast));
+                astResultOptimized = replace_all(astResultOptimized, "\n", "\\n");
             }
         }
 

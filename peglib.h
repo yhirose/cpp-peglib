@@ -2142,10 +2142,10 @@ void ast_to_s(const std::shared_ptr<T>& ptr, std::string& s, int level = 0) {
         name = ast.original_name + " (" + ast.name + ")";
     }
     if (ast.is_token) {
-        s += "- " + name + "(" + ast.token + ")\\n";
+        s += "- " + name + "(" + ast.token + ")\n";
     }
     else {
-        s += "+ " + name + "\\n";
+        s += "+ " + name + "\n";
     }
     for (auto node : ast.nodes) {
         ast_to_s(node, s, level + 1);
