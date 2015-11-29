@@ -747,7 +747,9 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         auto save_error_pos = c.error_pos;
         const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
+        auto& chldsv = c.push();
+        auto len = rule.parse(s, n, chldsv, c, dt);
+        c.pop();
         if (success(len)) {
             c.set_error_pos(s);
             return -1;
