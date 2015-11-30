@@ -33,6 +33,7 @@ int main(int argc, const char** argv)
     auto opt_help = false;
     auto opt_server = false;
     int  port = 1234;
+    auto opt_trace = false;
     vector<const char*> path_list;
 
     auto argi = 1;
@@ -49,13 +50,15 @@ int main(int argc, const char** argv)
             if (argi < argc) {
                 port = std::stoi(argv[argi++]);
             }
+        } else if (string("--trace") == arg) {
+            opt_trace = true;
         } else {
             path_list.push_back(arg);
         }
     }
 
     if ((path_list.empty() && !opt_server) || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--server [PORT=1234]] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--server [PORT=1234]] [--trace] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
@@ -114,6 +117,25 @@ int main(int argc, const char** argv)
     parser.log = [&](auto ln, auto col, const auto& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
+
+    if (opt_trace) {
+        std::cout << "pos:lev\trule/ope" << std::endl;
+        std::cout << "-------\t--------" << std::endl;
+        size_t prev_pos = 0;
+        parser.enable_trace([&](auto name, auto s, auto n, auto& sv, auto& c, auto& dt) {
+            auto pos = s - c.s;
+            auto backtrack = (pos < prev_pos ? "*" : "");
+            string indent;
+            auto level = c.nest_level;
+            while (level--) {
+                indent += "  ";
+            }
+            std::cout
+                << pos << ":" << c.nest_level << backtrack << "\t"
+                << indent << name << std::endl;
+            prev_pos = pos;
+        });
+    }
 
     if (opt_ast) {
 	    parser.enable_ast();

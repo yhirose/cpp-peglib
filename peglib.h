@@ -155,6 +155,49 @@ private:
 };
 
 /*-----------------------------------------------------------------------------
+ *  scope_exit
+ *---------------------------------------------------------------------------*/
+
+// This is from "http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4189".
+
+template <typename EF>
+struct scope_exit
+{
+    explicit scope_exit(EF&& f) noexcept
+        : exit_function(std::move(f))
+        , execute_on_destruction{true} {}
+
+    scope_exit(scope_exit&& rhs) noexcept
+        : exit_function(std::move(rhs.exit_function))
+        , execute_on_destruction{rhs.execute_on_destruction} {
+            rhs.release();
+    }
+
+    ~scope_exit() noexcept(noexcept(this->exit_function())) {
+        if (execute_on_destruction) {
+            this->exit_function();
+        }
+    }
+
+    void release() noexcept {
+        this->execute_on_destruction = false;
+    }
+
+private:
+    scope_exit(const scope_exit&) = delete;
+    void operator=(const scope_exit&) = delete;
+    scope_exit& operator=(scope_exit&&) = delete;
+
+    EF   exit_function;
+    bool execute_on_destruction;
+};
+
+template <typename EF>
+auto make_scope_exit(EF&& exit_function) noexcept {
+    return scope_exit<std::remove_reference_t<EF>>(std::forward<EF>(exit_function));
+}
+
+/*-----------------------------------------------------------------------------
  *  PEG
  *---------------------------------------------------------------------------*/
 
@@ -427,8 +470,11 @@ inline bool fail(size_t len) {
 /*
  * Context
  */
-class Definition;
 class Ope;
+class Context;
+class Definition;
+
+typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> Tracer;
 
 struct Context
 {
@@ -440,6 +486,7 @@ struct Context
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
+    size_t                                       nest_level;
     std::vector<Definition*>                     definition_stack;
 
     std::vector<std::shared_ptr<SemanticValues>> value_stack;
@@ -454,24 +501,29 @@ struct Context
 
     std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
 
+    std::function<void (const char*, const char*, size_t, const SemanticValues&, const Context&, const any&)> tracer;
+
     Context(
         const char*          path,
         const char*          s,
         size_t               l,
         size_t               def_count,
         std::shared_ptr<Ope> whiteSpaceOpe,
-        bool                 enablePackratParsing)
+        bool                 enablePackratParsing,
+        Tracer               tracer)
         : path(path)
         , s(s)
         , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
         , whiteSpaceOpe(whiteSpaceOpe)
+        , nest_level(0)
         , value_stack_size(0)
         , def_count(def_count)
         , enablePackratParsing(enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
+        , tracer(tracer)
     {
     }
 
@@ -506,7 +558,7 @@ struct Context
         }
     }
 
-    inline SemanticValues& push() {
+    SemanticValues& push() {
         assert(value_stack_size <= value_stack.size());
         if (value_stack_size == value_stack.size()) {
             value_stack.emplace_back(std::make_shared<SemanticValues>());
@@ -528,6 +580,10 @@ struct Context
 
     void set_error_pos(const char* s) {
         if (error_pos < s) error_pos = s;
+    }
+
+    void trace(const char* name, const char* s, size_t n, SemanticValues& sv, any& dt) const {
+        if (tracer) tracer(name, s, n, sv, *this, dt);
     }
 };
 
@@ -569,8 +625,11 @@ public:
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("Sequence", s, n, sv, dt);
         size_t i = 0;
         for (const auto& ope : opes_) {
+            c.nest_level++;
+            auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
@@ -609,10 +668,13 @@ public:
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("PrioritizedChoice", s, n, sv, dt);
         size_t id = 0;
         for (const auto& ope : opes_) {
-            const auto& rule = *ope;
+            c.nest_level++;
+            auto se = make_scope_exit([&]() { c.nest_level--; });
             auto& chldsv = c.push();
+            const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (len != -1) {
                 if (!chldsv.empty()) {
@@ -643,9 +705,12 @@ public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("ZeroOrMore", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         size_t i = 0;
         while (n - i > 0) {
+            c.nest_level++;
+            auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
@@ -669,14 +734,22 @@ public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
-        if (fail(len)) {
-            return -1;
+        c.trace("OneOrMore", s, n, sv, dt);
+        auto len = 0;
+        {
+            c.nest_level++;
+            auto se = make_scope_exit([&]() { c.nest_level--; });
+            const auto& rule = *ope_;
+            len = rule.parse(s, n, sv, c, dt);
+            if (fail(len)) {
+                return -1;
+            }
         }
         auto save_error_pos = c.error_pos;
         auto i = len;
         while (n - i > 0) {
+            c.nest_level++;
+            auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
@@ -700,7 +773,10 @@ public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("Option", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
+        c.nest_level++;
+        auto se = make_scope_exit([&]() { c.nest_level--; });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
@@ -723,8 +799,11 @@ public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        const auto& rule = *ope_;
+        c.trace("AndPredicate", s, n, sv, dt);
+        c.nest_level++;
+        auto se = make_scope_exit([&]() { c.nest_level--; });
         auto& chldsv = c.push();
+        const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
         c.pop();
         if (success(len)) {
@@ -745,9 +824,12 @@ public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("NotPredicate", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
-        const auto& rule = *ope_;
+        c.nest_level++;
+        auto se = make_scope_exit([&]() { c.nest_level--; });
         auto& chldsv = c.push();
+        const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
         c.pop();
         if (success(len)) {
@@ -783,6 +865,7 @@ public:
     CharacterClass(const std::string& chars) : chars_(chars) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("CharacterClass", s, n, sv, dt);
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
@@ -818,6 +901,7 @@ public:
     Character(char ch) : ch_(ch) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("Character", s, n, sv, dt);
         // TODO: UTF8 support
         if (n < 1 || s[0] != ch_) {
             c.set_error_pos(s);
@@ -835,6 +919,7 @@ class AnyCharacter : public Ope
 {
 public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("AnyCharacter", s, n, sv, dt);
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
@@ -917,6 +1002,7 @@ public:
     User(Parser fn) : fn_(fn) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.trace("User", s, n, sv, dt);
         assert(fn_);
         return fn_(s, n, sv, dt);
     }
@@ -1222,6 +1308,7 @@ public:
     std::shared_ptr<Ope>           whiteSpaceOpe;
     bool                           enablePackratParsing;
     bool                           is_token;
+    Tracer                         tracer;
 
 private:
     friend class DefinitionReference;
@@ -1233,7 +1320,7 @@ private:
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
-        Context cxt(path, s, n, assignId.ids.size(), whiteSpaceOpe, enablePackratParsing);
+        Context cxt(path, s, n, assignId.ids.size(), whiteSpaceOpe, enablePackratParsing, tracer);
         auto len = holder_->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1246,6 +1333,8 @@ private:
  */
 
 inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    c.trace("LiteralString", s, n, sv, dt);
+
     auto i = 0u;
     for (; i < lit_.size(); i++) {
         if (i >= n || s[i] != lit_[i]) {
@@ -1272,6 +1361,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         throw std::logic_error("Uninitialized definition ope was used...");
     }
 
+    c.trace(outer_->name.c_str(), s, n, sv, dt);
+
     size_t      len;
     any         val;
     const char* token_boundary_s = s;
@@ -1294,6 +1385,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             ope = std::make_shared<Sequence>(std::make_shared<TokenBoundary>(ope_), c.whiteSpaceOpe);
         }
 
+        c.nest_level++;
+        auto se = make_scope_exit([&]() { c.nest_level--; });
         const auto& rule = *ope;
         len = rule.parse(s, n, chldsv, c, dt);
 
@@ -2374,6 +2467,13 @@ public:
             }
         }
         return *this;
+    }
+
+    void enable_trace(Tracer tracer) {
+        if (grammar_ != nullptr) {
+            auto& rule = (*grammar_)[start_];
+            rule.tracer = tracer;
+        }
     }
 
     MatchAction match_action;
