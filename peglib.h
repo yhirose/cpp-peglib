@@ -158,7 +158,7 @@ private:
  *  scope_exit
  *---------------------------------------------------------------------------*/
 
-// This is from "http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4189".
+// This is based on "http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4189".
 
 template <typename EF>
 struct scope_exit
@@ -173,7 +173,7 @@ struct scope_exit
             rhs.release();
     }
 
-    ~scope_exit() noexcept(noexcept(this->exit_function())) {
+    ~scope_exit() noexcept {
         if (execute_on_destruction) {
             this->exit_function();
         }
@@ -2232,14 +2232,12 @@ void ast_to_s(const std::shared_ptr<T>& ptr, std::string& s, int level = 0) {
     std::string name;
     if (ast.name == ast.original_name) {
         name = ast.name;
-    }
-    else {
-        name = ast.original_name + " (" + ast.name + ")";
+    } else {
+        name = ast.original_name + "[" + ast.name + "]";
     }
     if (ast.is_token) {
-        s += "- " + name + "(" + ast.token + ")\n";
-    }
-    else {
+        s += "- " + name + " (" + ast.token + ")\n";
+    } else {
         s += "+ " + name + "\n";
     }
     for (auto node : ast.nodes) {

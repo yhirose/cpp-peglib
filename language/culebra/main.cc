@@ -5,7 +5,6 @@
 #include <iostream>
 #include <vector>
 
-using namespace culebra;
 using namespace peg;
 using namespace std;
 
@@ -28,7 +27,7 @@ bool read_file(const char* path, vector<char>& buff)
 
 struct CommandLineDebugger
 {
-    void operator()(const Ast& ast, Environment& env, bool force_to_break) {
+    void operator()(const Ast& ast, culebra::Environment& env, bool force_to_break) {
         if (quit) {
             return;
         }
@@ -130,7 +129,7 @@ struct CommandLineDebugger
         }
     }
 
-    void print(const Ast& ast, Environment& env, const string& symbol) {
+    void print(const Ast& ast, culebra::Environment& env, const string& symbol) {
         if (symbol.empty()) {
             print_all(ast, env);
         } else if (env.has(symbol)) {
@@ -140,14 +139,14 @@ struct CommandLineDebugger
         }
     }
 
-    void print_all(const Ast& ast, Environment& env) {
+    void print_all(const Ast& ast, culebra::Environment& env) {
         auto node = find_function_node(ast);
         set<string> references;
         enum_identifiers(*node, references);
         for (const auto& symbol: references) {
             if (env.has(symbol)) {
                 const auto& val = env.get(symbol);
-                if (val.type != Value::Function) {
+                if (val.type != culebra::Value::Function) {
                     cout << symbol << ": " << val.str() << endl;
                 }
             }
@@ -212,7 +211,7 @@ struct CommandLineDebugger
     map<string, vector<size_t>> sources_;
 };
 
-int repl(shared_ptr<Environment> env, bool print_ast)
+int repl(shared_ptr<culebra::Environment> env, bool print_ast)
 {
     for (;;) {
         auto line = linenoise::Readline("cul> ");
@@ -223,13 +222,13 @@ int repl(shared_ptr<Environment> env, bool print_ast)
 
         if (!line.empty()) {
             vector<string>  msgs;
-            auto ast = parse("(repl)", line.data(), line.size(), msgs);
+            auto ast = culebra::parse("(repl)", line.data(), line.size(), msgs);
             if (ast) {
                 if (print_ast) {
                     cout << peg::ast_to_s(ast);
                 }
 
-                Value val;
+                culebra::Value val;
                 if (interpret(ast, env, val, msgs)) {
                     cout << val << endl;
                     linenoise::AddHistory(line.c_str());
@@ -272,7 +271,7 @@ int main(int argc, const char** argv)
     }
 
     try {
-        auto env = make_shared<Environment>();
+        auto env = make_shared<culebra::Environment>();
         setup_built_in_functions(*env);
 
         for (auto path: path_list) {
@@ -283,14 +282,14 @@ int main(int argc, const char** argv)
             }
 
             vector<string>  msgs;
-            auto ast = parse(path, buff.data(), buff.size(), msgs);
+            auto ast = culebra::parse(path, buff.data(), buff.size(), msgs);
             if (ast) {
                 if (print_ast) {
                     cout << peg::ast_to_s(ast);
                 }
 
-                Value val;
-                auto  dbg = debug ? CommandLineDebugger() : Debugger();
+                culebra::Value val;
+                auto  dbg = debug ? CommandLineDebugger() : culebra::Debugger();
                 if (interpret(ast, env, val, msgs, dbg)) {
                     return 0;
                 }

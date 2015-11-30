@@ -141,21 +141,21 @@ struct FunctionValue {
 };
 
 struct ObjectValue {
+    ObjectValue() : properties(std::make_shared<std::map<std::string, Symbol>>()) {}
     bool has(const std::string& name) const;
     const Value& get(const std::string& name) const;
     void assign(const std::string& name, const Value& val);
     void initialize(const std::string& name, const Value& val, bool mut);
     virtual std::map<std::string, Value>& builtins();
 
-    std::shared_ptr<std::map<std::string, Symbol>> properties =
-        std::make_shared<std::map<std::string, Symbol>>();
+    std::shared_ptr<std::map<std::string, Symbol>> properties;
 };
 
 struct ArrayValue : public ObjectValue {
+    ArrayValue() : values(std::make_shared<std::vector<Value>>()) {}
     std::map<std::string, Value>& builtins() override;
 
-    std::shared_ptr<std::vector<Value>> values =
-        std::make_shared<std::vector<Value>>();
+    std::shared_ptr<std::vector<Value>> values;
 };
 
 struct Value
