@@ -58,7 +58,7 @@ int main(int argc, const char** argv)
     }
 
     if ((path_list.empty() && !opt_server) || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--server [PORT=1234]] [--trace] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--server [PORT]] [--trace] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
