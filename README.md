@@ -189,15 +189,15 @@ assert(ret == false);
 
 ```cpp
 parser["RULE"].before = [](any& dt) {
-    std::cout << "before" << std::cout;
+    std::cout << "before" << std::endl;
 };
 
 parser["RULE"] = [](const SemanticValues& sv, any& dt) {
-    std::cout << "action!" << std::cout;
+    std::cout << "action!" << std::endl;
 };
 
 parser["RULE"].after = [](any& dt) {
-    std::cout << "after" << std::cout;
+    std::cout << "after" << std::endl;
 };
 ```
 
@@ -355,7 +355,7 @@ The following are available operators:
 | tok      | Token boundary        |
 | ign      | Ignore semantic value |
 | cap      | Capture character     |
-| usr      | User defiend parser   |
+| usr      | User defined parser   |
 
 Adjust definitions
 ------------------
