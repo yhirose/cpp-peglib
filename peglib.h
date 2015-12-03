@@ -1301,8 +1301,8 @@ public:
     std::string                    name;
     size_t                         id;
     Action                         action;
-    std::function<void (any& dt)>  before;
-    std::function<void (any& dt)>  after;
+    std::function<void (any& dt)>  enter;
+    std::function<void (any& dt)>  exit;
     std::function<std::string ()>  error_message;
     bool                           ignoreSemanticValue;
     std::shared_ptr<Ope>           whiteSpaceOpe;
@@ -1373,8 +1373,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
         auto& chldsv = c.push();
 
-        if (outer_->before) {
-            outer_->before(dt);
+        if (outer_->enter) {
+            outer_->enter(dt);
         }
 
         auto ope = ope_;
@@ -1415,8 +1415,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             }
         }
 
-        if (outer_->after) {
-            outer_->after(dt);
+        if (outer_->exit) {
+            outer_->exit(dt);
         }
 
         c.pop();

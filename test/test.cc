@@ -213,7 +213,7 @@ TEST_CASE("Lambda action test", "[general]")
     REQUIRE(ss == "hello");
 }
 
-TEST_CASE("before/after handlers test", "[general]")
+TEST_CASE("enter/exit handlers test", "[general]")
 {
     parser parser(R"(
         START  <- LTOKEN '=' RTOKEN
@@ -222,11 +222,11 @@ TEST_CASE("before/after handlers test", "[general]")
         TOKEN  <- [A-Za-z]+
     )");
 
-    parser["LTOKEN"].before = [&](any& dt) {
+    parser["LTOKEN"].enter = [&](any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = false;
     };
-    parser["LTOKEN"].after = [&](any& dt) {
+    parser["LTOKEN"].exit = [&](any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = true;
     };
