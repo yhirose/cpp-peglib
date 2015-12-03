@@ -274,6 +274,32 @@ TEST_CASE("WHITESPACE test", "[general]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("WHITESPACE test2", "[general]")
+{
+    peg::parser parser(R"(
+        # Rules
+        ROOT         <-  ITEM (',' ITEM)*
+        ITEM         <-  '[' < [a-zA-Z0-9_]+ > ']'
+
+        %whitespace  <-  (SPACE / TAB)*
+        SPACE        <-  ' '
+        TAB          <-  '\t'
+    )");
+
+    vector<string> items;
+    parser["ITEM"] = [&](const SemanticValues& sv) {
+        items.push_back(sv.str());
+    };
+
+    auto ret = parser.parse(R"([one], 	[two] ,[three] )");
+
+    REQUIRE(ret == true);
+    REQUIRE(items.size() == 3);
+    REQUIRE(items[0] == "one");
+    REQUIRE(items[1] == "two");
+    REQUIRE(items[2] == "three");
+}
+
 TEST_CASE("Skip token test", "[general]")
 {
     peg::parser parser(

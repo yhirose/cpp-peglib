@@ -476,8 +476,9 @@ class Definition;
 
 typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> Tracer;
 
-struct Context
+class Context
 {
+public:
     const char*                                  path;
     const char*                                  s;
     const size_t                                 l;
@@ -492,7 +493,9 @@ struct Context
     std::vector<std::shared_ptr<SemanticValues>> value_stack;
     size_t                                       value_stack_size;
 
-    std::shared_ptr<Ope>                         whiteSpaceOpe;
+    std::shared_ptr<Ope>                         whitespaceOpe;
+    bool                                         in_whiltespace;
+    bool                                         in_token;
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
@@ -508,7 +511,7 @@ struct Context
         const char*          s,
         size_t               l,
         size_t               def_count,
-        std::shared_ptr<Ope> whiteSpaceOpe,
+        std::shared_ptr<Ope> whitespaceOpe,
         bool                 enablePackratParsing,
         Tracer               tracer)
         : path(path)
@@ -516,7 +519,9 @@ struct Context
         , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
-        , whiteSpaceOpe(whiteSpaceOpe)
+        , whitespaceOpe(whitespaceOpe)
+        , in_whiltespace(false)
+        , in_token(false)
         , nest_level(0)
         , value_stack_size(0)
         , def_count(def_count)
@@ -1071,6 +1076,26 @@ private:
     mutable std::shared_ptr<Ope>                       rule_;
 };
 
+class Whitespace : public Ope
+{
+public:
+    Whitespace(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        if (c.in_whiltespace) {
+            return 0;
+        }
+        c.in_whiltespace = true;
+        auto se = make_scope_exit([&]() { c.in_whiltespace = false; });
+        const auto& rule = *ope_;
+        return rule.parse(s, n, sv, c, dt);
+    }
+
+    void accept(Visitor& v) override;
+
+    std::shared_ptr<Ope> ope_;
+};
+
 /*
  * Visitor
  */
@@ -1094,6 +1119,7 @@ struct Ope::Visitor
     virtual void visit(WeakHolder& ope) {}
     virtual void visit(Holder& ope) {}
     virtual void visit(DefinitionReference& ope) {}
+    virtual void visit(Whitespace& ope) {}
 };
 
 struct AssignIDToDefinition : public Ope::Visitor
@@ -1174,6 +1200,7 @@ public:
         : ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
+        , has_token_boundary(false)
         , holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
@@ -1181,6 +1208,7 @@ public:
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
+        , has_token_boundary(false)
         , holder_(rhs.holder_)
     {
         holder_->outer_ = this;
@@ -1189,9 +1217,10 @@ public:
     Definition(Definition&& rhs)
         : name(std::move(rhs.name))
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
-        , whiteSpaceOpe(rhs.whiteSpaceOpe)
+        , whitespaceOpe(rhs.whitespaceOpe)
         , enablePackratParsing(rhs.enablePackratParsing)
         , is_token(rhs.is_token)
+        , has_token_boundary(rhs.has_token_boundary)
         , holder_(std::move(rhs.holder_))
     {
         holder_->outer_ = this;
@@ -1201,6 +1230,7 @@ public:
         : ignoreSemanticValue(false)
         , enablePackratParsing(false)
         , is_token(false)
+        , has_token_boundary(false)
         , holder_(std::make_shared<Holder>(this))
     {
         *this <= ope;
@@ -1214,6 +1244,7 @@ public:
         IsToken isToken;
         ope->accept(isToken);
         is_token = isToken.is_token();
+        has_token_boundary = isToken.has_token_boundary;
 
         holder_->ope_ = ope;
 
@@ -1305,9 +1336,10 @@ public:
     std::function<void (any& dt)>  exit;
     std::function<std::string ()>  error_message;
     bool                           ignoreSemanticValue;
-    std::shared_ptr<Ope>           whiteSpaceOpe;
+    std::shared_ptr<Ope>           whitespaceOpe;
     bool                           enablePackratParsing;
     bool                           is_token;
+    bool                           has_token_boundary;
     Tracer                         tracer;
 
 private:
@@ -1320,7 +1352,7 @@ private:
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
-        Context cxt(path, s, n, assignId.ids.size(), whiteSpaceOpe, enablePackratParsing, tracer);
+        Context cxt(path, s, n, assignId.ids.size(), whitespaceOpe, enablePackratParsing, tracer);
         auto len = holder_->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1345,8 +1377,8 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
 
     // Skip whiltespace
     const auto d = c.definition_stack.back();
-    if (!d->is_token && c.whiteSpaceOpe) {
-        auto len = c.whiteSpaceOpe->parse(s + i, n - i, sv, c, dt);
+    if (!d->is_token && c.whitespaceOpe) {
+        auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
         if (fail(len)) {
             return -1;
         }
@@ -1362,6 +1394,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     }
 
     c.trace(outer_->name.c_str(), s, n, sv, dt);
+    c.nest_level++;
+    auto se = make_scope_exit([&]() { c.nest_level--; });
 
     size_t      len;
     any         val;
@@ -1379,16 +1413,31 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
         auto ope = ope_;
 
-        if (outer_->whiteSpaceOpe) {
-            ope = std::make_shared<Sequence>(outer_->whiteSpaceOpe, ope_);
-        } else if (outer_->is_token && c.whiteSpaceOpe) {
-            ope = std::make_shared<Sequence>(std::make_shared<TokenBoundary>(ope_), c.whiteSpaceOpe);
+        if (!c.in_token && c.whitespaceOpe) {
+            if (c.definition_stack.size() == 1) {
+                if (outer_->is_token && !outer_->has_token_boundary) {
+                    ope = std::make_shared<Sequence>(c.whitespaceOpe, std::make_shared<TokenBoundary>(ope_));
+                } else {
+                    ope = std::make_shared<Sequence>(c.whitespaceOpe, ope_);
+                }
+            } else if (outer_->is_token) {
+                if (!outer_->has_token_boundary) {
+                    ope = std::make_shared<Sequence>(std::make_shared<TokenBoundary>(ope_), c.whitespaceOpe);
+                } else {
+                    ope = std::make_shared<Sequence>(ope_, c.whitespaceOpe);
+                }
+            }
         }
 
-        c.nest_level++;
-        auto se = make_scope_exit([&]() { c.nest_level--; });
         const auto& rule = *ope;
-        len = rule.parse(s, n, chldsv, c, dt);
+        if (!c.in_token && outer_->is_token) {
+            c.in_token = true;
+            auto se = make_scope_exit([&]() { c.in_token = false; });
+
+            len = rule.parse(s, n, chldsv, c, dt);
+        } else {
+            len = rule.parse(s, n, chldsv, c, dt);
+        }
 
         token_boundary_n = len;
 
@@ -1483,6 +1532,7 @@ inline void User::accept(Visitor& v) { v.visit(*this); }
 inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
 inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
+inline void Whitespace::accept(Visitor& v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder& ope) {
     auto p = (void*)ope.outer_;
@@ -1566,6 +1616,10 @@ inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, S
 
 inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition>& grammar, const std::string& name, const char* s) {
     return std::make_shared<DefinitionReference>(grammar, name, s);
+}
+
+inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<Ignore>(std::make_shared<Whitespace>(ope));
 }
 
 /*-----------------------------------------------------------------------------
@@ -2054,7 +2108,7 @@ private:
         // Automatic whitespace skipping
         if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
             auto& rule = (*data.grammar)[start];
-            rule.whiteSpaceOpe = (*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator();
+            rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
         }
 
         return data.grammar;
