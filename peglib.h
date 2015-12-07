@@ -207,15 +207,14 @@ auto make_scope_exit(EF&& exit_function) noexcept {
 struct SemanticValue
 {
     any         val;
-    const char* name;
     const char* s;
     size_t      n;
 
     SemanticValue()
         : s(nullptr), n(0) {}
 
-    SemanticValue(const any& val, const char* name, const char* s, size_t n)
-        : val(val), name(name), s(s), n(n) {}
+    SemanticValue(const any& val, const char* s, size_t n)
+        : val(val), s(s), n(n) {}
 
     template <typename T>
     T& get() {
@@ -487,11 +486,11 @@ public:
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
-    size_t                                       nest_level;
-    std::vector<Definition*>                     definition_stack;
-
     std::vector<std::shared_ptr<SemanticValues>> value_stack;
     size_t                                       value_stack_size;
+
+    size_t                                       nest_level;
+    std::vector<Definition*>                     definition_stack;
 
     std::shared_ptr<Ope>                         whitespaceOpe;
     bool                                         in_whiltespace;
@@ -519,11 +518,11 @@ public:
         , l(l)
         , error_pos(nullptr)
         , message_pos(nullptr)
+        , value_stack_size(0)
+        , nest_level(0)
         , whitespaceOpe(whitespaceOpe)
         , in_whiltespace(false)
         , in_token(false)
-        , nest_level(0)
-        , value_stack_size(0)
         , def_count(def_count)
         , enablePackratParsing(enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
@@ -681,7 +680,7 @@ public:
             auto& chldsv = c.push();
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
-            if (len != -1) {
+            if (success(len)) {
                 if (!chldsv.empty()) {
                     sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 }
@@ -841,7 +840,6 @@ public:
             c.set_error_pos(s);
             return -1;
         } else {
-            sv.rewind(s);
             c.error_pos = save_error_pos;
             return 0;
         }
@@ -1474,7 +1472,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     if (success(len)) {
         if (!outer_->ignoreSemanticValue) {
-            sv.emplace_back(val, outer_->name.c_str(), token_boundary_s, token_boundary_n);
+            sv.emplace_back(val, token_boundary_s, token_boundary_n);
         }
     } else {
         if (outer_->error_message) {
