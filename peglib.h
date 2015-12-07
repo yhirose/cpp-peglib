@@ -163,23 +163,23 @@ private:
 template <typename EF>
 struct scope_exit
 {
-    explicit scope_exit(EF&& f) noexcept
+    explicit scope_exit(EF&& f)
         : exit_function(std::move(f))
         , execute_on_destruction{true} {}
 
-    scope_exit(scope_exit&& rhs) noexcept
+    scope_exit(scope_exit&& rhs)
         : exit_function(std::move(rhs.exit_function))
         , execute_on_destruction{rhs.execute_on_destruction} {
             rhs.release();
     }
 
-    ~scope_exit() noexcept {
+    ~scope_exit() {
         if (execute_on_destruction) {
             this->exit_function();
         }
     }
 
-    void release() noexcept {
+    void release() {
         this->execute_on_destruction = false;
     }
 
@@ -193,7 +193,7 @@ private:
 };
 
 template <typename EF>
-auto make_scope_exit(EF&& exit_function) noexcept {
+auto make_scope_exit(EF&& exit_function) {
     return scope_exit<std::remove_reference_t<EF>>(std::forward<EF>(exit_function));
 }
 
@@ -273,16 +273,6 @@ struct SemanticValues : protected std::vector<SemanticValue>
     template <typename T>
     auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
         return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
-    }
-
-    void rewind(const char* s) {
-        auto it = rbegin();
-        while (it != rend() && it->s >= s) {
-            ++it;
-        }
-        if (it != rbegin()) {
-            erase(it.base());
-        }
     }
 
 private:
@@ -441,7 +431,7 @@ private:
 /*
  * Semantic predicate
  */
-// Note: 'parser_error' exception class should be be used in sematic action handlers to reject the rule.
+// Note: 'parse_error' exception class should be be used in sematic action handlers to reject the rule.
 struct parse_error {
     parse_error() = default;
     parse_error(const char* s) : s_(s) {}
@@ -676,8 +666,11 @@ public:
         size_t id = 0;
         for (const auto& ope : opes_) {
             c.nest_level++;
-            auto se = make_scope_exit([&]() { c.nest_level--; });
             auto& chldsv = c.push();
+            auto se = make_scope_exit([&]() {
+                c.nest_level--;
+                c.pop();
+            });
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (success(len)) {
@@ -687,11 +680,9 @@ public:
                 sv.s = chldsv.s;
                 sv.n = chldsv.n;
                 sv.choice = id;
-                c.pop();
                 return len;
             }
             id++;
-            c.pop();
         }
         return -1;
     }
@@ -715,10 +706,13 @@ public:
         while (n - i > 0) {
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
+            auto save_sv_size = sv.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                sv.rewind(s + i);
+                if (sv.size() != save_sv_size) {
+                    sv.erase(sv.begin() + save_sv_size);
+                }
                 c.error_pos = save_error_pos;
                 break;
             }
@@ -754,10 +748,13 @@ public:
         while (n - i > 0) {
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
+            auto save_sv_size = sv.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                sv.rewind(s + i);
+                if (sv.size() != save_sv_size) {
+                    sv.erase(sv.begin() + save_sv_size);
+                }
                 c.error_pos = save_error_pos;
                 break;
             }
@@ -780,13 +777,16 @@ public:
         c.trace("Option", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
+        auto save_sv_size = sv.size();
         auto se = make_scope_exit([&]() { c.nest_level--; });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             return len;
         } else {
-            sv.rewind(s);
+            if (sv.size() != save_sv_size) {
+                sv.erase(sv.begin() + save_sv_size);
+            }
             c.error_pos = save_error_pos;
             return 0;
         }
@@ -805,11 +805,13 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("AndPredicate", s, n, sv, dt);
         c.nest_level++;
-        auto se = make_scope_exit([&]() { c.nest_level--; });
         auto& chldsv = c.push();
+        auto se = make_scope_exit([&]() {
+            c.nest_level--;
+            c.pop();
+        });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
-        c.pop();
         if (success(len)) {
             return 0;
         } else {
@@ -831,11 +833,13 @@ public:
         c.trace("NotPredicate", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
-        auto se = make_scope_exit([&]() { c.nest_level--; });
         auto& chldsv = c.push();
+        auto se = make_scope_exit([&]() {
+            c.nest_level--;
+            c.pop();
+        });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
-        c.pop();
         if (success(len)) {
             c.set_error_pos(s);
             return -1;
@@ -987,9 +991,10 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto& chldsv = c.push();
-        auto len = rule.parse(s, n, chldsv, c, dt);
-        c.pop();
-        return len;
+        auto se = make_scope_exit([&]() {
+            c.pop();
+        });
+        return rule.parse(s, n, chldsv, c, dt);
     }
 
     void accept(Visitor& v) override;
@@ -1409,6 +1414,16 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             outer_->enter(dt);
         }
 
+        auto se = make_scope_exit([&]() {
+            c.definition_stack.pop_back();
+
+            c.pop();
+
+            if (outer_->exit) {
+                outer_->exit(dt);
+            }
+        });
+
         auto ope = ope_;
 
         if (!c.in_token && c.whitespaceOpe) {
@@ -1461,13 +1476,6 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                 len = -1;
             }
         }
-
-        if (outer_->exit) {
-            outer_->exit(dt);
-        }
-
-        c.pop();
-        c.definition_stack.pop_back();
     });
 
     if (success(len)) {
