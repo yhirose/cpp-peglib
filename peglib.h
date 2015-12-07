@@ -25,14 +25,22 @@
 
 // guard for older versions of VC++
 #ifdef _MSC_VER
-// VS2013 has no constexpr
+
 #if (_MSC_VER == 1800)
+// VS2013 lacks constexpr
 #define PEGLIB_NO_CONSTEXPR_SUPPORT
+// VS2013 lacks noexcept
+#define NOEXCEPT 
 #elif (_MSC_VER >= 1800)
-// good to go
+// VS2015 supports noexcept
+#define NOEXCEPT noexcept
 #else (_MSC_VER < 1800)
+// epic fail here
 #error "Requires C+11 support"
 #endif
+#else	
+// GCC Clang
+#define NOEXCEPT noexcept
 #endif
 
 namespace peg {
@@ -163,23 +171,29 @@ private:
 template <typename EF>
 struct scope_exit
 {
-    explicit scope_exit(EF&& f) noexcept
+    explicit scope_exit(EF&& f) NOEXCEPT
         : exit_function(std::move(f))
         , execute_on_destruction{true} {}
 
-    scope_exit(scope_exit&& rhs) noexcept
+    scope_exit(scope_exit&& rhs) NOEXCEPT
         : exit_function(std::move(rhs.exit_function))
         , execute_on_destruction{rhs.execute_on_destruction} {
             rhs.release();
     }
 
+	// no easy way around the NOEXCEPT macro with args ...
+	// VS2015+ or G++. Needs Clang perhaps?
+#if (defined(MSC_VER) && (_MSC_VER >= 1800)) || defined(__GNUG__)
     ~scope_exit() noexcept(noexcept(this->exit_function())) {
+#else
+		~scope_exit()  {
+#endif
         if (execute_on_destruction) {
             this->exit_function();
         }
     }
 
-    void release() noexcept {
+    void release() NOEXCEPT {
         this->execute_on_destruction = false;
     }
 
@@ -193,7 +207,7 @@ private:
 };
 
 template <typename EF>
-auto make_scope_exit(EF&& exit_function) noexcept {
+auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> NOEXCEPT  {
     return scope_exit<std::remove_reference_t<EF>>(std::forward<EF>(exit_function));
 }
 
@@ -471,7 +485,7 @@ inline bool fail(size_t len) {
  * Context
  */
 class Ope;
-class Context;
+struct Context;
 class Definition;
 
 typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> Tracer;
