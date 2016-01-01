@@ -231,12 +231,14 @@ TEST_CASE("enter/exit handlers test", "[general]")
         require_upper_case = true;
     };
 
+    auto message = "should be upper case string...";
+
     parser["TOKEN"] = [&](const SemanticValues& sv, any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         if (require_upper_case) {
             const auto& s = sv.str();
             if (!std::all_of(s.begin(), s.end(), ::isupper)) {
-                throw parse_error("should be upper case string...");
+                throw parse_error(message);
             }
         }
     };
@@ -251,6 +253,7 @@ TEST_CASE("enter/exit handlers test", "[general]")
     parser.log = [&](size_t ln, size_t col, const string& msg) {
         REQUIRE(ln == 1);
         REQUIRE(col == 7);
+        REQUIRE(msg == message);
     };
     parser.parse("hello=world", dt);
 }
@@ -661,16 +664,6 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
     REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
 }
 
-TEST_CASE("Definition duplicates test", "[general]")
-{
-    parser parser(
-        " A <- ''"
-        " A <- ''"
-    );
-
-    REQUIRE(parser == false);
-}
-
 TEST_CASE("Literal token on AST test1", "[general]")
 {
     parser parser(R"(
@@ -723,6 +716,25 @@ TEST_CASE("Literal token on AST test3", "[general]")
     REQUIRE(ast->nodes.empty());
 }
 
+TEST_CASE("Missing missing definitions test", "[general]")
+{
+    parser parser(
+        " A <- B C "
+    );
+
+    REQUIRE(parser == false);
+}
+
+TEST_CASE("Definition duplicates test", "[general]")
+{
+    parser parser(
+        " A <- ''"
+        " A <- ''"
+    );
+
+    REQUIRE(parser == false);
+}
+
 TEST_CASE("Left recursive test", "[left recursive]")
 {
     parser parser(
@@ -767,7 +779,7 @@ TEST_CASE("User rule test", "[user rule]")
 
     Rules rules = {
         {
-            "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) -> size_t {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
                 static vector<string> names = { "PEG", "BNF" };
                 for (const auto& name: names) {
                     if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
