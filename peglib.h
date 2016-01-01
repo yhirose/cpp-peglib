@@ -2058,7 +2058,7 @@ private:
         }
 
         // Check duplicated definitions
-        bool ret = data.duplicates.empty();;
+        bool ret = data.duplicates.empty();
 
         for (const auto& x: data.duplicates) {
             if (log) {
@@ -2404,7 +2404,7 @@ public:
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, n, path);
-            output_log(s, n, log, r);
+            output_log(s, n, r);
             return r.ret && r.len == n;
         }
         return false;
@@ -2419,7 +2419,7 @@ public:
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse(s, n, dt, path);
-            output_log(s, n, log, r);
+            output_log(s, n, r);
             return r.ret && r.len == n;
         }
         return false;
@@ -2435,7 +2435,7 @@ public:
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse_and_get_value(s, n, val, path);
-            output_log(s, n, log, r);
+            output_log(s, n, r);
             return r.ret && r.len == n;
         }
         return false;
@@ -2452,7 +2452,7 @@ public:
         if (grammar_ != nullptr) {
             const auto& rule = (*grammar_)[start_];
             auto r = rule.parse_and_get_value(s, n, dt, val, path);
-            output_log(s, n, log, r);
+            output_log(s, n, r);
             return r.ret && r.len == n;
         }
         return false;
@@ -2538,7 +2538,7 @@ public:
     Log         log;
 
 private:
-    void output_log(const char* s, size_t n, Log log, const Definition::Result& r) const {
+    void output_log(const char* s, size_t n, const Definition::Result& r) const {
         if (log) {
             if (!r.ret) {
                 if (r.message_pos) {

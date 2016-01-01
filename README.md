@@ -369,7 +369,7 @@ auto syntax = R"(
 
 Rules additional_rules = {
     {
-        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& c) -> size_t {
+        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
             static vector<string> names = { "PEG", "BNF" };
             for (const auto& name: names) {
                 if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
