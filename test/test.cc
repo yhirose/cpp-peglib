@@ -98,7 +98,7 @@ TEST_CASE("String capture test3", "[general]")
    std::vector<std::string> tags;
 
    pg["TOKEN"] = [&](const SemanticValues& sv) {
-       tags.push_back(sv.str());
+       tags.push_back(sv.token());
    };
 
    auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
@@ -205,7 +205,7 @@ TEST_CASE("Lambda action test", "[general]")
 
     string ss;
     parser["CHAR"] = [&](const SemanticValues& sv) {
-        ss += *sv.s;
+        ss += *sv.c_str();
     };
 
     bool ret = parser.parse("hello");
@@ -213,7 +213,7 @@ TEST_CASE("Lambda action test", "[general]")
     REQUIRE(ss == "hello");
 }
 
-TEST_CASE("enter/exit handlers test", "[general]")
+TEST_CASE("enter/leave handlers test", "[general]")
 {
     parser parser(R"(
         START  <- LTOKEN '=' RTOKEN
@@ -226,7 +226,7 @@ TEST_CASE("enter/exit handlers test", "[general]")
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = false;
     };
-    parser["LTOKEN"].exit = [&](any& dt) {
+    parser["LTOKEN"].leave = [&](any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = true;
     };
@@ -266,8 +266,8 @@ TEST_CASE("WHITESPACE test", "[general]")
         ITEM         <-  WORD / PHRASE
 
         # Tokens
-        WORD         <-  [a-zA-Z0-9_]+
-        PHRASE       <-  '"' (!'"' .)* '"'
+        WORD         <-  < [a-zA-Z0-9_]+ >
+        PHRASE       <-  < '"' (!'"' .)* '"' >
 
         %whitespace  <-  [ \t\r\n]*
     )");
@@ -291,7 +291,7 @@ TEST_CASE("WHITESPACE test2", "[general]")
 
     vector<string> items;
     parser["ITEM"] = [&](const SemanticValues& sv) {
-        items.push_back(sv.str());
+        items.push_back(sv.token());
     };
 
     auto ret = parser.parse(R"([one], 	[two] ,[three] )");
@@ -324,7 +324,7 @@ TEST_CASE("Skip token test2", "[general]")
 {
     peg::parser parser(R"(
         ROOT        <-  ITEM (',' ITEM)*
-        ITEM        <-  ([a-z0-9])+
+        ITEM        <-  < ([a-z0-9])+ >
         %whitespace <-  [ \t]*
     )");
 
@@ -407,7 +407,7 @@ TEST_CASE("Simple calculator test", "[general]")
     parser parser(syntax);
 
     parser["Additive"] = [](const SemanticValues& sv) {
-        switch (sv.choice) {
+        switch (sv.choice()) {
         case 0:
             return sv[0].get<int>() + sv[1].get<int>();
         default:
@@ -416,7 +416,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
-        switch (sv.choice) {
+        switch (sv.choice()) {
         case 0:
             return sv[0].get<int>() * sv[1].get<int>();
         default:
@@ -425,7 +425,7 @@ TEST_CASE("Simple calculator test", "[general]")
     };
 
     parser["Number"] = [](const SemanticValues& sv) {
-        return atoi(sv.s);
+        return atoi(sv.c_str());
     };
 
     int val;
@@ -448,10 +448,10 @@ TEST_CASE("Calculator test", "[general]")
 
     // Setup actions
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].val.get<long>();
+        long ret = sv[0].get<long>();
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].val.get<long>();
-            switch (sv[i].val.get<char>()) {
+            auto num = sv[i + 1].get<long>();
+            switch (sv[i].get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -463,8 +463,8 @@ TEST_CASE("Calculator test", "[general]")
 
     EXPRESSION      = reduce;
     TERM            = reduce;
-    TERM_OPERATOR   = [](const SemanticValues& sv) { return *sv.s; };
-    FACTOR_OPERATOR = [](const SemanticValues& sv) { return *sv.s; };
+    TERM_OPERATOR   = [](const SemanticValues& sv) { return *sv.c_str(); };
+    FACTOR_OPERATOR = [](const SemanticValues& sv) { return *sv.c_str(); };
     NUMBER          = [](const SemanticValues& sv) { return stol(sv.str(), nullptr, 10); };
 
     // Parse
@@ -494,10 +494,10 @@ TEST_CASE("Calculator test2", "[general]")
 
     // Setup actions
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].val.get<long>();
+        long ret = sv[0].get<long>();
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].val.get<long>();
-            switch (sv[i].val.get<char>()) {
+            auto num = sv[i + 1].get<long>();
+            switch (sv[i].get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -509,8 +509,8 @@ TEST_CASE("Calculator test2", "[general]")
 
     g["EXPRESSION"]      = reduce;
     g["TERM"]            = reduce;
-    g["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return *sv.s; };
-    g["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return *sv.s; };
+    g["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return *sv.c_str(); };
+    g["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
     g["NUMBER"]          = [](const SemanticValues& sv) { return stol(sv.str(), nullptr, 10); };
 
     // Parse
@@ -535,10 +535,10 @@ TEST_CASE("Calculator test3", "[general]")
         );
 
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].val.get<long>();
+        long ret = sv[0].get<long>();
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].val.get<long>();
-            switch (sv[i].val.get<char>()) {
+            auto num = sv[i + 1].get<long>();
+            switch (sv[i].get<char>()) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -551,8 +551,8 @@ TEST_CASE("Calculator test3", "[general]")
     // Setup actions
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return (char)*sv.s; };
-    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return (char)*sv.s; };
+    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
+    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
     parser["NUMBER"]          = [](const SemanticValues& sv) { return stol(sv.str(), nullptr, 10); };
 
     // Parse
@@ -805,7 +805,7 @@ TEST_CASE("Semantic predicate test", "[predicate]")
     parser parser("NUMBER  <-  [0-9]+");
 
     parser["NUMBER"] = [](const SemanticValues& sv) {
-        auto val = stol(sv.str(), nullptr, 10);
+        auto val = stol(sv.token(), nullptr, 10);
         if (val != 100) {
             throw parse_error("value error!!");
         }

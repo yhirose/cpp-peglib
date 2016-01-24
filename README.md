@@ -35,7 +35,7 @@ int main(void) {
         Additive    <- Multitive '+' Additive / Multitive
         Multitive   <- Primary '*' Multitive / Primary
         Primary     <- '(' Additive ')' / Number
-        Number      <- [0-9]+
+        Number      <- < [0-9]+ >
         %whitespace <- [ \t]*
     )";
 
@@ -43,7 +43,7 @@ int main(void) {
 
     // (3) Setup an action
     parser["Additive"] = [](const SemanticValues& sv) {
-        switch (sv.choice) {
+        switch (sv.choice()) {
         case 0:  // "Multitive '+' Additive"
             return sv[0].get<int>() + sv[1].get<int>();
         default: // "Multitive"
@@ -52,7 +52,7 @@ int main(void) {
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
-        switch (sv.choice) {
+        switch (sv.choice()) {
         case 0:  // "Primary '*' Multitive"
             return sv[0].get<int>() * sv[1].get<int>();
         default: // "Primary"
@@ -61,11 +61,11 @@ int main(void) {
     };
 
     parser["Number"] = [](const SemanticValues& sv) {
-        return stoi(sv.str(), nullptr, 10);
+        return stoi(sv.token(), nullptr, 10);
     };
 
     // (4) Parse
-    parser.packrat_parsing(); // Enable packrat parsing.
+    parser.enable_packrat_parsing(); // Enable packrat parsing.
 
     int val;
     parser.parse(" (1 + 2) * 3 ", val);
@@ -84,28 +84,24 @@ Here are available actions:
 `const SemanticValues& sv` contains semantic values. `SemanticValues` structure is defined as follows.
 
 ```cpp
-struct SemanticValue {
-    any         val;  // Semantic value
-    const char* name; // Definition name for the sematic value
-    const char* s;    // Token start for the semantic value
-    size_t      n;    // Token length for the semantic value
-
-    // Cast semantic value
-    template <typename T> T& get();
-    template <typename T> const T& get() const;
-
-    // Get token
-    std::string str() const;
-};
-
-struct SemanticValues : protected std::vector<SemanticValue>
+struct SemanticValues : protected std::vector<any>
 {
-    const char* s;      // Token start
-    size_t      n;      // Token length
-    size_t      choice; // Choice number (0 based index)
+    // Matched string
+    std::string str() const;    // Matched string
+    const char* c_str() const;  // Matched string start
+    size_t      length() const; // Matched string length
 
-    // Get token
-    std::string str() const;
+    // Tokens
+    std::vector<
+        std::pair<
+            const char*, // Token start
+            size_t>>     // Token length
+        tokens;
+
+    std::string token(size_t id = 0) const;
+
+    // Choice number (0 based index)
+    size_t      choice() const;
 
     // Transform the semantic value vector to another vector
     template <typename T> vector<T> transform(size_t beg = 0, size_t end = -1) const;
@@ -114,11 +110,9 @@ struct SemanticValues : protected std::vector<SemanticValue>
 
 `peg::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
 
-`const char* s, size_t n` gives a pointer and length of the matched string. This is same as `sv.s` and `sv.n`.
-
 `any& dt` is a data object which can be used by the user for whatever purposes.
 
-The following example uses `<` ... ` >` operators. They are the *token boundary* operators. Each token boundary operator creates a semantic value that contains `const char*` of the position. It could be useful to eliminate unnecessary characters.
+The following example uses `<` ... ` >` operators. They are the *token boundary* operators.
 
 ```cpp
 auto syntax = R"(
@@ -131,7 +125,7 @@ peg pg(syntax);
 
 pg["TOKEN"] = [](const SemanticValues& sv) {
     // 'token' doesn't include trailing whitespaces
-    auto token = sv.str();
+    auto token = sv.token();
 };
 
 auto ret = pg.parse(" token1, token2 ");
@@ -185,19 +179,19 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
-*before* and *after* actions are also avalable.
+*enter* and *leave* actions are also avalable.
 
 ```cpp
-parser["RULE"].before = [](any& dt) {
-    std::cout << "before" << std::endl;
+parser["RULE"].enter = [](any& dt) {
+    std::cout << "enter" << std::endl;
 };
 
 parser["RULE"] = [](const SemanticValues& sv, any& dt) {
     std::cout << "action!" << std::endl;
 };
 
-parser["RULE"].after = [](any& dt) {
-    std::cout << "after" << std::endl;
+parser["RULE"].leave = [](any& dt) {
+    std::cout << "leave" << std::endl;
 };
 ```
 
@@ -216,7 +210,7 @@ These are valid tokens:
 
 ```
 KEYWORD  <- 'keyword'
-WORD     <-  [a-zA-Z0-9] [a-zA-Z0-9-_]*        # no reference rule is used
+WORD     <-  < [a-zA-Z0-9] [a-zA-Z0-9-_]* >    # token boundary operator is used.
 IDNET    <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
 ```
 
@@ -225,8 +219,8 @@ The following grammar accepts ` one, "two three", four `.
 ```
 ROOT         <- ITEM (',' ITEM)*
 ITEM         <- WORD / PHRASE
-WORD         <- [a-z]+
-PHRASE       <- '"' (!'"' .)* '"'
+WORD         <- < [a-z]+ >
+PHRASE       <- < '"' (!'"' .)* '"' >
 
 %whitespace  <-  [ \t\r\n]*
 ```
@@ -413,7 +407,6 @@ Tested compilers
 TODO
 ----
 
-  * Semantic predicate (`&{ expr }` and `!{ expr }`)
   * Unicode support (`.` matches a Unicode char. `\u????`, `\p{L}`)
   * Allow `←` and `ε`
 

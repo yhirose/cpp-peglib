@@ -204,81 +204,71 @@ auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
 /*
 * Semantic values
 */
-struct SemanticValue
-{
-    any         val;
-    const char* s;
-    size_t      n;
-
-    SemanticValue()
-        : s(nullptr), n(0) {}
-
-    SemanticValue(const any& val, const char* s, size_t n)
-        : val(val), s(s), n(n) {}
-
-    template <typename T>
-    T& get() {
-        return val.get<T>();
-    }
-
-    template <typename T>
-    const T& get() const {
-        return val.get<T>();
-    }
-
-    std::string str() const {
-        return std::string(s, n);
-    }
-
-};
-
-struct SemanticValues : protected std::vector<SemanticValue>
+struct SemanticValues : protected std::vector<any>
 {
     const char* path;
     const char* ss;
-    const char* s;
-    size_t      n;
-    size_t      choice;
+    const char* c_str() const { return s_; }
+    size_t      length() const { return n_; }
+    size_t      choice() const { return choice_; }
 
-    SemanticValues() : s(nullptr), n(0), choice(0) {}
+    std::vector<std::pair<const char*, size_t>> tokens;
 
-    typedef SemanticValue T;
-    using std::vector<T>::iterator;
-    using std::vector<T>::const_iterator;
-    using std::vector<T>::size;
-    using std::vector<T>::empty;
-    using std::vector<T>::assign;
-    using std::vector<T>::begin;
-    using std::vector<T>::end;
-    using std::vector<T>::rbegin;
-    using std::vector<T>::rend;
-    using std::vector<T>::operator[];
-    using std::vector<T>::at;
-    using std::vector<T>::resize;
-    using std::vector<T>::front;
-    using std::vector<T>::back;
-    using std::vector<T>::push_back;
-    using std::vector<T>::pop_back;
-    using std::vector<T>::insert;
-    using std::vector<T>::erase;
-    using std::vector<T>::clear;
-    using std::vector<T>::swap;
-    using std::vector<T>::emplace;
-    using std::vector<T>::emplace_back;
+    SemanticValues() : s_(nullptr), n_(0), choice_(0) {}
+
+    using std::vector<any>::iterator;
+    using std::vector<any>::const_iterator;
+    using std::vector<any>::size;
+    using std::vector<any>::empty;
+    using std::vector<any>::assign;
+    using std::vector<any>::begin;
+    using std::vector<any>::end;
+    using std::vector<any>::rbegin;
+    using std::vector<any>::rend;
+    using std::vector<any>::operator[];
+    using std::vector<any>::at;
+    using std::vector<any>::resize;
+    using std::vector<any>::front;
+    using std::vector<any>::back;
+    using std::vector<any>::push_back;
+    using std::vector<any>::pop_back;
+    using std::vector<any>::insert;
+    using std::vector<any>::erase;
+    using std::vector<any>::clear;
+    using std::vector<any>::swap;
+    using std::vector<any>::emplace;
+    using std::vector<any>::emplace_back;
 
     std::string str() const {
-        return std::string(s, n);
+        return std::string(s_, n_);
+    }
+
+    std::string token(size_t id = 0) const {
+        if (!tokens.empty()) {
+            assert(id < tokens.size());
+            const auto& tok = tokens[id];
+            return std::string(tok.first, tok.second);
+        }
+        return std::string(s_, n_);
     }
 
     template <typename T>
     auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
-        return this->transform(beg, end, [](const SemanticValue& v) { return v.get<T>(); });
+        return this->transform(beg, end, [](const any& v) { return v.get<T>(); });
     }
 
 private:
+    friend class Context;
+    friend class PrioritizedChoice;
+    friend class Holder;
+
+    const char* s_;
+    size_t      n_;
+    size_t      choice_;
+
     template <typename F>
-    auto transform(F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
-        vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
+    auto transform(F f) const -> vector<typename std::remove_const<decltype(f(any()))>::type> {
+        vector<typename std::remove_const<decltype(f(any()))>::type> r;
         for (const auto& v: *this) {
             r.emplace_back(f(v));
         }
@@ -286,8 +276,8 @@ private:
     }
 
     template <typename F>
-    auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> {
-        vector<typename std::remove_const<decltype(f(SemanticValue()))>::type> r;
+    auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(any()))>::type> {
+        vector<typename std::remove_const<decltype(f(any()))>::type> r;
         end = (std::min)(end, size());
         for (size_t i = beg; i < end; i++) {
             r.emplace_back(f((*this)[i]));
@@ -318,18 +308,9 @@ any call(F fn, Args&&... args) {
 
 template <
     typename R, typename F,
-    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, SemanticValue>::value>::type*& = enabler,
-    typename... Args>
-any call(F fn, Args&&... args) {
-    return fn(std::forward<Args>(args)...).val;
-}
-
-template <
-    typename R, typename F,
     typename std::enable_if<
         !std::is_void<R>::value &&
-        !std::is_same<typename std::remove_cv<R>::type, any>::value &&
-        !std::is_same<typename std::remove_cv<R>::type, SemanticValue>::value>::type*& = enabler,
+        !std::is_same<typename std::remove_cv<R>::type, any>::value>::type*& = enabler,
     typename... Args>
 any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
@@ -480,11 +461,11 @@ public:
     size_t                                       value_stack_size;
 
     size_t                                       nest_level;
-    std::vector<Definition*>                     definition_stack;
+
+    bool                                         in_token;
 
     std::shared_ptr<Ope>                         whitespaceOpe;
-    bool                                         in_whiltespace;
-    bool                                         in_token;
+    bool                                         in_whitespace;
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
@@ -510,9 +491,9 @@ public:
         , message_pos(nullptr)
         , value_stack_size(0)
         , nest_level(0)
-        , whitespaceOpe(whitespaceOpe)
-        , in_whiltespace(false)
         , in_token(false)
+        , whitespaceOpe(whitespaceOpe)
+        , in_whitespace(false)
         , def_count(def_count)
         , enablePackratParsing(enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
@@ -563,8 +544,9 @@ public:
         }
         sv.path = path;
         sv.ss = s;
-        sv.s = nullptr;
-        sv.n = 0;
+        sv.s_ = nullptr;
+        sv.n_ = 0;
+        sv.tokens.clear();
         return sv;
     }
 
@@ -677,9 +659,10 @@ public:
                 if (!chldsv.empty()) {
                     sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 }
-                sv.s = chldsv.s;
-                sv.n = chldsv.n;
-                sv.choice = id;
+                sv.s_ = chldsv.c_str();
+                sv.n_ = chldsv.length();
+                sv.choice_ = id;
+                sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
                 return len;
             }
             id++;
@@ -707,11 +690,15 @@ public:
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
             auto save_sv_size = sv.size();
+            auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + save_sv_size);
+                }
+                if (sv.tokens.size() != save_tok_size) {
+                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -749,11 +736,15 @@ public:
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
             auto save_sv_size = sv.size();
+            auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + save_sv_size);
+                }
+                if (sv.tokens.size() != save_tok_size) {
+                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -778,6 +769,7 @@ public:
         auto save_error_pos = c.error_pos;
         c.nest_level++;
         auto save_sv_size = sv.size();
+        auto save_tok_size = sv.tokens.size();
         auto se = make_scope_exit([&]() { c.nest_level--; });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
@@ -786,6 +778,9 @@ public:
         } else {
             if (sv.size() != save_sv_size) {
                 sv.erase(sv.begin() + save_sv_size);
+            }
+            if (sv.tokens.size() != save_tok_size) {
+                sv.tokens.erase(sv.tokens.begin() + save_tok_size);
             }
             c.error_pos = save_error_pos;
             return 0;
@@ -968,15 +963,7 @@ class TokenBoundary : public Ope
 public:
     TokenBoundary(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len)) {
-            sv.s = s;
-            sv.n = len;
-        }
-        return len;
-    }
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
@@ -1085,11 +1072,11 @@ public:
     Whitespace(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        if (c.in_whiltespace) {
+        if (c.in_whitespace) {
             return 0;
         }
-        c.in_whiltespace = true;
-        auto se = make_scope_exit([&]() { c.in_whiltespace = false; });
+        c.in_whitespace = true;
+        auto se = make_scope_exit([&]() { c.in_whitespace = false; });
         const auto& rule = *ope_;
         return rule.parse(s, n, sv, c, dt);
     }
@@ -1280,8 +1267,8 @@ public:
         SemanticValues sv;
         any dt;
         auto r = parse_core(s, n, sv, dt, path);
-        if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
-            val = sv[0].val.get<T>();
+        if (r.ret && !sv.empty() && !sv.front().is_undefined()) {
+            val = sv[0].get<T>();
         }
         return r;
     }
@@ -1296,8 +1283,8 @@ public:
     Result parse_and_get_value(const char* s, size_t n, any& dt, T& val, const char* path = nullptr) const {
         SemanticValues sv;
         auto r = parse_core(s, n, sv, dt, path);
-        if (r.ret && !sv.empty() && !sv.front().val.is_undefined()) {
-            val = sv[0].val.get<T>();
+        if (r.ret && !sv.empty() && !sv.front().is_undefined()) {
+            val = sv[0].get<T>();
         }
         return r;
     }
@@ -1336,7 +1323,7 @@ public:
     size_t                         id;
     Action                         action;
     std::function<void (any& dt)>  enter;
-    std::function<void (any& dt)>  exit;
+    std::function<void (any& dt)>  leave;
     std::function<std::string ()>  error_message;
     bool                           ignoreSemanticValue;
     std::shared_ptr<Ope>           whitespaceOpe;
@@ -1355,8 +1342,13 @@ private:
         AssignIDToDefinition assignId;
         holder_->accept(assignId);
 
+        std::shared_ptr<Ope> ope = holder_;
+        if (whitespaceOpe) {
+            ope = std::make_shared<Sequence>(whitespaceOpe, ope);
+        }
+
         Context cxt(path, s, n, assignId.ids.size(), whitespaceOpe, enablePackratParsing, tracer);
-        auto len = holder_->parse(s, n, sv, cxt, dt);
+        auto len = ope->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
 
@@ -1379,16 +1371,36 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
     }
 
     // Skip whiltespace
-    const auto d = c.definition_stack.back();
-    if (!d->is_token && c.whitespaceOpe) {
-        auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
-        if (fail(len)) {
-            return -1;
+    if (!c.in_token) {
+        if (c.whitespaceOpe) {
+            auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
+            if (fail(len)) {
+                return -1;
+            }
+            i += len;
         }
-        i += len;
     }
 
     return i;
+}
+
+inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+	c.in_token = true;
+    auto se = make_scope_exit([&]() { c.in_token = false; });
+    const auto& rule = *ope_;
+    auto len = rule.parse(s, n, sv, c, dt);
+    if (success(len)) {
+        sv.tokens.push_back(std::make_pair(s, len));
+
+        if (c.whitespaceOpe) {
+            auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
+            if (fail(l)) {
+                return -1;
+            }
+            len += l;
+        }
+    }
+    return len;
 }
 
 inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
@@ -1402,12 +1414,8 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     size_t      len;
     any         val;
-    const char* token_boundary_s = s;
-    size_t      token_boundary_n = n;
 
     c.packrat(s, outer_->id, len, val, [&](any& val) {
-        c.definition_stack.push_back(outer_);
-
         auto& chldsv = c.push();
 
         if (outer_->enter) {
@@ -1415,54 +1423,20 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         }
 
         auto se = make_scope_exit([&]() {
-            c.definition_stack.pop_back();
-
             c.pop();
 
-            if (outer_->exit) {
-                outer_->exit(dt);
+            if (outer_->leave) {
+                outer_->leave(dt);
             }
         });
 
-        auto ope = ope_;
-
-        if (!c.in_token && c.whitespaceOpe) {
-            if (c.definition_stack.size() == 1) {
-                if (outer_->is_token && !outer_->has_token_boundary) {
-                    ope = std::make_shared<Sequence>(c.whitespaceOpe, std::make_shared<TokenBoundary>(ope_));
-                } else {
-                    ope = std::make_shared<Sequence>(c.whitespaceOpe, ope_);
-                }
-            } else if (outer_->is_token) {
-                if (!outer_->has_token_boundary) {
-                    ope = std::make_shared<Sequence>(std::make_shared<TokenBoundary>(ope_), c.whitespaceOpe);
-                } else {
-                    ope = std::make_shared<Sequence>(ope_, c.whitespaceOpe);
-                }
-            }
-        }
-
-        const auto& rule = *ope;
-        if (!c.in_token && outer_->is_token) {
-            c.in_token = true;
-            auto se = make_scope_exit([&]() { c.in_token = false; });
-
-            len = rule.parse(s, n, chldsv, c, dt);
-        } else {
-            len = rule.parse(s, n, chldsv, c, dt);
-        }
-
-        token_boundary_n = len;
+        const auto& rule = *ope_;
+        len = rule.parse(s, n, chldsv, c, dt);
 
         // Invoke action
         if (success(len)) {
-            if (chldsv.s) {
-                token_boundary_s = chldsv.s;
-                token_boundary_n = chldsv.n;
-            } else {
-                chldsv.s = s;
-                chldsv.n = len;
-            }
+            chldsv.s_ = s;
+            chldsv.n_ = len;
 
             try {
                 val = reduce(chldsv, dt);
@@ -1480,7 +1454,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     if (success(len)) {
         if (!outer_->ignoreSemanticValue) {
-            sv.emplace_back(val, token_boundary_s, token_boundary_n);
+            sv.emplace_back(val);
         }
     } else {
         if (outer_->error_message) {
@@ -1500,7 +1474,7 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt) const {
     } else if (sv.empty()) {
         return any();
     } else {
-        return sv.front().val;
+        return sv.front();
     }
 }
 
@@ -1625,7 +1599,7 @@ inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition
 }
 
 inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Ignore>(std::make_shared<Whitespace>(ope));
+    return std::make_shared<Whitespace>(std::make_shared<Ignore>(ope));
 }
 
 /*-----------------------------------------------------------------------------
@@ -1815,7 +1789,7 @@ private:
         g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
         g["Primary"]    <= cho(seq(opt(g["IGNORE"]), g["Identifier"], npd(g["LEFTARROW"])),
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                               seq(g["Begin"], g["Expression"], g["End"]),
+                               seq(g["BeginTok"], g["Expression"], g["EndTok"]),
                                seq(g["BeginCap"], g["Expression"], g["EndCap"]),
                                g["Literal"], g["Class"], g["DOT"]);
 
@@ -1853,8 +1827,8 @@ private:
         g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
         g["EndOfFile"]  <= npd(dot());
 
-        g["Begin"]      <= seq(chr('<'), g["Spacing"]);
-        g["End"]        <= seq(chr('>'), g["Spacing"]);
+        g["BeginTok"]   <= seq(chr('<'), g["Spacing"]);
+        g["EndTok"]     <= seq(chr('>'), g["Spacing"]);
 
         g["BeginCap"]   <= seq(chr('$'), tok(opt(g["Identifier"])), chr('<'), g["Spacing"]);
         g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
@@ -1888,7 +1862,7 @@ private:
                     data.start = name;
                 }
             } else {
-                data.duplicates.emplace_back(name, sv.s);
+                data.duplicates.emplace_back(name, sv.c_str());
             }
         };
 
@@ -1955,7 +1929,7 @@ private:
         g["Primary"] = [&](const SemanticValues& sv, any& dt) -> std::shared_ptr<Ope> {
             Data& data = *dt.get<Data*>();
 
-            switch (sv.choice) {
+            switch (sv.choice()) {
                 case 0: { // Reference
                     auto ignore = (sv.size() == 2);
                     auto baseId = ignore ? 1 : 0;
@@ -1963,13 +1937,13 @@ private:
                     const auto& ident = sv[baseId].get<std::string>();
 
                     if (!data.references.count(ident)) {
-                        data.references[ident] = sv.s; // for error handling
+                        data.references[ident] = sv.c_str(); // for error handling
                     }
 
                     if (ignore) {
-                        return ign(ref(*data.grammar, ident, sv.s));
+                        return ign(ref(*data.grammar, ident, sv.c_str()));
                     } else {
-                        return ref(*data.grammar, ident, sv.s);
+                        return ref(*data.grammar, ident, sv.c_str());
                     }
                 }
                 case 1: { // (Expression)
@@ -1979,7 +1953,7 @@ private:
                     return tok(sv[1].get<std::shared_ptr<Ope>>());
                 }
                 case 3: { // Capture
-                    auto name = std::string(sv[0].s, sv[0].n);
+                    const auto& name = sv[0].get<std::string>();
                     auto ope = sv[1].get<std::shared_ptr<Ope>>();
                     return cap(ope, data.match_action, ++data.capture_count, name);
                 }
@@ -1990,24 +1964,27 @@ private:
         };
 
         g["IdentCont"] = [](const SemanticValues& sv) {
-            return std::string(sv.s, sv.n);
+            return std::string(sv.c_str(), sv.length());
         };
 
         g["Literal"] = [this](const SemanticValues& sv) {
-            return lit(resolve_escape_sequence(sv.s, sv.n));
+            const auto& tok = sv.tokens.front();
+            return lit(resolve_escape_sequence(tok.first, tok.second));
         };
         g["Class"] = [this](const SemanticValues& sv) {
-            return cls(resolve_escape_sequence(sv.s, sv.n));
+            const auto& tok = sv.tokens.front();
+            return cls(resolve_escape_sequence(tok.first, tok.second));
         };
 
-        g["AND"]      = [](const SemanticValues& sv) { return *sv.s; };
-        g["NOT"]      = [](const SemanticValues& sv) { return *sv.s; };
-        g["QUESTION"] = [](const SemanticValues& sv) { return *sv.s; };
-        g["STAR"]     = [](const SemanticValues& sv) { return *sv.s; };
-        g["PLUS"]     = [](const SemanticValues& sv) { return *sv.s; };
-
+        g["AND"]      = [](const SemanticValues& sv) { return *sv.c_str(); };
+        g["NOT"]      = [](const SemanticValues& sv) { return *sv.c_str(); };
+        g["QUESTION"] = [](const SemanticValues& sv) { return *sv.c_str(); };
+        g["STAR"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
+        g["PLUS"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
 
         g["DOT"] = [](const SemanticValues& sv) { return dot(); };
+
+        g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
     }
 
     std::shared_ptr<Grammar> perform_core(
@@ -2509,12 +2486,12 @@ public:
             if (!rule.action) {
                 auto is_token = rule.is_token;
                 rule.action = [=](const SemanticValues& sv) {
+                    auto line = line_info(sv.ss, sv.c_str());
+
                     if (is_token) {
-                        auto line = line_info(sv.ss, sv.s);
-                        return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), std::string(sv.s, sv.n));
+                        return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.str());
                     }
 
-                    auto line = line_info(sv.ss, sv.s);
                     auto ast = std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<T>>());
 
                     for (auto node: ast->nodes) {

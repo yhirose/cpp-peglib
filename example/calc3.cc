@@ -44,9 +44,9 @@ int main(int argc, const char** argv)
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
         FACTOR           <-  NUMBER / '(' EXPRESSION ')'
 
-        TERM_OPERATOR    <-  [-+]
-        FACTOR_OPERATOR  <-  [/*]
-        NUMBER           <-  [0-9]+
+        TERM_OPERATOR    <-  < [-+] >
+        FACTOR_OPERATOR  <-  < [/*] >
+        NUMBER           <-  < [0-9]+ >
 
         %whitespace      <-  [ \t\r\n]*
     )");

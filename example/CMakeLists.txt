@@ -10,3 +10,6 @@ target_link_libraries(calc2 pthread)
 
 add_executable(calc3 calc3.cc)
 target_link_libraries(calc3 pthread)
+
+add_executable(calc_readme calc_readme.cc)
+target_link_libraries(calc_readme pthread)
