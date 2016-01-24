@@ -2489,7 +2489,7 @@ public:
                     auto line = line_info(sv.ss, sv.c_str());
 
                     if (is_token) {
-                        return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.str());
+                        return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.token());
                     }
 
                     auto ast = std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.transform<std::shared_ptr<T>>());
