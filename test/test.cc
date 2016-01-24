@@ -8,7 +8,7 @@
 TEST_CASE("Simple syntax test", "[general]")
 {
     peg::parser parser(
-        " ROOT <- _ "
+        " ROOT ← _ "
         " _ <- ' ' "
     );
 

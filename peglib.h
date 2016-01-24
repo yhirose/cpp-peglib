@@ -1810,7 +1810,7 @@ private:
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
                                seq(npd(chr('\\')), dot()));
 
-        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit("←")), g["Spacing"]);
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
