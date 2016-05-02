@@ -997,22 +997,6 @@ public:
 
 typedef std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> Parser;
 
-class User : public Ope
-{
-public:
-    User(Parser fn) : fn_(fn) {}
-
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        c.trace("User", s, n, sv, dt);
-        assert(fn_);
-        return fn_(s, n, sv, dt);
-    }
-
-    void accept(Visitor& v) override;
-
-    std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
-};
-
 class WeakHolder : public Ope
 {
 public:
@@ -1112,7 +1096,6 @@ struct Ope::Visitor
     virtual void visit(Capture& /*ope*/) {}
     virtual void visit(TokenBoundary& /*ope*/) {}
     virtual void visit(Ignore& /*ope*/) {}
-    virtual void visit(User& /*ope*/) {}
     virtual void visit(WeakHolder& /*ope*/) {}
     virtual void visit(Holder& /*ope*/) {}
     virtual void visit(DefinitionReference& /*ope*/) {}
@@ -1515,7 +1498,6 @@ inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
 inline void Capture::accept(Visitor& v) { v.visit(*this); }
 inline void TokenBoundary::accept(Visitor& v) { v.visit(*this); }
 inline void Ignore::accept(Visitor& v) { v.visit(*this); }
-inline void User::accept(Visitor& v) { v.visit(*this); }
 inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
 inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
@@ -1597,10 +1579,6 @@ inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Ignore>(ope);
 }
 
-inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn) {
-    return std::make_shared<User>(fn);
-}
-
 inline std::shared_ptr<Ope> ref(const std::unordered_map<std::string, Definition>& grammar, const std::string& name, const char* s) {
     return std::make_shared<DefinitionReference>(grammar, name, s);
 }
@@ -1642,23 +1620,11 @@ public:
     static std::shared_ptr<Grammar> parse(
         const char*  s,
         size_t       n,
-        const Rules& rules,
         std::string& start,
         MatchAction  ma,
         Log          log)
     {
-        return get_instance().perform_core(s, n, rules, start, ma, log);
-    }
-
-    static std::shared_ptr<Grammar> parse(
-        const char*  s,
-        size_t       n,
-        std::string& start,
-        MatchAction  ma,
-        Log          log)
-    {
-        Rules dummy;
-        return parse(s, n, dummy, start, ma, log);
+        return get_instance().perform_core(s, n, start, ma, log);
     }
 
     // For debuging purpose
@@ -1755,9 +1721,6 @@ private:
         }
         void visit(Ignore& ope) override {
             ope.ope_->accept(*this);
-        }
-        void visit(User& /*ope*/) override {
-            done_ = true;
         }
         void visit(WeakHolder& ope) override {
             ope.weak_.lock()->accept(*this);
@@ -2001,7 +1964,6 @@ private:
     std::shared_ptr<Grammar> perform_core(
         const char*  s,
         size_t       n,
-        const Rules& rules,
         std::string& start,
         MatchAction  ma,
         Log          log)
@@ -2026,24 +1988,6 @@ private:
         }
 
         auto& grammar = *data.grammar;
-
-        // User provided rules
-        for (const auto& x: rules) {
-            auto name = x.first;
-
-            bool ignore = false;
-            if (!name.empty() && name[0] == '~') {
-                ignore = true;
-                name.erase(0, 1);
-            }
-
-            if (!name.empty()) {
-                auto& rule = grammar[name];
-                rule <= x.second;
-                rule.name = name;
-                rule.ignoreSemanticValue = ignore;
-            }
-        }
 
         // Check duplicated definitions
         bool ret = data.duplicates.empty();
@@ -2344,27 +2288,20 @@ class parser
 public:
     parser() = default;
 
-    parser(const char* s, size_t n, const Rules& rules) {
-        load_grammar(s, n, rules);
+    parser(const char* s, size_t n) {
+        load_grammar(s, n);
     }
 
-    parser(const char* s, const Rules& rules)
-        : parser(s, strlen(s), rules) {}
-
-    parser(const char* s, size_t n)
-        : parser(s, n, Rules()) {}
-
     parser(const char* s)
-        : parser(s, strlen(s), Rules()) {}
+        : parser(s, strlen(s)) {}
 
     operator bool() {
         return grammar_ != nullptr;
     }
 
-    bool load_grammar(const char* s, size_t n, const Rules& rules) {
+    bool load_grammar(const char* s, size_t n) {
         grammar_ = ParserGenerator::parse(
             s, n,
-            rules,
             start_,
             [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
                 if (match_action) match_action(a_s, a_n, a_id, a_name);
@@ -2372,15 +2309,6 @@ public:
             log);
 
         return grammar_ != nullptr;
-    }
-
-    bool load_grammar(const char* s, size_t n) {
-        return load_grammar(s, n, Rules());
-    }
-
-    bool load_grammar(const char* s, const Rules& rules) {
-        auto n = strlen(s);
-        return load_grammar(s, n, rules);
     }
 
     bool load_grammar(const char* s) {

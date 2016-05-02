@@ -786,33 +786,6 @@ TEST_CASE("Left recursive with empty string test", "[left recursive]")
     REQUIRE(parser == false);
 }
 
-TEST_CASE("User rule test", "[user rule]")
-{
-    auto syntax = " ROOT <- _ 'Hello' _ NAME '!' _ ";
-
-    Rules rules = {
-        {
-            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
-                static vector<string> names = { "PEG", "BNF" };
-                for (const auto& name: names) {
-                    if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
-                        return name.size();
-                    }
-                }
-                return static_cast<size_t>(-1);
-            })
-        },
-        {
-            "~_", zom(cls(" \t\r\n"))
-        }
-    };
-
-    auto g = parser(syntax, rules);
-
-    REQUIRE(g.parse(" Hello BNF! ") == true);
-}
-
-
 TEST_CASE("Semantic predicate test", "[predicate]")
 {
     parser parser("NUMBER  <-  [0-9]+");
@@ -873,6 +846,7 @@ TEST_CASE("PEG Definition", "[peg]")
     auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Definition", "Definition <- a / (b c) / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition <- a / b c / d ") == true);
+    REQUIRE(exact(g, "Definition", "Definitiond ← a ") == true);
     REQUIRE(exact(g, "Definition", "Definition ") == false);
     REQUIRE(exact(g, "Definition", " ") == false);
     REQUIRE(exact(g, "Definition", "") == false);
@@ -907,7 +881,7 @@ TEST_CASE("PEG Prefix", "[peg]")
     REQUIRE(exact(g, "Prefix", "![']") == true);
     REQUIRE(exact(g, "Prefix", "-[']") == false);
     REQUIRE(exact(g, "Prefix", "") == false);
-    REQUIRE(exact(g, "Sequence", " a") == false);
+    REQUIRE(exact(g, "Prefix", " a") == false);
 }
 
 TEST_CASE("PEG Suffix", "[peg]")
@@ -920,7 +894,7 @@ TEST_CASE("PEG Suffix", "[peg]")
     REQUIRE(exact(g, "Suffix", ". + ") == true);
     REQUIRE(exact(g, "Suffix", "?") == false);
     REQUIRE(exact(g, "Suffix", "") == false);
-    REQUIRE(exact(g, "Sequence", " a") == false);
+    REQUIRE(exact(g, "Suffix", " a") == false);
 }
 
 TEST_CASE("PEG Primary", "[peg]")
