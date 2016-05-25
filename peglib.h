@@ -134,7 +134,7 @@ public:
 
 private:
     struct placeholder {
-        virtual ~placeholder() {};
+        virtual ~placeholder() {}
         virtual placeholder* clone() const = 0;
     };
 
@@ -571,7 +571,7 @@ class Ope
 public:
     struct Visitor;
 
-    virtual ~Ope() {};
+    virtual ~Ope() {}
     virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
 };
@@ -1492,7 +1492,7 @@ inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
     }
     assert(rule_);
     return rule_;
-};
+}
 
 inline void Sequence::accept(Visitor& v) { v.visit(*this); }
 inline void PrioritizedChoice::accept(Visitor& v) { v.visit(*this); }
