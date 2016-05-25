@@ -2746,7 +2746,7 @@ private:
         m_.matches.clear();
         size_t mpos, mlen;
         if (peg_.search(s_ + pos_, l_ - pos_, mpos, mlen)) {
-            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0 });
+            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0, std::string() });
             pos_ += mpos + mlen;
         } else {
             pos_ = (std::numeric_limits<size_t>::max)();
