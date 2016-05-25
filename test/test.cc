@@ -786,7 +786,7 @@ TEST_CASE("User rule test", "[user rule]")
                         return name.size();
                     }
                 }
-                return -1;
+                return static_cast<size_t>(-1);
             })
         },
         {

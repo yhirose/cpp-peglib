@@ -253,7 +253,7 @@ struct SemanticValues : protected std::vector<any>
     }
 
     template <typename T>
-    auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
+    auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
         return this->transform(beg, end, [](const any& v) { return v.get<T>(); });
     }
 
@@ -432,11 +432,11 @@ typedef std::function<void (const char* s, size_t n, size_t id, const std::strin
  * Result
  */
 inline bool success(size_t len) {
-    return len != -1;
+    return len != static_cast<size_t>(-1);
 }
 
 inline bool fail(size_t len) {
-    return len == -1;
+    return len == static_cast<size_t>(-1);
 }
 
 /*
@@ -512,21 +512,21 @@ public:
         }
 
         auto col = s - this->s;
-        auto has_cache = cache_register[def_count * col + def_id];
+        auto has_cache = cache_register[def_count * static_cast<size_t>(col) + def_id];
 
         if (has_cache) {
-            if (cache_success[def_count * col + def_id]) {
+            if (cache_success[def_count * static_cast<size_t>(col) + def_id]) {
                 const auto& key = std::make_pair(s - this->s, def_id);
                 std::tie(len, val) = cache_result[key];
                 return;
             } else {
-                len = -1;
+                len = static_cast<size_t>(-1);
                 return;
             }
         } else {
             fn(val);
-            cache_register[def_count * col + def_id] = true;
-            cache_success[def_count * col + def_id] = success(len);
+            cache_register[def_count * static_cast<size_t>(col) + def_id] = true;
+            cache_success[def_count * static_cast<size_t>(col) + def_id] = success(len);
             if (success(len)) {
                 const auto& key = std::make_pair(s - this->s, def_id);
                 cache_result[key] = std::make_pair(len, val);
@@ -611,7 +611,7 @@ public:
             const auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             i += len;
         }
@@ -669,7 +669,7 @@ public:
             }
             id++;
         }
-        return -1;
+        return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
@@ -697,10 +697,10 @@ public:
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + save_sv_size);
+                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -722,14 +722,14 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("OneOrMore", s, n, sv, dt);
-        auto len = 0;
+        size_t len = 0;
         {
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
         }
         auto save_error_pos = c.error_pos;
@@ -740,13 +740,13 @@ public:
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
-            auto len = rule.parse(s + i, n - i, sv, c, dt);
+            len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + save_sv_size);
+                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -779,10 +779,10 @@ public:
             return len;
         } else {
             if (sv.size() != save_sv_size) {
-                sv.erase(sv.begin() + save_sv_size);
+                sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
             }
             if (sv.tokens.size() != save_tok_size) {
-                sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
             }
             c.error_pos = save_error_pos;
             return 0;
@@ -812,7 +812,7 @@ public:
         if (success(len)) {
             return 0;
         } else {
-            return -1;
+            return static_cast<size_t>(-1);
         }
     }
 
@@ -839,7 +839,7 @@ public:
         auto len = rule.parse(s, n, chldsv, c, dt);
         if (success(len)) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         } else {
             c.error_pos = save_error_pos;
             return 0;
@@ -873,7 +873,7 @@ public:
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         auto ch = s[0];
         auto i = 0u;
@@ -891,7 +891,7 @@ public:
             }
         }
         c.set_error_pos(s);
-        return -1;
+        return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
@@ -909,7 +909,7 @@ public:
         // TODO: UTF8 support
         if (n < 1 || s[0] != ch_) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         return 1;
     }
@@ -927,7 +927,7 @@ public:
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         return 1;
     }
@@ -1369,7 +1369,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
     for (; i < lit_.size(); i++) {
         if (i >= n || s[i] != lit_[i]) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
     }
 
@@ -1378,7 +1378,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             i += len;
         }
@@ -1398,7 +1398,7 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
             if (fail(l)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             len += l;
         }
@@ -1450,7 +1450,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
-                len = -1;
+                len = static_cast<size_t>(-1);
             }
         }
     });
@@ -1582,7 +1582,7 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma,
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma, (size_t)-1, std::string());
+    return std::make_shared<Capture>(ope, ma, static_cast<size_t>(-1), std::string());
 }
 
 inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
@@ -1849,7 +1849,7 @@ private:
             Data& data = *dt.get<Data*>();
 
             auto ignore = (sv.size() == 4);
-            auto baseId = ignore ? 1 : 0;
+            auto baseId = ignore ? 1u : 0u;
 
             const auto& name = sv[baseId].get<std::string>();
             auto ope = sv[baseId + 2].get<std::shared_ptr<Ope>>();
@@ -1935,7 +1935,7 @@ private:
             switch (sv.choice()) {
                 case 0: { // Reference
                     auto ignore = (sv.size() == 2);
-                    auto baseId = ignore ? 1 : 0;
+                    auto baseId = ignore ? 1u : 0u;
 
                     const auto& ident = sv[baseId].get<std::string>();
 
@@ -2126,7 +2126,7 @@ private:
         char ret = 0;
         int val;
         while (i < n && is_hex(s[i], val)) {
-            ret = ret * 16 + val;
+            ret = static_cast<char>(ret * 16 + val);
             i++;
         }
         return std::make_pair(ret, i);
@@ -2136,7 +2136,7 @@ private:
         char ret = 0;
         int val;
         while (i < n && is_digit(s[i], val)) {
-            ret = ret * 8 + val;
+            ret = static_cast<char>(ret * 8 + val);
             i++;
         }
         return std::make_pair(ret, i);
@@ -2190,7 +2190,7 @@ const int AstDefaultTag = -1;
 
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
 inline constexpr unsigned int str2tag(const char* str, int h = 0) {
-    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ str[h];
+    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ static_cast<unsigned char>(str[h]);
 }
 
 inline constexpr unsigned int operator "" _(const char* s, size_t) {
