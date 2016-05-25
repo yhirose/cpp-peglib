@@ -348,7 +348,7 @@ public:
     Action& operator=(const Action& rhs) = default;
 
     operator bool() const {
-        return (bool)fn_;
+        return bool(fn_);
     }
 
     any operator()(const SemanticValues& sv, any& dt) const {
@@ -1518,7 +1518,7 @@ inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
 inline void Whitespace::accept(Visitor& v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder& ope) {
-    auto p = (void*)ope.outer_;
+    auto p = static_cast<void*>(ope.outer_);
     if (ids.count(p)) {
         return;
     }

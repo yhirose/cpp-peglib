@@ -46,8 +46,8 @@ int main(int argc, const char** argv)
 
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
-    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
+    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
+    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
     parser["NUMBER"]          = [](const SemanticValues& sv) { return atol(sv.c_str()); };
 
     auto expr = argv[1];
