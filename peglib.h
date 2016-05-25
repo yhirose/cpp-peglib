@@ -330,7 +330,7 @@ public:
     Action(F fn) : fn_(make_adaptor(fn, fn)) {}
 
     template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
-    Action(F fn) {}
+    Action(F /*fn*/) {}
 
     template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
     void operator=(F fn) {
@@ -343,7 +343,7 @@ public:
     }
 
     template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
-    void operator=(F fn) {}
+    void operator=(F /*fn*/) {}
 
     operator bool() const {
         return (bool)fn_;
@@ -358,7 +358,7 @@ private:
     struct TypeAdaptor {
         TypeAdaptor(std::function<R (const SemanticValues& sv)> fn)
             : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& dt) {
+        any operator()(const SemanticValues& sv, any& /*dt*/) {
             return call<R>(fn_, sv);
         }
         std::function<R (const SemanticValues& sv)> fn_;
@@ -377,32 +377,32 @@ private:
     typedef std::function<any (const SemanticValues& sv, any& dt)> Fty;
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv) const) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv) const) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv)) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const SemanticValues& sv)) {
+    Fty make_adaptor(F fn, R (* /*mf*/)(const SemanticValues& sv)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv, any& dt) const) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt) const) {
         return TypeAdaptor_c<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv, any& dt)) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt)) {
         return TypeAdaptor_c<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const SemanticValues& sv, any& dt)) {
+    Fty make_adaptor(F fn, R(* /*mf*/)(const SemanticValues& sv, any& dt)) {
         return TypeAdaptor_c<R>(fn);
     }
 
@@ -975,7 +975,7 @@ class Ignore : public Ope
 public:
     Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto& chldsv = c.push();
         auto se = make_scope_exit([&]() {
@@ -1091,25 +1091,26 @@ public:
  */
 struct Ope::Visitor
 {
-    virtual void visit(Sequence& ope) {}
-    virtual void visit(PrioritizedChoice& ope) {}
-    virtual void visit(ZeroOrMore& ope) {}
-    virtual void visit(OneOrMore& ope) {}
-    virtual void visit(Option& ope) {}
-    virtual void visit(AndPredicate& ope) {}
-    virtual void visit(NotPredicate& ope) {}
-    virtual void visit(LiteralString& ope) {}
-    virtual void visit(CharacterClass& ope) {}
-    virtual void visit(Character& ope) {}
-    virtual void visit(AnyCharacter& ope) {}
-    virtual void visit(Capture& ope) {}
-    virtual void visit(TokenBoundary& ope) {}
-    virtual void visit(Ignore& ope) {}
-    virtual void visit(User& ope) {}
-    virtual void visit(WeakHolder& ope) {}
-    virtual void visit(Holder& ope) {}
-    virtual void visit(DefinitionReference& ope) {}
-    virtual void visit(Whitespace& ope) {}
+    virtual ~Visitor() {}
+    virtual void visit(Sequence& /*ope*/) {}
+    virtual void visit(PrioritizedChoice& /*ope*/) {}
+    virtual void visit(ZeroOrMore& /*ope*/) {}
+    virtual void visit(OneOrMore& /*ope*/) {}
+    virtual void visit(Option& /*ope*/) {}
+    virtual void visit(AndPredicate& /*ope*/) {}
+    virtual void visit(NotPredicate& /*ope*/) {}
+    virtual void visit(LiteralString& /*ope*/) {}
+    virtual void visit(CharacterClass& /*ope*/) {}
+    virtual void visit(Character& /*ope*/) {}
+    virtual void visit(AnyCharacter& /*ope*/) {}
+    virtual void visit(Capture& /*ope*/) {}
+    virtual void visit(TokenBoundary& /*ope*/) {}
+    virtual void visit(Ignore& /*ope*/) {}
+    virtual void visit(User& /*ope*/) {}
+    virtual void visit(WeakHolder& /*ope*/) {}
+    virtual void visit(Holder& /*ope*/) {}
+    virtual void visit(DefinitionReference& /*ope*/) {}
+    virtual void visit(Whitespace& /*ope*/) {}
 };
 
 struct AssignIDToDefinition : public Ope::Visitor
@@ -1157,10 +1158,10 @@ struct IsToken : public Ope::Visitor
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { has_token_boundary = true; }
+    void visit(TokenBoundary& /*ope*/) override { has_token_boundary = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(DefinitionReference& ope) override { has_rule = true; }
+    void visit(DefinitionReference& /*ope*/) override { has_rule = true; }
 
     bool is_token() const {
         return has_token_boundary || !has_rule;
@@ -1731,13 +1732,13 @@ private:
         void visit(LiteralString& ope) override {
             done_ = !ope.lit_.empty();
         }
-        void visit(CharacterClass& ope) override {
+        void visit(CharacterClass& /*ope*/) override {
             done_ = true;
         }
-        void visit(Character& ope) override {
+        void visit(Character& /*ope*/) override {
             done_ = true;
         }
-        void visit(AnyCharacter& ope) override {
+        void visit(AnyCharacter& /*ope*/) override {
             done_ = true;
         }
         void visit(Capture& ope) override {
@@ -1749,7 +1750,7 @@ private:
         void visit(Ignore& ope) override {
             ope.ope_->accept(*this);
         }
-        void visit(User& ope) override {
+        void visit(User& /*ope*/) override {
             done_ = true;
         }
         void visit(WeakHolder& ope) override {
@@ -1982,7 +1983,7 @@ private:
         g["STAR"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
         g["PLUS"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
 
-        g["DOT"] = [](const SemanticValues& sv) { return dot(); };
+        g["DOT"] = [](const SemanticValues& /*sv*/) { return dot(); };
 
         g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
     }
@@ -2436,7 +2437,7 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, any& dt, T& val, const char* path = nullptr) const {
+    bool parse(const char* s, any& dt, T& val, const char* /*path*/ = nullptr) const {
         auto n = strlen(s);
         return parse_n(s, n, dt, val);
     }

@@ -122,7 +122,7 @@ int main(int argc, const char** argv)
         std::cout << "pos:lev\trule/ope" << std::endl;
         std::cout << "-------\t--------" << std::endl;
         size_t prev_pos = 0;
-        parser.enable_trace([&](auto name, auto s, auto n, auto& sv, auto& c, auto& dt) {
+        parser.enable_trace([&](auto name, auto s, auto /*n*/, auto& /*sv*/, auto& c, auto& /*dt*/) {
             auto pos = s - c.s;
             auto backtrack = (pos < prev_pos ? "*" : "");
             string indent;

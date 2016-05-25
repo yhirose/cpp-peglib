@@ -137,7 +137,7 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['),
-                    cap(TAG_NAME, [&](const char* s, size_t n, size_t id, const std::string& name) {
+                    cap(TAG_NAME, [&](const char* s, size_t n, size_t /*id*/, const std::string& /*name*/) {
                         tags.push_back(string(s, n));
                     }),
                     chr(']'),
@@ -347,7 +347,7 @@ TEST_CASE("Backtracking test", "[general]")
     );
 
     size_t count = 0;
-    parser["HELLO"] = [&](const SemanticValues& sv) {
+    parser["HELLO"] = [&](const SemanticValues& /*sv*/) {
         count++;
     };
 
@@ -779,7 +779,7 @@ TEST_CASE("User rule test", "[user rule]")
 
     Rules rules = {
         {
-            "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
                 static vector<string> names = { "PEG", "BNF" };
                 for (const auto& name: names) {
                     if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
