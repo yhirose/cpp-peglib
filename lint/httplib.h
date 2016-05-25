@@ -572,11 +572,11 @@ inline void parse_query_text(const std::string& s, Map& params)
     split(&s[0], &s[s.size()], '&', [&](const char* b, const char* e) {
         std::string key;
         std::string val;
-        split(b, e, '=', [&](const char* b, const char* e) {
+        split(b, e, '=', [&](const char* b2, const char* e2) {
             if (key.empty()) {
-                key.assign(b, e);
+                key.assign(b2, e2);
             } else {
-                val.assign(b, e);
+                val.assign(b2, e2);
             }
         });
         params[key] = detail::decode_url(val);

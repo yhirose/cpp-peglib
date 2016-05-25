@@ -479,44 +479,44 @@ public:
     std::function<void (const char*, const char*, size_t, const SemanticValues&, const Context&, const any&)> tracer;
 
     Context(
-        const char*          path,
-        const char*          s,
-        size_t               l,
-        size_t               def_count,
-        std::shared_ptr<Ope> whitespaceOpe,
-        bool                 enablePackratParsing,
-        Tracer               tracer)
-        : path(path)
-        , s(s)
-        , l(l)
+        const char*          a_path,
+        const char*          a_s,
+        size_t               a_l,
+        size_t               a_def_count,
+        std::shared_ptr<Ope> a_whitespaceOpe,
+        bool                 a_enablePackratParsing,
+        Tracer               a_tracer)
+        : path(a_path)
+        , s(a_s)
+        , l(a_l)
         , error_pos(nullptr)
         , message_pos(nullptr)
         , value_stack_size(0)
         , nest_level(0)
         , in_token(false)
-        , whitespaceOpe(whitespaceOpe)
+        , whitespaceOpe(a_whitespaceOpe)
         , in_whitespace(false)
-        , def_count(def_count)
-        , enablePackratParsing(enablePackratParsing)
+        , def_count(a_def_count)
+        , enablePackratParsing(a_enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
-        , tracer(tracer)
+        , tracer(a_tracer)
     {
     }
 
     template <typename T>
-    void packrat(const char* s, size_t def_id, size_t& len, any& val, T fn) {
+    void packrat(const char* a_s, size_t def_id, size_t& len, any& val, T fn) {
         if (!enablePackratParsing) {
             fn(val);
             return;
         }
 
-        auto col = s - this->s;
+        auto col = a_s - s;
         auto has_cache = cache_register[def_count * static_cast<size_t>(col) + def_id];
 
         if (has_cache) {
             if (cache_success[def_count * static_cast<size_t>(col) + def_id]) {
-                const auto& key = std::make_pair(s - this->s, def_id);
+                const auto& key = std::make_pair(a_s - s, def_id);
                 std::tie(len, val) = cache_result[key];
                 return;
             } else {
@@ -528,7 +528,7 @@ public:
             cache_register[def_count * static_cast<size_t>(col) + def_id] = true;
             cache_success[def_count * static_cast<size_t>(col) + def_id] = success(len);
             if (success(len)) {
-                const auto& key = std::make_pair(s - this->s, def_id);
+                const auto& key = std::make_pair(a_s - s, def_id);
                 cache_result[key] = std::make_pair(len, val);
             }
             return;
@@ -556,12 +556,12 @@ public:
         value_stack_size--;
     }
 
-    void set_error_pos(const char* s) {
-        if (error_pos < s) error_pos = s;
+    void set_error_pos(const char* a_s) {
+        if (error_pos < a_s) error_pos = a_s;
     }
 
-    void trace(const char* name, const char* s, size_t n, SemanticValues& sv, any& dt) const {
-        if (tracer) tracer(name, s, n, sv, *this, dt);
+    void trace(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
+        if (tracer) tracer(name, a_s, n, sv, *this, dt);
     }
 };
 
@@ -1418,14 +1418,14 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     size_t      len;
     any         val;
 
-    c.packrat(s, outer_->id, len, val, [&](any& val) {
+    c.packrat(s, outer_->id, len, val, [&](any& a_val) {
         auto& chldsv = c.push();
 
         if (outer_->enter) {
             outer_->enter(dt);
         }
 
-        auto se = make_scope_exit([&]() {
+        auto se2 = make_scope_exit([&]() {
             c.pop();
 
             if (outer_->leave) {
@@ -1442,7 +1442,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             chldsv.n_ = len;
 
             try {
-                val = reduce(chldsv, dt);
+                a_val = reduce(chldsv, dt);
             } catch (const parse_error& e) {
                 if (e.what()) {
                     if (c.message_pos < s) {
@@ -2201,43 +2201,43 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 template <typename Annotation>
 struct AstBase : public Annotation
 {
-    AstBase(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<AstBase>>& nodes)
-        : path(path ? path : "")
-        , line(line)
-        , column(column)
-        , name(name)
-        , original_name(name)
+    AstBase(const char* a_path, size_t a_line, size_t a_column, const char* a_name, const std::vector<std::shared_ptr<AstBase>>& a_nodes)
+        : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
+        , name(a_name)
+        , original_name(a_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name))
+        , tag(str2tag(a_name))
         , original_tag(tag)
 #endif
         , is_token(false)
-        , nodes(nodes)
+        , nodes(a_nodes)
     {}
 
-    AstBase(const char* path, size_t line, size_t column, const char* name, const std::string& token)
-        : path(path ? path : "")
-        , line(line)
-        , column(column)
-        , name(name)
-        , original_name(name)
+    AstBase(const char* a_path, size_t a_line, size_t a_column, const char* a_name, const std::string& a_token)
+        : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
+        , name(a_name)
+        , original_name(a_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name))
+        , tag(str2tag(a_name))
         , original_tag(tag)
 #endif
         , is_token(true)
-        , token(token)
+        , token(a_token)
     {}
 
-    AstBase(const AstBase& ast, const char* original_name)
+    AstBase(const AstBase& ast, const char* a_original_name)
         : path(ast.path)
         , line(ast.line)
         , column(ast.column)
         , name(ast.name)
-        , original_name(original_name)
+        , original_name(a_original_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(ast.tag)
-        , original_tag(str2tag(original_name))
+        , original_tag(str2tag(a_original_name))
 #endif
         , is_token(ast.is_token)
         , token(ast.token)
@@ -2358,8 +2358,8 @@ public:
             s, n,
             rules,
             start_,
-            [&](const char* s, size_t n, size_t id, const std::string& name) {
-                if (match_action) match_action(s, n, id, name);
+            [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+                if (match_action) match_action(a_s, a_n, a_id, a_name);
             },
             log);
 
@@ -2637,8 +2637,8 @@ inline bool peg_match(const char* syntax, const char* s, match& m) {
     m.matches.clear();
 
     parser pg(syntax);
-    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, n, id, name });
+    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
     };
 
     auto ret = pg.parse(s);
@@ -2658,8 +2658,8 @@ inline bool peg_match(const char* syntax, const char* s) {
 inline bool peg_search(parser& pg, const char* s, size_t n, match& m) {
     m.matches.clear();
 
-    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, n, id, name });
+    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
     };
 
     size_t mpos, mlen;
@@ -2701,8 +2701,8 @@ public:
         , s_(s)
         , l_(strlen(s))
         , pos_(0) {
-        peg_.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-            m_.matches.push_back(match::Item{ s, n, id, name });
+        peg_.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+            m_.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
         };
         search();
     }
