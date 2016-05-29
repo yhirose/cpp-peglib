@@ -4,3 +4,5 @@ add_definitions("-std=c++1y")
 
 add_executable(test-main test.cc)
 target_link_libraries(test-main pthread)
+
+add_test(TestMain test-main)
