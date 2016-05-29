@@ -5,10 +5,23 @@
 #include <peglib.h>
 #include <iostream>
 
-TEST_CASE("Simple syntax test", "[general]")
+#if !defined(PEGLIB_NO_UNICODE_CHARS)
+TEST_CASE("Simple syntax test (with unicode)", "[general]")
 {
     peg::parser parser(
         " ROOT ← _ "
+        " _ <- ' ' "
+    );
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+}
+#endif
+
+TEST_CASE("Simple syntax test", "[general]")
+{
+    peg::parser parser(
+        " ROOT <- _ "
         " _ <- ' ' "
     );
 

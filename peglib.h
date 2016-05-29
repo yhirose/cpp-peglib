@@ -35,6 +35,10 @@
 #endif
 #endif
 
+// define if the compiler doesn't support unicode characters reliably in the
+// source code
+//#define PEGLIB_NO_UNICODE_CHARS
+
 namespace peg {
 
 extern void* enabler;
@@ -1813,7 +1817,11 @@ private:
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
                                seq(npd(chr('\\')), dot()));
 
+#if !defined(PEGLIB_NO_UNICODE_CHARS)
         g["LEFTARROW"]  <= seq(cho(lit("<-"), lit("←")), g["Spacing"]);
+#else
+        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+#endif
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
