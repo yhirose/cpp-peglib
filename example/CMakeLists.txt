@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 include_directories(..)
-add_definitions("-std=c++1y")
+add_compile_options(${cxx11_options} ${warning_options})
 
 add_executable(calc calc.cc)
 target_link_libraries(calc pthread)
