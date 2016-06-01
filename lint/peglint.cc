@@ -122,8 +122,8 @@ int main(int argc, const char** argv)
         std::cout << "pos:lev\trule/ope" << std::endl;
         std::cout << "-------\t--------" << std::endl;
         size_t prev_pos = 0;
-        parser.enable_trace([&](auto name, auto s, auto n, auto& sv, auto& c, auto& dt) {
-            auto pos = s - c.s;
+        parser.enable_trace([&](auto name, auto s, auto /*n*/, auto& /*sv*/, auto& c, auto& /*dt*/) {
+            auto pos = static_cast<size_t>(s - c.s);
             auto backtrack = (pos < prev_pos ? "*" : "");
             string indent;
             auto level = c.nest_level;
@@ -133,7 +133,7 @@ int main(int argc, const char** argv)
             std::cout
                 << pos << ":" << c.nest_level << backtrack << "\t"
                 << indent << name << std::endl;
-            prev_pos = pos;
+            prev_pos = static_cast<size_t>(pos);
         });
     }
 

@@ -35,6 +35,10 @@
 #endif
 #endif
 
+// define if the compiler doesn't support unicode characters reliably in the
+// source code
+//#define PEGLIB_NO_UNICODE_CHARS
+
 namespace peg {
 
 extern void* enabler;
@@ -134,7 +138,7 @@ public:
 
 private:
     struct placeholder {
-        virtual ~placeholder() {};
+        virtual ~placeholder() {}
         virtual placeholder* clone() const = 0;
     };
 
@@ -194,7 +198,7 @@ private:
 
 template <typename EF>
 auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
-    return scope_exit<std::remove_reference_t<EF>>(std::forward<EF>(exit_function));
+    return scope_exit<typename std::remove_reference<EF>::type>(std::forward<EF>(exit_function));
 }
 
 /*-----------------------------------------------------------------------------
@@ -253,7 +257,7 @@ struct SemanticValues : protected std::vector<any>
     }
 
     template <typename T>
-    auto transform(size_t beg = 0, size_t end = -1) const -> vector<T> {
+    auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
         return this->transform(beg, end, [](const any& v) { return v.get<T>(); });
     }
 
@@ -330,7 +334,7 @@ public:
     Action(F fn) : fn_(make_adaptor(fn, fn)) {}
 
     template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
-    Action(F fn) {}
+    Action(F /*fn*/) {}
 
     template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
     void operator=(F fn) {
@@ -343,10 +347,12 @@ public:
     }
 
     template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
-    void operator=(F fn) {}
+    void operator=(F /*fn*/) {}
+
+    Action& operator=(const Action& rhs) = default;
 
     operator bool() const {
-        return (bool)fn_;
+        return bool(fn_);
     }
 
     any operator()(const SemanticValues& sv, any& dt) const {
@@ -358,7 +364,7 @@ private:
     struct TypeAdaptor {
         TypeAdaptor(std::function<R (const SemanticValues& sv)> fn)
             : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& dt) {
+        any operator()(const SemanticValues& sv, any& /*dt*/) {
             return call<R>(fn_, sv);
         }
         std::function<R (const SemanticValues& sv)> fn_;
@@ -377,32 +383,32 @@ private:
     typedef std::function<any (const SemanticValues& sv, any& dt)> Fty;
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv) const) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv) const) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv)) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (*mf)(const SemanticValues& sv)) {
+    Fty make_adaptor(F fn, R (* /*mf*/)(const SemanticValues& sv)) {
         return TypeAdaptor<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv, any& dt) const) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt) const) {
         return TypeAdaptor_c<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::*mf)(const SemanticValues& sv, any& dt)) {
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt)) {
         return TypeAdaptor_c<R>(fn);
     }
 
     template<typename F, typename R>
-    Fty make_adaptor(F fn, R(*mf)(const SemanticValues& sv, any& dt)) {
+    Fty make_adaptor(F fn, R(* /*mf*/)(const SemanticValues& sv, any& dt)) {
         return TypeAdaptor_c<R>(fn);
     }
 
@@ -430,11 +436,11 @@ typedef std::function<void (const char* s, size_t n, size_t id, const std::strin
  * Result
  */
 inline bool success(size_t len) {
-    return len != -1;
+    return len != static_cast<size_t>(-1);
 }
 
 inline bool fail(size_t len) {
-    return len == -1;
+    return len == static_cast<size_t>(-1);
 }
 
 /*
@@ -477,56 +483,56 @@ public:
     std::function<void (const char*, const char*, size_t, const SemanticValues&, const Context&, const any&)> tracer;
 
     Context(
-        const char*          path,
-        const char*          s,
-        size_t               l,
-        size_t               def_count,
-        std::shared_ptr<Ope> whitespaceOpe,
-        bool                 enablePackratParsing,
-        Tracer               tracer)
-        : path(path)
-        , s(s)
-        , l(l)
+        const char*          a_path,
+        const char*          a_s,
+        size_t               a_l,
+        size_t               a_def_count,
+        std::shared_ptr<Ope> a_whitespaceOpe,
+        bool                 a_enablePackratParsing,
+        Tracer               a_tracer)
+        : path(a_path)
+        , s(a_s)
+        , l(a_l)
         , error_pos(nullptr)
         , message_pos(nullptr)
         , value_stack_size(0)
         , nest_level(0)
         , in_token(false)
-        , whitespaceOpe(whitespaceOpe)
+        , whitespaceOpe(a_whitespaceOpe)
         , in_whitespace(false)
-        , def_count(def_count)
-        , enablePackratParsing(enablePackratParsing)
+        , def_count(a_def_count)
+        , enablePackratParsing(a_enablePackratParsing)
         , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
-        , tracer(tracer)
+        , tracer(a_tracer)
     {
     }
 
     template <typename T>
-    void packrat(const char* s, size_t def_id, size_t& len, any& val, T fn) {
+    void packrat(const char* a_s, size_t def_id, size_t& len, any& val, T fn) {
         if (!enablePackratParsing) {
             fn(val);
             return;
         }
 
-        auto col = s - this->s;
-        auto has_cache = cache_register[def_count * col + def_id];
+        auto col = a_s - s;
+        auto has_cache = cache_register[def_count * static_cast<size_t>(col) + def_id];
 
         if (has_cache) {
-            if (cache_success[def_count * col + def_id]) {
-                const auto& key = std::make_pair(s - this->s, def_id);
+            if (cache_success[def_count * static_cast<size_t>(col) + def_id]) {
+                const auto& key = std::make_pair(a_s - s, def_id);
                 std::tie(len, val) = cache_result[key];
                 return;
             } else {
-                len = -1;
+                len = static_cast<size_t>(-1);
                 return;
             }
         } else {
             fn(val);
-            cache_register[def_count * col + def_id] = true;
-            cache_success[def_count * col + def_id] = success(len);
+            cache_register[def_count * static_cast<size_t>(col) + def_id] = true;
+            cache_success[def_count * static_cast<size_t>(col) + def_id] = success(len);
             if (success(len)) {
-                const auto& key = std::make_pair(s - this->s, def_id);
+                const auto& key = std::make_pair(a_s - s, def_id);
                 cache_result[key] = std::make_pair(len, val);
             }
             return;
@@ -554,12 +560,12 @@ public:
         value_stack_size--;
     }
 
-    void set_error_pos(const char* s) {
-        if (error_pos < s) error_pos = s;
+    void set_error_pos(const char* a_s) {
+        if (error_pos < a_s) error_pos = a_s;
     }
 
-    void trace(const char* name, const char* s, size_t n, SemanticValues& sv, any& dt) const {
-        if (tracer) tracer(name, s, n, sv, *this, dt);
+    void trace(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
+        if (tracer) tracer(name, a_s, n, sv, *this, dt);
     }
 };
 
@@ -571,7 +577,7 @@ class Ope
 public:
     struct Visitor;
 
-    virtual ~Ope() {};
+    virtual ~Ope() {}
     virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
 };
@@ -609,7 +615,7 @@ public:
             const auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             i += len;
         }
@@ -667,7 +673,7 @@ public:
             }
             id++;
         }
-        return -1;
+        return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
@@ -695,10 +701,10 @@ public:
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + save_sv_size);
+                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -720,14 +726,14 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("OneOrMore", s, n, sv, dt);
-        auto len = 0;
+        size_t len = 0;
         {
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
         }
         auto save_error_pos = c.error_pos;
@@ -738,13 +744,13 @@ public:
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
-            auto len = rule.parse(s + i, n - i, sv, c, dt);
+            len = rule.parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
                 if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + save_sv_size);
+                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
                 break;
@@ -777,10 +783,10 @@ public:
             return len;
         } else {
             if (sv.size() != save_sv_size) {
-                sv.erase(sv.begin() + save_sv_size);
+                sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
             }
             if (sv.tokens.size() != save_tok_size) {
-                sv.tokens.erase(sv.tokens.begin() + save_tok_size);
+                sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
             }
             c.error_pos = save_error_pos;
             return 0;
@@ -810,7 +816,7 @@ public:
         if (success(len)) {
             return 0;
         } else {
-            return -1;
+            return static_cast<size_t>(-1);
         }
     }
 
@@ -837,7 +843,7 @@ public:
         auto len = rule.parse(s, n, chldsv, c, dt);
         if (success(len)) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         } else {
             c.error_pos = save_error_pos;
             return 0;
@@ -871,7 +877,7 @@ public:
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         auto ch = s[0];
         auto i = 0u;
@@ -889,7 +895,7 @@ public:
             }
         }
         c.set_error_pos(s);
-        return -1;
+        return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
@@ -907,7 +913,7 @@ public:
         // TODO: UTF8 support
         if (n < 1 || s[0] != ch_) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         return 1;
     }
@@ -925,7 +931,7 @@ public:
         // TODO: UTF8 support
         if (n < 1) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
         return 1;
     }
@@ -975,7 +981,7 @@ class Ignore : public Ope
 public:
     Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto& chldsv = c.push();
         auto se = make_scope_exit([&]() {
@@ -1091,25 +1097,26 @@ public:
  */
 struct Ope::Visitor
 {
-    virtual void visit(Sequence& ope) {}
-    virtual void visit(PrioritizedChoice& ope) {}
-    virtual void visit(ZeroOrMore& ope) {}
-    virtual void visit(OneOrMore& ope) {}
-    virtual void visit(Option& ope) {}
-    virtual void visit(AndPredicate& ope) {}
-    virtual void visit(NotPredicate& ope) {}
-    virtual void visit(LiteralString& ope) {}
-    virtual void visit(CharacterClass& ope) {}
-    virtual void visit(Character& ope) {}
-    virtual void visit(AnyCharacter& ope) {}
-    virtual void visit(Capture& ope) {}
-    virtual void visit(TokenBoundary& ope) {}
-    virtual void visit(Ignore& ope) {}
-    virtual void visit(User& ope) {}
-    virtual void visit(WeakHolder& ope) {}
-    virtual void visit(Holder& ope) {}
-    virtual void visit(DefinitionReference& ope) {}
-    virtual void visit(Whitespace& ope) {}
+    virtual ~Visitor() {}
+    virtual void visit(Sequence& /*ope*/) {}
+    virtual void visit(PrioritizedChoice& /*ope*/) {}
+    virtual void visit(ZeroOrMore& /*ope*/) {}
+    virtual void visit(OneOrMore& /*ope*/) {}
+    virtual void visit(Option& /*ope*/) {}
+    virtual void visit(AndPredicate& /*ope*/) {}
+    virtual void visit(NotPredicate& /*ope*/) {}
+    virtual void visit(LiteralString& /*ope*/) {}
+    virtual void visit(CharacterClass& /*ope*/) {}
+    virtual void visit(Character& /*ope*/) {}
+    virtual void visit(AnyCharacter& /*ope*/) {}
+    virtual void visit(Capture& /*ope*/) {}
+    virtual void visit(TokenBoundary& /*ope*/) {}
+    virtual void visit(Ignore& /*ope*/) {}
+    virtual void visit(User& /*ope*/) {}
+    virtual void visit(WeakHolder& /*ope*/) {}
+    virtual void visit(Holder& /*ope*/) {}
+    virtual void visit(DefinitionReference& /*ope*/) {}
+    virtual void visit(Whitespace& /*ope*/) {}
 };
 
 struct AssignIDToDefinition : public Ope::Visitor
@@ -1157,10 +1164,10 @@ struct IsToken : public Ope::Visitor
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { has_token_boundary = true; }
+    void visit(TokenBoundary& /*ope*/) override { has_token_boundary = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(DefinitionReference& ope) override { has_rule = true; }
+    void visit(DefinitionReference& /*ope*/) override { has_rule = true; }
 
     bool is_token() const {
         return has_token_boundary || !has_rule;
@@ -1366,7 +1373,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
     for (; i < lit_.size(); i++) {
         if (i >= n || s[i] != lit_[i]) {
             c.set_error_pos(s);
-            return -1;
+            return static_cast<size_t>(-1);
         }
     }
 
@@ -1375,7 +1382,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             i += len;
         }
@@ -1395,7 +1402,7 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
             if (fail(l)) {
-                return -1;
+                return static_cast<size_t>(-1);
             }
             len += l;
         }
@@ -1415,14 +1422,14 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     size_t      len;
     any         val;
 
-    c.packrat(s, outer_->id, len, val, [&](any& val) {
+    c.packrat(s, outer_->id, len, val, [&](any& a_val) {
         auto& chldsv = c.push();
 
         if (outer_->enter) {
             outer_->enter(dt);
         }
 
-        auto se = make_scope_exit([&]() {
+        auto se2 = make_scope_exit([&]() {
             c.pop();
 
             if (outer_->leave) {
@@ -1439,7 +1446,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             chldsv.n_ = len;
 
             try {
-                val = reduce(chldsv, dt);
+                a_val = reduce(chldsv, dt);
             } catch (const parse_error& e) {
                 if (e.what()) {
                     if (c.message_pos < s) {
@@ -1447,7 +1454,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
-                len = -1;
+                len = static_cast<size_t>(-1);
             }
         }
     });
@@ -1492,7 +1499,7 @@ inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
     }
     assert(rule_);
     return rule_;
-};
+}
 
 inline void Sequence::accept(Visitor& v) { v.visit(*this); }
 inline void PrioritizedChoice::accept(Visitor& v) { v.visit(*this); }
@@ -1515,7 +1522,7 @@ inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
 inline void Whitespace::accept(Visitor& v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder& ope) {
-    auto p = (void*)ope.outer_;
+    auto p = static_cast<void*>(ope.outer_);
     if (ids.count(p)) {
         return;
     }
@@ -1579,7 +1586,7 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma,
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma, (size_t)-1, std::string());
+    return std::make_shared<Capture>(ope, ma, static_cast<size_t>(-1), std::string());
 }
 
 inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
@@ -1731,13 +1738,13 @@ private:
         void visit(LiteralString& ope) override {
             done_ = !ope.lit_.empty();
         }
-        void visit(CharacterClass& ope) override {
+        void visit(CharacterClass& /*ope*/) override {
             done_ = true;
         }
-        void visit(Character& ope) override {
+        void visit(Character& /*ope*/) override {
             done_ = true;
         }
-        void visit(AnyCharacter& ope) override {
+        void visit(AnyCharacter& /*ope*/) override {
             done_ = true;
         }
         void visit(Capture& ope) override {
@@ -1749,7 +1756,7 @@ private:
         void visit(Ignore& ope) override {
             ope.ope_->accept(*this);
         }
-        void visit(User& ope) override {
+        void visit(User& /*ope*/) override {
             done_ = true;
         }
         void visit(WeakHolder& ope) override {
@@ -1810,7 +1817,11 @@ private:
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
                                seq(npd(chr('\\')), dot()));
 
+#if !defined(PEGLIB_NO_UNICODE_CHARS)
         g["LEFTARROW"]  <= seq(cho(lit("<-"), lit("←")), g["Spacing"]);
+#else
+        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+#endif
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
@@ -1846,7 +1857,7 @@ private:
             Data& data = *dt.get<Data*>();
 
             auto ignore = (sv.size() == 4);
-            auto baseId = ignore ? 1 : 0;
+            auto baseId = ignore ? 1u : 0u;
 
             const auto& name = sv[baseId].get<std::string>();
             auto ope = sv[baseId + 2].get<std::shared_ptr<Ope>>();
@@ -1932,7 +1943,7 @@ private:
             switch (sv.choice()) {
                 case 0: { // Reference
                     auto ignore = (sv.size() == 2);
-                    auto baseId = ignore ? 1 : 0;
+                    auto baseId = ignore ? 1u : 0u;
 
                     const auto& ident = sv[baseId].get<std::string>();
 
@@ -1982,7 +1993,7 @@ private:
         g["STAR"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
         g["PLUS"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
 
-        g["DOT"] = [](const SemanticValues& sv) { return dot(); };
+        g["DOT"] = [](const SemanticValues& /*sv*/) { return dot(); };
 
         g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
     }
@@ -2123,7 +2134,7 @@ private:
         char ret = 0;
         int val;
         while (i < n && is_hex(s[i], val)) {
-            ret = ret * 16 + val;
+            ret = static_cast<char>(ret * 16 + val);
             i++;
         }
         return std::make_pair(ret, i);
@@ -2133,7 +2144,7 @@ private:
         char ret = 0;
         int val;
         while (i < n && is_digit(s[i], val)) {
-            ret = ret * 8 + val;
+            ret = static_cast<char>(ret * 8 + val);
             i++;
         }
         return std::make_pair(ret, i);
@@ -2187,7 +2198,7 @@ const int AstDefaultTag = -1;
 
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
 inline constexpr unsigned int str2tag(const char* str, int h = 0) {
-    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ str[h];
+    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ static_cast<unsigned char>(str[h]);
 }
 
 inline constexpr unsigned int operator "" _(const char* s, size_t) {
@@ -2198,43 +2209,43 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 template <typename Annotation>
 struct AstBase : public Annotation
 {
-    AstBase(const char* path, size_t line, size_t column, const char* name, const std::vector<std::shared_ptr<AstBase>>& nodes)
-        : path(path ? path : "")
-        , line(line)
-        , column(column)
-        , name(name)
-        , original_name(name)
+    AstBase(const char* a_path, size_t a_line, size_t a_column, const char* a_name, const std::vector<std::shared_ptr<AstBase>>& a_nodes)
+        : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
+        , name(a_name)
+        , original_name(a_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name))
+        , tag(str2tag(a_name))
         , original_tag(tag)
 #endif
         , is_token(false)
-        , nodes(nodes)
+        , nodes(a_nodes)
     {}
 
-    AstBase(const char* path, size_t line, size_t column, const char* name, const std::string& token)
-        : path(path ? path : "")
-        , line(line)
-        , column(column)
-        , name(name)
-        , original_name(name)
+    AstBase(const char* a_path, size_t a_line, size_t a_column, const char* a_name, const std::string& a_token)
+        : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
+        , name(a_name)
+        , original_name(a_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-        , tag(str2tag(name))
+        , tag(str2tag(a_name))
         , original_tag(tag)
 #endif
         , is_token(true)
-        , token(token)
+        , token(a_token)
     {}
 
-    AstBase(const AstBase& ast, const char* original_name)
+    AstBase(const AstBase& ast, const char* a_original_name)
         : path(ast.path)
         , line(ast.line)
         , column(ast.column)
         , name(ast.name)
-        , original_name(original_name)
+        , original_name(a_original_name)
 #ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(ast.tag)
-        , original_tag(str2tag(original_name))
+        , original_tag(str2tag(a_original_name))
 #endif
         , is_token(ast.is_token)
         , token(ast.token)
@@ -2355,8 +2366,8 @@ public:
             s, n,
             rules,
             start_,
-            [&](const char* s, size_t n, size_t id, const std::string& name) {
-                if (match_action) match_action(s, n, id, name);
+            [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+                if (match_action) match_action(a_s, a_n, a_id, a_name);
             },
             log);
 
@@ -2436,7 +2447,7 @@ public:
     }
 
     template <typename T>
-    bool parse(const char* s, any& dt, T& val, const char* path = nullptr) const {
+    bool parse(const char* s, any& dt, T& val, const char* /*path*/ = nullptr) const {
         auto n = strlen(s);
         return parse_n(s, n, dt, val);
     }
@@ -2634,8 +2645,8 @@ inline bool peg_match(const char* syntax, const char* s, match& m) {
     m.matches.clear();
 
     parser pg(syntax);
-    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, n, id, name });
+    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
     };
 
     auto ret = pg.parse(s);
@@ -2655,8 +2666,8 @@ inline bool peg_match(const char* syntax, const char* s) {
 inline bool peg_search(parser& pg, const char* s, size_t n, match& m) {
     m.matches.clear();
 
-    pg.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-        m.matches.push_back(match::Item{ s, n, id, name });
+    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
     };
 
     size_t mpos, mlen;
@@ -2698,8 +2709,8 @@ public:
         , s_(s)
         , l_(strlen(s))
         , pos_(0) {
-        peg_.match_action = [&](const char* s, size_t n, size_t id, const std::string& name) {
-            m_.matches.push_back(match::Item{ s, n, id, name });
+        peg_.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
+            m_.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
         };
         search();
     }
@@ -2743,7 +2754,7 @@ private:
         m_.matches.clear();
         size_t mpos, mlen;
         if (peg_.search(s_ + pos_, l_ - pos_, mpos, mlen)) {
-            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0 });
+            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0, std::string() });
             pos_ += mpos + mlen;
         } else {
             pos_ = (std::numeric_limits<size_t>::max)();

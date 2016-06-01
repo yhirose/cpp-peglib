@@ -1,5 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 2.8)
 include_directories(..)
-add_definitions("-std=c++1y")
 
 add_executable(peglint peglint.cc server.cc)

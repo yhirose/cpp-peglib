@@ -1,4 +1,3 @@
-
 #include "httplib.h"
 #include "peglib.h"
 #include <cstdio>
@@ -7,7 +6,7 @@
 using namespace httplib;
 using namespace std;
 
-string indexHTML = R"(
+static string indexHTML = R"(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -290,7 +289,7 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
 {
     Server svr;
 
-    svr.get("/", [&](const Request& req, Response& res) {
+    svr.get("/", [&](const Request& /*req*/, Response& res) {
         indexHTML = replace_all(indexHTML, "{{syntax}}", string(syntax.data(), syntax.size()).c_str());
         indexHTML = replace_all(indexHTML, "{{source}}", string(source.data(), source.size()).c_str());
 
@@ -333,7 +332,7 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
         res.set_content(json, "application/json");
     });
 
-    svr.set_error_handler([](const Request& req, Response& res) {
+    svr.set_error_handler([](const Request& /*req*/, Response& res) {
         const char* fmt = "<p>Error Status: <span style='color:red;'>%d</span></p>";
         char buf[BUFSIZ];
         snprintf(buf, sizeof(buf), fmt, res.status);

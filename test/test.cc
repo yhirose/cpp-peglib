@@ -5,10 +5,23 @@
 #include <peglib.h>
 #include <iostream>
 
-TEST_CASE("Simple syntax test", "[general]")
+#if !defined(PEGLIB_NO_UNICODE_CHARS)
+TEST_CASE("Simple syntax test (with unicode)", "[general]")
 {
     peg::parser parser(
         " ROOT ← _ "
+        " _ <- ' ' "
+    );
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+}
+#endif
+
+TEST_CASE("Simple syntax test", "[general]")
+{
+    peg::parser parser(
+        " ROOT <- _ "
         " _ <- ' ' "
     );
 
@@ -137,7 +150,7 @@ TEST_CASE("String capture test with embedded match action", "[general]")
 
     ROOT     <= seq(WS, zom(TAG));
     TAG      <= seq(chr('['),
-                    cap(TAG_NAME, [&](const char* s, size_t n, size_t id, const std::string& name) {
+                    cap(TAG_NAME, [&](const char* s, size_t n, size_t /*id*/, const std::string& /*name*/) {
                         tags.push_back(string(s, n));
                     }),
                     chr(']'),
@@ -347,7 +360,7 @@ TEST_CASE("Backtracking test", "[general]")
     );
 
     size_t count = 0;
-    parser["HELLO"] = [&](const SemanticValues& sv) {
+    parser["HELLO"] = [&](const SemanticValues& /*sv*/) {
         count++;
     };
 
@@ -551,8 +564,8 @@ TEST_CASE("Calculator test3", "[general]")
     // Setup actions
     parser["EXPRESSION"]      = reduce;
     parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
-    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return (char)*sv.c_str(); };
+    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
+    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
     parser["NUMBER"]          = [](const SemanticValues& sv) { return stol(sv.str(), nullptr, 10); };
 
     // Parse
@@ -779,14 +792,14 @@ TEST_CASE("User rule test", "[user rule]")
 
     Rules rules = {
         {
-            "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
                 static vector<string> names = { "PEG", "BNF" };
                 for (const auto& name: names) {
                     if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
                         return name.size();
                     }
                 }
-                return -1;
+                return static_cast<size_t>(-1);
             })
         },
         {

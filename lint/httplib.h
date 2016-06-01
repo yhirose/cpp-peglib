@@ -245,7 +245,7 @@ socket_t create_socket(const char* host, int port, Fn fn)
 
        // Make 'reuse address' option available
        int yes = 1;
-       setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
+       setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char*>(&yes), sizeof(yes));
 
        // bind or connect
        if (fn(sock, *rp)) {
@@ -301,7 +301,7 @@ inline void read_file(const std::string& path, std::string& out)
     fs.seekg(0, std::ios_base::end);
     auto size = fs.tellg();
     fs.seekg(0);
-    out.resize(size);
+    out.resize(static_cast<size_t>(size));
     fs.read(&out[0], size);
 }
 
@@ -345,11 +345,11 @@ inline const char* get_header_value(const MultiMap& map, const char* key, const 
     return def;
 }
 
-inline int get_header_value_int(const MultiMap& map, const char* key, int def)
+inline size_t get_header_value_int(const MultiMap& map, const char* key, size_t def)
 {
     auto it = map.find(key);
     if (it != map.end()) {
-        return std::stoi(it->second);
+        return static_cast<size_t>(std::stoul(it->second));
     }
     return def;
 }
@@ -424,7 +424,7 @@ inline std::string encode_url(const std::string& s)
 {
     std::string result;
 
-    for (auto i = 0; s[i]; i++) {
+    for (size_t i = 0; s[i]; i++) {
         switch (s[i]) {
         case ' ':  result += "+"; break;
         case '\'': result += "%27"; break;
@@ -435,7 +435,7 @@ inline std::string encode_url(const std::string& s)
             if (s[i] < 0) {
                 result += '%';
                 char hex[4];
-                size_t len = snprintf(hex, sizeof(hex), "%02X", (unsigned char)s[i]);
+                auto len = static_cast<size_t>(snprintf(hex, sizeof(hex), "%02X", static_cast<unsigned char>(s[i])));
                 assert(len == 2);
                 result.append(hex, len);
             } else {
@@ -463,10 +463,10 @@ inline bool is_hex(char c, int& v)
     return false;
 }
 
-inline int from_hex_to_i(const std::string& s, int i, int cnt, int& val)
+inline size_t from_hex_to_i(const std::string& s, size_t i, int cnt, int& val)
 {
     val = 0;
-    for (; s[i] && cnt; i++, cnt--) {
+    for ( ; s[i] && cnt; i++, cnt--) {
         int v = 0;
         if (is_hex(s[i], v)) {
             val = val * 16 + v;
@@ -483,26 +483,26 @@ inline size_t to_utf8(int code, char* buff)
         buff[0] = (code & 0x7F);
         return 1;
     } else if (code < 0x0800) {
-        buff[0] = (0xC0 | ((code >> 6) & 0x1F));
-        buff[1] = (0x80 | (code & 0x3F));
+        buff[0] = static_cast<char>(0xC0 | ((code >> 6) & 0x1F));
+        buff[1] = static_cast<char>(0x80 | (code & 0x3F));
         return 2;
     } else if (code < 0xD800) {
-        buff[0] = (0xE0 | ((code >> 12) & 0xF));
-        buff[1] = (0x80 | ((code >> 6) & 0x3F));
-        buff[2] = (0x80 | (code & 0x3F));
+        buff[0] = static_cast<char>(0xE0 | ((code >> 12) & 0xF));
+        buff[1] = static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+        buff[2] = static_cast<char>(0x80 | (code & 0x3F));
         return 3;
     } else if (code < 0xE000)  { // D800 - DFFF is invalid...
         return 0;
     } else if (code < 0x10000) {
-        buff[0] = (0xE0 | ((code >> 12) & 0xF));
-        buff[1] = (0x80 | ((code >> 6) & 0x3F));
-        buff[2] = (0x80 | (code & 0x3F));
+        buff[0] = static_cast<char>(0xE0 | ((code >> 12) & 0xF));
+        buff[1] = static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+        buff[2] = static_cast<char>(0x80 | (code & 0x3F));
         return 3;
     } else if (code < 0x110000) {
-        buff[0] = (0xF0 | ((code >> 18) & 0x7));
-        buff[1] = (0x80 | ((code >> 12) & 0x3F));
-        buff[2] = (0x80 | ((code >> 6) & 0x3F));
-        buff[3] = (0x80 | (code & 0x3F));
+        buff[0] = static_cast<char>(0xF0 | ((code >> 18) & 0x7));
+        buff[1] = static_cast<char>(0x80 | ((code >> 12) & 0x3F));
+        buff[2] = static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+        buff[3] = static_cast<char>(0x80 | (code & 0x3F));
         return 4;
     }
 
@@ -514,7 +514,7 @@ inline std::string decode_url(const std::string& s)
 {
     std::string result;
 
-    for (int i = 0; s[i]; i++) {
+    for (size_t i = 0; s[i]; i++) {
         if (s[i] == '%') {
             i++;
             assert(s[i]);
@@ -539,7 +539,7 @@ inline std::string decode_url(const std::string& s)
                 // HEX
                 int val = 0;
                 i = from_hex_to_i(s, i, 2, val);
-                result += val;
+                result += static_cast<char>(val);
             }
         } else if (s[i] == '+') {
             result += ' ';
@@ -572,11 +572,11 @@ inline void parse_query_text(const std::string& s, Map& params)
     split(&s[0], &s[s.size()], '&', [&](const char* b, const char* e) {
         std::string key;
         std::string val;
-        split(b, e, '=', [&](const char* b, const char* e) {
+        split(b, e, '=', [&](const char* b2, const char* e2) {
             if (key.empty()) {
-                key.assign(b, e);
+                key.assign(b2, e2);
             } else {
-                val.assign(b, e);
+                val.assign(b2, e2);
             }
         });
         params[key] = detail::decode_url(val);
