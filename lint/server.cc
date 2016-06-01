@@ -1,4 +1,3 @@
-
 #include "httplib.h"
 #include "peglib.h"
 #include <cstdio>
@@ -7,7 +6,7 @@
 using namespace httplib;
 using namespace std;
 
-string indexHTML = R"(
+static string indexHTML = R"(
 <!DOCTYPE html>
 <html lang="en">
 <head>
