@@ -194,7 +194,7 @@ private:
 
 template <typename EF>
 auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
-    return scope_exit<std::remove_reference_t<EF>>(std::forward<EF>(exit_function));
+    return scope_exit<typename std::remove_reference<EF>::type>(std::forward<EF>(exit_function));
 }
 
 /*-----------------------------------------------------------------------------
