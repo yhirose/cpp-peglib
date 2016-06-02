@@ -349,39 +349,6 @@ The following are available operators:
 | tok      | Token boundary        |
 | ign      | Ignore semantic value |
 | cap      | Capture character     |
-| usr      | User defined parser   |
-
-Adjust definitions
-------------------
-
-It's possible to add/override definitions.
-
-```cpp
-auto syntax = R"(
-    ROOT <- _ 'Hello' _ NAME '!' _
-)";
-
-Rules additional_rules = {
-    {
-        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
-            static vector<string> names = { "PEG", "BNF" };
-            for (const auto& name: names) {
-                if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
-                    return name.size(); // processed length
-                }
-            }
-            return -1; // parse error
-        })
-    },
-    {
-        "~_", zom(cls(" \t\r\n"))
-    }
-};
-
-auto g = parser(syntax, additional_rules);
-
-assert(g.parse(" Hello BNF! "));
-```
 
 Unicode support
 ---------------
