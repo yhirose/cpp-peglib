@@ -14,17 +14,17 @@ matrix:
             - gcc-4.9
             - g++-4.9
       env: COMPILER=g++-4.9
-    - compiler: clang
-      addons:
-        apt:
-          sources:
-            - kubuntu-backports
-            - ubuntu-toolchain-r-test
-            - llvm-toolchain-precise-3.7
-          packages:
-            - cmake
-            - clang-3.7
-      env: COMPILER=clang++-3.7
+#    - compiler: clang
+#      addons:
+#        apt:
+#          sources:
+#            - kubuntu-backports
+#            - ubuntu-toolchain-r-test
+#            - llvm-toolchain-precise-3.7
+#          packages:
+#            - cmake
+#            - clang-3.7
+#      env: COMPILER=clang++-3.7
 
 branches:
     only:
