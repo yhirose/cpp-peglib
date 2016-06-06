@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 2.8)
-add_definitions("-std=c++1y")
 
 # Check if a supported compiler is used and add c++14 flag:
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
