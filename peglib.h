@@ -1104,6 +1104,8 @@ struct Ope::Visitor
 
 struct AssignIDToDefinition : public Ope::Visitor
 {
+    using Ope::Visitor::visit;
+
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1132,6 +1134,8 @@ struct AssignIDToDefinition : public Ope::Visitor
 struct IsToken : public Ope::Visitor
 {
     IsToken() : has_token_boundary(false), has_rule(false) {}
+
+    using Ope::Visitor::visit;
 
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1660,6 +1664,8 @@ private:
     struct DetectLeftRecursion : public Ope::Visitor {
         DetectLeftRecursion(const std::string& name)
             : s_(nullptr), name_(name), done_(false) {}
+
+        using Ope::Visitor::visit;
 
         void visit(Sequence& ope) override {
             for (auto op: ope.opes_) {
