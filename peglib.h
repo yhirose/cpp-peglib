@@ -1356,7 +1356,7 @@ private:
 inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     c.trace("LiteralString", s, n, sv, dt);
 
-    auto i = 0u;
+    size_t i = 0;
     for (; i < lit_.size(); i++) {
         if (i >= n || s[i] != lit_[i]) {
             c.set_error_pos(s);
