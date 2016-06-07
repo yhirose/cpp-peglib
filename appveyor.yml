@@ -1,0 +1,16 @@
+clone_depth: 5
+
+environment:
+  matrix:
+    - CMAKE_GENERATOR: "Visual Studio 14 2015"
+      CONFIGURATION: Release
+    - CMAKE_GENERATOR: "Visual Studio 14 2015 Win64"
+      CONFIGURATION: Release
+
+build_script:
+  - mkdir build && cd build
+  - cmake .. -Wno-dev -G"%CMAKE_GENERATOR%"
+  - cmake --build . --config %CONFIGURATION%
+
+test_script:
+  - ctest -C %CONFIGURATION% -V
