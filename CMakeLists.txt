@@ -56,6 +56,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   set(warning_options /W4 /wd4503 /wd4512)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(add_link_deps pthread)
+endif()
+
 enable_testing()
 
 add_subdirectory(lint)
