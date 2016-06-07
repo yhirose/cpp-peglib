@@ -5,8 +5,8 @@
 //  MIT License
 //
 
-#ifndef _CPPPEGLIB_PEGLIB_H_
-#define _CPPPEGLIB_PEGLIB_H_
+#ifndef CPPPEGLIB_PEGLIB_H
+#define CPPPEGLIB_PEGLIB_H
 
 #include <algorithm>
 #include <cassert>
