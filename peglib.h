@@ -5,8 +5,8 @@
 //  MIT License
 //
 
-#ifndef _CPPPEGLIB_PEGLIB_H_
-#define _CPPPEGLIB_PEGLIB_H_
+#ifndef CPPPEGLIB_PEGLIB_H
+#define CPPPEGLIB_PEGLIB_H
 
 #include <algorithm>
 #include <cassert>
@@ -1104,6 +1104,8 @@ struct Ope::Visitor
 
 struct AssignIDToDefinition : public Ope::Visitor
 {
+    using Ope::Visitor::visit;
+
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1132,6 +1134,8 @@ struct AssignIDToDefinition : public Ope::Visitor
 struct IsToken : public Ope::Visitor
 {
     IsToken() : has_token_boundary(false), has_rule(false) {}
+
+    using Ope::Visitor::visit;
 
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1352,7 +1356,7 @@ private:
 inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     c.trace("LiteralString", s, n, sv, dt);
 
-    auto i = 0u;
+    size_t i = 0;
     for (; i < lit_.size(); i++) {
         if (i >= n || s[i] != lit_[i]) {
             c.set_error_pos(s);
@@ -1660,6 +1664,8 @@ private:
     struct DetectLeftRecursion : public Ope::Visitor {
         DetectLeftRecursion(const std::string& name)
             : s_(nullptr), name_(name), done_(false) {}
+
+        using Ope::Visitor::visit;
 
         void visit(Sequence& ope) override {
             for (auto op: ope.opes_) {

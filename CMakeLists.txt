@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 2.8)
-add_definitions("-std=c++1y")
 
 # Check if a supported compiler is used and add c++14 flag:
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -7,7 +6,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(FATAL_ERROR "Need at least gcc 4.9 to compile.")
   endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+elseif(MSVC)
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19)
     message(FATAL_ERROR "Visual Studio 2015 or newer is required.")
   endif()
@@ -53,14 +52,25 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
     )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(warning_options -Wall -Wpedantic -Wextra)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-  set(warning_options /WX /W4 /wd4503 /wd4512)
+elseif(MSVC)
+  set(warning_options /W4 /wd4503 /wd4512)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(add_link_deps pthread)
+endif()
+
+if(MSVC)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8")
 endif()
 
 enable_testing()
 
-add_subdirectory(lint)
 add_subdirectory(test)
 add_subdirectory(example)
+
+if(NOT MSVC)
+add_subdirectory(lint)
 add_subdirectory(language/pl0)
 add_subdirectory(language/culebra)
+endif()
