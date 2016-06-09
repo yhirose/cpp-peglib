@@ -91,7 +91,7 @@ int main(int argc, const char** argv)
 
     peg::parser parser;
 
-    parser.log = [&](auto ln, auto col, const auto& msg) {
+    parser.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
@@ -114,7 +114,7 @@ int main(int argc, const char** argv)
         source_path = "[commendline]";
     }
 
-    parser.log = [&](auto ln, auto col, const auto& msg) {
+    parser.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
@@ -122,7 +122,13 @@ int main(int argc, const char** argv)
         std::cout << "pos:lev\trule/ope" << std::endl;
         std::cout << "-------\t--------" << std::endl;
         size_t prev_pos = 0;
-        parser.enable_trace([&](auto name, auto s, auto /*n*/, auto& /*sv*/, auto& c, auto& /*dt*/) {
+        parser.enable_trace([&](
+            const char* name,
+            const char* s,
+            size_t /*n*/,
+            const peg::SemanticValues& /*sv*/,
+            const peg::Context& c,
+            const peg::any& /*dt*/) {
             auto pos = static_cast<size_t>(s - c.s);
             auto backtrack = (pos < prev_pos ? "*" : "");
             string indent;
