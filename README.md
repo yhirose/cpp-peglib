@@ -2,6 +2,7 @@ cpp-peglib
 ==========
 
 [![Build Status](https://travis-ci.org/yhirose/cpp-peglib.svg?branch=master)](https://travis-ci.org/yhirose/cpp-peglib)
+[![Bulid Status](https://ci.appveyor.com/api/projects/status/github/yhirose/cpp-peglib?branch=master&svg=true)](https://ci.appveyor.com/project/yhirose/cpp-peglib)
 
 C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library.
 
