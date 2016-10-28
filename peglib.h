@@ -1787,7 +1787,7 @@ private:
                                seq(npd(chr('\\')), dot()));
 
 #if !defined(PEGLIB_NO_UNICODE_CHARS)
-        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit("←")), g["Spacing"]);
+        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
 #else
         g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
 #endif

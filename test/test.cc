@@ -1,4 +1,4 @@
-
+﻿
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
@@ -9,7 +9,7 @@
 TEST_CASE("Simple syntax test (with unicode)", "[general]")
 {
     peg::parser parser(
-        " ROOT ← _ "
+        u8" ROOT ← _ "
         " _ <- ' ' "
     );
 
@@ -809,7 +809,7 @@ TEST_CASE("Semantic predicate test", "[predicate]")
 
 TEST_CASE("Japanese character", "[unicode]")
 {
-    peg::parser parser(R"(
+    peg::parser parser(u8R"(
         文 <- 修飾語? 主語 述語 '。'
         主語 <- 名詞 助詞
         述語 <- 動詞 助詞
@@ -820,7 +820,7 @@ TEST_CASE("Japanese character", "[unicode]")
         助詞 <- 'が' / 'を' / 'た' / 'ます' / 'に'
     )");
 
-    auto ret = parser.parse(R"(サーバーを復旧します。)");
+    auto ret = parser.parse(u8R"(サーバーを復旧します。)");
 
     REQUIRE(ret == true);
 }
@@ -846,7 +846,7 @@ TEST_CASE("PEG Definition", "[peg]")
     auto g = ParserGenerator::grammar();
     REQUIRE(exact(g, "Definition", "Definition <- a / (b c) / d ") == true);
     REQUIRE(exact(g, "Definition", "Definition <- a / b c / d ") == true);
-    REQUIRE(exact(g, "Definition", "Definitiond ← a ") == true);
+    REQUIRE(exact(g, "Definition", u8"Definitiond ← a ") == true);
     REQUIRE(exact(g, "Definition", "Definition ") == false);
     REQUIRE(exact(g, "Definition", " ") == false);
     REQUIRE(exact(g, "Definition", "") == false);
@@ -962,7 +962,7 @@ TEST_CASE("PEG Literal", "[peg]")
     REQUIRE(exact(g, "Literal", "\"'\"abc\"'\" ") == false);
     REQUIRE(exact(g, "Literal", "abc") == false);
     REQUIRE(exact(g, "Literal", "") == false);
-    REQUIRE(exact(g, "Literal", "日本語") == false);
+    REQUIRE(exact(g, "Literal", u8"日本語") == false);
 }
 
 TEST_CASE("PEG Class", "[peg]")
@@ -980,7 +980,7 @@ TEST_CASE("PEG Class", "[peg]")
     REQUIRE(exact(g, "Class", "[a") == false);
     REQUIRE(exact(g, "Class", "]") == false);
     REQUIRE(exact(g, "Class", "a]") == false);
-    REQUIRE(exact(g, "Class", "あ-ん") == false);
+    REQUIRE(exact(g, "Class", u8"あ-ん") == false);
     REQUIRE(exact(g, "Class", "[-+]") == true);
     REQUIRE(exact(g, "Class", "[+-]") == false);
 }
@@ -1026,7 +1026,7 @@ TEST_CASE("PEG Char", "[peg]")
     REQUIRE(exact(g, "Char", " ") == true);
     REQUIRE(exact(g, "Char", "  ") == false);
     REQUIRE(exact(g, "Char", "") == false);
-    REQUIRE(exact(g, "Char", "あ") == false);
+    REQUIRE(exact(g, "Char", u8"あ") == false);
 }
 
 TEST_CASE("PEG Operators", "[peg]")
