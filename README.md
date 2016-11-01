@@ -364,7 +364,7 @@ Sample codes
   * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
   * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
   * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
-  * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/cmdline/peglint.cc)
+  * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/peglint.cc)
   * [PL/0 Interpreter](https://github.com/yhirose/cpp-peglib/blob/master/language/pl0/pl0.cc)
 
 Tested compilers
@@ -382,4 +382,4 @@ TODO
 License
 -------
 
-MIT license (© 2015 Yuji Hirose)
+MIT license (© 2016 Yuji Hirose)
