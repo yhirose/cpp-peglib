@@ -372,7 +372,10 @@ Tested compilers
 
   * Visual Studio 2015
   * Visual Studio 2013 with update 5
-  * Clang 3.5
+  * Clang++ 3.5
+  * G++ 5.4 on Ubuntu 16.04
+  
+  IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127).
 
 TODO
 ----
