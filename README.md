@@ -18,6 +18,8 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 
 This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
+If you need a Go language version, please see [*go-peg*](https://github.com/yhirose/go-peg).
+
 How to use
 ----------
 
@@ -374,7 +376,7 @@ Tested compilers
   * Visual Studio 2013 with update 5
   * Clang++ 3.5
   * G++ 5.4 on Ubuntu 16.04
-  
+
   IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127).
 
 TODO
