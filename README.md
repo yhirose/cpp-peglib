@@ -23,7 +23,7 @@ If you need a Go language version, please see [*go-peg*](https://github.com/yhir
 How to use
 ----------
 
-This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar and handle semantic values.
+This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar, and handle semantic values.
 
 ```cpp
 // (1) Include the header file
@@ -46,7 +46,7 @@ int main(void) {
 
     parser parser(syntax);
 
-    // (3) Setup an action
+    // (3) Setup actions
     parser["Additive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:  // "Multitive '+' Additive"
@@ -79,14 +79,27 @@ int main(void) {
 }
 ```
 
-Here are available actions:
+There are two semantic actions available:
 
 ```cpp
 [](const SemanticValues& sv, any& dt)
 [](const SemanticValues& sv)
 ```
 
-`const SemanticValues& sv` contains semantic values. `SemanticValues` structure is defined as follows.
+`const SemanticValues& sv` contains the following information:
+
+ - Semantic values
+ - Matched string information
+ - Token information if the rule is literal or uses a token boundary operator
+ - Choice number when the rule is 'prioritized choise'
+
+`any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
+
+`peg::any` is a simpler implementatin of [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). It can wrap arbitrary data type.
+
+A semantic action can return a value of arbitrary data type, which will be wrapped by `peg::any`. If a user returns nothing in a semantic action, the first semantic value in the `const SemanticValues& sv` argument will be returned. (Yacc parser has the same behavior.)
+
+Here shows the `SemanticValues` structure:
 
 ```cpp
 struct SemanticValues : protected std::vector<any>
@@ -113,11 +126,7 @@ struct SemanticValues : protected std::vector<any>
 }
 ```
 
-`peg::any` class is very similar to [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). You can obtain a value by castning it to the actual type. In order to determine the actual type, you have to check the return value type of the child action for the semantic value.
-
-`any& dt` is a data object which can be used by the user for whatever purposes.
-
-The following example uses `<` ... ` >` operators. They are the *token boundary* operators.
+The following example uses `<` ... ` >` operator, which is *token boundary* operator.
 
 ```cpp
 auto syntax = R"(
@@ -128,7 +137,7 @@ auto syntax = R"(
 
 peg pg(syntax);
 
-pg["TOKEN"] = [](const SemanticValues& sv) {
+pg["TOKEN"] = [](const auto& sv) {
     // 'token' doesn't include trailing whitespaces
     auto token = sv.token();
 };
@@ -145,7 +154,7 @@ peg::pegparser parser(
     "  ~_    <-  [ \t]*                  "
 );
 
-parser["ROOT"] = [&](const SemanticValues& sv) {
+parser["ROOT"] = [&](const auto& sv) {
     assert(sv.size() == 2); // should be 2 instead of 5.
 };
 
@@ -167,7 +176,7 @@ peg::parser parser(
 ```cpp
 peg::parser parser("NUMBER  <-  [0-9]+");
 
-parser["NUMBER"] = [](const SemanticValues& sv) {
+parser["NUMBER"] = [](const auto& sv) {
     auto val = stol(sv.str(), nullptr, 10);
     if (val != 100) {
         throw peg::parse_error("value error!!");
@@ -191,7 +200,7 @@ parser["RULE"].enter = [](any& dt) {
     std::cout << "enter" << std::endl;
 };
 
-parser["RULE"] = [](const SemanticValues& sv, any& dt) {
+parser["RULE"] = [](const auto& sv, any& dt) {
     std::cout << "action!" << std::endl;
 };
 
@@ -229,6 +238,29 @@ PHRASE       <- < '"' (!'"' .)* '"' >
 
 %whitespace  <-  [ \t\r\n]*
 ```
+
+AST generation
+--------------
+
+*cpp-peglib* is able to generate an AST (Abstract Syntax Tree) when parsing. `enable_ast` method on `peg::parser` class enables the feature.
+
+```
+peg::parser parser("...");
+
+parser.enable_ast();
+
+shared_ptr<peg::Ast> ast;
+if (parser.parse("...", ast)) {
+    cout << peg::ast_to_s(ast);
+
+    ast = peg::AstOptimizer(true).optimize(ast);
+    cout << peg::ast_to_s(ast);
+}
+```
+
+`peg::AstOptimizer` removes redundant nodes to make a AST simpler. You can make your own AST optimizers to fit your needs.
+
+See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 Interpreter example](https://github.com/yhirose/cpp-peglib/blob/master/language/pl0/pl0.cc).
 
 Simple interface
 ----------------
