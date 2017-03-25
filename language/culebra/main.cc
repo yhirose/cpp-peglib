@@ -6,6 +6,7 @@
 #include <vector>
 
 using namespace peg;
+using namespace peg::udl;
 using namespace std;
 
 bool read_file(const char* path, vector<char>& buff)

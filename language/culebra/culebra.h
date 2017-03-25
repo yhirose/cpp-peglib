@@ -547,7 +547,7 @@ struct Interpreter
     }
 
     Value eval(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        using peg::operator"" _;
+        using namespace peg::udl;
 
         if (debugger_) {
             if (ast.original_tag == "STATEMENT"_) {
@@ -715,7 +715,7 @@ private:
     }
 
     Value eval_call(const peg::Ast& ast, std::shared_ptr<Environment> env) {
-        using peg::operator"" _;
+        using namespace peg::udl;
 
         Value val = eval(*ast.nodes[0], env);
 
@@ -836,7 +836,7 @@ private:
             }
             return rval;
         } else {
-            using peg::operator"" _;
+            using namespace peg::udl;
 
             Value lval = eval(*ast.nodes[lvaloff], env);
 
