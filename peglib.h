@@ -2284,6 +2284,13 @@ private:
     const std::vector<std::string> filters_;
 };
 
+template <typename T>
+static std::shared_ptr<T> optimize_ast(
+    std::shared_ptr<T> ast,
+    const std::vector<std::string>& filters = {}) {
+    return AstOptimizer(true, filters).optimize(ast);
+}
+
 struct EmptyType {};
 typedef AstBase<EmptyType> Ast;
 
