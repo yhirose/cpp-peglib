@@ -475,10 +475,10 @@ public:
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
-    std::vector<bool>                            cache_register;
+    std::vector<bool>                            cache_registered;
     std::vector<bool>                            cache_success;
 
-    std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_result;
+    std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_values;
 
     std::function<void (const char*, const char*, size_t, const SemanticValues&, const Context&, const any&)> tracer;
 
@@ -502,7 +502,7 @@ public:
         , in_whitespace(false)
         , def_count(a_def_count)
         , enablePackratParsing(a_enablePackratParsing)
-        , cache_register(enablePackratParsing ? def_count * (l + 1) : 0)
+        , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , tracer(a_tracer)
     {
@@ -516,12 +516,12 @@ public:
         }
 
         auto col = a_s - s;
-        auto has_cache = cache_register[def_count * static_cast<size_t>(col) + def_id];
+        auto idx = def_count * static_cast<size_t>(col) + def_id;
 
-        if (has_cache) {
-            if (cache_success[def_count * static_cast<size_t>(col) + def_id]) {
-                const auto& key = std::make_pair(a_s - s, def_id);
-                std::tie(len, val) = cache_result[key];
+        if (cache_registered[idx]) {
+            if (cache_success[idx]) {
+                auto key = std::make_pair(col, def_id);
+                std::tie(len, val) = cache_values[key];
                 return;
             } else {
                 len = static_cast<size_t>(-1);
@@ -529,11 +529,11 @@ public:
             }
         } else {
             fn(val);
-            cache_register[def_count * static_cast<size_t>(col) + def_id] = true;
-            cache_success[def_count * static_cast<size_t>(col) + def_id] = success(len);
+            cache_registered[idx] = true;
+            cache_success[idx] = success(len);
             if (success(len)) {
-                const auto& key = std::make_pair(a_s - s, def_id);
-                cache_result[key] = std::make_pair(len, val);
+                auto key = std::make_pair(col, def_id);
+                cache_values[key] = std::make_pair(len, val);
             }
             return;
         }
