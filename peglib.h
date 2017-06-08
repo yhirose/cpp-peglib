@@ -1616,7 +1616,7 @@ inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
 typedef std::unordered_map<std::string, Definition> Grammar;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
-typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
+//typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 
 class ParserGenerator
 {
