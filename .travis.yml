@@ -35,4 +35,4 @@ before_script:
 
 script:
   - mkdir build && cd build
-  - cmake -DCMAKE_CXX_COMPILER=$COMPILER .. && make && ctest -V
+  - cmake .. && make && ctest -V
