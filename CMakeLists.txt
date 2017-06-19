@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 2.8)
 
 # Check if a supported compiler is used and add c++11 flag:
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9)
-  #   message(FATAL_ERROR "Need at least gcc 4.9 to compile.")
-  # endif()
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9)
+    message(FATAL_ERROR "Need at least gcc 4.9 to compile.")
+  endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 elseif(MSVC)
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19)

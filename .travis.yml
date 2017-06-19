@@ -7,10 +7,11 @@ matrix:
       addons:
         apt:
           sources:
-            - kubuntu-backports
             - ubuntu-toolchain-r-test
+            - george-edison55-precise-backports
           packages:
             - cmake
+            - cmake-data
             - gcc-4.9
             - g++-4.9
       env: COMPILER=g++-4.9
