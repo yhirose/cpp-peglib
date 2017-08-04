@@ -206,14 +206,17 @@ struct Environment
     Environment(shared_ptr<SymbolScope> scope, shared_ptr<Environment> outer)
         : scope(scope), outer(outer) {}
 
-    int get_value(const string& ident) const {
+    int get_value(const shared_ptr<AstPL0> ast, const string& ident) const {
         auto it = scope->constants.find(ident);
         if (it != scope->constants.end()) {
             return it->second;
         } else if (scope->variables.count(ident)) {
+            if (variables.find(ident) == variables.end()) {
+              throw_runtime_error(ast, "uninitialized variable '" + ident + "'...");
+            }
             return variables.at(ident);
         }
-        return outer->get_value(ident);
+        return outer->get_value(ast, ident);
     }
 
     void set_variable(const string& ident, int val) {
@@ -395,7 +398,7 @@ private:
     }
 
     static int eval_ident(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
-        return env->get_value(ast->token);
+        return env->get_value(ast, ast->token);
     }
 
     static int eval_number(const shared_ptr<AstPL0> ast, shared_ptr<Environment> env) {
@@ -453,4 +456,3 @@ int main(int argc, const char** argv)
 }
 
 // vim: et ts=4 sw=4 cin cino={1s ff=unix
-
