@@ -495,9 +495,34 @@ struct Interpreter {
  * LLVM
  */
 struct LLVM {
-  LLVM() : builder_(context_) {
+  LLVM(const shared_ptr<AstPL0> ast) : builder_(context_) {
     module_ = make_unique<Module>("pl0", context_);
+    compile(ast);
   }
+
+  void dump() { module_->dump(); }
+
+  void exec() {
+    unique_ptr<ExecutionEngine> ee(EngineBuilder(std::move(module_)).create());
+    std::vector<GenericValue> noargs;
+    auto fn = ee->FindFunctionNamed("__main__");
+    auto ret = ee->runFunction(fn, noargs);
+  }
+
+  static void dump(const shared_ptr<AstPL0> ast) {
+    LLVM compiler(ast);
+    compiler.dump();
+  }
+
+  static void exec(const shared_ptr<AstPL0> ast) {
+    LLVM compiler(ast);
+    compiler.exec();
+  }
+
+ private:
+  LLVMContext context_;
+  IRBuilder<> builder_;
+  unique_ptr<Module> module_;
 
   void compile(const shared_ptr<AstPL0> ast) {
     InitializeNativeTarget();
@@ -505,26 +530,6 @@ struct LLVM {
     compile_libs();
     compile_program(ast);
   }
-
-  void dump() { module_->dump(); }
-
-  static void exec(const shared_ptr<AstPL0> ast) {
-    LLVM compiler;
-    compiler.compile(ast);
-    // compiler.dump();
-
-    auto EE = EngineBuilder(std::move(compiler.module_)).create();
-    std::unique_ptr<ExecutionEngine> ExecutionEngineOwner(EE);
-
-    std::vector<GenericValue> noargs;
-    auto fn = EE->FindFunctionNamed("__main__");
-    auto ret = EE->runFunction(fn, noargs);
-  }
-
- private:
-  LLVMContext context_;
-  IRBuilder<> builder_;
-  unique_ptr<Module> module_;
 
   void compile_switch(const shared_ptr<AstPL0> ast) {
     switch (ast->tag) {
@@ -878,13 +883,16 @@ int main(int argc, const char** argv) {
   // Parse the source and make an AST
   shared_ptr<AstPL0> ast;
   if (parser.parse_n(source.data(), source.size(), ast, path)) {
-    bool opt_llvm = false;
+    bool opt_jit = false;
     bool opt_ast = false;
+    bool opt_llvm = false;
     {
       auto argi = 2;
       while (argi < argc) {
         if (string("--ast") == argv[argi]) {
           opt_ast = true;
+        } else if (string("--jit") == argv[argi]) {
+          opt_jit = true;
         } else if (string("--llvm") == argv[argi]) {
           opt_llvm = true;
         }
@@ -898,11 +906,18 @@ int main(int argc, const char** argv) {
 
     try {
       SymbolTable::build_on_ast(ast);
-      if (opt_llvm) {
-        LLVM::exec(ast);
+
+      if (opt_llvm || opt_jit) {
+        if (opt_llvm) {
+          LLVM::dump(ast);
+        }
+        if (opt_jit) {
+          LLVM::exec(ast);
+        }
       } else {
         Interpreter::exec(ast);
       }
+
     } catch (const runtime_error& e) {
       cerr << e.what() << endl;
     }
