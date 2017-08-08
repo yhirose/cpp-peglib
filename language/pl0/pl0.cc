@@ -9,9 +9,16 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/Support/TargetSelect.h"
 
 using namespace peg;
 using namespace peg::udl;
+using namespace llvm;
 using namespace std;
 
 /*
@@ -154,7 +161,8 @@ struct SymbolTable {
 
   static void constants(const shared_ptr<AstPL0> ast,
                         shared_ptr<SymbolScope> scope) {
-    // const <- ('CONST' __ ident '=' _ number(',' _ ident '=' _ number)* ';' _) ?
+    // const <- ('CONST' __ ident '=' _ number(',' _ ident '=' _ number)* ';'
+    // _)?
     const auto& nodes = ast->nodes;
     for (auto i = 0u; i < nodes.size(); i += 2) {
       const auto& ident = nodes[i + 0]->token;
@@ -224,7 +232,7 @@ struct SymbolTable {
 };
 
 /*
- * Environment
+ * Interpreter
  */
 struct Environment {
   Environment(shared_ptr<SymbolScope> scope, shared_ptr<Environment> outer)
@@ -263,9 +271,6 @@ struct Environment {
   map<string, int> variables;
 };
 
-/*
- * Interpreter
- */
 struct Interpreter {
   static void exec(const shared_ptr<AstPL0> ast,
                    shared_ptr<Environment> env = nullptr) {
@@ -312,8 +317,7 @@ struct Interpreter {
 
   static void exec_statement(const shared_ptr<AstPL0> ast,
                              shared_ptr<Environment> env) {
-    // statement  <- (assignment / call / statements / if / while / out /
-    // in)?
+    // statement  <- (assignment / call / statements / if / while / out / in)?
     if (!ast->nodes.empty()) {
       exec(ast->nodes[0], env);
     }
@@ -488,6 +492,359 @@ struct Interpreter {
 };
 
 /*
+ * LLVM
+ */
+struct LLVM {
+  LLVM() : builder_(context_) {
+    module_ = make_unique<Module>("pl0", context_);
+  }
+
+  void compile(const shared_ptr<AstPL0> ast) {
+    InitializeNativeTarget();
+    InitializeNativeTargetAsmPrinter();
+    compile_libs();
+    compile_program(ast);
+  }
+
+  void dump() { module_->dump(); }
+
+  static void exec(const shared_ptr<AstPL0> ast) {
+    LLVM compiler;
+    compiler.compile(ast);
+    // compiler.dump();
+
+    auto EE = EngineBuilder(std::move(compiler.module_)).create();
+    std::unique_ptr<ExecutionEngine> ExecutionEngineOwner(EE);
+
+    std::vector<GenericValue> noargs;
+    auto fn = EE->FindFunctionNamed("__main__");
+    auto ret = EE->runFunction(fn, noargs);
+  }
+
+ private:
+  LLVMContext context_;
+  IRBuilder<> builder_;
+  unique_ptr<Module> module_;
+
+  void compile_switch(const shared_ptr<AstPL0> ast) {
+    switch (ast->tag) {
+      case "assignment"_:
+        compile_assignment(ast);
+        break;
+      case "call"_:
+        compile_call(ast);
+        break;
+      case "statements"_:
+        compile_statements(ast);
+        break;
+      case "if"_:
+        compile_if(ast);
+        break;
+      case "while"_:
+        compile_while(ast);
+        break;
+      case "out"_:
+        compile_out(ast);
+        break;
+      default:
+        compile_switch(ast->nodes[0]);
+        break;
+    }
+  }
+
+  Value* compile_switch_value(const shared_ptr<AstPL0> ast) {
+    switch (ast->tag) {
+      case "odd"_:
+        return compile_odd(ast);
+      case "compare"_:
+        return compile_compare(ast);
+      case "expression"_:
+        return compile_expression(ast);
+      case "ident"_:
+        return compile_ident(ast);
+      case "number"_:
+        return compile_number(ast);
+      default:
+        return compile_switch_value(ast->nodes[0]);
+    }
+  }
+
+  void compile_libs() {
+    auto printfF = module_->getOrInsertFunction(
+        "printf",
+        FunctionType::get(builder_.getInt32Ty(),
+                          PointerType::get(builder_.getInt8Ty(), 0), true));
+
+    auto outF = cast<Function>(module_->getOrInsertFunction(
+        "out", builder_.getVoidTy(), builder_.getInt32Ty(), nullptr));
+    {
+      auto BB = BasicBlock::Create(context_, "entry", outF);
+      builder_.SetInsertPoint(BB);
+
+      auto val = &*outF->arg_begin();
+
+      auto fmt = builder_.CreateGlobalStringPtr("%d\n");
+      std::vector<Value*> args = {fmt, val};
+      builder_.CreateCall(printfF, args);
+
+      builder_.CreateRetVoid();
+    }
+  }
+
+  void compile_program(const shared_ptr<AstPL0> ast) {
+    auto fn = cast<Function>(module_->getOrInsertFunction(
+        "__main__", builder_.getVoidTy(), nullptr));
+    {
+      auto BB = BasicBlock::Create(context_, "entry", fn);
+      builder_.SetInsertPoint(BB);
+      compile_block(ast->nodes[0], true);
+      builder_.CreateRetVoid();
+    }
+  }
+
+  void compile_block(const shared_ptr<AstPL0> ast, bool top) {
+    compile_const(ast->nodes[0], top);
+    compile_var(ast->nodes[1], top);
+    compile_procedure(ast->nodes[2]);
+    compile_statement(ast->nodes[3]);
+  }
+
+  void compile_const(const shared_ptr<AstPL0> ast, bool top) {
+    for (auto i = 0u; i < ast->nodes.size(); i += 2) {
+      auto ident = ast->nodes[i]->token;
+      auto number = stoi(ast->nodes[i + 1]->token);
+
+      if (top) {
+        auto gv = cast<GlobalVariable>(
+            module_->getOrInsertGlobal(ident, builder_.getInt32Ty()));
+        gv->setAlignment(4);
+        gv->setInitializer(builder_.getInt32(number));
+      } else {
+        auto alloca =
+            builder_.CreateAlloca(builder_.getInt32Ty(), nullptr, ident);
+        builder_.CreateStore(builder_.getInt32(number), alloca);
+      }
+    }
+  }
+
+  void compile_var(const shared_ptr<AstPL0> ast, bool top) {
+    for (const auto node : ast->nodes) {
+      if (top) {
+        auto gv = cast<GlobalVariable>(
+            module_->getOrInsertGlobal(node->token, builder_.getInt32Ty()));
+        gv->setAlignment(4);
+        gv->setInitializer(builder_.getInt32(0));
+      } else {
+        builder_.CreateAlloca(builder_.getInt32Ty(), nullptr, node->token);
+      }
+    }
+  }
+
+  void compile_procedure(const shared_ptr<AstPL0> ast) {
+    for (auto i = 0u; i < ast->nodes.size(); i += 2) {
+      auto ident = ast->nodes[i]->token;
+      auto block = ast->nodes[i + 1];
+
+      auto fn = cast<Function>(
+          module_->getOrInsertFunction(ident, builder_.getVoidTy(), nullptr));
+      {
+        auto prevBB = builder_.GetInsertBlock();
+        auto BB = BasicBlock::Create(context_, "entry", fn);
+        builder_.SetInsertPoint(BB);
+        compile_block(block, false);
+        builder_.CreateRetVoid();
+        builder_.SetInsertPoint(prevBB);
+      }
+    }
+  }
+
+  void compile_statement(const shared_ptr<AstPL0> ast) {
+    if (!ast->nodes.empty()) {
+      compile_switch(ast->nodes[0]);
+    }
+  }
+
+  void compile_assignment(const shared_ptr<AstPL0> ast) {
+    auto name = ast->nodes[0]->token;
+
+    auto fn = builder_.GetInsertBlock()->getParent();
+    auto tbl = fn->getValueSymbolTable();
+    auto var = tbl->lookup(name);
+    if (!var) {
+      var = module_->getGlobalVariable(name);
+    }
+
+    auto val = compile_expression(ast->nodes[1]);
+    builder_.CreateStore(val, var);
+  }
+
+  void compile_call(const shared_ptr<AstPL0> ast) {
+    auto fn = module_->getFunction(ast->nodes[0]->token);
+    builder_.CreateCall(fn);
+  }
+
+  void compile_statements(const shared_ptr<AstPL0> ast) {
+    for (auto node : ast->nodes) {
+      compile_statement(node);
+    }
+  }
+
+  void compile_if(const shared_ptr<AstPL0> ast) {
+    auto cond = compile_condition(ast->nodes[0]);
+
+    auto fn = builder_.GetInsertBlock()->getParent();
+    auto ifThen = BasicBlock::Create(context_, "if.then", fn);
+    auto ifEnd = BasicBlock::Create(context_, "if.end");
+
+    builder_.CreateCondBr(cond, ifThen, ifEnd);
+
+    builder_.SetInsertPoint(ifThen);
+    compile_statement(ast->nodes[1]);
+    builder_.CreateBr(ifEnd);
+
+    fn->getBasicBlockList().push_back(ifEnd);
+    builder_.SetInsertPoint(ifEnd);
+  }
+
+  void compile_while(const shared_ptr<AstPL0> ast) {
+    auto whileCond = BasicBlock::Create(context_, "while.cond");
+    builder_.CreateBr(whileCond);
+
+    auto fn = builder_.GetInsertBlock()->getParent();
+    fn->getBasicBlockList().push_back(whileCond);
+    builder_.SetInsertPoint(whileCond);
+
+    auto cond = compile_condition(ast->nodes[0]);
+
+    auto whileBody = BasicBlock::Create(context_, "while.body", fn);
+    auto whileEnd = BasicBlock::Create(context_, "while.end");
+    builder_.CreateCondBr(cond, whileBody, whileEnd);
+
+    builder_.SetInsertPoint(whileBody);
+    compile_statement(ast->nodes[1]);
+
+    builder_.CreateBr(whileCond);
+
+    fn->getBasicBlockList().push_back(whileEnd);
+    builder_.SetInsertPoint(whileEnd);
+  }
+
+  Value* compile_condition(const shared_ptr<AstPL0> ast) {
+    return compile_switch_value(ast->nodes[0]);
+  }
+
+  Value* compile_odd(const shared_ptr<AstPL0> ast) {
+    auto val = compile_expression(ast->nodes[0]);
+    return builder_.CreateICmpNE(val, builder_.getInt32(0), "icmpne");
+  }
+
+  Value* compile_compare(const shared_ptr<AstPL0> ast) {
+    auto lhs = compile_expression(ast->nodes[0]);
+    auto rhs = compile_expression(ast->nodes[2]);
+
+    const auto& ope = ast->nodes[1]->token;
+    switch (ope[0]) {
+      case '=':
+        return builder_.CreateICmpEQ(lhs, rhs, "icmpeq");
+      case '#':
+        return builder_.CreateICmpNE(lhs, rhs, "icmpne");
+      case '<':
+        if (ope.size() == 1) {
+          return builder_.CreateICmpSLT(lhs, rhs, "icmpslt");
+        }
+        // '<='
+        return builder_.CreateICmpSLE(lhs, rhs, "icmpsle");
+      case '>':
+        if (ope.size() == 1) {
+          return builder_.CreateICmpSGT(lhs, rhs, "icmpsgt");
+        }
+        // '>='
+        return builder_.CreateICmpSGE(lhs, rhs, "icmpsge");
+    }
+    return nullptr;
+  }
+
+  void compile_out(const shared_ptr<AstPL0> ast) {
+    auto val = compile_expression(ast->nodes[0]);
+    auto outF = module_->getFunction("out");
+    builder_.CreateCall(outF, val);
+  }
+
+  Value* compile_expression(const shared_ptr<AstPL0> ast) {
+    const auto& nodes = ast->nodes;
+
+    auto sign = nodes[0]->token;
+    auto negative = !(sign.empty() || sign == "+");
+
+    auto val = compile_term(nodes[1]);
+    if (negative) {
+      val = builder_.CreateNeg(val, "negative");
+    }
+
+    for (auto i = 2u; i < nodes.size(); i += 2) {
+      auto ope = nodes[i + 0]->token[0];
+      auto rval = compile_term(nodes[i + 1]);
+      switch (ope) {
+        case '+':
+          val = builder_.CreateAdd(val, rval, "add");
+          break;
+        case '-':
+          val = builder_.CreateSub(val, rval, "sub");
+          break;
+      }
+    }
+    return val;
+  }
+
+  Value* compile_term(const shared_ptr<AstPL0> ast) {
+    const auto& nodes = ast->nodes;
+    auto val = compile_factor(nodes[0]);
+    for (auto i = 1u; i < nodes.size(); i += 2) {
+      auto ope = nodes[i + 0]->token[0];
+      auto rval = compile_switch_value(nodes[i + 1]);
+      switch (ope) {
+        case '*':
+          val = builder_.CreateMul(val, rval, "mul");
+          break;
+        case '/': {
+          // TODO: Zero devide error?
+          // auto ret = builder_.CreateICmpEQ(rval, builder_.getInt32(0),
+          // "icmpeq");
+          // if (!ret) {
+          //   throw_runtime_error(ast, "divide by 0 error");
+          // }
+          val = builder_.CreateSDiv(val, rval, "div");
+          break;
+        }
+      }
+    }
+    return val;
+  }
+
+  Value* compile_factor(const shared_ptr<AstPL0> ast) {
+    return compile_switch_value(ast->nodes[0]);
+  }
+
+  Value* compile_ident(const shared_ptr<AstPL0> ast) {
+    auto name = ast->token;
+
+    auto fn = builder_.GetInsertBlock()->getParent();
+    auto tbl = fn->getValueSymbolTable();
+    auto var = tbl->lookup(name);
+    if (!var) {
+      var = module_->getGlobalVariable(name);
+    }
+
+    return builder_.CreateLoad(var);
+  }
+
+  Value* compile_number(const shared_ptr<AstPL0> ast) {
+    return ConstantInt::getIntegerValue(builder_.getInt32Ty(),
+                                        APInt(32, ast->token, 10));
+  }
+};
+
+/*
  * Main
  */
 int main(int argc, const char** argv) {
@@ -521,12 +878,31 @@ int main(int argc, const char** argv) {
   // Parse the source and make an AST
   shared_ptr<AstPL0> ast;
   if (parser.parse_n(source.data(), source.size(), ast, path)) {
-    if (argc > 2 && string("--ast") == argv[2]) {
+    bool opt_llvm = false;
+    bool opt_ast = false;
+    {
+      auto argi = 2;
+      while (argi < argc) {
+        if (string("--ast") == argv[argi]) {
+          opt_ast = true;
+        } else if (string("--llvm") == argv[argi]) {
+          opt_llvm = true;
+        }
+        argi++;
+      }
+    }
+
+    if (opt_ast) {
       cout << ast_to_s(ast);
     }
+
     try {
       SymbolTable::build_on_ast(ast);
-      Interpreter::exec(ast);
+      if (opt_llvm) {
+        LLVM::exec(ast);
+      } else {
+        Interpreter::exec(ast);
+      }
     } catch (const runtime_error& e) {
       cerr << e.what() << endl;
     }
@@ -535,5 +911,3 @@ int main(int argc, const char** argv) {
 
   return -1;
 }
-
-// vim: et ts=2 sw=2 cin cino={1s ff=unix

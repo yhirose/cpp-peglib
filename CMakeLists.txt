@@ -69,5 +69,4 @@ add_subdirectory(example)
 
 if(NOT MSVC)
   add_subdirectory(lint)
-  add_subdirectory(language/pl0)
 endif()

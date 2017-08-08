@@ -3,7 +3,7 @@ VAR x, squ;
 
 PROCEDURE square;
 BEGIN
-   squ:= x * x
+   squ := x * x
 END;
 
 BEGIN

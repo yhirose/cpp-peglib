@@ -20,7 +20,7 @@ END;
 
 BEGIN
   i := 0;
-  WHILE i < 30 DO BEGIN
+  WHILE i < 25 DO BEGIN
     x := i;
     CALL fib;
     write i;
