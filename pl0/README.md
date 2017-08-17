@@ -9,6 +9,15 @@ PL/0 language example
   * LLVM Code generation
   * LLVM JIT execution (fast!)
 
+Build
+-----
+
+```
+brew install llvm
+export PATH="$PATH:/usr/local/opt/llvm/bin"
+make
+```
+
 Usage
 -----
 
