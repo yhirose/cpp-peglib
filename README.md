@@ -260,7 +260,7 @@ if (parser.parse("...", ast)) {
 
 `peg::AstOptimizer` removes redundant nodes to make a AST simpler. You can make your own AST optimizers to fit your needs.
 
-See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 Interpreter example](https://github.com/yhirose/cpp-peglib/blob/master/language/pl0/pl0.cc).
+See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/language/pl0/pl0.cc).
 
 Simple interface
 ----------------
@@ -399,7 +399,7 @@ Sample codes
   * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
   * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
   * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/peglint.cc)
-  * [PL/0 Interpreter](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
+  * [PL/0 language](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
 
 Tested compilers
 ----------------
