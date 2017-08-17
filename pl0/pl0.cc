@@ -1,5 +1,5 @@
 //
-//  pl0.cc - PL/0 interpreter (https://en.wikipedia.org/wiki/PL/0)
+//  pl0.cc - PL/0 language (https://en.wikipedia.org/wiki/PL/0)
 //
 //  Copyright (c) 2015 Yuji Hirose. All rights reserved.
 //  MIT License
@@ -79,7 +79,6 @@ struct SymbolScope;
 
 struct Annotation {
   shared_ptr<SymbolScope> scope;
-  shared_ptr<vector<string>> freeVariables;
 };
 
 typedef AstBase<Annotation> AstPL0;
@@ -538,18 +537,8 @@ struct LLVM {
   void exec() {
     unique_ptr<ExecutionEngine> ee(EngineBuilder(std::move(module_)).create());
     std::vector<GenericValue> noargs;
-    auto fn = ee->FindFunctionNamed("__main__");
+    auto fn = ee->FindFunctionNamed("main");
     auto ret = ee->runFunction(fn, noargs);
-  }
-
-  static void dump(const shared_ptr<AstPL0> ast) {
-    LLVM compiler(ast);
-    compiler.dump();
-  }
-
-  static void exec(const shared_ptr<AstPL0> ast) {
-    LLVM compiler(ast);
-    compiler.exec();
   }
 
  private:
@@ -631,7 +620,7 @@ struct LLVM {
 
   void compile_program(const shared_ptr<AstPL0> ast) {
     auto fn = cast<Function>(module_->getOrInsertFunction(
-        "__main__", builder_.getVoidTy(), nullptr));
+        "main", builder_.getVoidTy(), nullptr));
     {
       auto BB = BasicBlock::Create(context_, "entry", fn);
       builder_.SetInsertPoint(BB);
@@ -901,14 +890,31 @@ struct LLVM {
  */
 int main(int argc, const char** argv) {
   if (argc < 2) {
-    cout << "usage: pl0 PATH [--ast]" << endl;
+    cout << "usage: pl0 PATH [--ast] [--llvm] [--jit]" << endl;
     return 1;
   }
 
-  // Read a source file into memory
+  // Parser commandline parameters
   auto path = argv[1];
-  vector<char> source;
+  bool opt_jit = false;
+  bool opt_ast = false;
+  bool opt_llvm = false;
+  {
+    auto argi = 2;
+    while (argi < argc) {
+      if (string("--ast") == argv[argi]) {
+        opt_ast = true;
+      } else if (string("--jit") == argv[argi]) {
+        opt_jit = true;
+      } else if (string("--llvm") == argv[argi]) {
+        opt_llvm = true;
+      }
+      argi++;
+    }
+  }
 
+  // Read a source file into memory
+  vector<char> source;
   ifstream ifs(path, ios::in | ios::binary);
   if (ifs.fail()) {
     cerr << "can't open the source file." << endl;
@@ -930,23 +936,6 @@ int main(int argc, const char** argv) {
   // Parse the source and make an AST
   shared_ptr<AstPL0> ast;
   if (parser.parse_n(source.data(), source.size(), ast, path)) {
-    bool opt_jit = false;
-    bool opt_ast = false;
-    bool opt_llvm = false;
-    {
-      auto argi = 2;
-      while (argi < argc) {
-        if (string("--ast") == argv[argi]) {
-          opt_ast = true;
-        } else if (string("--jit") == argv[argi]) {
-          opt_jit = true;
-        } else if (string("--llvm") == argv[argi]) {
-          opt_llvm = true;
-        }
-        argi++;
-      }
-    }
-
     try {
       SymbolTable::build_on_ast(ast);
 
@@ -955,11 +944,13 @@ int main(int argc, const char** argv) {
       }
 
       if (opt_llvm || opt_jit) {
+        LLVM compiler(ast);
+
         if (opt_llvm) {
-          LLVM::dump(ast);
+          compiler.dump();
         }
         if (opt_jit) {
-          LLVM::exec(ast);
+          compiler.exec();
         }
       } else {
         Interpreter::exec(ast);
