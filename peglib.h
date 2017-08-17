@@ -2224,7 +2224,12 @@ struct AstBase : public Annotation
 };
 
 template <typename T>
-void ast_to_s(const std::shared_ptr<T>& ptr, std::string& s, int level = 0) {
+void ast_to_s_core(
+    const std::shared_ptr<T>& ptr,
+    std::string& s,
+    int level,
+    std::function<std::string (const T& ast, int level)> fn) {
+
     const auto& ast = *ptr;
     for (auto i = 0; i < level; i++) {
         s += "  ";
@@ -2240,15 +2245,21 @@ void ast_to_s(const std::shared_ptr<T>& ptr, std::string& s, int level = 0) {
     } else {
         s += "+ " + name + "\n";
     }
+    if (fn) {
+      s += fn(ast, level + 1);
+    }
     for (auto node : ast.nodes) {
-        ast_to_s(node, s, level + 1);
+        ast_to_s_core(node, s, level + 1, fn);
     }
 }
 
 template <typename T>
-std::string ast_to_s(const std::shared_ptr<T>& ptr) {
+std::string ast_to_s(
+    const std::shared_ptr<T>& ptr,
+    std::function<std::string (const T& ast, int level)> fn = nullptr) {
+
     std::string s;
-    ast_to_s(ptr, s);
+    ast_to_s_core(ptr, s, 0, fn);
     return s;
 }
 
