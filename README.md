@@ -404,8 +404,10 @@ Sample codes
 Tested compilers
 ----------------
 
+  * Visual Studio 2017
   * Visual Studio 2015
   * Visual Studio 2013 with update 5
+  * Clang++ 4.0
   * Clang++ 3.5
   * G++ 5.4 on Ubuntu 16.04
 
@@ -419,4 +421,4 @@ TODO
 License
 -------
 
-MIT license (© 2016 Yuji Hirose)
+MIT license (© 2017 Yuji Hirose)

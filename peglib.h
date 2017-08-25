@@ -1,7 +1,7 @@
 ﻿//
 //  peglib.h
 //
-//  Copyright (c) 2015 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2015-17 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
