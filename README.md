@@ -104,10 +104,17 @@ Here shows the `SemanticValues` structure:
 ```cpp
 struct SemanticValues : protected std::vector<any>
 {
+    // Input text
+    const char* path;
+    const char* ss;
+
     // Matched string
     std::string str() const;    // Matched string
     const char* c_str() const;  // Matched string start
     size_t      length() const; // Matched string length
+
+    // Line number and column at which the matched string is
+    std::pair<size_t, size_t> line_info() const;
 
     // Tokens
     std::vector<

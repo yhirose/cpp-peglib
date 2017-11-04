@@ -825,6 +825,34 @@ TEST_CASE("Japanese character", "[unicode]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("Line information test", "[line information]")
+{
+    parser parser(R"(
+        S    <- _ (WORD _)+
+        WORD <- [A-Za-z]+
+        ~_   <- [ \t\r\n]+
+    )");
+
+    std::vector<std::pair<int, int>> locations;
+    parser["WORD"] = [&](const peg::SemanticValues& sv) {
+        locations.push_back(sv.line_info());
+    };
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+    ret = parser.parse(" Mon Tue Wed \nThu  Fri  Sat\nSun\n");
+    REQUIRE(ret == true);
+
+    REQUIRE(locations[0] == std::make_pair(1, 2));
+    REQUIRE(locations[1] == std::make_pair(1, 6));
+    REQUIRE(locations[2] == std::make_pair(1, 10));
+    REQUIRE(locations[3] == std::make_pair(2, 1));
+    REQUIRE(locations[4] == std::make_pair(2, 6));
+    REQUIRE(locations[5] == std::make_pair(2, 11));
+    REQUIRE(locations[6] == std::make_pair(3, 1));
+}
+
 bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);

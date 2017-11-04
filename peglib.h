@@ -206,17 +206,68 @@ auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
  *---------------------------------------------------------------------------*/
 
 /*
+* Line information utility function
+*/
+inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
+    auto p = start;
+    auto col_ptr = p;
+    auto no = 1;
+
+    while (p < cur) {
+        if (*p == '\n') {
+            no++;
+            col_ptr = p + 1;
+        }
+        p++;
+    }
+
+    auto col = p - col_ptr + 1;
+
+    return std::make_pair(no, col);
+}
+
+/*
 * Semantic values
 */
 struct SemanticValues : protected std::vector<any>
 {
+    // Input text
     const char* path;
     const char* ss;
+
+    // Matched string
     const char* c_str() const { return s_; }
     size_t      length() const { return n_; }
+
+    std::string str() const {
+        return std::string(s_, n_);
+    }
+
+    // Line number and column at which the matched string is
+    std::pair<size_t, size_t> line_info() const {
+        return peg::line_info(ss, s_);
+    }
+
+    // Choice number (0 based index)
     size_t      choice() const { return choice_; }
 
+    // Tokens
     std::vector<std::pair<const char*, size_t>> tokens;
+
+    std::string token(size_t id = 0) const {
+        if (!tokens.empty()) {
+            assert(id < tokens.size());
+            const auto& tok = tokens[id];
+            return std::string(tok.first, tok.second);
+        }
+        return std::string(s_, n_);
+    }
+
+    // Transform the semantic value vector to another vector
+    template <typename T>
+    auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
+        return this->transform(beg, end, [](const any& v) { return v.get<T>(); });
+    }
 
     SemanticValues() : s_(nullptr), n_(0), choice_(0) {}
 
@@ -242,24 +293,6 @@ struct SemanticValues : protected std::vector<any>
     using std::vector<any>::swap;
     using std::vector<any>::emplace;
     using std::vector<any>::emplace_back;
-
-    std::string str() const {
-        return std::string(s_, n_);
-    }
-
-    std::string token(size_t id = 0) const {
-        if (!tokens.empty()) {
-            assert(id < tokens.size());
-            const auto& tok = tokens[id];
-            return std::string(tok.first, tok.second);
-        }
-        return std::string(s_, n_);
-    }
-
-    template <typename T>
-    auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
-        return this->transform(beg, end, [](const any& v) { return v.get<T>(); });
-    }
 
 private:
     friend class Context;
@@ -1595,28 +1628,8 @@ inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
 
-inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
-    auto p = start;
-    auto col_ptr = p;
-    auto no = 1;
-
-    while (p < cur) {
-        if (*p == '\n') {
-            no++;
-            col_ptr = p + 1;
-        }
-        p++;
-    }
-
-    auto col = p - col_ptr + 1;
-
-    return std::make_pair(no, col);
-}
-
 typedef std::unordered_map<std::string, Definition> Grammar;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
-
-//typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 
 class ParserGenerator
 {
