@@ -414,6 +414,8 @@ Tested compilers
   * Visual Studio 2017
   * Visual Studio 2015
   * Visual Studio 2013 with update 5
+  * Clang++ 5.0.1
+  * Clang++ 5.0
   * Clang++ 4.0
   * Clang++ 3.5
   * G++ 5.4 on Ubuntu 16.04
