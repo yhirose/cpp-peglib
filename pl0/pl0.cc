@@ -1,7 +1,7 @@
 //
 //  pl0.cc - PL/0 language (https://en.wikipedia.org/wiki/PL/0)
 //
-//  Copyright (c) 2015 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2018 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -177,7 +177,8 @@ struct SymbolTable {
 
   static void constants(const shared_ptr<AstPL0> ast,
                         shared_ptr<SymbolScope> scope) {
-    // const <- ('CONST' __ ident '=' _ number(',' _ ident '=' _ number)* ';' _)?
+    // const <- ('CONST' __ ident '=' _ number(',' _ ident '=' _ number)* ';'
+    // _)?
     const auto& nodes = ast->nodes;
     for (auto i = 0u; i < nodes.size(); i += 2) {
       const auto& ident = nodes[i + 0]->token;
@@ -532,7 +533,7 @@ struct LLVM {
     compile(ast);
   }
 
-  void dump() { module_->dump(); }
+  void dump() { module_->print(llvm::errs(), nullptr); }
 
   void exec() {
     unique_ptr<ExecutionEngine> ee(EngineBuilder(std::move(module_)).create());
@@ -603,7 +604,7 @@ struct LLVM {
                           PointerType::get(builder_.getInt8Ty(), 0), true));
 
     auto outF = cast<Function>(module_->getOrInsertFunction(
-        "out", builder_.getVoidTy(), builder_.getInt32Ty(), nullptr));
+        "out", builder_.getVoidTy(), builder_.getInt32Ty()));
     {
       auto BB = BasicBlock::Create(context_, "entry", outF);
       builder_.SetInsertPoint(BB);
@@ -619,8 +620,8 @@ struct LLVM {
   }
 
   void compile_program(const shared_ptr<AstPL0> ast) {
-    auto fn = cast<Function>(module_->getOrInsertFunction(
-        "main", builder_.getVoidTy(), nullptr));
+    auto fn = cast<Function>(
+        module_->getOrInsertFunction("main", builder_.getVoidTy()));
     {
       auto BB = BasicBlock::Create(context_, "entry", fn);
       builder_.SetInsertPoint(BB);
