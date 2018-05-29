@@ -1,6 +1,6 @@
 ﻿
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch.hh"
 
 #include <peglib.h>
 #include <iostream>
@@ -735,7 +735,7 @@ TEST_CASE("Missing missing definitions test", "[general]")
         " A <- B C "
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Definition duplicates test", "[general]")
@@ -745,7 +745,7 @@ TEST_CASE("Definition duplicates test", "[general]")
         " A <- ''"
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive test", "[left recursive]")
@@ -755,7 +755,7 @@ TEST_CASE("Left recursive test", "[left recursive]")
         " B <- A 'a'"
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive with option test", "[left recursive]")
@@ -765,7 +765,7 @@ TEST_CASE("Left recursive with option test", "[left recursive]")
         " B  <- A                "
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive with zom test", "[left recursive]")
@@ -774,7 +774,7 @@ TEST_CASE("Left recursive with zom test", "[left recursive]")
         " A <- 'a'* A* "
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive with empty string test", "[left recursive]")
@@ -783,7 +783,7 @@ TEST_CASE("Left recursive with empty string test", "[left recursive]")
         " A <- '' A"
     );
 
-    REQUIRE(parser == false);
+    REQUIRE(!parser);
 }
 
 TEST_CASE("Semantic predicate test", "[predicate]")
