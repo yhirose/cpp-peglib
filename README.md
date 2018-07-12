@@ -13,10 +13,12 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)
-  * `$<` ... `>` (Capture operator)
   * `$name<` ... `>` (Named capture operator)
+  * `$name` (Backreference operator)
   * `%whitespace` (Automatic whitespace skipping)
   * `%word` (Word expression)
+
+This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
 If you need a Go language version, please see [*go-peg*](https://github.com/yhirose/go-peg).
 
@@ -322,6 +324,7 @@ The following are available operators:
 | tok      | Token boundary        |
 | ign      | Ignore semantic value |
 | cap      | Capture character     |
+| bkr      | Back reference        |
 
 Unicode support
 ---------------

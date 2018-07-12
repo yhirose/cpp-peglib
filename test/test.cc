@@ -83,27 +83,27 @@ TEST_CASE("String capture test2", "[general]")
 
 TEST_CASE("String capture test3", "[general]")
 {
-   auto syntax =
-       " ROOT  <- _ TOKEN*                "
-       " TOKEN <- '[' < (!']' .)+ > ']' _ "
-       " _     <- [ \t\r\n]*              "
-       ;
+    auto syntax =
+        " ROOT  <- _ TOKEN*                "
+        " TOKEN <- '[' < (!']' .)+ > ']' _ "
+        " _     <- [ \t\r\n]*              "
+        ;
 
-   parser pg(syntax);
+    parser pg(syntax);
 
-   std::vector<std::string> tags;
+    std::vector<std::string> tags;
 
-   pg["TOKEN"] = [&](const SemanticValues& sv) {
-       tags.push_back(sv.token());
-   };
+    pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
 
-   auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
+    auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
 
-   REQUIRE(ret == true);
-   REQUIRE(tags.size() == 3);
-   REQUIRE(tags[0] == "tag1");
-   REQUIRE(tags[1] == "tag:2");
-   REQUIRE(tags[2] == "tag-3");
+    REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "tag1");
+    REQUIRE(tags[1] == "tag:2");
+    REQUIRE(tags[2] == "tag-3");
 }
 
 TEST_CASE("Cyclic grammer test", "[general]")
@@ -455,7 +455,7 @@ TEST_CASE("Calculator test2", "[general]")
         ;
 
     string start;
-    auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr, nullptr);
+    auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr);
     auto& g = *grammar;
 
     // Setup actions
@@ -649,7 +649,7 @@ TEST_CASE("Literal token on AST test1", "[general]")
 TEST_CASE("Literal token on AST test2", "[general]")
 {
     parser parser(R"(
-        STRING_LITERAL  <-  '"' (ESC / CHAR)* '"' 
+        STRING_LITERAL  <-  '"' (ESC / CHAR)* '"'
         ESC             <-  ('\\"' / '\\t' / '\\n')
         CHAR            <-  (!["] .)
     )");
@@ -700,6 +700,78 @@ TEST_CASE("Definition duplicates test", "[general]")
 
     REQUIRE(!parser);
 }
+
+TEST_CASE("Back reference test", "[back reference]")
+{
+    parser parser(R"(
+        START  <- _ LQUOTE < (!RQUOTE .)* > RQUOTE _
+        LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
+        RQUOTE <- ')' $delm '"'
+        ~_     <- [ \t\r\n]*
+    )");
+
+    std::string token;
+    parser["START"] = [&](const SemanticValues& sv) {
+        token = sv.token();
+    };
+
+    {
+        token.clear();
+        auto ret = parser.parse(R"delm(
+            R"("hello world")"
+        )delm");
+
+        REQUIRE(ret == true);
+        REQUIRE(token == "\"hello world\"");
+    }
+
+    {
+        token.clear();
+        auto ret = parser.parse(R"delm(
+            R"foo("(hello world)")foo"
+        )delm");
+
+        REQUIRE(ret == true);
+        REQUIRE(token == "\"(hello world)\"");
+    }
+
+    {
+        token.clear();
+        auto ret = parser.parse(R"delm(
+            R"foo("(hello world)foo")foo"
+        )delm");
+
+        REQUIRE(ret == false);
+        REQUIRE(token == "\"(hello world");
+    }
+
+    {
+        token.clear();
+        auto ret = parser.parse(R"delm(
+            R"foo("(hello world)")bar"
+        )delm");
+
+        REQUIRE(ret == false);
+        REQUIRE(token.empty());
+    }
+}
+
+TEST_CASE("Invalid back reference test", "[back reference]")
+{
+    parser parser(R"(
+        START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _
+        LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
+        RQUOTE <- ')' $delm2 '"'
+        ~_     <- [ \t\r\n]*
+    )");
+
+    REQUIRE_THROWS_AS(
+        parser.parse(R"delm(
+            R"foo("(hello world)")foo"
+        )delm"),
+        std::runtime_error);
+}
+
 
 TEST_CASE("Left recursive test", "[left recursive]")
 {
