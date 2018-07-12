@@ -45,3 +45,5 @@ CMakeCache.txt
 *.cmake
 *.vcxproj.filters
 *.opensdf
+.idea/
+grammar/test/*
