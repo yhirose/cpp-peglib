@@ -59,23 +59,6 @@ TEST_CASE("String capture test", "[general]")
     REQUIRE(tags[2] == "tag-3");
 }
 
-TEST_CASE("String capture test with match", "[general]")
-{
-    peg::match m;
-    auto ret = peg::peg_match(
-        "  ROOT      <-  _ ('[' $< TAG_NAME > ']' _)*  "
-        "  TAG_NAME  <-  (!']' .)+                "
-        "  _         <-  [ \t]*                   ",
-        " [tag1] [tag:2] [tag-3] ",
-        m);
-
-    REQUIRE(ret == true);
-    REQUIRE(m.size() == 4);
-    REQUIRE(m.str(1) == "tag1");
-    REQUIRE(m.str(2) == "tag:2");
-    REQUIRE(m.str(3) == "tag-3");
-}
-
 using namespace peg;
 using namespace std;
 
@@ -121,50 +104,6 @@ TEST_CASE("String capture test3", "[general]")
    REQUIRE(tags[0] == "tag1");
    REQUIRE(tags[1] == "tag:2");
    REQUIRE(tags[2] == "tag-3");
-}
-
-TEST_CASE("Named capture test", "[general]")
-{
-    peg::match m;
-
-    auto ret = peg::peg_match(
-        "  ROOT      <-  _ ('[' $test< TAG_NAME > ']' _)*  "
-        "  TAG_NAME  <-  (!']' .)+                "
-        "  _         <-  [ \t]*                   ",
-        " [tag1] [tag:2] [tag-3] ",
-        m);
-
-    auto cap = m.named_capture("test");
-
-    REQUIRE(ret == true);
-    REQUIRE(m.size() == 4);
-    REQUIRE(cap.size() == 3);
-    REQUIRE(m.str(cap[2]) == "tag-3");
-}
-
-TEST_CASE("String capture test with embedded match action", "[general]")
-{
-    Definition ROOT, TAG, TAG_NAME, WS;
-
-    vector<string> tags;
-
-    ROOT     <= seq(WS, zom(TAG));
-    TAG      <= seq(chr('['),
-                    cap(TAG_NAME, [&](const char* s, size_t n, size_t /*id*/, const std::string& /*name*/) {
-                        tags.push_back(string(s, n));
-                    }),
-                    chr(']'),
-                    WS);
-    TAG_NAME <= oom(seq(npd(chr(']')), dot()));
-    WS       <= zom(cls(" \t"));
-
-    auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
-
-    REQUIRE(r.ret == true);
-    REQUIRE(tags.size() == 3);
-    REQUIRE(tags[0] == "tag1");
-    REQUIRE(tags[1] == "tag:2");
-    REQUIRE(tags[2] == "tag-3");
 }
 
 TEST_CASE("Cyclic grammer test", "[general]")

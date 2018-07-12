@@ -1,7 +1,7 @@
 ﻿//
 //  peglib.h
 //
-//  Copyright (c) 2015-17 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2015-18 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -1608,10 +1608,6 @@ inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma,
     return std::make_shared<Capture>(ope, ma, n, s);
 }
 
-inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma, static_cast<size_t>(-1), std::string());
-}
-
 inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<TokenBoundary>(ope);
 }
@@ -2336,14 +2332,7 @@ public:
     }
 
     bool load_grammar(const char* s, size_t n) {
-        grammar_ = ParserGenerator::parse(
-            s, n,
-            start_,
-            [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
-                if (match_action) match_action(a_s, a_n, a_id, a_name);
-            },
-            log);
-
+        grammar_ = ParserGenerator::parse(s, n, start_, match_action, log);
         return grammar_ != nullptr;
     }
 
@@ -2509,256 +2498,6 @@ private:
 
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
-};
-
-/*-----------------------------------------------------------------------------
- *  Simple interface
- *---------------------------------------------------------------------------*/
-
-struct match
-{
-    struct Item {
-        const char* s;
-        size_t      n;
-        size_t      id;
-        std::string name;
-
-        size_t length() const { return n; }
-        std::string str() const { return std::string(s, n); }
-    };
-
-    std::vector<Item> matches;
-
-    typedef std::vector<Item>::iterator iterator;
-    typedef std::vector<Item>::const_iterator const_iterator;
-
-    bool empty() const {
-        return matches.empty();
-    }
-
-    size_t size() const {
-        return matches.size();
-    }
-
-    size_t length(size_t n = 0) {
-        return matches[n].length();
-    }
-
-    std::string str(size_t n = 0) const {
-        return matches[n].str();
-    }
-
-    const Item& operator[](size_t n) const {
-        return matches[n];
-    }
-
-    iterator begin() {
-        return matches.begin();
-    }
-
-    iterator end() {
-        return matches.end();
-    }
-
-    const_iterator begin() const {
-        return matches.cbegin();
-    }
-
-    const_iterator end() const {
-        return matches.cend();
-    }
-
-    std::vector<size_t> named_capture(const std::string& name) const {
-        std::vector<size_t> ret;
-        for (auto i = 0u; i < matches.size(); i++) {
-            if (matches[i].name == name) {
-                ret.push_back(i);
-            }
-        }
-        return ret;
-    }
-
-    std::map<std::string, std::vector<size_t>> named_captures() const {
-        std::map<std::string, std::vector<size_t>> ret;
-        for (auto i = 0u; i < matches.size(); i++) {
-            ret[matches[i].name].push_back(i);
-        }
-        return ret;
-    }
-
-    std::vector<size_t> indexed_capture(size_t id) const {
-        std::vector<size_t> ret;
-        for (auto i = 0u; i < matches.size(); i++) {
-            if (matches[i].id == id) {
-                ret.push_back(i);
-            }
-        }
-        return ret;
-    }
-
-    std::map<size_t, std::vector<size_t>> indexed_captures() const {
-        std::map<size_t, std::vector<size_t>> ret;
-        for (auto i = 0u; i < matches.size(); i++) {
-            ret[matches[i].id].push_back(i);
-        }
-        return ret;
-    }
-};
-
-inline bool peg_match(const char* syntax, const char* s, match& m) {
-    m.matches.clear();
-
-    parser pg(syntax);
-    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
-        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
-    };
-
-    auto ret = pg.parse(s);
-    if (ret) {
-        auto n = strlen(s);
-        m.matches.insert(m.matches.begin(), match::Item{ s, n, 0, std::string() });
-    }
-
-    return ret;
-}
-
-inline bool peg_match(const char* syntax, const char* s) {
-    parser parser(syntax);
-    return parser.parse(s);
-}
-
-inline bool peg_search(parser& pg, const char* s, size_t n, match& m) {
-    m.matches.clear();
-
-    pg.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
-        m.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
-    };
-
-    size_t mpos, mlen;
-    auto ret = pg.search(s, n, mpos, mlen);
-    if (ret) {
-        m.matches.insert(m.matches.begin(), match::Item{ s + mpos, mlen, 0, std::string() });
-        return true;
-    }
-
-    return false;
-}
-
-inline bool peg_search(parser& pg, const char* s, match& m) {
-    auto n = strlen(s);
-    return peg_search(pg, s, n, m);
-}
-
-inline bool peg_search(const char* syntax, const char* s, size_t n, match& m) {
-    parser pg(syntax);
-    return peg_search(pg, s, n, m);
-}
-
-inline bool peg_search(const char* syntax, const char* s, match& m) {
-    parser pg(syntax);
-    auto n = strlen(s);
-    return peg_search(pg, s, n, m);
-}
-
-class peg_token_iterator : public std::iterator<std::forward_iterator_tag, match>
-{
-public:
-    peg_token_iterator()
-        : s_(nullptr)
-        , l_(0)
-        , pos_((std::numeric_limits<size_t>::max)()) {}
-
-    peg_token_iterator(const char* syntax, const char* s)
-        : peg_(syntax)
-        , s_(s)
-        , l_(strlen(s))
-        , pos_(0) {
-        peg_.match_action = [&](const char* a_s, size_t a_n, size_t a_id, const std::string& a_name) {
-            m_.matches.push_back(match::Item{ a_s, a_n, a_id, a_name });
-        };
-        search();
-    }
-
-    peg_token_iterator(const peg_token_iterator& rhs)
-        : peg_(rhs.peg_)
-        , s_(rhs.s_)
-        , l_(rhs.l_)
-        , pos_(rhs.pos_)
-        , m_(rhs.m_) {}
-
-    peg_token_iterator& operator++() {
-        search();
-        return *this;
-    }
-
-    peg_token_iterator operator++(int) {
-        auto it = *this;
-        search();
-        return it;
-    }
-
-    match& operator*() {
-        return m_;
-    }
-
-    match* operator->() {
-        return &m_;
-    }
-
-    bool operator==(const peg_token_iterator& rhs) {
-        return pos_ == rhs.pos_;
-    }
-
-    bool operator!=(const peg_token_iterator& rhs) {
-        return pos_ != rhs.pos_;
-    }
-
-private:
-    void search() {
-        m_.matches.clear();
-        size_t mpos, mlen;
-        if (peg_.search(s_ + pos_, l_ - pos_, mpos, mlen)) {
-            m_.matches.insert(m_.matches.begin(), match::Item{ s_ + mpos, mlen, 0, std::string() });
-            pos_ += mpos + mlen;
-        } else {
-            pos_ = (std::numeric_limits<size_t>::max)();
-        }
-    }
-
-    parser      peg_;
-    const char* s_;
-    size_t      l_;
-    size_t      pos_;
-    match       m_;
-};
-
-struct peg_token_range {
-    typedef peg_token_iterator iterator;
-    typedef const peg_token_iterator const_iterator;
-
-    peg_token_range(const char* syntax, const char* s)
-        : beg_iter(peg_token_iterator(syntax, s))
-        , end_iter() {}
-
-    iterator begin() {
-        return beg_iter;
-    }
-
-    iterator end() {
-        return end_iter;
-    }
-
-    const_iterator cbegin() const {
-        return beg_iter;
-    }
-
-    const_iterator cend() const {
-        return end_iter;
-    }
-
-private:
-    peg_token_iterator beg_iter;
-    peg_token_iterator end_iter;
 };
 
 } // namespace peg
