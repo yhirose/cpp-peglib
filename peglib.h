@@ -465,11 +465,6 @@ private:
 };
 
 /*
- * Match action
- */
-typedef std::function<void (const char* s, size_t n, size_t id, const std::string& name)> MatchAction;
-
-/*
  * Result
  */
 inline bool success(size_t len) {
@@ -483,8 +478,8 @@ inline bool fail(size_t len) {
 /*
  * Context
  */
-class Ope;
 class Context;
+class Ope;
 class Definition;
 
 typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> Tracer;
@@ -511,6 +506,8 @@ public:
     bool                                         in_whitespace;
 
     std::shared_ptr<Ope>                         wordOpe;
+
+    std::unordered_map<std::string, std::string> captures;
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
@@ -989,14 +986,16 @@ public:
 class Capture : public Ope
 {
 public:
-    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t id, const std::string& name)
-        : ope_(ope), match_action_(ma), id_(id), name_(name) {}
+    typedef std::function<void (const char* s, size_t n, Context& c)> MatchAction;
+
+    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma)
+        : ope_(ope), match_action_(ma) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len) && match_action_) {
-            match_action_(s, len, id_, name_);
+            match_action_(s, len, c);
         }
         return len;
     }
@@ -1006,9 +1005,7 @@ public:
     std::shared_ptr<Ope> ope_;
 
 private:
-    MatchAction          match_action_;
-    size_t               id_;
-    std::string          name_;
+    MatchAction match_action_;
 };
 
 class TokenBoundary : public Ope
@@ -1123,6 +1120,18 @@ public:
     std::shared_ptr<Ope> ope_;
 };
 
+class BackReference : public Ope
+{
+public:
+    BackReference(const std::string& name) : name_(name) {}
+
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+
+    void accept(Visitor& v) override;
+
+    std::string name_;
+};
+
 /*
  * Visitor
  */
@@ -1147,6 +1156,7 @@ struct Ope::Visitor
     virtual void visit(Holder& /*ope*/) {}
     virtual void visit(DefinitionReference& /*ope*/) {}
     virtual void visit(Whitespace& /*ope*/) {}
+    virtual void visit(BackReference& /*ope*/) {}
 };
 
 struct AssignIDToDefinition : public Ope::Visitor
@@ -1403,31 +1413,31 @@ private:
  * Implementations
  */
 
-inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    c.trace("LiteralString", s, n, sv, dt);
-
+inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
+        const std::string& lit, bool& init_is_word, bool& is_word)
+{
     size_t i = 0;
-    for (; i < lit_.size(); i++) {
-        if (i >= n || s[i] != lit_[i]) {
+    for (; i < lit.size(); i++) {
+        if (i >= n || s[i] != lit[i]) {
             c.set_error_pos(s);
             return static_cast<size_t>(-1);
         }
     }
 
 	// Word check
-    static Context dummy_c(nullptr, lit_.data(), lit_.size(), 0, nullptr, nullptr, false, nullptr);
+    static Context dummy_c(nullptr, lit.data(), lit.size(), 0, nullptr, nullptr, false, nullptr);
     static SemanticValues dummy_sv;
     static any dummy_dt;
 
-    if (!init_is_word_) { // TODO: Protect with mutex
+    if (!init_is_word) { // TODO: Protect with mutex
 		if (c.wordOpe) {
-			auto len = c.wordOpe->parse(lit_.data(), lit_.size(), dummy_sv, dummy_c, dummy_dt);
-			is_word_ = success(len);
+			auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
+			is_word = success(len);
 		}
-        init_is_word_ = true;
+        init_is_word = true;
     }
 
-	if (is_word_) {
+	if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
 		auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
 		if (fail(len)) {
@@ -1448,6 +1458,11 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
     }
 
     return i;
+}
+
+inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    c.trace("LiteralString", s, n, sv, dt);
+    return parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_);
 }
 
 inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
@@ -1560,6 +1575,17 @@ inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
     return rule_;
 }
 
+inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    c.trace("BackReference", s, n, sv, dt);
+    if (c.captures.find(name_) == c.captures.end()) {
+        throw std::runtime_error("Invalid back reference...");
+    }
+    const auto& lit = c.captures[name_];
+    bool init_is_word = false;
+    bool is_word = false;
+    return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word);
+}
+
 inline void Sequence::accept(Visitor& v) { v.visit(*this); }
 inline void PrioritizedChoice::accept(Visitor& v) { v.visit(*this); }
 inline void ZeroOrMore::accept(Visitor& v) { v.visit(*this); }
@@ -1578,6 +1604,7 @@ inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
 inline void Holder::accept(Visitor& v) { v.visit(*this); }
 inline void DefinitionReference::accept(Visitor& v) { v.visit(*this); }
 inline void Whitespace::accept(Visitor& v) { v.visit(*this); }
+inline void BackReference::accept(Visitor& v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder& ope) {
     auto p = static_cast<void*>(ope.outer_);
@@ -1639,8 +1666,8 @@ inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
 }
 
-inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, MatchAction ma, size_t n, const std::string& s) {
-    return std::make_shared<Capture>(ope, ma, n, s);
+inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, Capture::MatchAction ma) {
+    return std::make_shared<Capture>(ope, ma);
 }
 
 inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
@@ -1659,6 +1686,10 @@ inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
     return std::make_shared<Whitespace>(std::make_shared<Ignore>(ope));
 }
 
+inline std::shared_ptr<Ope> bkr(const std::string& name) {
+    return std::make_shared<BackReference>(name);
+}
+
 /*-----------------------------------------------------------------------------
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
@@ -1673,10 +1704,9 @@ public:
         const char*  s,
         size_t       n,
         std::string& start,
-        MatchAction  ma,
         Log          log)
     {
-        return get_instance().perform_core(s, n, start, ma, log);
+        return get_instance().perform_core(s, n, start, log);
     }
 
     // For debuging purpose
@@ -1698,15 +1728,10 @@ private:
     struct Data {
         std::shared_ptr<Grammar>                         grammar;
         std::string                                      start;
-        MatchAction                                      match_action;
         std::vector<std::pair<std::string, const char*>> duplicates;
         std::unordered_map<std::string, const char*>     references;
-        size_t                                           capture_count;
 
-        Data()
-            : grammar(std::make_shared<Grammar>())
-            , capture_count(0)
-            {}
+        Data(): grammar(std::make_shared<Grammar>()) {}
     };
 
     struct DetectLeftRecursion : public Ope::Visitor {
@@ -1793,6 +1818,9 @@ private:
             }
             done_ = true;
         }
+        void visit(BackReference& /*ope*/) override {
+            done_ = true;
+        }
 
         const char* s_;
 
@@ -1815,7 +1843,7 @@ private:
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
                                seq(g["BeginTok"], g["Expression"], g["EndTok"]),
                                seq(g["BeginCap"], g["Expression"], g["EndCap"]),
-                               g["Literal"], g["Class"], g["DOT"]);
+                               g["BackRef"], g["Literal"], g["Class"], g["DOT"]);
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
         g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
@@ -1858,8 +1886,10 @@ private:
         g["BeginTok"]   <= seq(chr('<'), g["Spacing"]);
         g["EndTok"]     <= seq(chr('>'), g["Spacing"]);
 
-        g["BeginCap"]   <= seq(chr('$'), tok(opt(g["Identifier"])), chr('<'), g["Spacing"]);
-        g["EndCap"]     <= seq(lit(">"), g["Spacing"]);
+        g["BeginCap"]   <= seq(chr('$'), tok(g["IdentCont"]), chr('<'), g["Spacing"]);
+        g["EndCap"]     <= seq(chr('>'), g["Spacing"]);
+
+        g["BackRef"]    <= seq(chr('$'), tok(g["IdentCont"]), g["Spacing"]);
 
         g["IGNORE"]     <= chr('~');
 
@@ -1954,7 +1984,7 @@ private:
             }
         };
 
-        g["Primary"] = [&](const SemanticValues& sv, any& dt) -> std::shared_ptr<Ope> {
+        g["Primary"] = [&](const SemanticValues& sv, any& dt) {
             Data& data = *dt.get<Data*>();
 
             switch (sv.choice()) {
@@ -1983,7 +2013,9 @@ private:
                 case 3: { // Capture
                     const auto& name = sv[0].get<std::string>();
                     auto ope = sv[1].get<std::shared_ptr<Ope>>();
-                    return cap(ope, data.match_action, ++data.capture_count, name);
+                    return cap(ope, [name](const char* a_s, size_t a_n, Context& c) {
+                        c.captures[name] = std::string(a_s, a_n);
+                    });
                 }
                 default: {
                     return sv[0].get<std::shared_ptr<Ope>>();
@@ -2013,18 +2045,19 @@ private:
         g["DOT"] = [](const SemanticValues& /*sv*/) { return dot(); };
 
         g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
+
+        g["BackRef"] = [&](const SemanticValues& sv) {
+            return bkr(sv.token());
+        };
     }
 
     std::shared_ptr<Grammar> perform_core(
         const char*  s,
         size_t       n,
         std::string& start,
-        MatchAction  ma,
         Log          log)
     {
         Data data;
-        data.match_action = ma;
-
         any dt = &data;
         auto r = g["Grammar"].parse(s, n, dt);
 
@@ -2373,7 +2406,7 @@ public:
     }
 
     bool load_grammar(const char* s, size_t n) {
-        grammar_ = ParserGenerator::parse(s, n, start_, match_action, log);
+        grammar_ = ParserGenerator::parse(s, n, start_, log);
         return grammar_ != nullptr;
     }
 
@@ -2516,8 +2549,7 @@ public:
         }
     }
 
-    MatchAction match_action;
-    Log         log;
+    Log log;
 
 private:
     void output_log(const char* s, size_t n, const Definition::Result& r) const {
