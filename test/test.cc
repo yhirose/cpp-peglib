@@ -255,6 +255,20 @@ TEST_CASE("WHITESPACE test2", "[general]")
     REQUIRE(items[2] == "three");
 }
 
+TEST_CASE("Word expression test", "[general]") {
+    peg::parser parser(R"(
+        ROOT         <-  'hello' ','? 'world'
+        %whitespace  <-  [ \t\r\n]*
+        %word        <-  [a-z]+
+    )");
+
+	REQUIRE(parser.parse("helloworld") == false);
+	REQUIRE(parser.parse("hello world") == true);
+	REQUIRE(parser.parse("hello,world") == true);
+	REQUIRE(parser.parse("hello, world") == true);
+	REQUIRE(parser.parse("hello , world") == true);
+}
+
 TEST_CASE("Skip token test", "[general]")
 {
     peg::parser parser(

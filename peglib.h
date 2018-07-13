@@ -510,6 +510,8 @@ public:
     std::shared_ptr<Ope>                         whitespaceOpe;
     bool                                         in_whitespace;
 
+    std::shared_ptr<Ope>                         wordOpe;
+
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
     std::vector<bool>                            cache_registered;
@@ -525,6 +527,7 @@ public:
         size_t               a_l,
         size_t               a_def_count,
         std::shared_ptr<Ope> a_whitespaceOpe,
+        std::shared_ptr<Ope> a_wordOpe,
         bool                 a_enablePackratParsing,
         Tracer               a_tracer)
         : path(a_path)
@@ -537,6 +540,7 @@ public:
         , in_token(false)
         , whitespaceOpe(a_whitespaceOpe)
         , in_whitespace(false)
+        , wordOpe(a_wordOpe)
         , def_count(a_def_count)
         , enablePackratParsing(a_enablePackratParsing)
         , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
@@ -895,13 +899,19 @@ public:
 class LiteralString : public Ope
 {
 public:
-    LiteralString(const std::string& s) : lit_(s) {}
+    LiteralString(const std::string& s)
+        : lit_(s)
+        , init_is_word_(false)
+        , is_word_(false)
+        {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
 
     void accept(Visitor& v) override;
 
     std::string lit_;
+	mutable bool init_is_word_;
+	mutable bool is_word_;
 };
 
 class CharacterClass : public Ope
@@ -1202,6 +1212,7 @@ struct IsToken : public Ope::Visitor
 };
 
 static const char* WHITESPACE_DEFINITION_NAME = "%whitespace";
+static const char* WORD_DEFINITION_NAME = "%word";
 
 /*
  * Definition
@@ -1239,6 +1250,7 @@ public:
         : name(std::move(rhs.name))
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
         , whitespaceOpe(rhs.whitespaceOpe)
+        , wordOpe(rhs.wordOpe)
         , enablePackratParsing(rhs.enablePackratParsing)
         , is_token(rhs.is_token)
         , has_token_boundary(rhs.has_token_boundary)
@@ -1358,6 +1370,7 @@ public:
     std::function<std::string ()>  error_message;
     bool                           ignoreSemanticValue;
     std::shared_ptr<Ope>           whitespaceOpe;
+    std::shared_ptr<Ope>           wordOpe;
     bool                           enablePackratParsing;
     bool                           is_token;
     bool                           has_token_boundary;
@@ -1378,7 +1391,7 @@ private:
             ope = std::make_shared<Sequence>(whitespaceOpe, ope);
         }
 
-        Context cxt(path, s, n, assignId.ids.size(), whitespaceOpe, enablePackratParsing, tracer);
+        Context cxt(path, s, n, assignId.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1400,6 +1413,28 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
             return static_cast<size_t>(-1);
         }
     }
+
+	// Word check
+    static Context dummy_c(nullptr, lit_.data(), lit_.size(), 0, nullptr, nullptr, false, nullptr);
+    static SemanticValues dummy_sv;
+    static any dummy_dt;
+
+    if (!init_is_word_) { // TODO: Protect with mutex
+		if (c.wordOpe) {
+			auto len = c.wordOpe->parse(lit_.data(), lit_.size(), dummy_sv, dummy_c, dummy_dt);
+			is_word_ = success(len);
+		}
+        init_is_word_ = true;
+    }
+
+	if (is_word_) {
+        auto ope = std::make_shared<NotPredicate>(c.wordOpe);
+		auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
+		if (fail(len)) {
+            return static_cast<size_t>(-1);
+		}
+        i += len;
+	}
 
     // Skip whiltespace
     if (!c.in_token) {
@@ -2066,6 +2101,12 @@ private:
         if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
             auto& rule = (*data.grammar)[start];
             rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+        }
+
+        // Word expression
+        if (grammar.count(WORD_DEFINITION_NAME)) {
+            auto& rule = (*data.grammar)[start];
+            rule.wordOpe = (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
         }
 
         return data.grammar;

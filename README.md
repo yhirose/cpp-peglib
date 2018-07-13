@@ -15,8 +15,8 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `\x20` (Hex number char)
   * `$<` ... `>` (Capture operator)
   * `$name<` ... `>` (Named capture operator)
-
-This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
+  * `%whitespace` (Automatic whitespace skipping)
+  * `%word` (Word expression)
 
 If you need a Go language version, please see [*go-peg*](https://github.com/yhirose/go-peg).
 
@@ -244,6 +244,20 @@ WORD         <- < [a-z]+ >
 PHRASE       <- < '"' (!'"' .)* '"' >
 
 %whitespace  <-  [ \t\r\n]*
+```
+
+Word expression
+---------------
+
+```cpp
+peg::parser parser(R"(
+    ROOT         <-  'hello' 'world'
+    %whitespace  <-  [ \t\r\n]*
+    %word        <-  [a-z]+
+)");
+
+parser.parse("hello world") // OK
+parser.parse("helloworld")  // NG
 ```
 
 AST generation
