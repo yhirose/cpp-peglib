@@ -17,6 +17,9 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name` (Backreference operator)
   * `%whitespace` (Automatic whitespace skipping)
   * `%word` (Word expression)
+  * `$name(` ... `)` (Create capture scope)
+  * `$name<` ... `>` (Named capture operator)
+  * `$name` (Backreference operator)
 
 This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
@@ -323,7 +326,8 @@ The following are available operators:
 | dot      | Any character         |
 | tok      | Token boundary        |
 | ign      | Ignore semantic value |
-| cap      | Capture character     |
+| ncs      | New capture scope     |
+| cap      | Capture               |
 | bkr      | Back reference        |
 
 Unicode support

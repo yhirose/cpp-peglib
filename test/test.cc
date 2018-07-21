@@ -701,7 +701,7 @@ TEST_CASE("Definition duplicates test", "[general]")
     REQUIRE(!parser);
 }
 
-TEST_CASE("Back reference test", "[back reference]")
+TEST_CASE("Backreference test", "[backreference]")
 {
     parser parser(R"(
         START  <- _ LQUOTE < (!RQUOTE .)* > RQUOTE _
@@ -756,7 +756,7 @@ TEST_CASE("Back reference test", "[back reference]")
     }
 }
 
-TEST_CASE("Invalid back reference test", "[back reference]")
+TEST_CASE("Invalid backreference test", "[backreference]")
 {
     parser parser(R"(
         START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _
@@ -772,6 +772,107 @@ TEST_CASE("Invalid back reference test", "[back reference]")
         std::runtime_error);
 }
 
+
+TEST_CASE("Nested capture test", "[backreference]")
+{
+    parser parser(R"(
+        ROOT      <- CONTENT
+        CONTENT   <- (ELEMENT / TEXT)*
+        ELEMENT   <- $(STAG CONTENT ETAG)
+        STAG      <- '<' $tag< TAG_NAME > '>'
+        ETAG      <- '</' $tag '>'
+        TAG_NAME  <- 'b' / 'u'
+        TEXT      <- TEXT_DATA
+        TEXT_DATA <- ![<] .
+    )");
+
+    REQUIRE(parser.parse("This is <b>a <u>test</u> text</b>."));
+    REQUIRE(!parser.parse("This is <b>a <u>test</b> text</u>."));
+    REQUIRE(!parser.parse("This is <b>a <u>test text</b>."));
+}
+
+TEST_CASE("Backreference with Prioritized Choice test", "[backreference]")
+{
+    parser parser(R"(
+        TREE           <- WRONG_BRANCH / CORRECT_BRANCH
+        WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
+        CORRECT_BRANCH <- BRANCH THAT IS_backref CORRECT
+        BRANCH         <- 'branch'
+        THAT           <- 'that'
+        IS_capture     <- $ref<..>
+        IS_backref     <- $ref
+        WRONG          <- 'wrong'
+        CORRECT        <- 'correct'
+    )");
+
+    REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
+}
+
+TEST_CASE("Backreference with Zero or More test", "[backreference]")
+{
+    parser parser(R"(
+        TREE           <- WRONG_BRANCH* CORRECT_BRANCH
+        WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
+        CORRECT_BRANCH <- BRANCH THAT IS_backref CORRECT
+        BRANCH         <- 'branch'
+        THAT           <- 'that'
+        IS_capture     <- $ref<..>
+        IS_backref     <- $ref
+        WRONG          <- 'wrong'
+        CORRECT        <- 'correct'
+    )");
+
+    REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+    REQUIRE(parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
+    REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
+    REQUIRE_THROWS_AS(parser.parse("branchthatiswron_branchthatiscorrect"), std::runtime_error);
+}
+
+TEST_CASE("Backreference with One or More test", "[backreference]")
+{
+    parser parser(R"(
+        TREE           <- WRONG_BRANCH+ CORRECT_BRANCH
+        WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
+        CORRECT_BRANCH <- BRANCH THAT IS_backref CORRECT
+        BRANCH         <- 'branch'
+        THAT           <- 'that'
+        IS_capture     <- $ref<..>
+        IS_backref     <- $ref
+        WRONG          <- 'wrong'
+        CORRECT        <- 'correct'
+    )");
+
+    REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+    REQUIRE(parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
+    REQUIRE(!parser.parse("branchthatiscorrect"));
+    REQUIRE(!parser.parse("branchthatiswron_branchthatiscorrect"));
+}
+
+TEST_CASE("Backreference with Option test", "[backreference]")
+{
+    parser parser(R"(
+        TREE           <- WRONG_BRANCH? CORRECT_BRANCH
+        WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
+        CORRECT_BRANCH <- BRANCH THAT IS_backref CORRECT
+        BRANCH         <- 'branch'
+        THAT           <- 'that'
+        IS_capture     <- $ref<..>
+        IS_backref     <- $ref
+        WRONG          <- 'wrong'
+        CORRECT        <- 'correct'
+    )");
+
+    REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+    REQUIRE(!parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
+    REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
+    REQUIRE_THROWS_AS(parser.parse("branchthatiswron_branchthatiscorrect"), std::runtime_error);
+}
 
 TEST_CASE("Left recursive test", "[left recursive]")
 {

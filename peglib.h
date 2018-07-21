@@ -507,7 +507,7 @@ public:
 
     std::shared_ptr<Ope>                         wordOpe;
 
-    std::unordered_map<std::string, std::string> captures;
+    std::vector<std::unordered_map<std::string, std::string>> capture_scope_stack;
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
@@ -544,6 +544,7 @@ public:
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , tracer(a_tracer)
     {
+        capture_scope_stack.resize(1);
     }
 
     template <typename T>
@@ -596,6 +597,23 @@ public:
 
     void pop() {
         value_stack_size--;
+    }
+
+    void push_capture_scope() {
+        capture_scope_stack.resize(capture_scope_stack.size() + 1);
+    }
+
+    void pop_capture_scope() {
+        capture_scope_stack.resize(capture_scope_stack.size() - 1);
+    }
+
+    void shift_capture_values() {
+        assert(capture_scope_stack.size() >= 2);
+        auto it = capture_scope_stack.rbegin();
+        auto it_prev = it + 1;
+        for (const auto& kv: *it) {
+            (*it_prev)[kv.first] = kv.second;
+        }
     }
 
     void set_error_pos(const char* a_s) {
@@ -693,9 +711,11 @@ public:
         for (const auto& ope : opes_) {
             c.nest_level++;
             auto& chldsv = c.push();
+            c.push_capture_scope();
             auto se = make_scope_exit([&]() {
                 c.nest_level--;
                 c.pop();
+                c.pop_capture_scope();
             });
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
@@ -707,6 +727,8 @@ public:
                 sv.n_ = chldsv.length();
                 sv.choice_ = id;
                 sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
+
+                c.shift_capture_values();
                 return len;
             }
             id++;
@@ -732,12 +754,18 @@ public:
         size_t i = 0;
         while (n - i > 0) {
             c.nest_level++;
-            auto se = make_scope_exit([&]() { c.nest_level--; });
+            c.push_capture_scope();
+            auto se = make_scope_exit([&]() {
+                c.nest_level--;
+                c.pop_capture_scope();
+            });
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
-            if (fail(len)) {
+            if (success(len)) {
+                c.shift_capture_values();
+            } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
@@ -767,10 +795,16 @@ public:
         size_t len = 0;
         {
             c.nest_level++;
-            auto se = make_scope_exit([&]() { c.nest_level--; });
+            c.push_capture_scope();
+            auto se = make_scope_exit([&]() {
+                c.nest_level--;
+                c.pop_capture_scope();
+            });
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
-            if (fail(len)) {
+            if (success(len)) {
+                c.shift_capture_values();
+            } else {
                 return static_cast<size_t>(-1);
             }
         }
@@ -778,12 +812,18 @@ public:
         auto i = len;
         while (n - i > 0) {
             c.nest_level++;
-            auto se = make_scope_exit([&]() { c.nest_level--; });
+            c.push_capture_scope();
+            auto se = make_scope_exit([&]() {
+                c.nest_level--;
+                c.pop_capture_scope();
+            });
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             len = rule.parse(s + i, n - i, sv, c, dt);
-            if (fail(len)) {
+            if (success(len)) {
+                c.shift_capture_values();
+            } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
@@ -814,10 +854,15 @@ public:
         c.nest_level++;
         auto save_sv_size = sv.size();
         auto save_tok_size = sv.tokens.size();
-        auto se = make_scope_exit([&]() { c.nest_level--; });
+        c.push_capture_scope();
+        auto se = make_scope_exit([&]() {
+            c.nest_level--;
+            c.pop_capture_scope();
+        });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
+            c.shift_capture_values();
             return len;
         } else {
             if (sv.size() != save_sv_size) {
@@ -845,9 +890,11 @@ public:
         c.trace("AndPredicate", s, n, sv, dt);
         c.nest_level++;
         auto& chldsv = c.push();
+        c.push_capture_scope();
         auto se = make_scope_exit([&]() {
             c.nest_level--;
             c.pop();
+            c.pop_capture_scope();
         });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
@@ -873,9 +920,11 @@ public:
         auto save_error_pos = c.error_pos;
         c.nest_level++;
         auto& chldsv = c.push();
+        c.push_capture_scope();
         auto se = make_scope_exit([&]() {
             c.nest_level--;
             c.pop();
+            c.pop_capture_scope();
         });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
@@ -981,6 +1030,27 @@ public:
     }
 
     void accept(Visitor& v) override;
+};
+
+class NewCaptureScope : public Ope
+{
+public:
+    NewCaptureScope(const std::shared_ptr<Ope>& ope)
+        : ope_(ope) {}
+
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        c.push_capture_scope();
+        auto se = make_scope_exit([&]() {
+            c.pop_capture_scope();
+        });
+        const auto& rule = *ope_;
+        auto len = rule.parse(s, n, sv, c, dt);
+        return len;
+    }
+
+    void accept(Visitor& v) override;
+
+    std::shared_ptr<Ope> ope_;
 };
 
 class Capture : public Ope
@@ -1149,6 +1219,7 @@ struct Ope::Visitor
     virtual void visit(CharacterClass& /*ope*/) {}
     virtual void visit(Character& /*ope*/) {}
     virtual void visit(AnyCharacter& /*ope*/) {}
+    virtual void visit(NewCaptureScope& /*ope*/) {}
     virtual void visit(Capture& /*ope*/) {}
     virtual void visit(TokenBoundary& /*ope*/) {}
     virtual void visit(Ignore& /*ope*/) {}
@@ -1178,6 +1249,7 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
     void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(NewCaptureScope& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
@@ -1207,6 +1279,7 @@ struct IsToken : public Ope::Visitor
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
+    void visit(NewCaptureScope& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(TokenBoundary& /*ope*/) override { has_token_boundary = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
@@ -1491,10 +1564,12 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     c.trace(outer_->name.c_str(), s, n, sv, dt);
     c.nest_level++;
-    auto se = make_scope_exit([&]() { c.nest_level--; });
+    auto se = make_scope_exit([&]() {
+        c.nest_level--;
+    });
 
-    size_t      len;
-    any         val;
+    size_t len;
+    any    val;
 
     c.packrat(s, outer_->id, len, val, [&](any& a_val) {
         auto& chldsv = c.push();
@@ -1577,13 +1652,18 @@ inline std::shared_ptr<Ope> DefinitionReference::get_rule() const {
 
 inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     c.trace("BackReference", s, n, sv, dt);
-    if (c.captures.find(name_) == c.captures.end()) {
-        throw std::runtime_error("Invalid back reference...");
+    auto it = c.capture_scope_stack.rbegin();
+    while (it != c.capture_scope_stack.rend()) {
+        const auto& captures = *it;
+        if (captures.find(name_) != captures.end()) {
+            const auto& lit = captures.at(name_);
+            auto init_is_word = false;
+            auto is_word = false;
+            return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word);
+        }
+        ++it;
     }
-    const auto& lit = c.captures[name_];
-    bool init_is_word = false;
-    bool is_word = false;
-    return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word);
+    throw std::runtime_error("Invalid back reference...");
 }
 
 inline void Sequence::accept(Visitor& v) { v.visit(*this); }
@@ -1597,6 +1677,7 @@ inline void LiteralString::accept(Visitor& v) { v.visit(*this); }
 inline void CharacterClass::accept(Visitor& v) { v.visit(*this); }
 inline void Character::accept(Visitor& v) { v.visit(*this); }
 inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
+inline void NewCaptureScope::accept(Visitor& v) { v.visit(*this); }
 inline void Capture::accept(Visitor& v) { v.visit(*this); }
 inline void TokenBoundary::accept(Visitor& v) { v.visit(*this); }
 inline void Ignore::accept(Visitor& v) { v.visit(*this); }
@@ -1664,6 +1745,10 @@ inline std::shared_ptr<Ope> chr(char dt) {
 
 inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
+}
+
+inline std::shared_ptr<Ope> ncs(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<NewCaptureScope>(ope);
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, Capture::MatchAction ma) {
@@ -1792,6 +1877,9 @@ private:
         void visit(AnyCharacter& /*ope*/) override {
             done_ = true;
         }
+        void visit(NewCaptureScope& ope) override {
+            ope.ope_->accept(*this);
+        }
         void visit(Capture& ope) override {
             ope.ope_->accept(*this);
         }
@@ -1842,6 +1930,7 @@ private:
         g["Primary"]    <= cho(seq(opt(g["IGNORE"]), g["Identifier"], npd(g["LEFTARROW"])),
                                seq(g["OPEN"], g["Expression"], g["CLOSE"]),
                                seq(g["BeginTok"], g["Expression"], g["EndTok"]),
+                               seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]),
                                seq(g["BeginCap"], g["Expression"], g["EndCap"]),
                                g["BackRef"], g["Literal"], g["Class"], g["DOT"]);
 
@@ -1886,6 +1975,9 @@ private:
         g["BeginTok"]   <= seq(chr('<'), g["Spacing"]);
         g["EndTok"]     <= seq(chr('>'), g["Spacing"]);
 
+        g["BeginCapScope"] <= seq(chr('$'), chr('('), g["Spacing"]);
+        g["EndCapScope"]   <= seq(chr(')'), g["Spacing"]);
+
         g["BeginCap"]   <= seq(chr('$'), tok(g["IdentCont"]), chr('<'), g["Spacing"]);
         g["EndCap"]     <= seq(chr('>'), g["Spacing"]);
 
@@ -1903,8 +1995,8 @@ private:
         g["Definition"] = [&](const SemanticValues& sv, any& dt) {
             Data& data = *dt.get<Data*>();
 
-            auto ignore = (sv.size() == 4);
-            auto baseId = ignore ? 1u : 0u;
+            auto baseId = sv.size() - 3;
+            auto ignore = baseId > 0;
 
             const auto& name = sv[baseId].get<std::string>();
             auto ope = sv[baseId + 2].get<std::shared_ptr<Ope>>();
@@ -2010,11 +2102,14 @@ private:
                 case 2: { // TokenBoundary
                     return tok(sv[1].get<std::shared_ptr<Ope>>());
                 }
-                case 3: { // Capture
+                case 3: { // NewCaptureScope
+                    return ncs(sv[1].get<std::shared_ptr<Ope>>());
+                }
+                case 4: { // Capture
                     const auto& name = sv[0].get<std::string>();
                     auto ope = sv[1].get<std::shared_ptr<Ope>>();
                     return cap(ope, [name](const char* a_s, size_t a_n, Context& c) {
-                        c.captures[name] = std::string(a_s, a_n);
+                        c.capture_scope_stack.back()[name] = std::string(a_s, a_n);
                     });
                 }
                 default: {
