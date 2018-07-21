@@ -17,7 +17,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name` (Backreference operator)
   * `%whitespace` (Automatic whitespace skipping)
   * `%word` (Word expression)
-  * `$name(` ... `)` (Create capture scope)
+  * `$name(` ... `)` (Capture scope operator)
   * `$name<` ... `>` (Named capture operator)
   * `$name` (Backreference operator)
 
@@ -261,8 +261,28 @@ peg::parser parser(R"(
     %word        <-  [a-z]+
 )");
 
-parser.parse("hello world") // OK
-parser.parse("helloworld")  // NG
+parser.parse("hello world"); // OK
+parser.parse("helloworld");  // NG
+```
+
+Capture/Backreference
+---------------------
+
+```cpp
+peg::parser parser(R"(
+    ROOT      <- CONTENT
+    CONTENT   <- (ELEMENT / TEXT)*
+    ELEMENT   <- $(STAG CONTENT ETAG)
+    STAG      <- '<' $tag< TAG_NAME > '>'
+    ETAG      <- '</' $tag '>'
+    TAG_NAME  <- 'b' / 'u'
+    TEXT      <- TEXT_DATA
+    TEXT_DATA <- ![<] .
+)");
+
+parser.parse("This is <b>a <u>test</u> text</b>."); // OK
+parser.parse("This is <b>a <u>test</b> text</u>."); // NG
+parser.parse("This is <b>a <u>test text</b>.");     // NG
 ```
 
 AST generation
@@ -326,7 +346,7 @@ The following are available operators:
 | dot      | Any character         |
 | tok      | Token boundary        |
 | ign      | Ignore semantic value |
-| ncs      | New capture scope     |
+| csc      | Capture scope         |
 | cap      | Capture               |
 | bkr      | Back reference        |
 

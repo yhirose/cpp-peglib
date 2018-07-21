@@ -789,6 +789,7 @@ TEST_CASE("Nested capture test", "[backreference]")
     REQUIRE(parser.parse("This is <b>a <u>test</u> text</b>."));
     REQUIRE(!parser.parse("This is <b>a <u>test</b> text</u>."));
     REQUIRE(!parser.parse("This is <b>a <u>test text</b>."));
+    REQUIRE(!parser.parse("This is a <u>test</u> text</b>."));
 }
 
 TEST_CASE("Backreference with Prioritized Choice test", "[backreference]")

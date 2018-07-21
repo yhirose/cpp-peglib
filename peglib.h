@@ -1032,10 +1032,10 @@ public:
     void accept(Visitor& v) override;
 };
 
-class NewCaptureScope : public Ope
+class CaptureScope : public Ope
 {
 public:
-    NewCaptureScope(const std::shared_ptr<Ope>& ope)
+    CaptureScope(const std::shared_ptr<Ope>& ope)
         : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
@@ -1219,7 +1219,7 @@ struct Ope::Visitor
     virtual void visit(CharacterClass& /*ope*/) {}
     virtual void visit(Character& /*ope*/) {}
     virtual void visit(AnyCharacter& /*ope*/) {}
-    virtual void visit(NewCaptureScope& /*ope*/) {}
+    virtual void visit(CaptureScope& /*ope*/) {}
     virtual void visit(Capture& /*ope*/) {}
     virtual void visit(TokenBoundary& /*ope*/) {}
     virtual void visit(Ignore& /*ope*/) {}
@@ -1249,7 +1249,7 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(Option& ope) override { ope.ope_->accept(*this); }
     void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
     void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NewCaptureScope& ope) override { ope.ope_->accept(*this); }
+    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
@@ -1279,7 +1279,7 @@ struct IsToken : public Ope::Visitor
     void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
     void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(NewCaptureScope& ope) override { ope.ope_->accept(*this); }
+    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
     void visit(Capture& ope) override { ope.ope_->accept(*this); }
     void visit(TokenBoundary& /*ope*/) override { has_token_boundary = true; }
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
@@ -1677,7 +1677,7 @@ inline void LiteralString::accept(Visitor& v) { v.visit(*this); }
 inline void CharacterClass::accept(Visitor& v) { v.visit(*this); }
 inline void Character::accept(Visitor& v) { v.visit(*this); }
 inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
-inline void NewCaptureScope::accept(Visitor& v) { v.visit(*this); }
+inline void CaptureScope::accept(Visitor& v) { v.visit(*this); }
 inline void Capture::accept(Visitor& v) { v.visit(*this); }
 inline void TokenBoundary::accept(Visitor& v) { v.visit(*this); }
 inline void Ignore::accept(Visitor& v) { v.visit(*this); }
@@ -1747,8 +1747,8 @@ inline std::shared_ptr<Ope> dot() {
     return std::make_shared<AnyCharacter>();
 }
 
-inline std::shared_ptr<Ope> ncs(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<NewCaptureScope>(ope);
+inline std::shared_ptr<Ope> csc(const std::shared_ptr<Ope>& ope) {
+    return std::make_shared<CaptureScope>(ope);
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, Capture::MatchAction ma) {
@@ -1877,7 +1877,7 @@ private:
         void visit(AnyCharacter& /*ope*/) override {
             done_ = true;
         }
-        void visit(NewCaptureScope& ope) override {
+        void visit(CaptureScope& ope) override {
             ope.ope_->accept(*this);
         }
         void visit(Capture& ope) override {
@@ -2102,8 +2102,8 @@ private:
                 case 2: { // TokenBoundary
                     return tok(sv[1].get<std::shared_ptr<Ope>>());
                 }
-                case 3: { // NewCaptureScope
-                    return ncs(sv[1].get<std::shared_ptr<Ope>>());
+                case 3: { // CaptureScope
+                    return csc(sv[1].get<std::shared_ptr<Ope>>());
                 }
                 case 4: { // Capture
                     const auto& name = sv[0].get<std::string>();
