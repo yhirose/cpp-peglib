@@ -41,8 +41,8 @@
 
 namespace peg {
 
-#if __clang__ == 1 && __clang_major__ == 5 && __clang_minor__ == 0 && __clang_patchlevel__ == 0
-static void* enabler = nullptr; // workaround for Clang 5.0.0
+#if __clang__ == 1 && __clang_major__ <= 5
+static void* enabler = nullptr; // workaround for Clang version <= 5.0.0
 #else
 extern void* enabler;
 #endif
@@ -2076,7 +2076,7 @@ private:
             }
         };
 
-        g["Primary"] = [&](const SemanticValues& sv, any& dt) {
+        g["Primary"] = [&](const SemanticValues& sv, any& dt) -> std::shared_ptr<Ope> {
             Data& data = *dt.get<Data*>();
 
             switch (sv.choice()) {
