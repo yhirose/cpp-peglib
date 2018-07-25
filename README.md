@@ -20,6 +20,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name(` ... `)` (Capture scope operator)
   * `$name<` ... `>` (Named capture operator)
   * `$name` (Backreference operator)
+  * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
 
 This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
@@ -283,6 +284,28 @@ peg::parser parser(R"(
 parser.parse("This is <b>a <u>test</u> text</b>."); // OK
 parser.parse("This is <b>a <u>test</b> text</u>."); // NG
 parser.parse("This is <b>a <u>test text</b>.");     // NG
+```
+
+Parameterized Rule or Macro
+---------------------------
+
+```peg
+# Syntax
+Start      ← _ Expr
+Expr       ← Sum
+Sum        ← List(Product, SumOpe)
+Product    ← List(Value, ProOpe)
+Value      ← Number / T('(') Expr T(')')
+
+# Token
+SumOpe     ← T('+' / '-')
+ProOpe     ← T('*' / '/')
+Number     ← T([0-9]+)
+~_         ← [ \t\r\n]*
+
+# Macro
+List(I, D) ← I (D I)*
+T(x)       ← < x > _
 ```
 
 AST generation

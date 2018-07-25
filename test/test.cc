@@ -948,8 +948,210 @@ TEST_CASE("Japanese character", "[unicode]")
     )");
 
     auto ret = parser.parse(u8R"(サーバーを復旧します。)");
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("Macro simple test", "[macro]")
+{
+    parser parser(R"(
+		S     <- HELLO WORLD
+		HELLO <- T('hello')
+		WORLD <- T('world')
+		T(a)  <- a [ \t]*
+	)");
+
+    REQUIRE(parser.parse("hello \tworld "));
+}
+
+TEST_CASE("Macro two parameters", "[macro]")
+{
+    parser parser(R"(
+		S           <- HELLO_WORLD
+		HELLO_WORLD <- T('hello', 'world')
+		T(a, b)     <- a [ \t]* b [ \t]*
+	)");
+
+    REQUIRE(parser.parse("hello \tworld "));
+}
+
+TEST_CASE("Macro syntax error", "[macro]")
+{
+    parser parser(R"(
+		S     <- T('hello')
+		T (a) <- a [ \t]*
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Macro missing argument", "[macro]")
+{
+    parser parser(R"(
+		S       <- T ('hello')
+		T(a, b) <- a [ \t]* b
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Macro reference syntax error", "[macro]")
+{
+    parser parser(R"(
+		S    <- T ('hello')
+		T(a) <- a [ \t]*
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Macro invalid macro reference error", "[macro]")
+{
+    parser parser(R"(
+		S <- T('hello')
+		T <- 'world'
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Macro calculator", "[macro]")
+{
+	// Create a PEG parser
+    parser parser(R"(
+        # Grammar for simple calculator...
+        EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
+        TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
+        FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
+        TERM_OPERATOR    <-  T([-+])
+        FACTOR_OPERATOR  <-  T([/*])
+        NUMBER           <-  T([0-9]+)
+		~_               <-  [ \t]*
+		LIST(I, D)       <-  I (D I)*
+		T(S)             <-  < S > _
+	)");
+
+	// Setup actions
+    auto reduce = [](const SemanticValues& sv) -> long {
+        auto result = sv[0].get<long>();
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = sv[i + 1].get<long>();
+            auto ope = sv[i].get<char>();
+            switch (ope) {
+                case '+': result += num; break;
+                case '-': result -= num; break;
+                case '*': result *= num; break;
+                case '/': result /= num; break;
+            }
+        }
+        return result;
+    };
+
+    parser["EXPRESSION"]      = reduce;
+    parser["TERM"]            = reduce;
+    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
+    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
+    parser["NUMBER"]          = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+	auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
+    long val = 0;
+    ret = parser.parse(expr, val);
 
     REQUIRE(ret == true);
+    REQUIRE(val == -3);
+}
+
+TEST_CASE("Macro expression arguments", "[macro]")
+{
+    parser parser(R"(
+		S             <- M('hello' / 'Hello', 'world' / 'World')
+		M(arg0, arg1) <- arg0 [ \t]+ arg1
+	)");
+
+    REQUIRE(parser.parse("Hello world"));
+}
+
+TEST_CASE("Macro recursive", "[macro]")
+{
+    parser parser(R"(
+		S    <- M('abc')
+		M(s) <- !s / s ' ' M(s / '123') / s
+	)");
+
+    REQUIRE(parser.parse(""));
+    REQUIRE(parser.parse("abc"));
+    REQUIRE(parser.parse("abc abc"));
+    REQUIRE(parser.parse("abc 123 abc"));
+}
+
+TEST_CASE("Macro recursive2", "[macro]")
+{
+	auto syntaxes = std::vector<const char*>{
+		"S <- M('abc') M(s) <- !s / s ' ' M(s* '-' '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(s+ '-' '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(s? '-' '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(&s s+ '-' '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(s '-' !s '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(< s > '-' '123') / s",
+		"S <- M('abc') M(s) <- !s / s ' ' M(~s '-' '123') / s",
+	};
+
+	for (const auto& syntax: syntaxes) {
+        parser parser(syntax);
+        REQUIRE(parser.parse("abc abc-123"));
+	}
+}
+
+TEST_CASE("Macro exclusive modifiers", "[macro]")
+{
+    parser parser(R"(
+		S                   <- Modifiers(!"") _
+		Modifiers(Appeared) <- (!Appeared) (
+								   Token('public') Modifiers(Appeared / 'public') /
+								   Token('static') Modifiers(Appeared / 'static') /
+								   Token('final') Modifiers(Appeared / 'final') /
+								   "")
+		Token(t)            <- t _
+		_                   <- [ \t\r\n]*
+	)");
+
+	REQUIRE(parser.parse("public"));
+	REQUIRE(parser.parse("static"));
+	REQUIRE(parser.parse("final"));
+	REQUIRE(parser.parse("public static final"));
+	REQUIRE(!parser.parse("public public"));
+	REQUIRE(!parser.parse("public static public"));
+}
+
+TEST_CASE("Macro token check test", "[macro]")
+{
+    parser parser(R"(
+        # Grammar for simple calculator...
+        EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
+        TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
+        FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
+        TERM_OPERATOR    <-  T([-+])
+        FACTOR_OPERATOR  <-  T([/*])
+        NUMBER           <-  T([0-9]+)
+		~_               <-  [ \t]*
+		LIST(I, D)       <-  I (D I)*
+		T(S)             <-  < S > _
+	)");
+
+    REQUIRE(parser["EXPRESSION"].is_token == false);
+    REQUIRE(parser["TERM"].is_token == false);
+    REQUIRE(parser["FACTOR"].is_token == false);
+    REQUIRE(parser["FACTOR_OPERATOR"].is_token == true);
+    REQUIRE(parser["NUMBER"].is_token == true);
+    REQUIRE(parser["_"].is_token == true);
+    REQUIRE(parser["LIST"].is_token == false);
+    REQUIRE(parser["T"].is_token == true);
 }
 
 TEST_CASE("Line information test", "[line information]")
@@ -1006,6 +1208,8 @@ TEST_CASE("PEG Definition", "[peg]")
     REQUIRE(exact(g, "Definition", " ") == false);
     REQUIRE(exact(g, "Definition", "") == false);
     REQUIRE(exact(g, "Definition", "Definition = a / (b c) / d ") == false);
+	REQUIRE(exact(g, "Definition", "Macro(param) <- a ") == true);
+	REQUIRE(exact(g, "Definition", "Macro (param) <- a ") == false);
 }
 
 TEST_CASE("PEG Expression", "[peg]")
