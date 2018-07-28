@@ -1525,23 +1525,7 @@ struct LinkReferences : public Ope::Visitor {
     void visit(Ignore& ope) override { ope.ope_->accept(*this); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override {
-        if (grammar_.count(ope.name_)) {
-            auto& rule = grammar_.at(ope.name_);
-            ope.rule_ = &rule;
-        } else {
-            for (size_t i = 0; i < params_.size(); i++) {
-                const auto& param = params_[i];
-                if (param == ope.name_) {
-                    ope.iarg_ = i;
-                    break;
-                }
-            }
-        }
-        for (auto arg: ope.args_) {
-            arg->accept(*this);
-        }
-    }
+    void visit(Reference& ope) override;
     void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
 
 private:
@@ -1588,16 +1572,7 @@ struct FindReference : public Ope::Visitor {
     void visit(Ignore& ope) override { ope.ope_->accept(*this); found_ope = ign(found_ope); }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override {
-        for (size_t i = 0; i < args_.size(); i++) {
-            const auto& name = params_[i];
-            if (name == ope.name_) {
-                found_ope = args_[i];
-                return;
-            }
-        }
-        found_ope = ope.shared_from_this();
-    }
+    void visit(Reference& ope) override;
     void visit(Whitespace& ope) override { ope.ope_->accept(*this); found_ope = wsp(found_ope); }
 
     std::shared_ptr<Ope> found_ope;
@@ -2085,6 +2060,35 @@ inline void ReferenceChecker::visit(Reference& ope) {
             error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
         }
     }
+}
+
+inline void LinkReferences::visit(Reference& ope) {
+    if (grammar_.count(ope.name_)) {
+        auto& rule = grammar_.at(ope.name_);
+        ope.rule_ = &rule;
+    } else {
+        for (size_t i = 0; i < params_.size(); i++) {
+            const auto& param = params_[i];
+            if (param == ope.name_) {
+                ope.iarg_ = i;
+                break;
+            }
+        }
+    }
+    for (auto arg: ope.args_) {
+        arg->accept(*this);
+    }
+}
+
+inline void FindReference::visit(Reference& ope) {
+    for (size_t i = 0; i < args_.size(); i++) {
+        const auto& name = params_[i];
+        if (name == ope.name_) {
+            found_ope = args_[i];
+            return;
+        }
+    }
+    found_ope = ope.shared_from_this();
 }
 
 /*-----------------------------------------------------------------------------
