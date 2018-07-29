@@ -142,11 +142,11 @@ TEST_CASE("Token check test", "[general]")
         "  _               <-  [ \t\r\n]*                        "
         );
 
-    REQUIRE(parser["EXPRESSION"].is_token == false);
-    REQUIRE(parser["FACTOR"].is_token == false);
-    REQUIRE(parser["FACTOR_OPERATOR"].is_token == true);
-    REQUIRE(parser["NUMBER"].is_token == true);
-    REQUIRE(parser["_"].is_token == true);
+    REQUIRE(parser["EXPRESSION"].is_token() == false);
+    REQUIRE(parser["FACTOR"].is_token() == false);
+    REQUIRE(parser["FACTOR_OPERATOR"].is_token() == true);
+    REQUIRE(parser["NUMBER"].is_token() == true);
+    REQUIRE(parser["_"].is_token() == true);
 }
 
 TEST_CASE("Lambda action test", "[general]")
@@ -1144,14 +1144,14 @@ TEST_CASE("Macro token check test", "[macro]")
 		T(S)             <-  < S > _
 	)");
 
-    REQUIRE(parser["EXPRESSION"].is_token == false);
-    REQUIRE(parser["TERM"].is_token == false);
-    REQUIRE(parser["FACTOR"].is_token == false);
-    REQUIRE(parser["FACTOR_OPERATOR"].is_token == true);
-    REQUIRE(parser["NUMBER"].is_token == true);
-    REQUIRE(parser["_"].is_token == true);
-    REQUIRE(parser["LIST"].is_token == false);
-    REQUIRE(parser["T"].is_token == true);
+    REQUIRE(parser["EXPRESSION"].is_token() == false);
+    REQUIRE(parser["TERM"].is_token() == false);
+    REQUIRE(parser["FACTOR"].is_token() == false);
+    REQUIRE(parser["FACTOR_OPERATOR"].is_token() == true);
+    REQUIRE(parser["NUMBER"].is_token() == true);
+    REQUIRE(parser["_"].is_token() == true);
+    REQUIRE(parser["LIST"].is_token() == false);
+    REQUIRE(parser["T"].is_token() == true);
 }
 
 TEST_CASE("Line information test", "[line information]")

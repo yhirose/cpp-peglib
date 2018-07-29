@@ -1605,17 +1605,17 @@ public:
     Definition()
         : ignoreSemanticValue(false)
         , enablePackratParsing(false)
-        , is_token(false)
         , is_macro(false)
-        , holder_(std::make_shared<Holder>(this)) {}
+        , holder_(std::make_shared<Holder>(this))
+        , is_token_(false) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
         , ignoreSemanticValue(false)
         , enablePackratParsing(false)
-        , is_token(false)
         , is_macro(false)
         , holder_(rhs.holder_)
+        , is_token_(false)
     {
         holder_->outer_ = this;
     }
@@ -1626,9 +1626,9 @@ public:
         , whitespaceOpe(rhs.whitespaceOpe)
         , wordOpe(rhs.wordOpe)
         , enablePackratParsing(rhs.enablePackratParsing)
-        , is_token(rhs.is_token)
         , is_macro(rhs.is_macro)
         , holder_(std::move(rhs.holder_))
+        , is_token_(rhs.is_token_)
     {
         holder_->outer_ = this;
     }
@@ -1636,9 +1636,9 @@ public:
     Definition(const std::shared_ptr<Ope>& ope)
         : ignoreSemanticValue(false)
         , enablePackratParsing(false)
-        , is_token(false)
         , is_macro(false)
         , holder_(std::make_shared<Holder>(this))
+        , is_token_(false)
     {
         *this <= ope;
     }
@@ -1726,8 +1726,17 @@ public:
         holder_->accept(v);
     }
 
-    std::shared_ptr<Ope> get_core_operator() {
+    std::shared_ptr<Ope> get_core_operator() const {
         return holder_->ope_;
+    }
+
+    bool is_token() const {
+        std::call_once(is_token_init_, [this]() {
+            TokenChecker vis;
+            get_core_operator()->accept(vis);
+            is_token_ = vis.is_token();
+        });
+        return is_token_;
     }
 
     std::string                    name;
@@ -1740,7 +1749,6 @@ public:
     std::shared_ptr<Ope>           whitespaceOpe;
     std::shared_ptr<Ope>           wordOpe;
     bool                           enablePackratParsing;
-    bool                           is_token;
     bool                           is_macro;
     std::vector<std::string>       params;
     Tracer                         tracer;
@@ -1766,6 +1774,8 @@ private:
     }
 
     std::shared_ptr<Holder> holder_;
+    mutable std::once_flag  is_token_init_;
+    mutable bool            is_token_;
 };
 
 /*
@@ -2476,14 +2486,6 @@ private:
             return nullptr;
         }
 
-        // Token check
-        for (auto& x: grammar) {
-            auto& rule = x.second;
-            TokenChecker vis;
-            rule.get_core_operator()->accept(vis);
-            rule.is_token = vis.is_token();
-        }
-
         // Set root definition
         start = data.start;
 
@@ -2879,11 +2881,10 @@ public:
             auto& rule = x.second;
 
             if (!rule.action) {
-                auto is_token = rule.is_token;
-                rule.action = [=](const SemanticValues& sv) {
+                rule.action = [&](const SemanticValues& sv) {
                     auto line = line_info(sv.ss, sv.c_str());
 
-                    if (is_token) {
+                    if (rule.is_token()) {
                         return std::make_shared<T>(sv.path, line.first, line.second, name.c_str(), sv.token());
                     }
 
