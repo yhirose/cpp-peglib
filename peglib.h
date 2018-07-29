@@ -1363,6 +1363,7 @@ struct AssignIDToDefinition : public Ope::Visitor
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override;
     void visit(Reference& ope) override;
+    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
 
     std::unordered_map<void*, size_t> ids;
 };
@@ -1760,12 +1761,18 @@ private:
     Definition& operator=(Definition&& rhs);
 
     Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt, const char* path) const {
+        std::shared_ptr<Ope> ope = holder_;
+
         AssignIDToDefinition vis;
         holder_->accept(vis);
 
-        std::shared_ptr<Ope> ope = holder_;
         if (whitespaceOpe) {
             ope = std::make_shared<Sequence>(whitespaceOpe, ope);
+            whitespaceOpe->accept(vis);
+        }
+
+        if (wordOpe) {
+            wordOpe->accept(vis);
         }
 
         Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
@@ -2022,6 +2029,9 @@ inline void AssignIDToDefinition::visit(Holder& ope) {
 
 inline void AssignIDToDefinition::visit(Reference& ope) {
     if (ope.rule_) {
+        for (auto arg: ope.args_) {
+            arg->accept(*this);
+        }
         ope.rule_->accept(*this);
     }
 }

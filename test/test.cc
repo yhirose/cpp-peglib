@@ -701,6 +701,40 @@ TEST_CASE("Definition duplicates test", "[general]")
     REQUIRE(!parser);
 }
 
+TEST_CASE("Packrat parser test with %whitespace%", "[packrat]")
+{
+    peg::parser parser(R"(
+        ROOT         <-  'a'
+        %whitespace  <-  SPACE*
+        SPACE        <-  ' '
+    )");
+
+    parser.enable_packrat_parsing();
+
+    auto ret = parser.parse("a");
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("Packrat parser test with macro", "[packrat]")
+{
+    parser parser(R"(
+        EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
+        TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
+        FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
+        TERM_OPERATOR    <-  T([-+])
+        FACTOR_OPERATOR  <-  T([/*])
+        NUMBER           <-  T([0-9]+)
+		~_               <-  [ \t]*
+		LIST(I, D)       <-  I (D I)*
+		T(S)             <-  < S > _
+	)");
+
+    parser.enable_packrat_parsing();
+
+    auto ret = parser.parse(" 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ");
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("Backreference test", "[backreference]")
 {
     parser parser(R"(
