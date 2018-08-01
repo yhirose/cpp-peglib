@@ -35,13 +35,14 @@ This is a simple calculator sample. It shows how to define grammar, associate sa
 // (1) Include the header file
 #include <peglib.h>
 #include <assert.h>
+#include <iostream>
 
 using namespace peg;
 using namespace std;
 
 int main(void) {
     // (2) Make a parser
-    auto syntax = R"(
+    auto grammar = R"(
         # Grammar for Calculator...
         Additive    <- Multitive '+' Additive / Multitive
         Multitive   <- Primary '*' Multitive / Primary
@@ -50,7 +51,14 @@ int main(void) {
         %whitespace <- [ \t]*
     )";
 
-    parser parser(syntax);
+    parser parser;
+
+    parser.log = [](size_t line, size_t col, const string& msg) {
+        cerr << line << ":" << col << ": " << msg << "\n";
+    };
+
+    auto ok = parser.load_grammar(grammar);
+    assert(ok);
 
     // (3) Setup actions
     parser["Additive"] = [](const SemanticValues& sv) {
