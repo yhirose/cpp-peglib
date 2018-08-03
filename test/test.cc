@@ -255,6 +255,23 @@ TEST_CASE("WHITESPACE test2", "[general]")
     REQUIRE(items[2] == "three");
 }
 
+TEST_CASE("WHITESPACE test3", "[general]") {
+    peg::parser parser(R"(
+        StrQuot      <- < '"' < (StrEscape / StrChars)* > '"' >
+        StrEscape    <- '\\' any
+        StrChars     <- (!'"' !'\\' any)+
+        any          <- .
+        %whitespace  <- [ \t]*
+    )");
+
+    parser["StrQuot"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == R"(  aaa \" bbb  )");
+    };
+
+    auto ret = parser.parse(R"( "  aaa \" bbb  " )");
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("Word expression test", "[general]") {
     peg::parser parser(R"(
         ROOT         <-  'hello' ','? 'world'
