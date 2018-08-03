@@ -31,6 +31,8 @@ int main(int argc, const char** argv)
     auto opt_ast = false;
     auto opt_optimize_ast_nodes = false;
     auto opt_help = false;
+    auto opt_source = false;
+    vector<char> source;
     auto opt_server = false;
     int  port = 1234;
     auto opt_trace = false;
@@ -45,6 +47,12 @@ int main(int argc, const char** argv)
             opt_ast = true;
         } else if (string("--optimize_ast_nodes") == arg || string("--opt") == arg) {
             opt_optimize_ast_nodes = true;
+        } else if (string("--source") == arg) {
+            opt_source = true;
+            if (argi < argc) {
+                std::string text = argv[argi++];
+                source.assign(text.begin(), text.end());
+            }
         } else if (string("--server") == arg) {
             opt_server = true;
             if (argi < argc) {
@@ -58,14 +66,13 @@ int main(int argc, const char** argv)
     }
 
     if ((path_list.empty() && !opt_server) || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--server [PORT]] [--trace] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--server [PORT]] [--trace] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
     // Sever mode
     if (opt_server) {
         vector<char> syntax;
-        vector<char> source;
 
         if (path_list.size() >= 1 && !read_file(path_list[0], syntax)) {
             cerr << "can't open the grammar file." << endl;
@@ -96,22 +103,22 @@ int main(int argc, const char** argv)
     };
 
     if (!parser.load_grammar(syntax.data(), syntax.size())) {
+        cerr << "can't open the grammar file." << endl;
         return -1;
     }
 
-    if (path_list.size() < 2) {
+    if (path_list.size() < 2 && !opt_source) {
         return 0;
     }
 
     // Check source
-    auto source_path = path_list[1];
-
-    vector<char> source;
-    if (!read_file(source_path, source)) {
-        auto beg = source_path;
-        auto end = source_path + strlen(source_path);
-        source.assign(beg, end);
-        source_path = "[commendline]";
+    std::string source_path = "[commendline]";
+    if (path_list.size() >= 2) {
+        if (!read_file(path_list[1], source)) {
+            cerr << "can't open the code file." << endl;
+            return -1;
+        }
+        source_path = path_list[1];
     }
 
     parser.log = [&](size_t ln, size_t col, const string& msg) {
