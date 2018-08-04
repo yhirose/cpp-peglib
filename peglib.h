@@ -1707,9 +1707,9 @@ public:
         return parse_and_get_value(s, n, dt, val, path);
     }
 
-    Definition& operator=(Action a) {
+    Action operator=(Action a) {
         action = a;
-        return *this;
+        return a;
     }
 
     template <typename T>
