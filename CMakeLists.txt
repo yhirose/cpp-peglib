@@ -66,7 +66,3 @@ enable_testing()
 
 add_subdirectory(test)
 add_subdirectory(example)
-
-if(NOT MSVC)
-  add_subdirectory(lint)
-endif()

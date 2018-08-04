@@ -158,7 +158,7 @@ auto syntax = R"(
 
 peg pg(syntax);
 
-pg["TOKEN"] = [](const auto& sv) {
+pg["TOKEN"] = [](const SemanticValues& sv) {
     // 'token' doesn't include trailing whitespaces
     auto token = sv.token();
 };
@@ -175,7 +175,7 @@ peg::pegparser parser(
     "  ~_    <-  [ \t]*                  "
 );
 
-parser["ROOT"] = [&](const auto& sv) {
+parser["ROOT"] = [&](const SemanticValues& sv) {
     assert(sv.size() == 2); // should be 2 instead of 5.
 };
 
@@ -197,7 +197,7 @@ peg::parser parser(
 ```cpp
 peg::parser parser("NUMBER  <-  [0-9]+");
 
-parser["NUMBER"] = [](const auto& sv) {
+parser["NUMBER"] = [](const SemanticValues& sv) {
     auto val = stol(sv.str(), nullptr, 10);
     if (val != 100) {
         throw peg::parse_error("value error!!");
@@ -221,7 +221,7 @@ parser["RULE"].enter = [](any& dt) {
     std::cout << "enter" << std::endl;
 };
 
-parser["RULE"] = [](const auto& sv, any& dt) {
+parser["RULE"] = [](const SemanticValues& sv, any& dt) {
     std::cout << "action!" << std::endl;
 };
 
@@ -386,13 +386,97 @@ Unicode support
 
 Since cpp-peglib only accepts 8 bits characters, it probably accepts UTF-8 text. But `.` matches only a byte, not a Unicode character. Also, it dosn't support `\u????`.
 
+peglint - PEG syntax lint utility
+---------------------------------
+
+### Build peglint
+
+```
+> cd lint
+> mkdir build
+> cd build
+> cmake ..
+> make
+> ./peglint
+usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--server [PORT]] [--trace] [grammar file path] [source file path]
+```
+
+### Lint grammar
+
+```
+> cat a.peg
+A <- 'hello' ^ 'world'
+
+> peglint a.peg
+a.peg:1:14: syntax error
+```
+
+```
+> cat a.peg
+A <- B
+
+> peglint a.peg
+a.peg:1:6: 'B' is not defined.
+```
+
+```
+> cat a.peg
+A <- B / C
+B <- 'b'
+C <- A
+
+> peglint a.peg
+a.peg:1:10: 'C' is left recursive.
+a.peg:3:6: 'A' is left recursive.
+```
+
+### Lint source text
+
+```
+> cat a.peg
+Additive    <- Multitive '+' Additive / Multitive
+Multitive   <- Primary '*' Multitive / Primary
+Primary     <- '(' Additive ')' / Number
+Number      <- < [0-9]+ >
+%whitespace <- [ \t\r\n]*
+
+> peglint --source "1 + a * 3" a.peg
+[commendline]:1:3: syntax error
+```
+
+```
+> cat a.txt
+1 + 2 * 3
+
+> peglint --ast a.peg a.txt
++ Additive
+  + Multitive
+    + Primary
+      - Number (1)
+  + Additive
+    + Multitive
+      + Primary
+        - Number (2)
+      + Multitive
+        + Primary
+          - Number (3)
+```
+
+```
+> peglint --ast --opt --source "1 + 2 * 3" a.peg
++ Additive
+  - Multitive[Number] (1)
+  + Additive[Multitive]
+    - Primary[Number] (2)
+    - Multitive[Number] (3)
+```
+
 Sample codes
 ------------
 
   * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
   * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
   * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
-  * [PEG syntax Lint utility](https://github.com/yhirose/cpp-peglib/blob/master/lint/peglint.cc)
   * [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
   * [A tiny PL/0 JIT compiler in less than 700 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
 

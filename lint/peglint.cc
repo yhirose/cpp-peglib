@@ -103,7 +103,6 @@ int main(int argc, const char** argv)
     };
 
     if (!parser.load_grammar(syntax.data(), syntax.size())) {
-        cerr << "can't open the grammar file." << endl;
         return -1;
     }
 
