@@ -2877,6 +2877,15 @@ public:
         return (*grammar_)[s];
     }
 
+    std::vector<std::string> get_rule_names(){
+        std::vector<std::string> rules;
+        rules.reserve(grammar_->size());
+        for (auto const& r : *grammar_) {
+            rules.emplace_back(r.first);
+        }
+        return rules;
+    }
+
     void enable_packrat_parsing() {
         if (grammar_ != nullptr) {
             auto& rule = (*grammar_)[start_];
