@@ -1740,19 +1740,19 @@ public:
         return is_token_;
     }
 
-    std::string                    name;
-    size_t                         id;
-    Action                         action;
-    std::function<void (any& dt)>  enter;
-    std::function<void (any& dt)>  leave;
-    std::function<std::string ()>  error_message;
-    bool                           ignoreSemanticValue;
-    std::shared_ptr<Ope>           whitespaceOpe;
-    std::shared_ptr<Ope>           wordOpe;
-    bool                           enablePackratParsing;
-    bool                           is_macro;
-    std::vector<std::string>       params;
-    Tracer                         tracer;
+    std::string                                                                          name;
+    size_t                                                                               id;
+    Action                                                                               action;
+    std::function<void (const char* s, size_t n, any& dt)>                               enter;
+    std::function<void (const char* s, size_t n, size_t matchlen, any& value, any& dt)>  leave;
+    std::function<std::string ()>                                                        error_message;
+    bool                                                                                 ignoreSemanticValue;
+    std::shared_ptr<Ope>                                                                 whitespaceOpe;
+    std::shared_ptr<Ope>                                                                 wordOpe;
+    bool                                                                                 enablePackratParsing;
+    bool                                                                                 is_macro;
+    std::vector<std::string>                                                             params;
+    Tracer                                                                               tracer;
 
 private:
     friend class Reference;
@@ -1883,14 +1883,14 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
     c.packrat(s, outer_->id, len, val, [&](any& a_val) {
         if (outer_->enter) {
-            outer_->enter(dt);
+            outer_->enter(s, n, dt);
         }
 
         auto se2 = make_scope_exit([&]() {
             c.pop();
 
             if (outer_->leave) {
-                outer_->leave(dt);
+                outer_->leave(s, n, len, a_val, dt);
             }
         });
 
