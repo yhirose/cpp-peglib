@@ -483,7 +483,7 @@ Sample codes
 PEG debug
 ---------
 
-A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug). You can see a HTML output of parsing PL/0 source code [here](https://mqnc.github.io/pegdebug/example/output.html).
+A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug) for the detail. You can see a parse result of PL/0 code [here](https://mqnc.github.io/pegdebug/example/output.html).
 
 Tested compilers
 ----------------
@@ -497,7 +497,7 @@ Tested compilers
   * Clang++ 3.5
   * G++ 5.4 on Ubuntu 16.04
 
-  IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127).
+  IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127) and [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473).
 
 TODO
 ----
