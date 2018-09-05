@@ -480,6 +480,11 @@ Sample codes
   * [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
   * [A tiny PL/0 JIT compiler in less than 700 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
 
+PEG debug
+---------
+
+A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug). You can see a HTML output of parsing PL/0 source code [here](https://mqnc.github.io/pegdebug/example/output.html).
+
 Tested compilers
 ----------------
 
