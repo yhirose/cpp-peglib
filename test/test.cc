@@ -174,11 +174,11 @@ TEST_CASE("enter/leave handlers test", "[general]")
         TOKEN  <- [A-Za-z]+
     )");
 
-    parser["LTOKEN"].enter = [&](any& dt) {
+    parser["LTOKEN"].enter = [&](const char*, size_t, any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = false;
     };
-    parser["LTOKEN"].leave = [&](any& dt) {
+    parser["LTOKEN"].leave = [&](const char*, size_t, size_t, any&, any& dt) {
         auto& require_upper_case = *dt.get<bool*>();
         require_upper_case = true;
     };
