@@ -217,7 +217,7 @@ assert(ret == false);
 *enter* and *leave* actions are also avalable.
 
 ```cpp
-parser["RULE"].enter = [](any& dt) {
+parser["RULE"].enter = [](const char* s, size_t n, any& dt) {
     std::cout << "enter" << std::endl;
 };
 
@@ -225,7 +225,7 @@ parser["RULE"] = [](const SemanticValues& sv, any& dt) {
     std::cout << "action!" << std::endl;
 };
 
-parser["RULE"].leave = [](any& dt) {
+parser["RULE"].leave = [](const char* s, size_t n, size_t matchlen, any& value, any& dt) {
     std::cout << "leave" << std::endl;
 };
 ```
