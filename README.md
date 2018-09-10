@@ -217,7 +217,7 @@ assert(ret == false);
 *enter* and *leave* actions are also avalable.
 
 ```cpp
-parser["RULE"].enter = [](any& dt) {
+parser["RULE"].enter = [](const char* s, size_t n, any& dt) {
     std::cout << "enter" << std::endl;
 };
 
@@ -225,7 +225,7 @@ parser["RULE"] = [](const SemanticValues& sv, any& dt) {
     std::cout << "action!" << std::endl;
 };
 
-parser["RULE"].leave = [](any& dt) {
+parser["RULE"].leave = [](const char* s, size_t n, size_t matchlen, any& value, any& dt) {
     std::cout << "leave" << std::endl;
 };
 ```
@@ -480,6 +480,11 @@ Sample codes
   * [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
   * [A tiny PL/0 JIT compiler in less than 700 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
 
+PEG debug
+---------
+
+A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug) for the detail. You can see a parse result of PL/0 code [here](https://mqnc.github.io/pegdebug/example/output.html).
+
 Tested compilers
 ----------------
 
@@ -492,7 +497,7 @@ Tested compilers
   * Clang++ 3.5
   * G++ 5.4 on Ubuntu 16.04
 
-  IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127).
+  IMPORTANT NOTE for Ubuntu: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127) and [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473).
 
 TODO
 ----
