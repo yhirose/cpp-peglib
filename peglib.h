@@ -35,9 +35,9 @@
 #endif
 #endif
 
-// define if the compiler doesn't support unicode characters reliably in the
-// source code
-//#define PEGLIB_NO_UNICODE_CHARS
+#ifndef DEFAULT_ENCODING
+    #define DEFAULT_ENCODING UTF8
+#endif
 
 namespace peg {
 
@@ -46,6 +46,112 @@ static void* enabler = nullptr; // workaround for Clang version <= 5.0.0
 #else
 extern void* enabler;
 #endif
+
+/*-----------------------------------------------------------------------------
+ *  UTF-8 utilities
+ *---------------------------------------------------------------------------*/
+
+// wchar works differently on linux and windows so everything was done manually
+typedef int codepoint;
+enum class Encoding { ASCII, ANSI, UTF8 }; // ANSI should be called ISO8859 but ANSI is more common and catchy
+
+size_t get_char(const char* s, size_t n, Encoding enc, codepoint& code)
+{
+    if (n < 1) {
+        code = -1;
+        return static_cast<size_t>(-1);
+    }
+
+    const unsigned char* us = reinterpret_cast<const unsigned char*>(s);
+
+    switch(enc) {
+
+    case Encoding::ASCII:
+
+        if (us[0] <= 0x7F) {
+            code = us[0];
+            return 1;
+        }
+        else {
+            code = -1;
+            return static_cast<size_t>(-1);
+        }
+        break;
+
+    case Encoding::ANSI:
+
+        code = us[0];
+        return 1;
+        break;
+
+    case Encoding::UTF8:
+
+        if (us[0] <= 0x7F) { // 0xxx xxxx is ascii
+            code = us[0];
+            return 1;
+        }
+
+        if (us[0] <= 0xBF) { // 10xx xxxx is invalid as first UTF8 byte
+            code = -1;
+            return static_cast<size_t>(-1);
+        }
+
+        if (us[0] <= 0xCF) { // 110x xxxx, 10xx xxxx
+            if (n < 2
+                || us[1] < 0x80 || us[1] > 0xBF)
+            { // second byte missing or invalid
+                code = -1;
+                return static_cast<size_t>(-1);
+            }
+
+            code = (int(us[0] & 0x1F) << 6)
+                + int(us[1] & 0x3F);
+            return 2;
+        }
+
+        if (us[0] <= 0xEF) { // 1110 xxxx, 10xx xxxx, 10xx xxxx
+            if (n < 3
+                || us[1] < 0x80 || us[1] > 0xBF
+                || us[2] < 0x80 || us[2] > 0xBF)
+            { // second or third byte missing or invalid
+                code = -1;
+                return static_cast<size_t>(-1);
+            }
+
+            code = (int(us[0] & 0x0F) << 12)
+                + (int(us[1] & 0x3F) << 6)
+                +  int(us[2] & 0x3F);
+            return 3;
+        }
+
+        if (us[0] <= 0xF7) { // 1111 0xxx, 10xx xxxx, 10xx xxxx, 10xx xxxx
+            if (n < 4
+                || us[1] < 0x80 || us[1] > 0xBF
+                || us[2] < 0x80 || us[2] > 0xBF
+                || us[3] < 0x80 || us[3] > 0xBF)
+            { // second, third or fourth byte missing or invalid
+                code = -1;
+                return static_cast<size_t>(-1);
+            }
+
+            code = (int(us[0] & 0x07) << 18)
+                 + (int(us[1] & 0x3F) << 12)
+                 + (int(us[2] & 0x3F) << 6)
+                 +  int(us[3] & 0x3F);
+            if (code > 0x10FFFF) { // invalid codepoint
+                code = -1;
+                return static_cast<size_t>(-1);
+            }
+            return 4;
+        }
+        break;
+
+    }
+
+    // unknown encoding
+    code = -1;
+    return static_cast<size_t>(-1);
+}
 
 /*-----------------------------------------------------------------------------
  *  any
@@ -511,6 +617,7 @@ public:
     std::vector<std::unordered_map<std::string, std::string>> capture_scope_stack;
 
     const size_t                                 def_count;
+    const Encoding                               encoding;
     const bool                                   enablePackratParsing;
     std::vector<bool>                            cache_registered;
     std::vector<bool>                            cache_success;
@@ -526,6 +633,7 @@ public:
         size_t               a_def_count,
         std::shared_ptr<Ope> a_whitespaceOpe,
         std::shared_ptr<Ope> a_wordOpe,
+        Encoding             a_encoding,
         bool                 a_enablePackratParsing,
         Tracer               a_tracer)
         : path(a_path)
@@ -540,6 +648,7 @@ public:
         , in_whitespace(false)
         , wordOpe(a_wordOpe)
         , def_count(a_def_count)
+        , encoding(a_encoding)
         , enablePackratParsing(a_enablePackratParsing)
         , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
@@ -971,66 +1080,112 @@ public:
     void accept(Visitor& v) override;
 
     std::string lit_;
-	mutable bool init_is_word_;
-	mutable bool is_word_;
+    mutable bool init_is_word_;
+    mutable bool is_word_;
 };
 
 class CharacterClass : public Ope
     , public std::enable_shared_from_this<CharacterClass>
 {
 public:
-    CharacterClass(const std::string& chars) : chars_(chars) {}
+    CharacterClass(const std::string& chars) {
+
+        chars_ = chars;
+
+        auto i = 0u;
+        codepoint ch = 0;
+
+        while (i < chars.size()){
+            auto len = get_char(chars.c_str()+i, chars.size()-i, Encoding::UTF8, ch);
+            codepoints_.push_back(ch); // might push -1 but that's fine
+            i+=len;
+        }
+    }
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("CharacterClass", s, n, sv, dt);
-        // TODO: UTF8 support
-        if (n < 1) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        }
-        auto ch = s[0];
-        auto i = 0u;
-        while (i < chars_.size()) {
-            if (i + 2 < chars_.size() && chars_[i + 1] == '-') {
-                if (chars_[i] <= ch && ch <= chars_[i + 2]) {
-                    return 1;
+
+        if (c.encoding == Encoding::ASCII || c.encoding == Encoding::ANSI) {
+
+            if (n < 1) {
+                c.set_error_pos(s);
+                return static_cast<size_t>(-1);
+            }
+
+            auto ch = s[0];
+            auto i = 0u;
+            while (i < chars_.size()) {
+                if (i + 2 < chars_.size() && chars_[i + 1] == '-') {
+                    if (chars_[i] <= ch && ch <= chars_[i + 2]) {
+                        return 1;
+                    }
+                    i += 3;
+                } else {
+                    if (chars_[i] == ch) {
+                        return 1;
+                    }
+                    i += 1;
                 }
-                i += 3;
-            } else {
-                if (chars_[i] == ch) {
-                    return 1;
-                }
-                i += 1;
             }
         }
+        else if (c.encoding == Encoding::UTF8) {
+
+            codepoint ch = 0;
+            auto len = get_char(s, n, Encoding::UTF8, ch);
+
+            if (len < 1) {
+                c.set_error_pos(s);
+                return static_cast<size_t>(-1);
+            }
+
+            auto i = 0u;
+            while (i < codepoints_.size()) {
+                if (i + 2 < codepoints_.size() && codepoints_[i + 1] == '-') {
+                    if (codepoints_[i] != -1 && codepoints_[i] <= ch && ch <= codepoints_[i + 2]) {
+                        return len;
+                    }
+                    i += 3;
+                } else {
+                    if (codepoints_[i] == ch) {
+                        return len;
+                    }
+                    i += 1;
+                }
+            }
+        }
+
         c.set_error_pos(s);
         return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
 
-    std::string chars_;
+    std::string chars_; // for ASCII/ANSI
+    std::vector<codepoint> codepoints_; // for UTF8
 };
 
 class Character : public Ope
     , public std::enable_shared_from_this<Character>
 {
 public:
-    Character(char ch) : ch_(ch) {}
+    Character(codepoint ch) : ch_(ch) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("Character", s, n, sv, dt);
-        // TODO: UTF8 support
-        if (n < 1 || s[0] != ch_) {
+
+        codepoint code = 0;
+        auto len = get_char(s, n, c.encoding, code);
+
+        if (len < 1 || code != ch_) {
             c.set_error_pos(s);
             return static_cast<size_t>(-1);
         }
-        return 1;
+        return len;
     }
 
     void accept(Visitor& v) override;
 
-    char ch_;
+    codepoint ch_;
 };
 
 class AnyCharacter : public Ope
@@ -1039,12 +1194,14 @@ class AnyCharacter : public Ope
 public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("AnyCharacter", s, n, sv, dt);
-        // TODO: UTF8 support
-        if (n < 1) {
+
+        codepoint code = 0;
+        auto len = get_char(s, n, c.encoding, code);
+
+        if (len < 1) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
         }
-        return 1;
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -1273,7 +1430,7 @@ inline std::shared_ptr<Ope> cls(const std::string& chars) {
     return std::make_shared<CharacterClass>(chars);
 }
 
-inline std::shared_ptr<Ope> chr(char dt) {
+inline std::shared_ptr<Ope> chr(codepoint dt) {
     return std::make_shared<Character>(dt);
 }
 
@@ -1605,6 +1762,7 @@ public:
 
     Definition()
         : ignoreSemanticValue(false)
+        , encoding(Encoding::DEFAULT_ENCODING)
         , enablePackratParsing(false)
         , is_macro(false)
         , holder_(std::make_shared<Holder>(this))
@@ -1613,6 +1771,7 @@ public:
     Definition(const Definition& rhs)
         : name(rhs.name)
         , ignoreSemanticValue(false)
+        , encoding(Encoding::DEFAULT_ENCODING)
         , enablePackratParsing(false)
         , is_macro(false)
         , holder_(rhs.holder_)
@@ -1626,6 +1785,7 @@ public:
         , ignoreSemanticValue(rhs.ignoreSemanticValue)
         , whitespaceOpe(rhs.whitespaceOpe)
         , wordOpe(rhs.wordOpe)
+        , encoding(rhs.encoding)
         , enablePackratParsing(rhs.enablePackratParsing)
         , is_macro(rhs.is_macro)
         , holder_(std::move(rhs.holder_))
@@ -1636,6 +1796,7 @@ public:
 
     Definition(const std::shared_ptr<Ope>& ope)
         : ignoreSemanticValue(false)
+        , encoding(Encoding::DEFAULT_ENCODING)
         , enablePackratParsing(false)
         , is_macro(false)
         , holder_(std::make_shared<Holder>(this))
@@ -1749,6 +1910,7 @@ public:
     bool                                                                                 ignoreSemanticValue;
     std::shared_ptr<Ope>                                                                 whitespaceOpe;
     std::shared_ptr<Ope>                                                                 wordOpe;
+    Encoding                                                                             encoding;
     bool                                                                                 enablePackratParsing;
     bool                                                                                 is_macro;
     std::vector<std::string>                                                             params;
@@ -1775,7 +1937,7 @@ private:
             wordOpe->accept(vis);
         }
 
-        Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
+        Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, encoding, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -1800,27 +1962,27 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         }
     }
 
-	// Word check
-    static Context dummy_c(nullptr, lit.data(), lit.size(), 0, nullptr, nullptr, false, nullptr);
+    // Word check
+    static Context dummy_c(nullptr, lit.data(), lit.size(), 0, nullptr, nullptr, Encoding::DEFAULT_ENCODING, false, nullptr);
     static SemanticValues dummy_sv;
     static any dummy_dt;
 
     if (!init_is_word) { // TODO: Protect with mutex
-		if (c.wordOpe) {
-			auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
-			is_word = success(len);
-		}
+        if (c.wordOpe) {
+            auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
+            is_word = success(len);
+        }
         init_is_word = true;
     }
 
-	if (is_word) {
+    if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
-		auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
-		if (fail(len)) {
+        auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
+        if (fail(len)) {
             return static_cast<size_t>(-1);
-		}
+        }
         i += len;
-	}
+    }
 
     // Skip whiltespace
     if (!c.in_token) {
@@ -1842,7 +2004,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
 }
 
 inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-	c.in_token = true;
+    c.in_token = true;
     auto se = make_scope_exit([&]() { c.in_token = false; });
     const auto& rule = *ope_;
     auto len = rule.parse(s, n, sv, c, dt);
@@ -1882,6 +2044,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     any    val;
 
     c.packrat(s, outer_->id, len, val, [&](any& a_val) {
+
         if (outer_->enter) {
             outer_->enter(s, n, dt);
         }
@@ -1946,33 +2109,33 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt) const {
 
 inline size_t Reference::parse(
     const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-	if (rule_) {
-		// Reference rule
-		if (rule_->is_macro) {
+    if (rule_) {
+        // Reference rule
+        if (rule_->is_macro) {
             // Macro
             FindReference vis(c.top_args(), rule_->params);
 
-			// Collect arguments
+            // Collect arguments
             std::vector<std::shared_ptr<Ope>> args;
             for (auto arg: args_) {
-				arg->accept(vis);
-				args.push_back(vis.found_ope);
-			}
+                arg->accept(vis);
+                args.push_back(vis.found_ope);
+            }
 
-			c.push_args(args);
+            c.push_args(args);
             auto se = make_scope_exit([&]() { c.pop_args(); });
             auto ope = get_core_operator();
-			return ope->parse(s, n, sv, c, dt);
-		} else {
-			// Definition
+            return ope->parse(s, n, sv, c, dt);
+        } else {
+            // Definition
             auto ope = get_core_operator();
             return ope->parse(s, n, sv, c, dt);
-		}
-	} else {
-		// Reference parameter in macro
-		const auto& args = c.top_args();
-		return args[iarg_]->parse(s, n, sv, c, dt);
-	}
+        }
+    } else {
+        // Reference parameter in macro
+        const auto& args = c.top_args();
+        return args[iarg_]->parse(s, n, sv, c, dt);
+    }
 }
 
 inline std::shared_ptr<Ope> Reference::get_core_operator() const {
@@ -2124,9 +2287,10 @@ public:
         const char*  s,
         size_t       n,
         std::string& start,
-        Log          log)
+        Log          log,
+        Encoding     enc = Encoding::DEFAULT_ENCODING)
     {
-        return get_instance().perform_core(s, n, start, log);
+        return get_instance().perform_core(s, n, start, log, enc);
     }
 
     // For debuging purpose
@@ -2173,7 +2337,8 @@ private:
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
         g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-        g["IdentStart"] <= cls("a-zA-Z_\x80-\xff%");
+        g["IdentStart"] <= cho(seq(npd(cls("\x01-\x7f")), dot()), cls("a-zA-Z_%"));
+
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
         g["Literal"]    <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
@@ -2188,11 +2353,7 @@ private:
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
                                seq(npd(chr('\\')), dot()));
 
-#if !defined(PEGLIB_NO_UNICODE_CHARS)
-        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
-#else
-        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
-#endif
+        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit("\xe2\x86\x90")), g["Spacing"]);
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
@@ -2413,10 +2574,12 @@ private:
         const char*  s,
         size_t       n,
         std::string& start,
-        Log          log)
+        Log          log,
+        Encoding     enc)
     {
         Data data;
         any dt = &data;
+        g["Grammar"].encoding = enc;
         auto r = g["Grammar"].parse(s, n, dt);
 
         if (!r.ret) {
@@ -2763,19 +2926,25 @@ class parser
 public:
     parser() = default;
 
-    parser(const char* s, size_t n) {
+    parser(const char* s, size_t n, Encoding enc = Encoding::DEFAULT_ENCODING)
+        : enc_(enc)
+    {
         load_grammar(s, n);
     }
 
-    parser(const char* s)
-        : parser(s, strlen(s)) {}
+    parser(const char* s, Encoding enc = Encoding::DEFAULT_ENCODING)
+        : parser(s, strlen(s), enc) {}
 
     operator bool() {
         return grammar_ != nullptr;
     }
 
     bool load_grammar(const char* s, size_t n) {
-        grammar_ = ParserGenerator::parse(s, n, start_, log);
+        grammar_ = ParserGenerator::parse(s, n, start_, log, enc_);
+        if (grammar_ != nullptr) {
+            auto& rule = (*grammar_)[start_];
+            rule.encoding = enc_;
+        }
         return grammar_ != nullptr;
     }
 
@@ -2948,6 +3117,7 @@ private:
 
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
+    const Encoding           enc_;
 };
 
 } // namespace peg

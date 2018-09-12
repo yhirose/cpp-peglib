@@ -5,7 +5,6 @@
 #include <peglib.h>
 #include <iostream>
 
-#if !defined(PEGLIB_NO_UNICODE_CHARS)
 TEST_CASE("Simple syntax test (with unicode)", "[general]")
 {
     peg::parser parser(
@@ -15,8 +14,8 @@ TEST_CASE("Simple syntax test (with unicode)", "[general]")
 
     bool ret = parser;
     REQUIRE(ret == true);
+
 }
-#endif
 
 TEST_CASE("Simple syntax test", "[general]")
 {
@@ -1373,6 +1372,7 @@ TEST_CASE("PEG Literal", "[peg]")
     REQUIRE(exact(g, "Literal", "abc") == false);
     REQUIRE(exact(g, "Literal", "") == false);
     REQUIRE(exact(g, "Literal", u8"日本語") == false);
+	REQUIRE(exact(g, "Literal", u8"'日本語'") == true);
 }
 
 TEST_CASE("PEG Class", "[peg]")
@@ -1391,6 +1391,7 @@ TEST_CASE("PEG Class", "[peg]")
     REQUIRE(exact(g, "Class", "]") == false);
     REQUIRE(exact(g, "Class", "a]") == false);
     REQUIRE(exact(g, "Class", u8"あ-ん") == false);
+	REQUIRE(exact(g, "Class", u8"[あ-ん]") == true);
     REQUIRE(exact(g, "Class", "[-+]") == true);
     REQUIRE(exact(g, "Class", "[+-]") == false);
 }
@@ -1436,7 +1437,7 @@ TEST_CASE("PEG Char", "[peg]")
     REQUIRE(exact(g, "Char", " ") == true);
     REQUIRE(exact(g, "Char", "  ") == false);
     REQUIRE(exact(g, "Char", "") == false);
-    REQUIRE(exact(g, "Char", u8"あ") == false);
+    REQUIRE(exact(g, "Char", u8"あ") == true);
 }
 
 TEST_CASE("PEG Operators", "[peg]")
