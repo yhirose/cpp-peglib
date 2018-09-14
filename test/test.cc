@@ -964,6 +964,31 @@ TEST_CASE("Left recursive with empty string test", "[left recursive]")
     REQUIRE(!parser);
 }
 
+TEST_CASE("User defined rule test", "[user rule]")
+{
+    auto g = parser(R"(
+        ROOT <- _ 'Hello' _ NAME '!' _
+    )",
+    {
+        {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
+                static vector<string> names = { "PEG", "BNF" };
+                for (const auto& name: names) {
+                    if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
+                        return name.size();
+                    }
+                }
+                return static_cast<size_t>(-1);
+            })
+        },
+        {
+            "~_", zom(cls(" \t\r\n"))
+        }
+    });
+
+    REQUIRE(g.parse(" Hello BNF! ") == true);
+}
+
 TEST_CASE("Semantic predicate test", "[predicate]")
 {
     parser parser("NUMBER  <-  [0-9]+");
