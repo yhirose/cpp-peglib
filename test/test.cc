@@ -1002,6 +1002,29 @@ TEST_CASE("Japanese character", "[unicode]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("dot with a code", "[unicode]")
+{
+    peg::parser parser(" S <- 'a' . 'b' ");
+    auto ret = parser.parse(u8R"(aあb)");
+    REQUIRE(ret == true);
+}
+
+#if 0 // TODO:
+TEST_CASE("dot with a char", "[unicode]")
+{
+    peg::parser parser(" S <- 'a' . 'b' ");
+    auto ret = parser.parse(u8R"(aåb)");
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("dot with a grapheme", "[unicode]")
+{
+    peg::parser parser(" S <- 'a' . 'b' ");
+    auto ret = parser.parse(u8R"(aसिb)");
+    REQUIRE(ret == true);
+}
+#endif
+
 TEST_CASE("Macro simple test", "[macro]")
 {
     parser parser(R"(
@@ -1372,6 +1395,8 @@ TEST_CASE("PEG Literal", "[peg]")
     REQUIRE(exact(g, "Literal", "\"'\"abc\"'\" ") == false);
     REQUIRE(exact(g, "Literal", "abc") == false);
     REQUIRE(exact(g, "Literal", "") == false);
+    REQUIRE(exact(g, "Literal", u8"'日本語'") == true);
+    REQUIRE(exact(g, "Literal", u8"\"日本語\"") == true);
     REQUIRE(exact(g, "Literal", u8"日本語") == false);
 }
 
@@ -1390,6 +1415,7 @@ TEST_CASE("PEG Class", "[peg]")
     REQUIRE(exact(g, "Class", "[a") == false);
     REQUIRE(exact(g, "Class", "]") == false);
     REQUIRE(exact(g, "Class", "a]") == false);
+    REQUIRE(exact(g, "Class", u8"[あ-ん]") == false);
     REQUIRE(exact(g, "Class", u8"あ-ん") == false);
     REQUIRE(exact(g, "Class", "[-+]") == true);
     REQUIRE(exact(g, "Class", "[+-]") == false);
