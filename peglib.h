@@ -206,6 +206,213 @@ auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
 }
 
 /*-----------------------------------------------------------------------------
+ *  UTF8 functions
+ *---------------------------------------------------------------------------*/
+
+inline size_t codepoint_length(const char *s8, size_t l) {
+  if (l) {
+    auto b = static_cast<uint8_t>(s8[0]);
+    if ((b & 0x80) == 0) {
+      return 1;
+    } else if ((b & 0xE0) == 0xC0) {
+      return 2;
+    } else if ((b & 0xF0) == 0xE0) {
+      return 3;
+    } else if ((b & 0xF8) == 0xF0) {
+      return 4;
+    }
+  }
+  return 0;
+}
+
+inline size_t encode_codepoint(char32_t cp, char *buff) {
+  if (cp < 0x0080) {
+    buff[0] = static_cast<char>(cp & 0x7F);
+    return 1;
+  } else if (cp < 0x0800) {
+    buff[0] = static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+    buff[1] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 2;
+  } else if (cp < 0xD800) {
+    buff[0] = static_cast<char>(0xE0 | ((cp >> 12) & 0xF));
+    buff[1] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    buff[2] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 3;
+  } else if (cp < 0xE000) {
+    // D800 - DFFF is invalid...
+    return 0;
+  } else if (cp < 0x10000) {
+    buff[0] = static_cast<char>(0xE0 | ((cp >> 12) & 0xF));
+    buff[1] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    buff[2] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 3;
+  } else if (cp < 0x110000) {
+    buff[0] = static_cast<char>(0xF0 | ((cp >> 18) & 0x7));
+    buff[1] = static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+    buff[2] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    buff[3] = static_cast<char>(0x80 | (cp & 0x3F));
+    return 4;
+  }
+  return 0;
+}
+
+inline std::string encode_codepoint(char32_t cp) {
+  char buff[4];
+  auto l = encode_codepoint(cp, buff);
+  return std::string(buff, l);
+}
+
+inline bool decode_codepoint(const char *s8, size_t l, size_t &bytes,
+                             char32_t &cp) {
+  if (l) {
+    auto b = static_cast<uint8_t>(s8[0]);
+    if ((b & 0x80) == 0) {
+      bytes = 1;
+      cp = b;
+      return true;
+    } else if ((b & 0xE0) == 0xC0) {
+      if (l >= 2) {
+        bytes = 2;
+        cp = ((static_cast<char32_t>(s8[0] & 0x1F)) << 6) |
+             (static_cast<char32_t>(s8[1] & 0x3F));
+        return true;
+      }
+    } else if ((b & 0xF0) == 0xE0) {
+      if (l >= 3) {
+        bytes = 3;
+        cp = ((static_cast<char32_t>(s8[0] & 0x0F)) << 12) |
+             ((static_cast<char32_t>(s8[1] & 0x3F)) << 6) |
+             (static_cast<char32_t>(s8[2] & 0x3F));
+        return true;
+      }
+    } else if ((b & 0xF8) == 0xF0) {
+      if (l >= 4) {
+        bytes = 4;
+        cp = ((static_cast<char32_t>(s8[0] & 0x07)) << 18) |
+             ((static_cast<char32_t>(s8[1] & 0x3F)) << 12) |
+             ((static_cast<char32_t>(s8[2] & 0x3F)) << 6) |
+             (static_cast<char32_t>(s8[3] & 0x3F));
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline size_t decode_codepoint(const char *s8, size_t l, char32_t &out) {
+  size_t bytes;
+  if (decode_codepoint(s8, l, bytes, out)) {
+    return bytes;
+  }
+  return 0;
+}
+
+inline char32_t decode_codepoint(const char *s8, size_t l) {
+  char32_t out = 0;
+  decode_codepoint(s8, l, out);
+  return out;
+}
+
+inline std::u32string decode(const char *s8, size_t l) {
+  std::u32string out;
+  size_t i = 0;
+  while (i < l) {
+    auto beg = i++;
+    while (i < l && (s8[i] & 0xc0) == 0x80) {
+      i++;
+    }
+    out += decode_codepoint(&s8[beg], (i - beg));
+  }
+  return out;
+}
+
+/*-----------------------------------------------------------------------------
+ *  resolve_escape_sequence
+ *---------------------------------------------------------------------------*/
+
+inline bool is_hex(char c, int& v) {
+    if ('0' <= c && c <= '9') {
+        v = c - '0';
+        return true;
+    } else if ('a' <= c && c <= 'f') {
+        v = c - 'a' + 10;
+        return true;
+    } else if ('A' <= c && c <= 'F') {
+        v = c - 'A' + 10;
+        return true;
+    }
+    return false;
+}
+
+inline bool is_digit(char c, int& v) {
+    if ('0' <= c && c <= '9') {
+        v = c - '0';
+        return true;
+    }
+    return false;
+}
+
+inline std::pair<int, size_t> parse_hex_number(const char* s, size_t n, size_t i) {
+    int ret = 0;
+    int val;
+    while (i < n && is_hex(s[i], val)) {
+        ret = static_cast<int>(ret * 16 + val);
+        i++;
+    }
+    return std::make_pair(ret, i);
+}
+
+inline std::pair<int, size_t> parse_octal_number(const char* s, size_t n, size_t i) {
+    int ret = 0;
+    int val;
+    while (i < n && is_digit(s[i], val)) {
+        ret = static_cast<int>(ret * 8 + val);
+        i++;
+    }
+    return std::make_pair(ret, i);
+}
+
+inline std::string resolve_escape_sequence(const char* s, size_t n) {
+    std::string r;
+    r.reserve(n);
+
+    size_t i = 0;
+    while (i < n) {
+        auto ch = s[i];
+        if (ch == '\\') {
+            i++;
+            switch (s[i]) {
+                case 'n':  r += '\n'; i++; break;
+                case 'r':  r += '\r'; i++; break;
+                case 't':  r += '\t'; i++; break;
+                case '\'': r += '\''; i++; break;
+                case '"':  r += '"';  i++; break;
+                case '[':  r += '[';  i++; break;
+                case ']':  r += ']';  i++; break;
+                case '\\': r += '\\'; i++; break;
+                case 'x':
+                case 'u': {
+                    char32_t cp;
+                    std::tie(cp, i) = parse_hex_number(s, n, i + 1);
+                    r += encode_codepoint(cp);
+                    break;
+                }
+                default: {
+                    char32_t cp;
+                    std::tie(cp, i) = parse_octal_number(s, n, i);
+                    r += encode_codepoint(cp);
+                    break;
+                }
+            }
+        } else {
+            r += ch;
+            i++;
+        }
+    }
+    return r;
+}
+
+/*-----------------------------------------------------------------------------
  *  PEG
  *---------------------------------------------------------------------------*/
 
@@ -979,37 +1186,51 @@ class CharacterClass : public Ope
     , public std::enable_shared_from_this<CharacterClass>
 {
 public:
-    CharacterClass(const std::string& chars) : chars_(chars) {}
+    CharacterClass(const std::string& s) {
+        auto chars = decode(s.c_str(), s.length());
+        auto i = 0u;
+        while (i < chars.size()) {
+            if (i + 2 < chars.size() && chars[i + 1] == '-') {
+                auto cp1 = chars[i];
+                auto cp2 = chars[i + 2];
+                ranges_.emplace_back(std::make_pair(cp1, cp2));
+                i += 3;
+            } else {
+                auto cp = chars[i];
+                ranges_.emplace_back(std::make_pair(cp, cp));
+                i += 1;
+            }
+        }
+    }
+
+    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) : ranges_(ranges) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("CharacterClass", s, n, sv, dt);
-        // TODO: UTF8 support
+
         if (n < 1) {
             c.set_error_pos(s);
             return static_cast<size_t>(-1);
         }
-        auto ch = s[0];
-        auto i = 0u;
-        while (i < chars_.size()) {
-            if (i + 2 < chars_.size() && chars_[i + 1] == '-') {
-                if (chars_[i] <= ch && ch <= chars_[i + 2]) {
-                    return 1;
+
+        char32_t cp;
+        auto len = decode_codepoint(s, n, cp);
+
+        if (!ranges_.empty()) {
+            for (const auto& range: ranges_) {
+                if (range.first <= cp && cp <= range.second) {
+                    return len;
                 }
-                i += 3;
-            } else {
-                if (chars_[i] == ch) {
-                    return 1;
-                }
-                i += 1;
             }
         }
+
         c.set_error_pos(s);
         return static_cast<size_t>(-1);
     }
 
     void accept(Visitor& v) override;
 
-    std::string chars_;
+    std::vector<std::pair<char32_t, char32_t>> ranges_;
 };
 
 class Character : public Ope
@@ -1020,7 +1241,6 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("Character", s, n, sv, dt);
-        // TODO: UTF8 support
         if (n < 1 || s[0] != ch_) {
             c.set_error_pos(s);
             return static_cast<size_t>(-1);
@@ -1039,12 +1259,12 @@ class AnyCharacter : public Ope
 public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("AnyCharacter", s, n, sv, dt);
-        // TODO: UTF8 support
-        if (n < 1) {
+        auto len = codepoint_length(s, n);
+        if (len < 1) {
             c.set_error_pos(s);
             return static_cast<size_t>(-1);
         }
-        return 1;
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -1269,8 +1489,12 @@ inline std::shared_ptr<Ope> lit(const std::string& lit) {
     return std::make_shared<LiteralString>(lit);
 }
 
-inline std::shared_ptr<Ope> cls(const std::string& chars) {
-    return std::make_shared<CharacterClass>(chars);
+inline std::shared_ptr<Ope> cls(const std::string& s) {
+    return std::make_shared<CharacterClass>(s);
+}
+
+inline std::shared_ptr<Ope> cls(const std::vector<std::pair<char32_t, char32_t>>& ranges) {
+    return std::make_shared<CharacterClass>(ranges);
 }
 
 inline std::shared_ptr<Ope> chr(char dt) {
@@ -2173,7 +2397,10 @@ private:
 
         g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
         g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-        g["IdentStart"] <= cls("a-zA-Z_\x80-\xff%");
+
+        const static std::vector<std::pair<char32_t, char32_t>> range = {{ 0x0080, 0xFFFF }};
+        g["IdentStart"] <= cho(cls("a-zA-Z_%"), cls(range));
+
         g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
 
         g["Literal"]    <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
@@ -2186,12 +2413,13 @@ private:
                                seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
                                seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
+                               seq(lit("\\u"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F")),
                                seq(npd(chr('\\')), dot()));
 
-#if !defined(PEGLIB_NO_UNICODE_CHARS)
-        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
-#else
+#if defined(PEGLIB_NO_UNICODE_CHARS)
         g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
+#else
+        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
 #endif
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
@@ -2203,7 +2431,7 @@ private:
         ~g["CLOSE"]     <= seq(chr(')'), g["Spacing"]);
         g["DOT"]        <= seq(chr('.'), g["Spacing"]);
 
-        g["Spacing"]    <= zom(cho(g["Space"], g["Comment"]));
+        ~g["Spacing"]   <= zom(cho(g["Space"], g["Comment"]));
         g["Comment"]    <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())), g["EndOfLine"]);
         g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
         g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
@@ -2375,13 +2603,41 @@ private:
             return std::string(sv.c_str(), sv.length());
         };
 
-        g["Literal"] = [this](const SemanticValues& sv) {
+        g["IdentStart"] = [](const SemanticValues& /*sv*/) {
+            return std::string();
+        };
+
+        g["IdentRest"] = [](const SemanticValues& /*sv*/) {
+            return std::string();
+        };
+
+        g["Literal"] = [](const SemanticValues& sv) {
             const auto& tok = sv.tokens.front();
             return lit(resolve_escape_sequence(tok.first, tok.second));
         };
-        g["Class"] = [this](const SemanticValues& sv) {
-            const auto& tok = sv.tokens.front();
-            return cls(resolve_escape_sequence(tok.first, tok.second));
+        g["Class"] = [](const SemanticValues& sv) {
+            auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
+            return cls(ranges);
+        };
+        g["Range"] = [](const SemanticValues& sv) {
+            switch (sv.choice()) {
+                case 0: {
+                    auto s1 = sv[0].get<std::string>();
+                    auto s2 = sv[1].get<std::string>();
+                    auto cp1 = decode_codepoint(s1.c_str(), s1.length());
+                    auto cp2 = decode_codepoint(s2.c_str(), s2.length());
+                    return std::make_pair(cp1, cp2);
+                }
+                case 1: {
+                    auto s = sv[0].get<std::string>();
+                    auto cp = decode_codepoint(s.c_str(), s.length());
+                    return std::make_pair(cp, cp);
+                }
+            }
+            return std::make_pair<char32_t, char32_t>(0, 0);
+        };
+        g["Char"] = [](const SemanticValues& sv) {
+            return resolve_escape_sequence(sv.c_str(), sv.length());
         };
 
         g["AND"]      = [](const SemanticValues& sv) { return *sv.c_str(); };
@@ -2512,85 +2768,6 @@ private:
         }
 
         return data.grammar;
-    }
-
-    bool is_hex(char c, int& v) {
-        if ('0' <= c && c <= '9') {
-            v = c - '0';
-            return true;
-        } else if ('a' <= c && c <= 'f') {
-            v = c - 'a' + 10;
-            return true;
-        } else if ('A' <= c && c <= 'F') {
-            v = c - 'A' + 10;
-            return true;
-        }
-        return false;
-    }
-
-    bool is_digit(char c, int& v) {
-        if ('0' <= c && c <= '9') {
-            v = c - '0';
-            return true;
-        }
-        return false;
-    }
-
-    std::pair<char, size_t> parse_hex_number(const char* s, size_t n, size_t i) {
-        char ret = 0;
-        int val;
-        while (i < n && is_hex(s[i], val)) {
-            ret = static_cast<char>(ret * 16 + val);
-            i++;
-        }
-        return std::make_pair(ret, i);
-    }
-
-    std::pair<char, size_t> parse_octal_number(const char* s, size_t n, size_t i) {
-        char ret = 0;
-        int val;
-        while (i < n && is_digit(s[i], val)) {
-            ret = static_cast<char>(ret * 8 + val);
-            i++;
-        }
-        return std::make_pair(ret, i);
-    }
-
-    std::string resolve_escape_sequence(const char* s, size_t n) {
-        std::string r;
-        r.reserve(n);
-
-        size_t i = 0;
-        while (i < n) {
-            auto ch = s[i];
-            if (ch == '\\') {
-                i++;
-                switch (s[i]) {
-                    case 'n':  r += '\n'; i++; break;
-                    case 'r':  r += '\r'; i++; break;
-                    case 't':  r += '\t'; i++; break;
-                    case '\'': r += '\''; i++; break;
-                    case '"':  r += '"';  i++; break;
-                    case '[':  r += '[';  i++; break;
-                    case ']':  r += ']';  i++; break;
-                    case '\\': r += '\\'; i++; break;
-                    case 'x': {
-                        std::tie(ch, i) = parse_hex_number(s, n, i + 1);
-                        r += ch;
-                        break;
-                    }
-                    default: {
-                        std::tie(ch, i) = parse_octal_number(s, n, i);
-                        r += ch;
-                        break;
-                    }
-                }
-            } else {
-                r += ch;
-                i++;
-            }
-        }
-        return r;
     }
 
     Grammar g;

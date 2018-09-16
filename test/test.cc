@@ -356,13 +356,13 @@ TEST_CASE("Backtracking with AST", "[general]")
     REQUIRE(ast->nodes.size() == 2);
 }
 
-TEST_CASE("Octal/Hex value test", "[general]")
+TEST_CASE("Octal/Hex/Unicode value test", "[general]")
 {
     peg::parser parser(
-        R"( ROOT <- '\132\x7a' )"
+        R"( ROOT <- '\132\x7a\u30f3' )"
     );
 
-    auto ret = parser.parse("Zz");
+    auto ret = parser.parse("Zzン");
 
     REQUIRE(ret == true);
 }
@@ -977,12 +977,10 @@ TEST_CASE("Semantic predicate test", "[predicate]")
     };
 
     long val;
-    auto ret = parser.parse("100", val);
-    REQUIRE(ret == true);
+    REQUIRE(parser.parse("100", val));
     REQUIRE(val == 100);
 
-    ret = parser.parse("200", val);
-    REQUIRE(ret == false);
+    REQUIRE(!parser.parse("200", val));
 }
 
 TEST_CASE("Japanese character", "[unicode]")
@@ -998,30 +996,56 @@ TEST_CASE("Japanese character", "[unicode]")
         助詞 <- 'が' / 'を' / 'た' / 'ます' / 'に'
     )");
 
-    auto ret = parser.parse(u8R"(サーバーを復旧します。)");
+    bool ret = parser;
     REQUIRE(ret == true);
+
+    REQUIRE(parser.parse(u8R"(サーバーを復旧します。)"));
 }
 
 TEST_CASE("dot with a code", "[unicode]")
 {
     peg::parser parser(" S <- 'a' . 'b' ");
-    auto ret = parser.parse(u8R"(aあb)");
-    REQUIRE(ret == true);
+    REQUIRE(parser.parse(u8R"(aあb)"));
 }
 
-#if 0 // TODO:
 TEST_CASE("dot with a char", "[unicode]")
 {
     peg::parser parser(" S <- 'a' . 'b' ");
-    auto ret = parser.parse(u8R"(aåb)");
-    REQUIRE(ret == true);
+    REQUIRE(parser.parse(u8R"(aåb)"));
 }
 
+TEST_CASE("character class", "[unicode]")
+{
+    peg::parser parser(R"(
+        S <- 'a' [い-おAさC-Eた-とは] 'b'
+    )");
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+    REQUIRE(!parser.parse(u8R"(aあb)"));
+    REQUIRE(parser.parse(u8R"(aいb)"));
+    REQUIRE(parser.parse(u8R"(aうb)"));
+    REQUIRE(parser.parse(u8R"(aおb)"));
+    REQUIRE(!parser.parse(u8R"(aかb)"));
+    REQUIRE(parser.parse(u8R"(aAb)"));
+    REQUIRE(!parser.parse(u8R"(aBb)"));
+    REQUIRE(parser.parse(u8R"(aEb)"));
+    REQUIRE(!parser.parse(u8R"(aFb)"));
+    REQUIRE(!parser.parse(u8R"(aそb)"));
+    REQUIRE(parser.parse(u8R"(aたb)"));
+    REQUIRE(parser.parse(u8R"(aちb)"));
+    REQUIRE(parser.parse(u8R"(aとb)"));
+    REQUIRE(!parser.parse(u8R"(aなb)"));
+    REQUIRE(parser.parse(u8R"(aはb)"));
+    REQUIRE(!parser.parse(u8R"(a?b)"));
+}
+
+#if 0 // TODO: Unicode Grapheme support
 TEST_CASE("dot with a grapheme", "[unicode]")
 {
     peg::parser parser(" S <- 'a' . 'b' ");
-    auto ret = parser.parse(u8R"(aसिb)");
-    REQUIRE(ret == true);
+    REQUIRE(parser.parse(u8R"(aसिb)"));
 }
 #endif
 
@@ -1415,7 +1439,7 @@ TEST_CASE("PEG Class", "[peg]")
     REQUIRE(exact(g, "Class", "[a") == false);
     REQUIRE(exact(g, "Class", "]") == false);
     REQUIRE(exact(g, "Class", "a]") == false);
-    REQUIRE(exact(g, "Class", u8"[あ-ん]") == false);
+    REQUIRE(exact(g, "Class", u8"[あ-ん]") == true);
     REQUIRE(exact(g, "Class", u8"あ-ん") == false);
     REQUIRE(exact(g, "Class", "[-+]") == true);
     REQUIRE(exact(g, "Class", "[+-]") == false);
@@ -1462,7 +1486,7 @@ TEST_CASE("PEG Char", "[peg]")
     REQUIRE(exact(g, "Char", " ") == true);
     REQUIRE(exact(g, "Char", "  ") == false);
     REQUIRE(exact(g, "Char", "") == false);
-    REQUIRE(exact(g, "Char", u8"あ") == false);
+    REQUIRE(exact(g, "Char", u8"あ") == true);
 }
 
 TEST_CASE("PEG Operators", "[peg]")
