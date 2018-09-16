@@ -417,7 +417,7 @@ assert(g.parse(" Hello BNF! "));
 Unicode support
 ---------------
 
-Since cpp-peglib only accepts 8 bits characters, it probably accepts UTF-8 text. But `.` matches only a byte, not a Unicode character. Also, it dosn't support `\u????`.
+cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`.
 
 peglint - PEG syntax lint utility
 ---------------------------------
@@ -535,7 +535,7 @@ Tested compilers
 TODO
 ----
 
-  * Unicode support (`.` matches a Unicode char. `\u????`, `\p{L}`)
+  * Advanced Unicode support ([Unicode regular expressoin](http://www.unicode.org/reports/tr18/))
 
 License
 -------
