@@ -3118,6 +3118,10 @@ public:
         return (*grammar_)[s];
     }
 
+    const Definition& operator[](const char* s) const {
+        return (*grammar_)[s];
+    }
+
     std::vector<std::string> get_rule_names(){
         std::vector<std::string> rules;
         rules.reserve(grammar_->size());
