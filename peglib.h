@@ -1178,8 +1178,8 @@ public:
     void accept(Visitor& v) override;
 
     std::string lit_;
-	mutable bool init_is_word_;
-	mutable bool is_word_;
+    mutable bool init_is_word_;
+    mutable bool is_word_;
 };
 
 class CharacterClass : public Ope
@@ -2043,27 +2043,27 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         }
     }
 
-	// Word check
+    // Word check
     static Context dummy_c(nullptr, lit.data(), lit.size(), 0, nullptr, nullptr, false, nullptr);
     static SemanticValues dummy_sv;
     static any dummy_dt;
 
     if (!init_is_word) { // TODO: Protect with mutex
-		if (c.wordOpe) {
-			auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
-			is_word = success(len);
-		}
+        if (c.wordOpe) {
+            auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
+            is_word = success(len);
+        }
         init_is_word = true;
     }
 
-	if (is_word) {
+    if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
-		auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
-		if (fail(len)) {
+        auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
+        if (fail(len)) {
             return static_cast<size_t>(-1);
-		}
+        }
         i += len;
-	}
+    }
 
     // Skip whiltespace
     if (!c.in_token) {
@@ -2085,7 +2085,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
 }
 
 inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-	c.in_token = true;
+    c.in_token = true;
     auto se = make_scope_exit([&]() { c.in_token = false; });
     const auto& rule = *ope_;
     auto len = rule.parse(s, n, sv, c, dt);
@@ -2189,33 +2189,33 @@ inline any Holder::reduce(const SemanticValues& sv, any& dt) const {
 
 inline size_t Reference::parse(
     const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-	if (rule_) {
-		// Reference rule
-		if (rule_->is_macro) {
+    if (rule_) {
+        // Reference rule
+        if (rule_->is_macro) {
             // Macro
             FindReference vis(c.top_args(), rule_->params);
 
-			// Collect arguments
+            // Collect arguments
             std::vector<std::shared_ptr<Ope>> args;
             for (auto arg: args_) {
-				arg->accept(vis);
-				args.push_back(vis.found_ope);
-			}
+                arg->accept(vis);
+                args.push_back(vis.found_ope);
+            }
 
-			c.push_args(args);
+            c.push_args(args);
             auto se = make_scope_exit([&]() { c.pop_args(); });
             auto ope = get_core_operator();
-			return ope->parse(s, n, sv, c, dt);
-		} else {
-			// Definition
+            return ope->parse(s, n, sv, c, dt);
+        } else {
+            // Definition
             auto ope = get_core_operator();
             return ope->parse(s, n, sv, c, dt);
-		}
-	} else {
-		// Reference parameter in macro
-		const auto& args = c.top_args();
-		return args[iarg_]->parse(s, n, sv, c, dt);
-	}
+        }
+    } else {
+        // Reference parameter in macro
+        const auto& args = c.top_args();
+        return args[iarg_]->parse(s, n, sv, c, dt);
+    }
 }
 
 inline std::shared_ptr<Ope> Reference::get_core_operator() const {
