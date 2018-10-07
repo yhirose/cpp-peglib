@@ -93,11 +93,13 @@ int main(void) {
 }
 ```
 
-There are two semantic actions available:
+There are four semantic actions available:
 
 ```cpp
 [](const SemanticValues& sv, any& dt)
 [](const SemanticValues& sv)
+[](SemanticValues& sv, any& dt)
+[](SemanticValues& sv)
 ```
 
 `const SemanticValues& sv` contains the following information:
