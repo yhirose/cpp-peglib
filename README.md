@@ -102,7 +102,7 @@ There are four semantic actions available:
 [](SemanticValues& sv)
 ```
 
-`const SemanticValues& sv` contains the following information:
+`SemanticValues` value contains the following information:
 
  - Semantic values
  - Matched string information
