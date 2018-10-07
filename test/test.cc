@@ -36,6 +36,29 @@ TEST_CASE("Empty syntax test", "[general]")
     REQUIRE(ret == false);
 }
 
+TEST_CASE("Action taking non const Semantic Values parameter", "[general]")
+{
+    peg::parser parser(R"(
+        ROOT <- TEXT
+        TEXT <- [a-zA-Z]+
+    )");
+
+    parser["ROOT"] = [&](peg::SemanticValues& sv) {
+        auto& s = sv[0].get<std::string>();
+        s[0] = 'H'; // mutate
+        return std::string(std::move(s)); // move
+    };
+
+    parser["TEXT"] = [&](peg::SemanticValues& sv) {
+        return sv.token();
+    };
+
+    std::string val;
+    auto ret = parser.parse("hello", val);
+    REQUIRE(ret == true);
+    REQUIRE(val == "Hello");
+}
+
 TEST_CASE("String capture test", "[general]")
 {
     peg::parser parser(

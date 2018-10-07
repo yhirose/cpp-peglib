@@ -599,61 +599,111 @@ public:
         return bool(fn_);
     }
 
-    any operator()(const SemanticValues& sv, any& dt) const {
+    any operator()(SemanticValues& sv, any& dt) const {
         return fn_(sv, dt);
     }
 
 private:
     template <typename R>
-    struct TypeAdaptor {
-        TypeAdaptor(std::function<R (const SemanticValues& sv)> fn)
+    struct TypeAdaptor_sv {
+        TypeAdaptor_sv(std::function<R (SemanticValues& sv)> fn)
             : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& /*dt*/) {
+        any operator()(SemanticValues& sv, any& /*dt*/) {
+            return call<R>(fn_, sv);
+        }
+        std::function<R (SemanticValues& sv)> fn_;
+    };
+
+    template <typename R>
+    struct TypeAdaptor_csv {
+        TypeAdaptor_csv(std::function<R (const SemanticValues& sv)> fn)
+            : fn_(fn) {}
+        any operator()(SemanticValues& sv, any& /*dt*/) {
             return call<R>(fn_, sv);
         }
         std::function<R (const SemanticValues& sv)> fn_;
     };
 
     template <typename R>
-    struct TypeAdaptor_c {
-        TypeAdaptor_c(std::function<R (const SemanticValues& sv, any& dt)> fn)
+    struct TypeAdaptor_sv_dt {
+        TypeAdaptor_sv_dt(std::function<R (SemanticValues& sv, any& dt)> fn)
             : fn_(fn) {}
-        any operator()(const SemanticValues& sv, any& dt) {
+        any operator()(SemanticValues& sv, any& dt) {
+            return call<R>(fn_, sv, dt);
+        }
+        std::function<R (SemanticValues& sv, any& dt)> fn_;
+    };
+
+    template <typename R>
+    struct TypeAdaptor_csv_dt {
+        TypeAdaptor_csv_dt(std::function<R (const SemanticValues& sv, any& dt)> fn)
+            : fn_(fn) {}
+        any operator()(SemanticValues& sv, any& dt) {
             return call<R>(fn_, sv, dt);
         }
         std::function<R (const SemanticValues& sv, any& dt)> fn_;
     };
 
-    typedef std::function<any (const SemanticValues& sv, any& dt)> Fty;
+    typedef std::function<any (SemanticValues& sv, any& dt)> Fty;
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv) const) {
+        return TypeAdaptor_sv<R>(fn);
+    }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv) const) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_csv<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv)) {
+        return TypeAdaptor_sv<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv)) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_csv<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (* /*mf*/)(SemanticValues& sv)) {
+        return TypeAdaptor_sv<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (* /*mf*/)(const SemanticValues& sv)) {
-        return TypeAdaptor<R>(fn);
+        return TypeAdaptor_csv<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv, any& dt) const) {
+        return TypeAdaptor_sv_dt<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt) const) {
-        return TypeAdaptor_c<R>(fn);
+        return TypeAdaptor_csv_dt<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv, any& dt)) {
+        return TypeAdaptor_sv_dt<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_c<R>(fn);
+        return TypeAdaptor_csv_dt<R>(fn);
+    }
+
+    template<typename F, typename R>
+    Fty make_adaptor(F fn, R(* /*mf*/)(SemanticValues& sv, any& dt)) {
+        return TypeAdaptor_sv_dt<R>(fn);
     }
 
     template<typename F, typename R>
     Fty make_adaptor(F fn, R(* /*mf*/)(const SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_c<R>(fn);
+        return TypeAdaptor_csv_dt<R>(fn);
     }
 
     Fty fn_;
@@ -1387,7 +1437,7 @@ public:
 
     void accept(Visitor& v) override;
 
-    any reduce(const SemanticValues& sv, any& dt) const;
+    any reduce(SemanticValues& sv, any& dt) const;
 
     std::shared_ptr<Ope> ope_;
     Definition*          outer_;
@@ -2177,13 +2227,13 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     return len;
 }
 
-inline any Holder::reduce(const SemanticValues& sv, any& dt) const {
+inline any Holder::reduce(SemanticValues& sv, any& dt) const {
     if (outer_->action) {
         return outer_->action(sv, dt);
     } else if (sv.empty()) {
         return any();
     } else {
-        return sv.front();
+        return std::move(sv.front());
     }
 }
 
