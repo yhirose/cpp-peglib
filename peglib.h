@@ -510,6 +510,7 @@ struct SemanticValues : protected std::vector<any>
 
 private:
     friend class Context;
+    friend class Sequence;
     friend class PrioritizedChoice;
     friend class Holder;
 
@@ -948,17 +949,22 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("Sequence", s, n, sv, dt);
+        auto& chldsv = c.push();
         size_t i = 0;
         for (const auto& ope : opes_) {
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope;
-            auto len = rule.parse(s + i, n - i, sv, c, dt);
+            auto len = rule.parse(s + i, n - i, chldsv, c, dt);
             if (fail(len)) {
                 return static_cast<size_t>(-1);
             }
             i += len;
         }
+        sv.insert(sv.end(), chldsv.begin(), chldsv.end());
+        sv.s_ = chldsv.c_str();
+        sv.n_ = chldsv.length();
+        sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
         return i;
     }
 
@@ -1004,9 +1010,7 @@ public:
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (success(len)) {
-                if (!chldsv.empty()) {
-                    sv.insert(sv.end(), chldsv.begin(), chldsv.end());
-                }
+                sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 sv.s_ = chldsv.c_str();
                 sv.n_ = chldsv.length();
                 sv.choice_count_ = opes_.size();

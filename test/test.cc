@@ -741,6 +741,32 @@ TEST_CASE("Definition duplicates test", "[general]")
     REQUIRE(!parser);
 }
 
+TEST_CASE("Semantic values test", "[general]")
+{
+    parser parser(R"(
+        term <- ( a b c x )? a b c
+        a <- 'a'
+        b <- 'b'
+        c <- 'c'
+        x <- 'x'
+    )");
+
+	for (const auto& rule: parser.get_rule_names()){
+		parser[rule.c_str()] = [rule](const SemanticValues& sv, any&) {
+            if (rule == "term") {
+                REQUIRE(sv[0].get<string>() == "a at 0");
+                REQUIRE(sv[1].get<string>() == "b at 1");
+                REQUIRE(sv[2].get<string>() == "c at 2");
+                return string();
+            } else {
+                return rule + " at " + to_string(sv.c_str() - sv.ss);
+            }
+		};
+	}
+
+	REQUIRE(parser.parse("abc"));
+}
+
 TEST_CASE("Packrat parser test with %whitespace%", "[packrat]")
 {
     peg::parser parser(R"(
