@@ -534,7 +534,7 @@ struct LLVM {
     compile(ast);
   }
 
-  void dump() { module_->print(llvm::errs(), nullptr); }
+  void dump() { module_->print(llvm::outs(), nullptr); }
 
   void exec() {
     unique_ptr<ExecutionEngine> ee(EngineBuilder(std::move(module_)).create());
