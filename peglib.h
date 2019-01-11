@@ -41,12 +41,6 @@
 
 namespace peg {
 
-#if __clang__ == 1 && __clang_major__ <= 5
-static void* enabler = nullptr; // workaround for Clang version <= 5.0.0
-#else
-extern void* enabler;
-#endif
-
 /*-----------------------------------------------------------------------------
  *  any
  *---------------------------------------------------------------------------*/
@@ -96,7 +90,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<!std::is_same<T, any>::value>::type*& = enabler
+        typename std::enable_if<!std::is_same<T, any>::value, std::nullptr_t>::type = nullptr
     >
     T& get() {
         if (!content_) {
@@ -112,7 +106,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<std::is_same<T, any>::value>::type*& = enabler
+        typename std::enable_if<std::is_same<T, any>::value, std::nullptr_t>::type = nullptr
     >
     T& get() {
         return *this;
@@ -120,7 +114,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<!std::is_same<T, any>::value>::type*& = enabler
+        typename std::enable_if<!std::is_same<T, any>::value, std::nullptr_t>::type = nullptr
     >
     const T& get() const {
         assert(content_);
@@ -134,7 +128,7 @@ public:
 
     template <
         typename T,
-        typename std::enable_if<std::is_same<T, any>::value>::type*& = enabler
+        typename std::enable_if<std::is_same<T, any>::value, std::nullptr_t>::type = nullptr
     >
     const any& get() const {
         return *this;
@@ -555,7 +549,7 @@ private:
  */
 template <
     typename R, typename F,
-    typename std::enable_if<std::is_void<R>::value>::type*& = enabler,
+    typename std::enable_if<std::is_void<R>::value, std::nullptr_t>::type = nullptr,
     typename... Args>
 any call(F fn, Args&&... args) {
     fn(std::forward<Args>(args)...);
@@ -564,7 +558,7 @@ any call(F fn, Args&&... args) {
 
 template <
     typename R, typename F,
-    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, any>::value>::type*& = enabler,
+    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, any>::value, std::nullptr_t>::type = nullptr,
     typename... Args>
 any call(F fn, Args&&... args) {
     return fn(std::forward<Args>(args)...);
@@ -574,7 +568,7 @@ template <
     typename R, typename F,
     typename std::enable_if<
         !std::is_void<R>::value &&
-        !std::is_same<typename std::remove_cv<R>::type, any>::value>::type*& = enabler,
+        !std::is_same<typename std::remove_cv<R>::type, any>::value, std::nullptr_t>::type = nullptr,
     typename... Args>
 any call(F fn, Args&&... args) {
     return any(fn(std::forward<Args>(args)...));
@@ -587,26 +581,26 @@ public:
 
     Action(const Action& rhs) : fn_(rhs.fn_) {}
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
     Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
 
-    template <typename F, typename std::enable_if<std::is_pointer<F>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<std::is_pointer<F>::value, std::nullptr_t>::type = nullptr>
     Action(F fn) : fn_(make_adaptor(fn, fn)) {}
 
-    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
     Action(F /*fn*/) {}
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
     void operator=(F fn) {
         fn_ = make_adaptor(fn, &F::operator());
     }
 
-    template <typename F, typename std::enable_if<std::is_pointer<F>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<std::is_pointer<F>::value, std::nullptr_t>::type = nullptr>
     void operator=(F fn) {
         fn_ = make_adaptor(fn, fn);
     }
 
-    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value>::type*& = enabler>
+    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
     void operator=(F /*fn*/) {}
 
     Action& operator=(const Action& rhs) = default;
