@@ -14,6 +14,7 @@
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Support/TargetSelect.h"
 
 using namespace peg;
@@ -627,6 +628,7 @@ struct LLVM {
       builder_.SetInsertPoint(BB);
       compile_block(ast->nodes[0]);
       builder_.CreateRetVoid();
+      verifyFunction(*fn);
     }
   }
 
@@ -679,6 +681,7 @@ struct LLVM {
         builder_.SetInsertPoint(BB);
         compile_block(block);
         builder_.CreateRetVoid();
+        verifyFunction(*fn);
         builder_.SetInsertPoint(prevBB);
       }
     }
