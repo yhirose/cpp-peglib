@@ -2,6 +2,8 @@
 #include "peglib.h"
 #include <cstdio>
 #include <functional>
+#include <iomanip>
+#include <sstream>
 
 using namespace httplib;
 using namespace std;
@@ -238,6 +240,20 @@ body {
 </html>
 )";
 
+// https://stackoverflow.com/questions/7724448/simple-json-string-escape-for-c/33799784#33799784
+std::string escape_json(const std::string &s) {
+    std::ostringstream o;
+    for (auto c : s) {
+        if (c == '"' || c == '\\' || ('\x00' <= c && c <= '\x1f')) {
+            o << "\\u"
+                << std::hex << std::setw(4) << std::setfill('0') << (int)c;
+        } else {
+            o << c;
+        }
+    }
+    return o.str();
+}
+
 function<void (size_t, size_t, const string&)> makeJSONFormatter(string& json)
 {
     auto init = make_shared<bool>(true);
@@ -249,7 +265,7 @@ function<void (size_t, size_t, const string&)> makeJSONFormatter(string& json)
         json += "{";
         json += R"("ln":)" + to_string(ln) + ",";
         json += R"("col":)" + to_string(col) + ",";
-        json += R"("msg":")" + msg + R"(")";
+        json += R"("msg":")" + escape_json(msg) + R"(")";
         json += "}";
         *init = false;
     };
@@ -321,13 +337,8 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
             const auto& codeText = req.get_param_value("code");
             shared_ptr<peg::Ast> ast;
             if (parse_code(codeText, peg, codeResult, ast)) {
-                astResult = peg::ast_to_s(ast);
-                astResult = replace_all(astResult, "\n", "\\n");
-                astResult = replace_all(astResult, "\"", "%22");
-
-                astResultOptimized = peg::ast_to_s(peg::AstOptimizer(true).optimize(ast));
-                astResultOptimized = replace_all(astResultOptimized, "\n", "\\n");
-                astResultOptimized = replace_all(astResultOptimized, "\"", "%22");
+                astResult = escape_json(peg::ast_to_s(ast));
+                astResultOptimized = escape_json(peg::ast_to_s(peg::AstOptimizer(true).optimize(ast)));
             }
         }
 
