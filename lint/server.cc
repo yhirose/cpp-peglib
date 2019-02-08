@@ -118,9 +118,13 @@ body {
 	// Setup editros
     var grammar = ace.edit("grammar-editor");
     grammar.setShowPrintMargin(false);
+    grammar.setValue(localStorage.getItem('grammarText'));
+    grammar.moveCursorTo(0, 0);
 
     var code = ace.edit("code-editor");
     code.setShowPrintMargin(false);
+    code.setValue(localStorage.getItem('codeText'));
+    code.moveCursorTo(0, 0);
 
     var codeAst = ace.edit("code-ast");
     codeAst.setShowPrintMargin(false);
@@ -161,36 +165,42 @@ body {
         var $codeInfo = $('#code-info');
         var codeText = code.getValue();
 
+        localStorage.setItem('grammarText', grammarText);
+        localStorage.setItem('codeText', codeText);
+
+        $grammarInfo.html('');
+        $grammarValidation.hide();
+	    $codeInfo.html('');
+        $codeValidation.hide();
+        codeAst.setValue('');
+        codeAstOptimized.setValue('');
+
+        if (grammarText.length === 0) {
+           return;
+        }
+
         $.post("/parse", {
             grammar: grammarText,
             code: codeText
         }).done(function (data) {
             var isValid = data.grammar.length === 0;
             if (isValid) {
-                $grammarInfo.html('');
-                $grammarValidation.removeClass('editor-validation-invalid').text('Valid');
-
-                codeAst.setValue('');
-                codeAstOptimized.setValue('');
+                $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
 
                 var isValid = data.code.length === 0;
 	            if (isValid) {
-	                $codeInfo.html('');
-	                $codeValidation.removeClass('editor-validation-invalid').text('Valid');
 	                codeAst.insert(data.ast);
 	                codeAstOptimized.insert(data.astOptimized);
+	                $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
                 } else {
 				    var html = generateErrorListHTML(data.code);
 	                $codeInfo.html(html);
-	                $codeValidation.addClass('editor-validation-invalid').text('Invalid');
+	                $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();
                 }
-                $codeValidation.show();
             } else {
 			    var html = generateErrorListHTML(data.grammar);
                 $grammarInfo.html(html);
-                $grammarValidation.addClass('editor-validation-invalid').text('Invalid');
-
-                $codeValidation.hide();
+                $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();
             }
         });
     };
@@ -289,15 +299,15 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
 {
     Server svr;
 
-    svr.get("/", [&](const Request& /*req*/, Response& res) {
+    svr.Get("/", [&](const Request& /*req*/, Response& res) {
         indexHTML = replace_all(indexHTML, "{{syntax}}", string(syntax.data(), syntax.size()).c_str());
         indexHTML = replace_all(indexHTML, "{{source}}", string(source.data(), source.size()).c_str());
 
         res.set_content(indexHTML, "text/html");
     });
 
-    svr.post("/parse", [](const Request& req, Response& res) {
-        const auto& grammarText = req.params.at("grammar");
+    svr.Post("/parse", [](const Request& req, Response& res) {
+        const auto& grammarText = req.get_param_value("grammar");
 
         string grammarResult;
         string codeResult;
@@ -308,14 +318,16 @@ int run_server(int port, const vector<char>& syntax, const vector<char>& source)
         auto ret = parse_grammar(grammarText, peg, grammarResult);
 
         if (ret && peg) {
-            const auto& codeText = req.params.at("code");
+            const auto& codeText = req.get_param_value("code");
             shared_ptr<peg::Ast> ast;
             if (parse_code(codeText, peg, codeResult, ast)) {
                 astResult = peg::ast_to_s(ast);
                 astResult = replace_all(astResult, "\n", "\\n");
+                astResult = replace_all(astResult, "\"", "%22");
 
                 astResultOptimized = peg::ast_to_s(peg::AstOptimizer(true).optimize(ast));
                 astResultOptimized = replace_all(astResultOptimized, "\n", "\\n");
+                astResultOptimized = replace_all(astResultOptimized, "\"", "%22");
             }
         }
 

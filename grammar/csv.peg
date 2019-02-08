@@ -14,5 +14,5 @@ CR          <- '\r'
 DQUOTE      <- '"'
 LF          <- '\n'
 NL          <- CR LF / CR / LF
-TEXTDATA    <- ![",] .
+TEXTDATA    <- !([",] / NL) .
 D_DQUOTE    <- '"' '"'
