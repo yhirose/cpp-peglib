@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>PEG Playground</title>
+<link rel="stylesheet" href="style.css" media="all">
+</head>
+<body>
+<div id="main">
+  <div class="editor-container">
+    <ul class="editor-header">
+      <li><span>Grammar:</span></li>
+      <li><span id="grammar-validation" class="editor-validation">Valid</span></li>
+    </ul>
+    <pre id="grammar-editor" class="editor-area">{{syntax}}</pre>
+    <div id="grammar-info" class="editor-info"></div>
+  </div>
+  <div class="editor-container">
+    <ul class="editor-header">
+      <li><span>Code:</span></li>
+      <li><span id="code-validation" class="editor-validation">Valid</span></li>
+    </ul>
+    <pre id="code-editor" class="editor-area">{{source}}</pre>
+    <pre id="code-ast" class="editor-area"></pre>
+    <pre id="code-ast-optimized" class="editor-area"></pre>
+    <div id="code-info" class="editor-info"></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.1.9/ace.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="index.js"></script>
+<script src="native.js"></script>
+</body>
+</html>
