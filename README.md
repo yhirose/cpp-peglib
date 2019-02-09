@@ -4,9 +4,9 @@ cpp-peglib
 [![Build Status](https://travis-ci.org/yhirose/cpp-peglib.svg?branch=master)](https://travis-ci.org/yhirose/cpp-peglib)
 [![Bulid Status](https://ci.appveyor.com/api/projects/status/github/yhirose/cpp-peglib?branch=master&svg=true)](https://ci.appveyor.com/project/yhirose/cpp-peglib)
 
-C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library.
+C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library. You can start using it right away just by including `peglib.h` in your project.
 
-*cpp-peglib* tries to provide more expressive parsing experience in a simple way. This library depends on only one header file. So, you can start using it right away just by including `peglib.h` in your project.
+You can also try the online version at https://yhirose.github.io/cpp-peglib.
 
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
@@ -433,7 +433,7 @@ peglint - PEG syntax lint utility
 > cmake ..
 > make
 > ./peglint
-usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--server [PORT]] [--trace] [grammar file path] [source file path]
+usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [grammar file path] [source file path]
 ```
 
 ### Lint grammar

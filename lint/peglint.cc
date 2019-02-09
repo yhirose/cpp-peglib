@@ -10,8 +10,6 @@
 
 using namespace std;
 
-int run_server(int port, const vector<char>& syntax, const vector<char>& source);
-
 bool read_file(const char* path, vector<char>& buff)
 {
     ifstream ifs(path, ios::in | ios::binary);
@@ -33,8 +31,6 @@ int main(int argc, const char** argv)
     auto opt_help = false;
     auto opt_source = false;
     vector<char> source;
-    auto opt_server = false;
-    int  port = 1234;
     auto opt_trace = false;
     vector<const char*> path_list;
 
@@ -53,11 +49,6 @@ int main(int argc, const char** argv)
                 std::string text = argv[argi++];
                 source.assign(text.begin(), text.end());
             }
-        } else if (string("--server") == arg) {
-            opt_server = true;
-            if (argi < argc) {
-                port = std::stoi(argv[argi++]);
-            }
         } else if (string("--trace") == arg) {
             opt_trace = true;
         } else {
@@ -65,26 +56,9 @@ int main(int argc, const char** argv)
         }
     }
 
-    if ((path_list.empty() && !opt_server) || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--server [PORT]] [--trace] [grammar file path] [source file path]" << endl;
+    if (path_list.empty() || opt_help) {
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [grammar file path] [source file path]" << endl;
         return 1;
-    }
-
-    // Sever mode
-    if (opt_server) {
-        vector<char> syntax;
-
-        if (path_list.size() >= 1 && !read_file(path_list[0], syntax)) {
-            cerr << "can't open the grammar file." << endl;
-            return -1;
-        }
-
-        if (path_list.size() >= 2 && !read_file(path_list[1], source)) {
-            cerr << "can't open the code file." << endl;
-            return -1;
-        }
-
-        return run_server(port, syntax, source);
     }
 
     // Check PEG grammar
