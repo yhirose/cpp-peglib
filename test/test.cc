@@ -767,6 +767,34 @@ TEST_CASE("Semantic values test", "[general]")
 	REQUIRE(parser.parse("abc"));
 }
 
+TEST_CASE("Ordered choice count", "[general]")
+{
+    auto syntax = R"(S <- 'a' / 'b')";
+
+    parser parser(syntax);
+
+    parser["S"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.choice() == 1);
+        REQUIRE(sv.choice_count() == 2);
+    };
+
+    parser.parse("b");
+}
+
+TEST_CASE("Ordered choice count 2", "[general]")
+{
+    auto syntax = R"(S <- ('a' / 'b')*)";
+
+    parser parser(syntax);
+
+    parser["S"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.choice() == 0);
+        REQUIRE(sv.choice_count() == 0);
+    };
+
+    parser.parse("b");
+}
+
 TEST_CASE("Packrat parser test with %whitespace%", "[packrat]")
 {
     peg::parser parser(R"(

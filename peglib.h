@@ -1643,8 +1643,6 @@ struct Ope::Visitor
 
 struct AssignIDToDefinition : public Ope::Visitor
 {
-    using Ope::Visitor::visit;
-
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1676,8 +1674,6 @@ struct TokenChecker : public Ope::Visitor
 {
     TokenChecker() : has_token_boundary_(false), has_rule_(false) {}
 
-    using Ope::Visitor::visit;
-
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1699,8 +1695,10 @@ struct TokenChecker : public Ope::Visitor
     void visit(Reference& ope) override;
     void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
 
-    bool is_token() const {
-        return has_token_boundary_ || !has_rule_;
+    static bool is_token(Ope& ope) {
+        TokenChecker vis;
+        ope.accept(vis);
+        return vis.has_token_boundary_ || !vis.has_rule_;
     }
 
 private:
@@ -1711,8 +1709,6 @@ private:
 struct DetectLeftRecursion : public Ope::Visitor {
     DetectLeftRecursion(const std::string& name)
         : error_s(nullptr), name_(name), done_(false) {}
-
-    using Ope::Visitor::visit;
 
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1768,8 +1764,6 @@ struct ReferenceChecker : public Ope::Visitor {
         const std::vector<std::string>& params)
         : grammar_(grammar), params_(params) {}
 
-    using Ope::Visitor::visit;
-
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1808,8 +1802,6 @@ struct LinkReferences : public Ope::Visitor {
         const std::vector<std::string>& params)
         : grammar_(grammar), params_(params) {}
 
-    using Ope::Visitor::visit;
-
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1844,8 +1836,6 @@ struct FindReference : public Ope::Visitor {
         const std::vector<std::shared_ptr<Ope>>& args,
         const std::vector<std::string>& params)
         : args_(args), params_(params) {}
-
-    using Ope::Visitor::visit;
 
     void visit(Sequence& ope) override {
         std::vector<std::shared_ptr<Ope>> opes;
@@ -1886,6 +1876,24 @@ struct FindReference : public Ope::Visitor {
 private:
     const std::vector<std::shared_ptr<Ope>>& args_;
     const std::vector<std::string>& params_;
+};
+
+struct IsPrioritizedChoice : public Ope::Visitor
+{
+    IsPrioritizedChoice() : is_prioritized_choice_(false) {}
+
+    void visit(PrioritizedChoice& /*ope*/) override {
+        is_prioritized_choice_ = true;
+    }
+
+    static bool is_prioritized_choice(Ope& ope) {
+        IsPrioritizedChoice vis;
+        ope.accept(vis);
+        return vis.is_prioritized_choice_;
+    }
+
+private:
+    bool is_prioritized_choice_;
 };
 
 /*
@@ -2038,9 +2046,7 @@ public:
 
     bool is_token() const {
         std::call_once(is_token_init_, [this]() {
-            TokenChecker vis;
-            get_core_operator()->accept(vis);
-            is_token_ = vis.is_token();
+            is_token_ = TokenChecker::is_token(*get_core_operator());
         });
         return is_token_;
     }
@@ -2179,8 +2185,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     // Macro reference
     // TODO: need packrat support
     if (outer_->is_macro) {
-        const auto& rule = *ope_;
-        return rule.parse(s, n, sv, c, dt);
+        return ope_->parse(s, n, sv, c, dt);
     }
 
     size_t len;
@@ -2201,13 +2206,17 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
 
         auto& chldsv = c.push();
 
-        const auto& rule = *ope_;
-        len = rule.parse(s, n, chldsv, c, dt);
+        len = ope_->parse(s, n, chldsv, c, dt);
 
         // Invoke action
         if (success(len)) {
             chldsv.s_ = s;
             chldsv.n_ = len;
+
+            if (!IsPrioritizedChoice::is_prioritized_choice(*ope_)) {
+                chldsv.choice_count_ = 0;
+                chldsv.choice_ = 0;
+            }
 
             try {
                 a_val = reduce(chldsv, dt);
