@@ -448,6 +448,9 @@ struct SemanticValues : protected std::vector<any>
         return std::string(s_, n_);
     }
 
+    // Definition name
+    const std::string& name() const { return name_; }
+
     // Line number and column at which the matched string is
     std::pair<size_t, size_t> line_info() const {
         return peg::line_info(ss, s_);
@@ -512,6 +515,7 @@ private:
     size_t      n_;
     size_t      choice_count_;
     size_t      choice_;
+    std::string name_;
 
     template <typename F>
     auto transform(F f) const -> vector<typename std::remove_const<decltype(f(any()))>::type> {
@@ -2212,6 +2216,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         if (success(len)) {
             chldsv.s_ = s;
             chldsv.n_ = len;
+            chldsv.name_ = outer_->name;
 
             if (!IsPrioritizedChoice::is_prioritized_choice(*ope_)) {
                 chldsv.choice_count_ = 0;
@@ -2915,12 +2920,15 @@ template <typename Annotation>
 struct AstBase : public Annotation
 {
     AstBase(const char* a_path, size_t a_line, size_t a_column,
-            const char* a_name, size_t a_choice_count, size_t a_choice,
+            const char* a_name, size_t a_position, size_t a_length,
+            size_t a_choice_count, size_t a_choice,
             const std::vector<std::shared_ptr<AstBase>>& a_nodes)
         : path(a_path ? a_path : "")
         , line(a_line)
         , column(a_column)
         , name(a_name)
+        , position(a_position)
+        , length(a_length)
         , choice_count(a_choice_count)
         , choice(a_choice)
         , original_name(a_name)
@@ -2935,12 +2943,15 @@ struct AstBase : public Annotation
     {}
 
     AstBase(const char* a_path, size_t a_line, size_t a_column,
-            const char* a_name, size_t a_choice_count, size_t a_choice,
+            const char* a_name, size_t a_position, size_t a_length,
+            size_t a_choice_count, size_t a_choice,
             const std::string& a_token)
         : path(a_path ? a_path : "")
         , line(a_line)
         , column(a_column)
         , name(a_name)
+        , position(a_position)
+        , length(a_length)
         , choice_count(a_choice_count)
         , choice(a_choice)
         , original_name(a_name)
@@ -2955,11 +2966,14 @@ struct AstBase : public Annotation
     {}
 
     AstBase(const AstBase& ast, const char* a_original_name,
+            size_t a_position, size_t a_length,
             size_t a_original_choice_count, size_t a_original_choise)
         : path(ast.path)
         , line(ast.line)
         , column(ast.column)
         , name(ast.name)
+        , position(a_position)
+        , length(a_length)
         , choice_count(ast.choice_count)
         , choice(ast.choice)
         , original_name(a_original_name)
@@ -2980,6 +2994,8 @@ struct AstBase : public Annotation
     const size_t                      column;
 
     const std::string                 name;
+    size_t                            position;
+    size_t                            length;
     const size_t                      choice_count;
     const size_t                      choice;
     const std::string                 original_name;
@@ -3245,13 +3261,13 @@ public:
                     if (rule.is_token()) {
                         return std::make_shared<T>(
                             sv.path, line.first, line.second,
-                            name.c_str(), sv.choice_count(), sv.choice(),
+                            name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                             sv.token());
                     }
 
                     auto ast = std::make_shared<T>(
                         sv.path, line.first, line.second,
-                        name.c_str(), sv.choice_count(), sv.choice(),
+                        name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                         sv.transform<std::shared_ptr<T>>());
 
                     for (auto node: ast->nodes) {
