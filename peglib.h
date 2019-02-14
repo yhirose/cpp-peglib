@@ -3069,7 +3069,8 @@ struct AstOptimizer
         if (opt && original->nodes.size() == 1) {
             auto child = optimize(original->nodes[0], parent);
             return std::make_shared<T>(
-                *child, original->name.c_str(), original->choice_count, original->choice);
+                *child, original->name.c_str(), original->choice_count,
+                original->position, original->length, original->choice);
         }
 
         auto ast = std::make_shared<T>(*original);
