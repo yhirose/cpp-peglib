@@ -1,12 +1,12 @@
 // Setup editros
 const grammar = ace.edit("grammar-editor");
 grammar.setShowPrintMargin(false);
-grammar.setValue(localStorage.getItem('grammarText'));
+grammar.setValue(localStorage.getItem('grammarText') || '');
 grammar.moveCursorTo(0, 0);
 
 const code = ace.edit("code-editor");
 code.setShowPrintMargin(false);
-code.setValue(localStorage.getItem('codeText'));
+code.setValue(localStorage.getItem('codeText') || '');
 code.moveCursorTo(0, 0);
 
 const codeAst = ace.edit("code-ast");
