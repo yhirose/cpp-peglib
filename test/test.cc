@@ -1032,6 +1032,17 @@ TEST_CASE("Left recursive with zom test", "[left recursive]")
     REQUIRE(!parser);
 }
 
+TEST_CASE("Left recursive with a ZOM content rule", "[left recursive]")
+{
+    parser parser(R"(
+        A <- B
+        B <- _ A
+        _ <- ' '* # Zero or more
+    )");
+
+    REQUIRE(!parser);
+}
+
 TEST_CASE("Left recursive with empty string test", "[left recursive]")
 {
     parser parser(
