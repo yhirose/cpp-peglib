@@ -2116,7 +2116,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     }
 
     // Word check
-    static Context dummy_c(nullptr, lit.data(), lit.size(), 0, nullptr, nullptr, false, nullptr);
+    static Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr);
     static SemanticValues dummy_sv;
     static any dummy_dt;
 
