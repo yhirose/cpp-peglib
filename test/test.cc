@@ -416,6 +416,26 @@ TEST_CASE("Octal/Hex/Unicode value test", "[general]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("Ignore case test", "[general]") {
+    peg::parser parser(R"(
+        ROOT         <-  HELLO WORLD
+        HELLO        <-  'hello'i
+        WORLD        <-  'world'i
+        %whitespace  <-  [ \t\r\n]*
+    )");
+
+    parser["HELLO"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == "Hello");
+    };
+
+    parser["WORLD"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == "World");
+    };
+
+    auto ret = parser.parse("  Hello World  ");
+    REQUIRE(ret == true);
+}
+
 TEST_CASE("mutable lambda test", "[general]")
 {
     vector<string> vec;

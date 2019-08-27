@@ -10,6 +10,7 @@ You can also try the online version, PEG Playground at https://yhirose.github.io
 
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
+  * `'...'i` (Case-insensitive literal operator)
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)
@@ -169,11 +170,11 @@ auto ret = pg.parse(" token1, token2 ");
 We can ignore unnecessary semantic values from the list by using `~` operator.
 
 ```cpp
-peg::pegparser parser(
-    "  ROOT  <-  _ ITEM (',' _ ITEM _)*  "
-    "  ITEM  <-  ([a-z])+                "
-    "  ~_    <-  [ \t]*                  "
-);
+peg::pegparser parser(R"(
+    ROOT  <-  _ ITEM (',' _ ITEM _)*
+    ITEM  <-  ([a-z])+
+    ~_    <-  [ \t]*
+)");
 
 parser["ROOT"] = [&](const SemanticValues& sv) {
     assert(sv.size() == 2); // should be 2 instead of 5.
@@ -185,11 +186,11 @@ auto ret = parser.parse(" item1, item2 ");
 The following grammar is same as the above.
 
 ```cpp
-peg::parser parser(
-    "  ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*  "
-    "  ITEM  <-  ([a-z])+                   "
-    "  _     <-  [ \t]*                     "
-);
+peg::pegparser parser(R"(
+    ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*
+    ITEM  <-  ([a-z])+
+    _     <-  [ \t]*
+)");
 ```
 
 *Semantic predicate* support is available. We can do it by throwing a `peg::parse_error` exception in a semantic action.
@@ -244,9 +245,10 @@ As you can see in the first example, we can ignore whitespaces between tokens au
 These are valid tokens:
 
 ```
-KEYWORD  <- 'keyword'
-WORD     <-  < [a-zA-Z0-9] [a-zA-Z0-9-_]* >    # token boundary operator is used.
-IDNET    <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
+KEYWORD   <- 'keyword'
+KEYWORDI  <- 'case_insensitive_keyword'
+WORD      <-  < [a-zA-Z0-9] [a-zA-Z0-9-_]* >    # token boundary operator is used.
+IDNET     <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
 ```
 
 The following grammar accepts ` one, "two three", four `.
@@ -372,6 +374,7 @@ The following are available operators:
 | apd      | And predicate         |
 | npd      | Not predicate         |
 | lit      | Literal string        |
+| liti     | Case-insensitive Literal string |
 | cls      | Character class       |
 | chr      | Character             |
 | dot      | Any character         |
