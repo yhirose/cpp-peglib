@@ -174,9 +174,10 @@ TEST_CASE("Token check test", "[general]")
 
 TEST_CASE("Lambda action test", "[general]")
 {
-    parser parser(
-       "  START <- (CHAR)* "
-       "  CHAR  <- .       ");
+    parser parser(R"(
+       START <- (CHAR)*
+       CHAR  <- .
+    )");
 
     string ss;
     parser["CHAR"] = [&](const SemanticValues& sv) {
@@ -370,12 +371,12 @@ TEST_CASE("Skip token test2", "[general]")
 
 TEST_CASE("Backtracking test", "[general]")
 {
-    parser parser(
-       "  START <- PAT1 / PAT2  "
-       "  PAT1  <- HELLO ' One' "
-       "  PAT2  <- HELLO ' Two' "
-       "  HELLO <- 'Hello'      "
-    );
+    peg::parser parser(R"(
+       START <- PAT1 / PAT2
+       PAT1  <- HELLO ' One'
+       PAT2  <- HELLO ' Two'
+       HELLO <- 'Hello'
+    )");
 
     size_t count = 0;
     parser["HELLO"] = [&](const SemanticValues& /*sv*/) {
@@ -429,11 +430,12 @@ TEST_CASE("mutable lambda test", "[general]")
 
 TEST_CASE("Simple calculator test", "[general]")
 {
-    auto syntax =
-        " Additive  <- Multitive '+' Additive / Multitive "
-        " Multitive <- Primary '*' Multitive / Primary "
-        " Primary   <- '(' Additive ')' / Number "
-        " Number    <- [0-9]+ ";
+    auto syntax = R"(
+        Additive  <- Multitive '+' Additive / Multitive
+        Multitive <- Primary '*' Multitive / Primary
+        Primary   <- '(' Additive ')' / Number
+        Number    <- [0-9]+
+    )";
 
     parser parser(syntax);
 
@@ -509,15 +511,15 @@ TEST_CASE("Calculator test", "[general]")
 TEST_CASE("Calculator test2", "[general]")
 {
     // Parse syntax
-    auto syntax =
-        "  # Grammar for Calculator...\n                          "
-        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
-        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-        "  TERM_OPERATOR    <-  [-+]                              "
-        "  FACTOR_OPERATOR  <-  [/*]                              "
-        "  NUMBER           <-  [0-9]+                            "
-        ;
+    auto syntax = R"(
+        # Grammar for Calculator...
+        EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' EXPRESSION ')'
+        TERM_OPERATOR    <-  [-+]
+        FACTOR_OPERATOR  <-  [/*]
+        NUMBER           <-  [0-9]+
+    )";
 
     string start;
     auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr);
@@ -555,15 +557,15 @@ TEST_CASE("Calculator test2", "[general]")
 TEST_CASE("Calculator test3", "[general]")
 {
     // Parse syntax
-    parser parser(
-        "  # Grammar for Calculator...\n                          "
-        "  EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*        "
-        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' EXPRESSION ')'       "
-        "  TERM_OPERATOR    <-  [-+]                              "
-        "  FACTOR_OPERATOR  <-  [/*]                              "
-        "  NUMBER           <-  [0-9]+                            "
-        );
+    parser parser(R"(
+        # Grammar for Calculator...
+        EXPRESSION       <-  TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' EXPRESSION ')'
+        TERM_OPERATOR    <-  [-+]
+        FACTOR_OPERATOR  <-  [/*]
+        NUMBER           <-  [0-9]+
+    )");
 
     auto reduce = [](const SemanticValues& sv) -> long {
         long ret = sv[0].get<long>();
@@ -596,15 +598,15 @@ TEST_CASE("Calculator test3", "[general]")
 
 TEST_CASE("Calculator test with AST", "[general]")
 {
-    parser parser(
-        "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
-        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
-        "  TERM_OPERATOR    <-  < [-+] > _                        "
-        "  FACTOR_OPERATOR  <-  < [/*] > _                        "
-        "  NUMBER           <-  < [0-9]+ > _                      "
-        "  ~_               <-  [ \t\r\n]*                        "
-        );
+    parser parser(R"(
+        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
+        TERM_OPERATOR    <-  < [-+] > _
+        FACTOR_OPERATOR  <-  < [/*] > _
+        NUMBER           <-  < [0-9]+ > _
+        ~_               <-  [ \t\r\n]*
+    )");
 
     parser.enable_ast();
 
@@ -639,12 +641,12 @@ TEST_CASE("Calculator test with AST", "[general]")
 
 TEST_CASE("Ignore semantic value test", "[general]")
 {
-    parser parser(
-       " START <-  ~HELLO WORLD "
-       " HELLO <- 'Hello' _     "
-       " WORLD <- 'World' _     "
-       " _     <- [ \t\r\n]*    "
-    );
+    parser parser(R"(
+       START <-  ~HELLO WORLD
+       HELLO <- 'Hello' _
+       WORLD <- 'World' _
+       _     <- [ \t\r\n]*
+    )");
 
     parser.enable_ast();
 
@@ -658,13 +660,13 @@ TEST_CASE("Ignore semantic value test", "[general]")
 
 TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
 {
-    parser parser(
-       " START       <- _ !DUMMY HELLO_WORLD '.' "
-       " HELLO_WORLD <- HELLO 'World' _          "
-       " HELLO       <- 'Hello' _                "
-       " DUMMY       <- 'dummy' _                "
-       " ~_          <- [ \t\r\n]*               "
-    );
+    parser parser(R"(
+       START       <- _ !DUMMY HELLO_WORLD '.'
+       HELLO_WORLD <- HELLO 'World' _
+       HELLO       <- 'Hello' _
+       DUMMY       <- 'dummy' _
+       ~_          <- [ \t\r\n]*
+   )");
 
     parser.enable_ast();
 
@@ -678,12 +680,12 @@ TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
 
 TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
 {
-    parser parser(
-       " START       <- _ &HELLO HELLO_WORLD '.' "
-       " HELLO_WORLD <- HELLO 'World' _          "
-       " HELLO       <- 'Hello' _                "
-       " ~_          <- [ \t\r\n]*               "
-    );
+    parser parser(R"(
+       START       <- _ &HELLO HELLO_WORLD '.'
+       HELLO_WORLD <- HELLO 'World' _
+       HELLO       <- 'Hello' _
+       ~_          <- [ \t\r\n]*
+    )");
 
     parser.enable_ast();
 
@@ -749,19 +751,19 @@ TEST_CASE("Literal token on AST test3", "[general]")
 
 TEST_CASE("Missing missing definitions test", "[general]")
 {
-    parser parser(
-        " A <- B C "
-    );
+    parser parser(R"(
+        A <- B C
+    )");
 
     REQUIRE(!parser);
 }
 
 TEST_CASE("Definition duplicates test", "[general]")
 {
-    parser parser(
-        " A <- ''"
-        " A <- ''"
-    );
+    parser parser(R"(
+        A <- ''
+        A <- ''
+    )");
 
     REQUIRE(!parser);
 }
@@ -1030,29 +1032,29 @@ TEST_CASE("Backreference with Option test", "[backreference]")
 
 TEST_CASE("Left recursive test", "[left recursive]")
 {
-    parser parser(
-        " A <- A 'a'"
-        " B <- A 'a'"
-    );
+    parser parser(R"(
+        A <- A 'a'
+        B <- A 'a'
+    )");
 
     REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive with option test", "[left recursive]")
 {
-    parser parser(
-        " A  <- 'a' / 'b'? B 'c' "
-        " B  <- A                "
-    );
+    parser parser(R"(
+        A  <- 'a' / 'b'? B 'c'
+        B  <- A
+    )");
 
     REQUIRE(!parser);
 }
 
 TEST_CASE("Left recursive with zom test", "[left recursive]")
 {
-    parser parser(
-        " A <- 'a'* A* "
-    );
+    parser parser(R"(
+        A <- 'a'* A*
+    )");
 
     REQUIRE(!parser);
 }
