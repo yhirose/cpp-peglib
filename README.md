@@ -13,8 +13,6 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)
-  * `$name<` ... `>` (Named capture operator)
-  * `$name` (Backreference operator)
   * `%whitespace` (Automatic whitespace skipping)
   * `%word` (Word expression)
   * `$name(` ... `)` (Capture scope operator)
