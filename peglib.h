@@ -1674,6 +1674,33 @@ struct AssignIDToDefinition : public Ope::Visitor
     std::unordered_map<void*, size_t> ids;
 };
 
+struct IsLiteralToken : public Ope::Visitor
+{
+    IsLiteralToken() : result_(false) {}
+
+    void visit(PrioritizedChoice& ope) override {
+        for (auto op: ope.opes_) {
+            if (!IsLiteralToken::check(*op)) {
+                return;
+            }
+        }
+        result_ = true;
+    }
+
+    void visit(LiteralString& /*ope*/) override {
+        result_ = true;
+    }
+
+    static bool check(Ope& ope) {
+        IsLiteralToken vis;
+        ope.accept(vis);
+        return vis.result_;
+    }
+
+private:
+    bool result_;
+};
+
 struct TokenChecker : public Ope::Visitor
 {
     TokenChecker() : has_token_boundary_(false), has_rule_(false) {}
@@ -1700,6 +1727,10 @@ struct TokenChecker : public Ope::Visitor
     void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
 
     static bool is_token(Ope& ope) {
+        if (IsLiteralToken::check(ope)) {
+            return true;
+        }
+
         TokenChecker vis;
         ope.accept(vis);
         return vis.has_token_boundary_ || !vis.has_rule_;
@@ -1884,20 +1915,20 @@ private:
 
 struct IsPrioritizedChoice : public Ope::Visitor
 {
-    IsPrioritizedChoice() : is_prioritized_choice_(false) {}
+    IsPrioritizedChoice() : result_(false) {}
 
     void visit(PrioritizedChoice& /*ope*/) override {
-        is_prioritized_choice_ = true;
+        result_ = true;
     }
 
-    static bool is_prioritized_choice(Ope& ope) {
+    static bool check(Ope& ope) {
         IsPrioritizedChoice vis;
         ope.accept(vis);
-        return vis.is_prioritized_choice_;
+        return vis.result_;
     }
 
 private:
-    bool is_prioritized_choice_;
+    bool result_;
 };
 
 /*
@@ -2218,7 +2249,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             chldsv.n_ = len;
             chldsv.name_ = outer_->name;
 
-            if (!IsPrioritizedChoice::is_prioritized_choice(*ope_)) {
+            if (!IsPrioritizedChoice::check(*ope_)) {
                 chldsv.choice_count_ = 0;
                 chldsv.choice_ = 0;
             }
@@ -2885,6 +2916,14 @@ private:
 
         // Automatic whitespace skipping
         if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
+            for (auto& x: grammar) {
+                auto& rule = x.second;
+                auto ope = rule.get_core_operator();
+                if (IsLiteralToken::check(*ope)) {
+                    rule <= tok(ope);
+                }
+            }
+
             auto& rule = (*data.grammar)[start];
             rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
         }

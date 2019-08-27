@@ -155,15 +155,15 @@ TEST_CASE("Visit test", "[general]")
 
 TEST_CASE("Token check test", "[general]")
 {
-    parser parser(
-        "  EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*      "
-        "  TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*  "
-        "  FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _   "
-        "  TERM_OPERATOR    <-  < [-+] > _                        "
-        "  FACTOR_OPERATOR  <-  < [/*] > _                        "
-        "  NUMBER           <-  < [0-9]+ > _                      "
-        "  _               <-  [ \t\r\n]*                        "
-        );
+    parser parser(R"(
+        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
+        TERM_OPERATOR    <-  < [-+] > _
+        FACTOR_OPERATOR  <-  < [/*] > _
+        NUMBER           <-  < [0-9]+ > _
+        _                <-  [ \t\r\n]*
+    )");
 
     REQUIRE(parser["EXPRESSION"].is_token() == false);
     REQUIRE(parser["FACTOR"].is_token() == false);
@@ -292,6 +292,31 @@ TEST_CASE("WHITESPACE test3", "[general]") {
     };
 
     auto ret = parser.parse(R"( "  aaa \" bbb  " )");
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("WHITESPACE test4", "[general]") {
+    peg::parser parser(R"(
+        ROOT         <-  HELLO OPE WORLD
+        HELLO        <-  'hello'
+        OPE          <-  < [-+] >
+        WORLD        <-  'world' / 'WORLD'
+        %whitespace  <-  [ \t\r\n]*
+    )");
+
+    parser["HELLO"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == "hello");
+    };
+
+    parser["OPE"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == "+");
+    };
+
+    parser["WORLD"] = [](const SemanticValues& sv) {
+        REQUIRE(sv.token() == "world");
+    };
+
+    auto ret = parser.parse("  hello + world  ");
     REQUIRE(ret == true);
 }
 
