@@ -9,6 +9,7 @@
 #define CPPPEGLIB_PEGLIB_H
 
 #include <algorithm>
+#include <cctype>
 #include <cassert>
 #include <cstring>
 #include <functional>
