@@ -433,6 +433,23 @@ inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
 }
 
 /*
+* String tag
+*/
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
+inline constexpr unsigned int str2tag(const char* str, int h = 0) {
+    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ static_cast<unsigned char>(str[h]);
+}
+
+namespace udl {
+
+inline constexpr unsigned int operator "" _(const char* s, size_t) {
+    return str2tag(s);
+}
+
+}
+#endif
+
+/*
 * Semantic values
 */
 struct SemanticValues : protected std::vector<any>
@@ -451,6 +468,10 @@ struct SemanticValues : protected std::vector<any>
 
     // Definition name
     const std::string& name() const { return name_; }
+
+#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
+    std::vector<unsigned int> tags;
+#endif
 
     // Line number and column at which the matched string is
     std::pair<size_t, size_t> line_info() const {
@@ -860,6 +881,7 @@ public:
         auto& sv = *value_stack[value_stack_size++];
         if (!sv.empty()) {
             sv.clear();
+            sv.tags.clear();
         }
         sv.reset();
         sv.path = path;
@@ -961,6 +983,7 @@ public:
             i += len;
         }
         sv.insert(sv.end(), chldsv.begin(), chldsv.end());
+        sv.tags.insert(sv.tags.end(), chldsv.tags.begin(), chldsv.tags.end());
         sv.s_ = chldsv.c_str();
         sv.n_ = chldsv.length();
         sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
@@ -1010,6 +1033,7 @@ public:
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (success(len)) {
                 sv.insert(sv.end(), chldsv.begin(), chldsv.end());
+                sv.tags.insert(sv.tags.end(), chldsv.tags.begin(), chldsv.tags.end());
                 sv.s_ = chldsv.c_str();
                 sv.n_ = chldsv.length();
                 sv.choice_count_ = opes_.size();
@@ -1056,6 +1080,7 @@ public:
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+                    sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
@@ -1114,6 +1139,7 @@ public:
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+                    sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
                 }
                 if (sv.tokens.size() != save_tok_size) {
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
@@ -1155,6 +1181,7 @@ public:
         } else {
             if (sv.size() != save_sv_size) {
                 sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+                sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
             }
             if (sv.tokens.size() != save_tok_size) {
                 sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
@@ -2278,6 +2305,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     if (success(len)) {
         if (!outer_->ignoreSemanticValue) {
             sv.emplace_back(val);
+            sv.tags.emplace_back(str2tag(outer_->name.c_str()));
         }
     } else {
         if (outer_->error_message) {
@@ -2956,20 +2984,6 @@ private:
 /*-----------------------------------------------------------------------------
  *  AST
  *---------------------------------------------------------------------------*/
-
-const int AstDefaultTag = -1;
-
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
-inline constexpr unsigned int str2tag(const char* str, int h = 0) {
-    return !str[h] ? 5381 : (str2tag(str, h + 1) * 33) ^ static_cast<unsigned char>(str[h]);
-}
-
-namespace udl {
-inline constexpr unsigned int operator "" _(const char* s, size_t) {
-    return str2tag(s);
-}
-}
-#endif
 
 template <typename Annotation>
 struct AstBase : public Annotation
