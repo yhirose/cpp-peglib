@@ -106,13 +106,12 @@ TEST_CASE("String capture test2", "[general]")
 
 TEST_CASE("String capture test3", "[general]")
 {
-    auto syntax =
-        " ROOT  <- _ TOKEN*                "
-        " TOKEN <- '[' < (!']' .)+ > ']' _ "
-        " _     <- [ \t\r\n]*              "
-        ;
+    parser pg(R"(
+        ROOT  <- _ TOKEN*
+        TOKEN <- '[' < (!']' .)+ > ']' _
+        _     <- [ \t\r\n]*
+    )");
 
-    parser pg(syntax);
 
     std::vector<std::string> tags;
 
@@ -450,14 +449,12 @@ TEST_CASE("mutable lambda test", "[general]")
 
 TEST_CASE("Simple calculator test", "[general]")
 {
-    auto syntax = R"(
+    parser parser(R"(
         Additive  <- Multitive '+' Additive / Multitive
         Multitive <- Primary '*' Multitive / Primary
         Primary   <- '(' Additive ')' / Number
         Number    <- [0-9]+
-    )";
-
-    parser parser(syntax);
+    )");
 
     parser["Additive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
@@ -816,9 +813,9 @@ TEST_CASE("Semantic values test", "[general]")
 
 TEST_CASE("Ordered choice count", "[general]")
 {
-    auto syntax = R"(S <- 'a' / 'b')";
-
-    parser parser(syntax);
+    parser parser(R"(
+        S <- 'a' / 'b'
+    )");
 
     parser["S"] = [](const SemanticValues& sv) {
         REQUIRE(sv.choice() == 1);
@@ -830,9 +827,9 @@ TEST_CASE("Ordered choice count", "[general]")
 
 TEST_CASE("Ordered choice count 2", "[general]")
 {
-    auto syntax = R"(S <- ('a' / 'b')*)";
-
-    parser parser(syntax);
+    parser parser(R"(
+        S <- ('a' / 'b')*
+    )");
 
     parser["S"] = [](const SemanticValues& sv) {
         REQUIRE(sv.choice() == 0);
