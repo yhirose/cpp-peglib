@@ -170,7 +170,7 @@ auto ret = pg.parse(" token1, token2 ");
 We can ignore unnecessary semantic values from the list by using `~` operator.
 
 ```cpp
-peg::pegparser parser(R"(
+peg::parser parser(R"(
     ROOT  <-  _ ITEM (',' _ ITEM _)*
     ITEM  <-  ([a-z])+
     ~_    <-  [ \t]*
@@ -186,7 +186,7 @@ auto ret = parser.parse(" item1, item2 ");
 The following grammar is same as the above.
 
 ```cpp
-peg::pegparser parser(R"(
+peg::parser parser(R"(
     ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*
     ITEM  <-  ([a-z])+
     _     <-  [ \t]*
