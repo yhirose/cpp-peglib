@@ -44,7 +44,7 @@ TEST_CASE("Action taking non const Semantic Values parameter", "[general]")
     )");
 
     parser["ROOT"] = [&](peg::SemanticValues& sv) {
-        auto& s = sv[0].get<std::string>();
+        auto s = peg::any_cast<std::string>(sv[0]);
         s[0] = 'H'; // mutate
         return std::string(std::move(s)); // move
     };
@@ -83,11 +83,10 @@ TEST_CASE("String capture test", "[general]")
 }
 
 using namespace peg;
-using namespace std;
 
 TEST_CASE("String capture test2", "[general]")
 {
-    vector<string> tags;
+    std::vector<std::string> tags;
 
     Definition ROOT, TAG, TAG_NAME, WS;
     ROOT     <= seq(WS, zom(TAG));
@@ -178,7 +177,7 @@ TEST_CASE("Lambda action test", "[general]")
        CHAR  <- .
     )");
 
-    string ss;
+    std::string ss;
     parser["CHAR"] = [&](const SemanticValues& sv) {
         ss += *sv.c_str();
     };
@@ -198,18 +197,18 @@ TEST_CASE("enter/leave handlers test", "[general]")
     )");
 
     parser["LTOKEN"].enter = [&](const char*, size_t, any& dt) {
-        auto& require_upper_case = *dt.get<bool*>();
+        auto& require_upper_case = *any_cast<bool*>(dt);
         require_upper_case = false;
     };
     parser["LTOKEN"].leave = [&](const char*, size_t, size_t, any&, any& dt) {
-        auto& require_upper_case = *dt.get<bool*>();
+        auto& require_upper_case = *any_cast<bool*>(dt);
         require_upper_case = true;
     };
 
     auto message = "should be upper case string...";
 
     parser["TOKEN"] = [&](const SemanticValues& sv, any& dt) {
-        auto& require_upper_case = *dt.get<bool*>();
+        auto& require_upper_case = *any_cast<bool*>(dt);
         if (require_upper_case) {
             const auto& s = sv.str();
             if (!std::all_of(s.begin(), s.end(), ::isupper)) {
@@ -225,7 +224,7 @@ TEST_CASE("enter/leave handlers test", "[general]")
     REQUIRE(parser.parse("hello=WORLD", dt) == true);
     REQUIRE(parser.parse("HELLO=WORLD", dt) == true);
 
-    parser.log = [&](size_t ln, size_t col, const string& msg) {
+    parser.log = [&](size_t ln, size_t col, const std::string& msg) {
         REQUIRE(ln == 1);
         REQUIRE(col == 7);
         REQUIRE(msg == message);
@@ -264,7 +263,7 @@ TEST_CASE("WHITESPACE test2", "[general]")
         TAB          <-  '\t'
     )");
 
-    vector<string> items;
+    std::vector<std::string> items;
     parser["ITEM"] = [&](const SemanticValues& sv) {
         items.push_back(sv.token());
     };
@@ -398,7 +397,7 @@ TEST_CASE("Backtracking with AST", "[general]")
     )");
 
     parser.enable_ast();
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     bool ret = parser.parse("ba", ast);
     REQUIRE(ret == true);
     REQUIRE(ast->nodes.size() == 2);
@@ -437,7 +436,7 @@ TEST_CASE("Ignore case test", "[general]") {
 
 TEST_CASE("mutable lambda test", "[general]")
 {
-    vector<string> vec;
+    std::vector<std::string> vec;
 
     parser pg("ROOT <- 'mutable lambda test'");
 
@@ -459,18 +458,18 @@ TEST_CASE("Simple calculator test", "[general]")
     parser["Additive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:
-            return sv[0].get<int>() + sv[1].get<int>();
+            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
         default:
-            return sv[0].get<int>();
+            return any_cast<int>(sv[0]);
         }
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:
-            return sv[0].get<int>() * sv[1].get<int>();
+            return any_cast<int>(sv[0]) * any_cast<int>(sv[1]);
         default:
-            return sv[0].get<int>();
+            return any_cast<int>(sv[0]);
         }
     };
 
@@ -498,10 +497,10 @@ TEST_CASE("Calculator test", "[general]")
 
     // Setup actions
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].get<long>();
+        long ret = any_cast<long>(sv[0]);
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].get<long>();
-            switch (sv[i].get<char>()) {
+            auto num = any_cast<long>(sv[i + 1]);
+            switch (any_cast<char>(sv[i])) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -538,16 +537,16 @@ TEST_CASE("Calculator test2", "[general]")
         NUMBER           <-  [0-9]+
     )";
 
-    string start;
+    std::string start;
     auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr);
     auto& g = *grammar;
 
     // Setup actions
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].get<long>();
+        long ret = any_cast<long>(sv[0]);
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].get<long>();
-            switch (sv[i].get<char>()) {
+            auto num = any_cast<long>(sv[i + 1]);
+            switch (any_cast<char>(sv[i])) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -585,10 +584,10 @@ TEST_CASE("Calculator test3", "[general]")
     )");
 
     auto reduce = [](const SemanticValues& sv) -> long {
-        long ret = sv[0].get<long>();
+        long ret = any_cast<long>(sv[0]);
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].get<long>();
-            switch (sv[i].get<char>()) {
+            auto num = any_cast<long>(sv[i + 1]);
+            switch (any_cast<char>(sv[i])) {
                 case '+': ret += num; break;
                 case '-': ret -= num; break;
                 case '*': ret *= num; break;
@@ -627,7 +626,7 @@ TEST_CASE("Calculator test with AST", "[general]")
 
     parser.enable_ast();
 
-    function<long (const Ast&)> eval = [&](const Ast& ast) {
+    std::function<long (const Ast&)> eval = [&](const Ast& ast) {
         if (ast.name == "NUMBER") {
             return stol(ast.token);
         } else {
@@ -647,7 +646,7 @@ TEST_CASE("Calculator test with AST", "[general]")
         }
     };
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse("1+2*3*(4-5+6)/7-8", ast);
     ast = peg::AstOptimizer(true).optimize(ast);
     auto val = eval(*ast);
@@ -667,7 +666,7 @@ TEST_CASE("Ignore semantic value test", "[general]")
 
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World", ast);
 
     REQUIRE(ret == true);
@@ -687,7 +686,7 @@ TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]")
 
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World.", ast);
 
     REQUIRE(ret == true);
@@ -706,7 +705,7 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]")
 
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse("Hello World.", ast);
 
     REQUIRE(ret == true);
@@ -721,7 +720,7 @@ TEST_CASE("Literal token on AST test1", "[general]")
     )");
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse(R"("a\tb")", ast);
 
     REQUIRE(ret == true);
@@ -739,7 +738,7 @@ TEST_CASE("Literal token on AST test2", "[general]")
     )");
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse(R"("a\tb")", ast);
 
     REQUIRE(ret == true);
@@ -757,7 +756,7 @@ TEST_CASE("Literal token on AST test3", "[general]")
     )");
     parser.enable_ast();
 
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     auto ret = parser.parse(R"("a\tb")", ast);
 
     REQUIRE(ret == true);
@@ -798,12 +797,12 @@ TEST_CASE("Semantic values test", "[general]")
 	for (const auto& rule: parser.get_rule_names()){
 		parser[rule.c_str()] = [rule](const SemanticValues& sv, any&) {
             if (rule == "term") {
-                REQUIRE(sv[0].get<string>() == "a at 0");
-                REQUIRE(sv[1].get<string>() == "b at 1");
-                REQUIRE(sv[2].get<string>() == "c at 2");
-                return string();
+                REQUIRE(any_cast<std::string>(sv[0]) == "a at 0");
+                REQUIRE(any_cast<std::string>(sv[1]) == "b at 1");
+                REQUIRE(any_cast<std::string>(sv[2]) == "c at 2");
+                return std::string();
             } else {
-                return rule + " at " + to_string(sv.c_str() - sv.ss);
+                return rule + " at " + std::to_string(sv.c_str() - sv.ss);
             }
 		};
 	}
@@ -1149,7 +1148,7 @@ TEST_CASE("User defined rule test", "[user rule]")
     {
         {
             "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
-                static vector<string> names = { "PEG", "BNF" };
+                static std::vector<std::string> names = { "PEG", "BNF" };
                 for (const auto& name: names) {
                     if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
                         return name.size();
@@ -1336,10 +1335,10 @@ TEST_CASE("Macro calculator", "[macro]")
 
 	// Setup actions
     auto reduce = [](const SemanticValues& sv) -> long {
-        auto result = sv[0].get<long>();
+        auto result = any_cast<long>(sv[0]);
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].get<long>();
-            auto ope = sv[i].get<char>();
+            auto num = any_cast<long>(sv[i + 1]);
+            auto ope = any_cast<char>(sv[i]);
             switch (ope) {
                 case '+': result += num; break;
                 case '-': result -= num; break;
@@ -1462,7 +1461,7 @@ TEST_CASE("Line information test", "[line information]")
         ~_   <- [ \t\r\n]+
     )");
 
-    std::vector<std::pair<int, int>> locations;
+    std::vector<std::pair<size_t, size_t>> locations;
     parser["WORD"] = [&](const peg::SemanticValues& sv) {
         locations.push_back(sv.line_info());
     };
@@ -1473,13 +1472,13 @@ TEST_CASE("Line information test", "[line information]")
     ret = parser.parse(" Mon Tue Wed \nThu  Fri  Sat\nSun\n");
     REQUIRE(ret == true);
 
-    REQUIRE(locations[0] == std::make_pair(1, 2));
-    REQUIRE(locations[1] == std::make_pair(1, 6));
-    REQUIRE(locations[2] == std::make_pair(1, 10));
-    REQUIRE(locations[3] == std::make_pair(2, 1));
-    REQUIRE(locations[4] == std::make_pair(2, 6));
-    REQUIRE(locations[5] == std::make_pair(2, 11));
-    REQUIRE(locations[6] == std::make_pair(3, 1));
+    REQUIRE(locations[0] == std::make_pair<size_t, size_t>(1, 2));
+    REQUIRE(locations[1] == std::make_pair<size_t, size_t>(1, 6));
+    REQUIRE(locations[2] == std::make_pair<size_t, size_t>(1, 10));
+    REQUIRE(locations[3] == std::make_pair<size_t, size_t>(2, 1));
+    REQUIRE(locations[4] == std::make_pair<size_t, size_t>(2, 6));
+    REQUIRE(locations[5] == std::make_pair<size_t, size_t>(2, 11));
+    REQUIRE(locations[6] == std::make_pair<size_t, size_t>(3, 1));
 }
 
 bool exact(Grammar& g, const char* d, const char* s) {

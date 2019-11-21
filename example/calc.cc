@@ -10,20 +10,19 @@
 #include <cstdlib>
 
 using namespace peg;
-using namespace std;
 
 int main(int argc, const char** argv)
 {
-    if (argc < 2 || string("--help") == argv[1]) {
-        cout << "usage: calc [formula]" << endl;
+    if (argc < 2 || std::string("--help") == argv[1]) {
+        std::cout << "usage: calc [formula]" << std::endl;
         return 1;
     }
 
     auto reduce = [](const SemanticValues& sv) -> long {
-        auto result = sv[0].get<long>();
+        auto result = any_cast<long>(sv[0]);
         for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = sv[i + 1].get<long>();
-            auto ope = sv[i].get<char>();
+            auto num = any_cast<long>(sv[i + 1]);
+            auto ope = any_cast<char>(sv[i]);
             switch (ope) {
                 case '+': result += num; break;
                 case '-': result -= num; break;
@@ -53,11 +52,11 @@ int main(int argc, const char** argv)
     auto expr = argv[1];
     long val = 0;
     if (parser.parse(expr, val)) {
-        cout << expr << " = " << val << endl;
+        std::cout << expr << " = " << val << std::endl;
         return 0;
     }
 
-    cout << "syntax error..." << endl;
+    std::cout << "syntax error..." << std::endl;
 
     return -1;
 }

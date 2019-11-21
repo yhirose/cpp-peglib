@@ -10,16 +10,15 @@
 #include <cstdlib>
 
 using namespace peg;
-using namespace std;
 
 int main(int argc, const char** argv)
 {
-    if (argc < 2 || string("--help") == argv[1]) {
-        cout << "usage: calc3 [formula]" << endl;
+    if (argc < 2 || std::string("--help") == argv[1]) {
+        std::cout << "usage: calc3 [formula]" << std::endl;
         return 1;
     }
 
-    function<long (const Ast&)> eval = [&](const Ast& ast) {
+    std::function<long (const Ast&)> eval = [&](const Ast& ast) {
         if (ast.name == "NUMBER") {
             return stol(ast.token);
         } else {
@@ -54,15 +53,15 @@ int main(int argc, const char** argv)
     parser.enable_ast();
 
     auto expr = argv[1];
-    shared_ptr<Ast> ast;
+    std::shared_ptr<Ast> ast;
     if (parser.parse(expr, ast)) {
         ast = AstOptimizer(true).optimize(ast);
-        cout << ast_to_s(ast);
-        cout << expr << " = " << eval(*ast) << endl;
+        std::cout << ast_to_s(ast);
+        std::cout << expr << " = " << eval(*ast) << std::endl;
         return 0;
     }
 
-    cout << "syntax error..." << endl;
+    std::cout << "syntax error..." << std::endl;
 
     return -1;
 }
