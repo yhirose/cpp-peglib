@@ -1,37 +1,26 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1.0)
+project("cpp-peglib")
 
-# Check if a supported compiler is used and add c++11 flag:
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9)
-    message(FATAL_ERROR "Need at least gcc 4.9 to compile.")
-  endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-elseif(MSVC)
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19)
-    message(FATAL_ERROR "Visual Studio 2015 or newer is required.")
-  endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0)
-    message(FATAL_ERROR "Need at least AppleClang 7.0 to compile.")
-  endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.4)
-    message(FATAL_ERROR "Clang below version 3.4 will most likely not work. Please upgrade your compiler.")
-  endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-else() # no GNU, no MSVC, no Clang
-  message(WARNING "You are using an unsupported compiler. Compilation has only been tested with MSVC, GCC and Clang.")
-
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag(-std=c++11 HAS_CXX11_FLAG)
-  if(HAS_CXX11_FLAG)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-  else()
-    message(FATAL_ERROR "Your compiler doesn't support the '-std=c++11' flag.")
+# Check if a supported compiler is used to setup the C++ standard to use:
+get_property(known_features GLOBAL PROPERTY CMAKE_CXX_KNOWN_FEATURES)
+list(FIND known_features "cxx_std_17" found)
+if(NOT ${found} EQUAL -1)
+  # C++17 standard is supported
+  set(CMAKE_CXX_STANDARD 17)
+else()
+  # Check for C++11 standard support
+  list(FIND known_features "cxx_std_11" found)
+  if(NOT ${found} EQUAL -1)
+    # C++11 standard is supported
+    set(CMAKE_CXX_STANDARD 11)
   endif()
 endif()
 
+if(${found} EQUAL -1)
+  message(FATAL_ERROR "Your compiler is not supported.")
+endif()
+
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
     OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")

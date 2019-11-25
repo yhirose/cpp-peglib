@@ -110,7 +110,14 @@ There are four semantic actions available:
 
 `any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
 
-`peg::any` is a simpler implementatin of [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). It can wrap arbitrary data type.
+`peg::any` is a simpler implementatin of [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). It can wrap arbitrary data type.  
+If the compiler in use supports C++17, by default `peg::any` is defined as an alias to `std::any`.  
+To force using the simpler `any` implementation that comes with `cpp-peglib`, define `PEGLIB_USE_STD_ANY` as 0 before including `peglib.h`:  
+```cpp
+#define PEGLIB_USE_STD_ANY 0
+#include <peglib.h>
+[...]
+```
 
 A semantic action can return a value of arbitrary data type, which will be wrapped by `peg::any`. If a user returns nothing in a semantic action, the first semantic value in the `const SemanticValues& sv` argument will be returned. (Yacc parser has the same behavior.)
 
