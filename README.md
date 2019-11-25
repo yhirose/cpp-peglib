@@ -63,18 +63,18 @@ int main(void) {
     parser["Additive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:  // "Multitive '+' Additive"
-            return sv[0].get<int>() + sv[1].get<int>();
+            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
         default: // "Multitive"
-            return sv[0].get<int>();
+            return any_cast<int>(sv[0]);
         }
     };
 
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:  // "Primary '*' Multitive"
-            return sv[0].get<int>() * sv[1].get<int>();
+            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
         default: // "Primary"
-            return sv[0].get<int>();
+            return any_cast<int>(sv[0]);
         }
     };
 
@@ -110,9 +110,9 @@ There are four semantic actions available:
 
 `any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
 
-`peg::any` is a simpler implementatin of [boost::any](http://www.boost.org/doc/libs/1_57_0/doc/html/any.html). It can wrap arbitrary data type.  
-If the compiler in use supports C++17, by default `peg::any` is defined as an alias to `std::any`.  
-To force using the simpler `any` implementation that comes with `cpp-peglib`, define `PEGLIB_USE_STD_ANY` as 0 before including `peglib.h`:  
+`peg::any` is a simpler implementatin of std::any. If the compiler in use supports C++17, by default `peg::any` is defined as an alias to `std::any`.
+
+To force using the simpler `any` implementation that comes with `cpp-peglib`, define `PEGLIB_USE_STD_ANY` as 0 before including `peglib.h`:
 ```cpp
 #define PEGLIB_USE_STD_ANY 0
 #include <peglib.h>
