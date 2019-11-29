@@ -1453,6 +1453,18 @@ TEST_CASE("Macro token check test", "[macro]")
     REQUIRE(parser["T"].is_token() == true);
 }
 
+TEST_CASE("Macro rule-parameter collision", "[macro]")
+{
+    parser parser(R"(
+        A    <- B(C)
+        B(D) <- D
+        C    <- 'c'
+        D    <- 'd'
+	)");
+
+    REQUIRE(parser.parse("c"));
+}
+
 TEST_CASE("Line information test", "[line information]")
 {
     parser parser(R"(
