@@ -72,7 +72,7 @@ int main(void) {
     parser["Multitive"] = [](const SemanticValues& sv) {
         switch (sv.choice()) {
         case 0:  // "Primary '*' Multitive"
-            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
+            return any_cast<int>(sv[0]) * any_cast<int>(sv[1]);
         default: // "Primary"
             return any_cast<int>(sv[0]);
         }
