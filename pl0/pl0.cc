@@ -15,6 +15,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/IR/Verifier.h"
+#include <llvm/IR/LLVMContext.h>
 #include "llvm/Support/TargetSelect.h"
 
 using namespace peg;
@@ -25,7 +26,7 @@ using namespace std;
 /*
  * PEG Grammar
  */
-auto grammar = R"(
+static auto grammar = R"(
   program    <- _ block '.' _
 
   block      <- const var procedure statement
@@ -84,9 +85,9 @@ struct Annotation {
 
 typedef AstBase<Annotation> AstPL0;
 shared_ptr<SymbolScope> get_closest_scope(shared_ptr<AstPL0> ast) {
-  ast = ast->parent;
+  ast = ast->parent.lock();
   while (ast->tag != "block"_) {
-    ast = ast->parent;
+    ast = ast->parent.lock();
   }
   return ast->scope;
 }
@@ -134,6 +135,7 @@ struct SymbolScope {
   shared_ptr<SymbolScope> outer;
 };
 
+[[noreturn]]
 void throw_runtime_error(const shared_ptr<AstPL0> node, const string& msg) {
   throw runtime_error(
       format_error_message(node->path, node->line, node->column, msg));
@@ -520,8 +522,10 @@ struct Interpreter {
   }
 
   static int eval_number(const shared_ptr<AstPL0> ast,
-                         shared_ptr<Environment> env) {
-    return stol(ast->token);
+                         shared_ptr<Environment> env)
+  {
+    (void)env;
+    return static_cast<int>(stol(ast->token));
   }
 };
 
@@ -529,8 +533,11 @@ struct Interpreter {
  * LLVM
  */
 struct LLVM {
-  LLVM(const shared_ptr<AstPL0> ast) : builder_(context_) {
-    module_ = make_unique<Module>("pl0", context_);
+  LLVM(const shared_ptr<AstPL0> ast) :
+      builder_(context_),
+      module_(std::make_unique<Module>("pl0", context_))
+  {
+    module_ = std::make_unique<Module>("pl0", context_);
     compile(ast);
   }
 
@@ -651,7 +658,7 @@ struct LLVM {
   }
 
   void compile_var(const shared_ptr<AstPL0> ast) {
-    for (const auto node : ast->nodes) {
+    for (const auto &node : ast->nodes) {
       auto ident = node->token;
       builder_.CreateAlloca(builder_.getInt32Ty(), nullptr, ident);
     }
