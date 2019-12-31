@@ -1366,10 +1366,13 @@ public:
         fillfromString(st);
     }
 
-    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) :
-        ranges_(ranges)
+    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges)
     {
         negated = ranges.front().first == '^';
+        auto itSt = ranges.begin();
+        if (negated)
+            ++itSt;
+        ranges_.insert(ranges_.begin(), itSt, ranges.end());
         specialChars();
     }
 
@@ -1387,9 +1390,10 @@ public:
         if (!ranges_.empty()) {
             if (negated) {
                 for (const auto& range: ranges_) {
-                    if (range.first > cp && cp > range.second)
-                        return len;
+                    if (range.first <= cp && cp <= range.second)
+                        goto fail;
                 }
+                return len;
             } else {
                 for (const auto& range: ranges_) {
                     if (range.first <= cp && cp <= range.second)
@@ -1397,7 +1401,7 @@ public:
                 }
             }
         }
-
+fail:
         c.set_error_pos(s);
         return static_cast<size_t>(-1);
     }
