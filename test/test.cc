@@ -1147,14 +1147,15 @@ TEST_CASE("User defined rule test", "[user rule]")
     )",
     {
         {
-            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, any& /*dt*/) -> size_t {
+            "NAME", usr([](const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& /*dt*/) -> size_t {
                 static std::vector<std::string> names = { "PEG", "BNF" };
                 for (const auto& name: names) {
                     if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
                         return name.size();
                     }
                 }
-                return static_cast<size_t>(-1);
+                c.setParseFail();
+                return 0;
             })
         },
         {
