@@ -30,6 +30,7 @@ int main(int argc, const char** argv)
     auto opt_optimize_ast_nodes = false;
     auto opt_help = false;
     auto opt_source = false;
+    auto opt_enable_pakrat = false;
     vector<char> source;
     auto opt_trace = false;
     vector<const char*> path_list;
@@ -51,6 +52,8 @@ int main(int argc, const char** argv)
             }
         } else if (string("--trace") == arg) {
             opt_trace = true;
+        } else if (string("--pakrat") == arg) {
+            opt_enable_pakrat = true;
         } else {
             path_list.push_back(arg);
         }
@@ -72,20 +75,27 @@ int main(int argc, const char** argv)
 
     peg::parser parser;
 
+    if (opt_enable_pakrat) {
+        cout << "Pakrat parsing enabled." << endl;
+        parser.enable_packrat_parsing();
+    }
+
     parser.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
     if (!parser.load_grammar(syntax.data(), syntax.size())) {
+        cerr << "could not load grammar." << std::endl;
         return -1;
     }
 
     if (path_list.size() < 2 && !opt_source) {
+        cout << "No sourcefile or sourcecode given." << std::endl;
         return 0;
     }
 
     // Check source
-    std::string source_path = "[commendline]";
+    std::string source_path = "[commandline]";
     if (path_list.size() >= 2) {
         if (!read_file(path_list[1], source)) {
             cerr << "can't open the code file." << endl;
@@ -135,9 +145,9 @@ int main(int argc, const char** argv)
         std::cout << peg::ast_to_s(ast);
 
     } else {
-	    if (!parser.parse_n(source.data(), source.size())) {
-	        return -1;
-	    }
+        if (!parser.parse_n(source.data(), source.size(), source_path.c_str())) {
+            return -1;
+        }
     }
 
     return 0;

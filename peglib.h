@@ -799,6 +799,7 @@ public:
     const size_t                                 l;
 
     const char*                                  error_pos;
+    const char*                                  max_error_pos;  // stores the furthest pos it has reached yet when error was set
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
@@ -839,6 +840,7 @@ public:
         , s(a_s)
         , l(a_l)
         , error_pos(nullptr)
+        , max_error_pos(nullptr)
         , message_pos(nullptr)
         , value_stack_size(0)
         , nest_level(0)
@@ -938,6 +940,7 @@ public:
 
     void set_error_pos(const char* a_s) {
         if (error_pos < a_s) error_pos = a_s;
+        if (max_error_pos < a_s) max_error_pos = a_s;
     }
 
     void trace(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
@@ -1295,9 +1298,10 @@ public:
 class CharacterClass : public Ope
     , public std::enable_shared_from_this<CharacterClass>
 {
-public:
-    CharacterClass(const std::string& s) {
-        auto chars = decode(s.c_str(), s.length());
+    enum { whsp = 0x0B, wdch = 0x0E, dgch = 0x0F };
+    bool negated;
+    void fillfromString(const std::string &str) {
+        auto chars = decode(str.c_str(), str.length());
         auto i = 0u;
         while (i < chars.size()) {
             if (i + 2 < chars.size() && chars[i + 1] == '-') {
@@ -1305,15 +1309,69 @@ public:
                 auto cp2 = chars[i + 2];
                 ranges_.emplace_back(std::make_pair(cp1, cp2));
                 i += 3;
+            } else if (i+1 < chars.size() && chars[i] == '\\') {
+                // subset of regex shorthands
+                // http://www.javascriptkit.com/javatutors/redev2.shtml
+                ++i;
+                switch (chars[i++]) {
+                case 's': ranges_.emplace_back(std::make_pair(whsp, whsp)); break;
+                case 'w': ranges_.emplace_back(std::make_pair(wdch, wdch)); break;
+                case 'd': ranges_.emplace_back(std::make_pair(dgch, dgch)); break;
+                default:;
+                }
             } else {
-                auto cp = chars[i];
+                auto cp = chars[i++];
                 ranges_.emplace_back(std::make_pair(cp, cp));
-                i += 1;
             }
         }
     }
+    void specialChars() {
+        char32_t prevCh = 0;
+        for (auto &p : ranges_) {
+            if (p.first == p.second && prevCh == '\\') {
+                switch (p.first) {
+                case 's':
+                    // \s matches whitespace (short for [\f\n\r\t\v\u00A0\u2028\u2029]).
+                    p.first = '\f'; p.second = '\f';
+                    ranges_.emplace_back(std::make_pair('\n', '\n'));
+                    ranges_.emplace_back(std::make_pair('\r', '\r'));
+                    ranges_.emplace_back(std::make_pair('\t', '\t'));
+                    ranges_.emplace_back(std::make_pair('\v', '\v'));
+                    ranges_.emplace_back(std::make_pair(0xA0, 0xA0));
+                    ranges_.emplace_back(std::make_pair(0x2028, 0x2028));
+                    ranges_.emplace_back(std::make_pair(0x2029, 0x2029));
+                    break;
+                case 'w':
+                    p.first = '_'; p.second = '_';
+                    ranges_.emplace_back(std::make_pair('a', 'z'));
+                    ranges_.emplace_back(std::make_pair('A', 'Z'));
+                    ranges_.emplace_back(std::make_pair('0', '9'));
+                    break;
+                case 'd': p.first = '0'; p.second = '9'; break;
+                }
+            }
+            prevCh = p.first;
+        }
+    }
+public:
+    CharacterClass(const std::string& str) {
+        // find the char class '[' chrs ']'
+        const char *s = str.c_str(), *e = s + str.length();
+        while((*s <= ' ' || *s == '[') && *(++s) != 0); // find front
+        while((*e <= ' ' || *e == ']') && --e > s); // find back
+        // first char in char class might negate char class
+        negated = *s == '^';
+        if (negated) ++s;
+        std::string st = resolve_escape_sequence(s, static_cast<size_t>(e - s +1));
+        fillfromString(st);
+    }
 
-    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) : ranges_(ranges) {}
+    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) :
+        ranges_(ranges)
+    {
+        negated = ranges.front().first == '^';
+        specialChars();
+    }
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("CharacterClass", s, n, sv, dt);
@@ -1327,9 +1385,15 @@ public:
         auto len = decode_codepoint(s, n, cp);
 
         if (!ranges_.empty()) {
-            for (const auto& range: ranges_) {
-                if (range.first <= cp && cp <= range.second) {
-                    return len;
+            if (negated) {
+                for (const auto& range: ranges_) {
+                    if (range.first > cp && cp > range.second)
+                        return len;
+                }
+            } else {
+                for (const auto& range: ranges_) {
+                    if (range.first <= cp && cp <= range.second)
+                        return len;
                 }
             }
         }
@@ -2171,6 +2235,7 @@ private:
 
         Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
+        cxt.error_pos = cxt.max_error_pos > cxt.error_pos ? cxt.max_error_pos : cxt.error_pos;
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
 
@@ -2525,6 +2590,34 @@ inline void FindReference::visit(Reference& ope) {
 
 typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
+
+void logPrint(const char *s, Log log, const Definition::Result &r, std::string msg) {
+
+    std::pair<size_t, size_t> line;
+
+    const char *cmsg;
+    if (r.message_pos) {
+        msg += r.message;
+        cmsg = r.message_pos;
+    } else
+        cmsg = r.error_pos;
+    line = line_info(s, cmsg);
+
+    // pretty print syntax errors
+    const char *lineStart = cmsg - line.second +1,
+               *lineEnd = lineStart;
+    while (*(lineEnd++) != '\n' && *lineEnd != '\r' && *lineEnd != '\0') {
+        auto len = codepoint_length(lineEnd, 1);
+        if (len > 1) lineEnd += len -1;
+    }
+
+    msg += "\n"; msg.append(lineStart, lineEnd - lineStart);
+    std::string fill;
+    if (line.second > 2) fill.resize(line.second -2, '-');
+    msg += "\n" + fill + "^";
+
+    log(line.first, line.second, msg);
+}
 
 class ParserGenerator
 {
@@ -2881,11 +2974,17 @@ private:
         if (!r.ret) {
             if (log) {
                 if (r.message_pos) {
-                    auto line = line_info(s, r.message_pos);
-                    log(line.first, line.second, r.message);
+                    //auto line = line_info(s, r.message_pos);
+                    logPrint(s, log, r, nullptr);
+                    //log(line.first, line.second, r.message);
                 } else {
-                    auto line = line_info(s, r.error_pos);
-                    log(line.first, line.second, "syntax error");
+//                    const char *lineEnd = r.error_pos;
+//                    while (*(++lineEnd) != '\n' && *lineEnd != '\0');
+//                    auto line = line_info(s, r.error_pos);
+//                    std::string msg("grammar syntax error: '");
+//                    msg.append(r.error_pos, lineEnd - r.error_pos);
+                    logPrint(s, log, r, "grammar syntax error");
+                    //log(line.first, line.second, msg + "'");
                 }
             }
             return nullptr;
@@ -2911,13 +3010,17 @@ private:
 
         // Check duplicated definitions
         bool ret = data.duplicates.empty();
-
-        for (const auto& x: data.duplicates) {
-            if (log) {
-                const auto& name = x.first;
-                auto ptr = x.second;
-                auto line = line_info(s, ptr);
-                log(line.first, line.second, "'" + name + "' is already defined.");
+        if (!ret) {
+            for (const auto& x: data.duplicates) {
+                if (log) {
+                    Definition::Result r;
+                    r.ret = 1; r.error_pos = x.second;
+                    const auto& name = x.first;
+                    //auto ptr = x.second;
+                    //auto line = line_info(s, ptr);
+                    logPrint(s, log, r, "'" + name + "' is already defined.");
+                    //log(line.first, line.second, "'" + name + "' is already defined.");
+                }
             }
         }
 
@@ -2929,10 +3032,13 @@ private:
             rule.accept(vis);
             for (const auto& y: vis.error_s) {
                 const auto& name = y.first;
-                const auto ptr = y.second;
+                //const auto ptr = y.second;
                 if (log) {
-                    auto line = line_info(s, ptr);
-                    log(line.first, line.second, vis.error_message[name]);
+                    Definition::Result r;
+                    r.ret = 1; r.error_pos = y.second;
+                    logPrint(s, log, r, vis.error_message[name]);
+                    //auto line = line_info(s, ptr);
+                    //log(line.first, line.second, vis.error_message[name]);
                 }
                 ret = false;
             }
@@ -2960,10 +3066,13 @@ private:
             rule.accept(vis);
             if (vis.error_s) {
                 if (log) {
-                    auto line = line_info(s, vis.error_s);
-                    log(line.first, line.second, "'" + name + "' is left recursive.");
+                    Definition::Result r;
+                    r.ret = 1; r.error_pos = vis.error_s;
+                    logPrint(s, log, r, "'" + name + " is left recursive.");
+  //                  auto line = line_info(s, vis.error_s);
+  //                  log(line.first, line.second, "'" + name + "' is left recursive.");
                 }
-                ret = false;;
+                ret = false;
             }
         }
 
@@ -3383,15 +3492,18 @@ private:
         if (log) {
             if (!r.ret) {
                 if (r.message_pos) {
-                    auto line = line_info(s, r.message_pos);
-                    log(line.first, line.second, r.message);
+                    logPrint(s, log, r, r.message);
+                    //auto line = line_info(s, r.message_pos);
+                    //log(line.first, line.second, r.message);
                 } else {
-                    auto line = line_info(s, r.error_pos);
-                    log(line.first, line.second, "syntax error");
+                    logPrint(s, log, r, "syntax error");
+                    //auto line = line_info(s, r.error_pos);
+                    //log(line.first, line.second, "syntax error");
                 }
             } else if (r.len != n) {
-                auto line = line_info(s, s + r.len);
-                log(line.first, line.second, "syntax error");
+                logPrint(s, log, r, "syntax error");
+                //auto line = line_info(s, s + r.len);
+                //log(line.first, line.second, "syntax error");
             }
         }
     }
