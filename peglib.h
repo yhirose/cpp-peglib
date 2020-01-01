@@ -440,23 +440,25 @@ std::string printable_escape_chars(char32_t escapeCh) {
     case '\b': return "\\b";
     case '\f': return "\\f";
     case '\v': return "\\v";
-    case 0x00A0: case 0x2028: case 0x2029:
+    case 0x00A0: case 0x2028: case 0x2029: // javascript \s
+    case 0x80:   case 0xFFFF: //lower and upper range defined for peg language (utf8)
         return printAsHex();
     default:
         if (escapeCh < ' ')
             return printAsHex();
-        size_t len = 1;
-        if (escapeCh > 0xFF) ++len;
-        if (escapeCh > 0xFFFF) ++len;
-        if (escapeCh > 0xFFFFFF) ++len;
-        return std::string(reinterpret_cast<char*>(&escapeCh), len);
+        return encode_codepoint(escapeCh);
     }
 }
 
 std::string printable_escape_chars_str(const std::string &str) {
     std::string ret;
-    for(auto ch : str)
+    const char *s = str.c_str();
+    size_t len = str.length();
+    for(size_t i = 0; i < len; ++i) {
+        char32_t ch;
+        i += decode_codepoint(&s[i], len - i, ch);
         ret += printable_escape_chars(ch);
+    }
     return ret;
 }
 
@@ -901,9 +903,9 @@ public:
                 auto pos = static_cast<size_t>(s - c.s);
                 auto backtrack = (pos < prev_pos ? "*" : "");
                 std::string indent;
-                auto level = c.nest_level;
-                while (level--) {
-                    indent += "  ";
+                auto level = 0;
+                while (level++ < c.nest_level) {
+                    indent += level % 2 == 0 ? ". " : "  ";
                 }
                 std::cout
                     << pos << ":" << c.nest_level << backtrack << "\t"
@@ -1174,6 +1176,7 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                c.clearParseFail();
                 break;
             }
             i += len;
@@ -1210,6 +1213,8 @@ public:
                 return 0;
             }
         }
+        // if we reached here we have at least one found
+
         auto save_error_pos = c.error_pos;
         auto i = len;
         while (n - i > 0) {
@@ -1234,6 +1239,7 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                c.clearParseFail(); // we have at least one found before entering loop
                 break;
             }
             i += len;
@@ -1277,6 +1283,7 @@ public:
                 sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
             }
             c.error_pos = save_error_pos;
+            c.clearParseFail();
             return 0;
         }
     }
@@ -1455,7 +1462,18 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         assert(c.parseSuccess());
-        c.trace("CharacterClass", s, n, sv, dt);
+        if (c.tracer) {
+            std::string str = "CharacterClass [";
+            for(auto p : ranges_) {
+                if (p.first == p.second)
+                    str += printable_escape_chars(p.first);
+                else
+                    str += printable_escape_chars(p.first) + "-" +
+                           printable_escape_chars(p.second);
+            }
+            str += "]='" + printable_escape_chars_str(sv.str()) + "'";
+            c.trace(str.c_str(), s, n, sv, dt);
+        }
 
         if (n < 1) {
             c.set_error_pos(s);
@@ -1604,6 +1622,7 @@ public:
         auto& chldsv = c.push();
         auto se = make_scope_exit([&]() {
             c.pop();
+            c.clearParseFail();
         });
         return rule.parse(s, n, chldsv, c, dt);
     }
@@ -1636,6 +1655,7 @@ public:
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         assert(c.parseSuccess());
+        //c.trace("WeakHolder", s, n, sv, dt);
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
@@ -2426,6 +2446,10 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
 
 inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     assert(c.parseSuccess());
+//    if (c.tracer) {
+//        std::string str = "Holder lookup=" + outer_->name;
+//        c.trace(str.c_str(), s, n, sv, dt);
+//    }
     if (!ope_) {
         throw std::logic_error("Uninitialized definition ope was used...");
     }
@@ -2492,12 +2516,24 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             sv.emplace_back(val);
             sv.tags.emplace_back(str2tag(outer_->name.c_str()));
         }
+        if (c.tracer) {
+            std::string str = "*" + outer_->name + " matched*";
+            --c.nest_level;
+            c.trace(str.c_str(), s, n, sv, dt);
+            ++c.nest_level;
+        }
     } else {
         if (outer_->error_message) {
             if (c.message_pos < s) {
                 c.message_pos = s;
                 c.message = outer_->error_message();
             }
+        }
+        if (c.tracer) {
+            std::string str ="-" + outer_->name + " not matched-";
+            --c.nest_level;
+            c.trace(str.c_str(), s, n, sv, dt);
+            ++c.nest_level;
         }
     }
 
