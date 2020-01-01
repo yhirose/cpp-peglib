@@ -31,6 +31,7 @@ int main(int argc, const char** argv)
     auto opt_help = false;
     auto opt_source = false;
     auto opt_enable_pakrat = false;
+    auto opt_trace_grmr = false;
     vector<char> source;
     auto opt_trace = false;
     vector<const char*> path_list;
@@ -52,6 +53,8 @@ int main(int argc, const char** argv)
             }
         } else if (string("--trace") == arg) {
             opt_trace = true;
+        } else if (string("--tracegrammar") == arg) {
+            opt_trace_grmr = true;
         } else if (string("--pakrat") == arg) {
             opt_enable_pakrat = true;
         } else {
@@ -60,7 +63,7 @@ int main(int argc, const char** argv)
     }
 
     if (path_list.empty() || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [--tracegrammar] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
@@ -74,6 +77,10 @@ int main(int argc, const char** argv)
     }
 
     peg::parser parser;
+
+    if (opt_trace_grmr) {
+        parser.enable_trace(peg::createTracer());
+    }
 
     if (opt_enable_pakrat) {
         cout << "Pakrat parsing enabled." << endl;
@@ -108,29 +115,8 @@ int main(int argc, const char** argv)
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
-    if (opt_trace) {
-        std::cout << "pos:lev\trule/ope" << std::endl;
-        std::cout << "-------\t--------" << std::endl;
-        size_t prev_pos = 0;
-        parser.enable_trace([&](
-            const char* name,
-            const char* s,
-            size_t /*n*/,
-            const peg::SemanticValues& /*sv*/,
-            const peg::Context& c,
-            const peg::any& /*dt*/) {
-            auto pos = static_cast<size_t>(s - c.s);
-            auto backtrack = (pos < prev_pos ? "*" : "");
-            string indent;
-            auto level = c.nest_level;
-            while (level--) {
-                indent += "  ";
-            }
-            std::cout
-                << pos << ":" << c.nest_level << backtrack << "\t"
-                << indent << name << std::endl;
-            prev_pos = static_cast<size_t>(pos);
-        });
+    if (opt_trace && !opt_trace_grmr) {
+        parser.enable_trace(peg::createTracer());
     }
 
     if (opt_ast) {

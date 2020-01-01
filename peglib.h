@@ -52,9 +52,6 @@
 // source code
 //#define PEGLIB_NO_UNICODE_CHARS
 
-// use builtin trace function
-#define DBG_TRACE_GRMR
-
 namespace peg {
 
 /*-----------------------------------------------------------------------------
@@ -889,31 +886,6 @@ public:
     {
         args_stack.resize(1);
         capture_scope_stack.resize(1);
-
-#ifdef DBG_TRACE_GRMR
-        if (!tracer) {
-            size_t prev_pos = 0;
-            tracer = [&](
-                const char* name,
-                const char* s,
-                size_t /*n*/,
-                const peg::SemanticValues& /*sv*/,
-                const peg::Context& c,
-                const peg::any& /*dt*/) {
-                auto pos = static_cast<size_t>(s - c.s);
-                auto backtrack = (pos < prev_pos ? "*" : "");
-                std::string indent;
-                auto level = 0;
-                while (level++ < c.nest_level) {
-                    indent += level % 2 == 0 ? ". " : "  ";
-                }
-                std::cout
-                    << pos << ":" << c.nest_level << backtrack << "\t"
-                    << indent << name << std::endl << std::flush;
-                prev_pos = static_cast<size_t>(pos);
-            };
-        }
-#endif
     }
 
     template <typename T>
@@ -2165,6 +2137,33 @@ private:
     bool result_;
 };
 
+/*-----------------------------------------------------------------------------
+ *  tracer fuunction
+ *---------------------------------------------------------------------------*/
+Tracer createTracer() {
+    size_t prev_pos = 0;
+    return [&prev_pos](
+            const char* name,
+            const char* s,
+            size_t /*n*/,
+            const peg::SemanticValues& /*sv*/,
+            const peg::Context& c,
+            const peg::any& /*dt*/)
+    {
+        auto pos = static_cast<size_t>(s - c.s);
+        auto backtrack = (pos < prev_pos ? "*" : "");
+        std::string indent;
+        size_t level = 0;
+        while (level++ < c.nest_level)
+            indent += level % 2 == 0 ? ". " : "  ";
+
+        std::cout
+                << pos << ":" << c.nest_level << backtrack << "\t"
+                << indent << name << std::endl << std::flush;
+        prev_pos = static_cast<size_t>(pos);
+    };
+}
+
 /*
  * Keywords
  */
@@ -2332,7 +2331,7 @@ public:
     bool                                                                                 enablePackratParsing;
     bool                                                                                 is_macro;
     std::vector<std::string>                                                             params;
-    Tracer                                                                               tracer;
+    static Tracer                                                                        tracer;
 
 private:
     friend class Reference;
@@ -2737,6 +2736,9 @@ inline void FindReference::visit(Reference& ope) {
     }
     found_ope = ope.shared_from_this();
 }
+
+//static
+Tracer Definition::tracer = nullptr;
 
 /*-----------------------------------------------------------------------------
  *  PEG parser generator
@@ -3633,10 +3635,7 @@ public:
     }
 
     void enable_trace(Tracer tracer) {
-        if (grammar_ != nullptr) {
-            auto& rule = (*grammar_)[start_];
-            rule.tracer = tracer;
-        }
+        Definition::tracer = tracer;
     }
 
     Log log;
