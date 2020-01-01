@@ -437,6 +437,7 @@ std::string printable_escape_chars(char32_t escapeCh) {
     case '\b': return "\\b";
     case '\f': return "\\f";
     case '\v': return "\\v";
+    case '\\': return "\\";
     case 0x00A0: case 0x2028: case 0x2029: // javascript \s
     case 0x80:   case 0xFFFF: //lower and upper range defined for peg language (utf8)
         return printAsHex();
@@ -1447,7 +1448,9 @@ public:
                     str += printable_escape_chars(p.first) + "-" +
                            printable_escape_chars(p.second);
             }
-            str += "]='" + printable_escape_chars_str(sv.str()) + "'";
+            char32_t cp;
+            decode_codepoint(s, n, cp);
+            str += "]='" + printable_escape_chars(cp) + "'";
             c.trace(str.c_str(), s, n, sv, dt);
         }
 
@@ -2142,7 +2145,8 @@ private:
  *---------------------------------------------------------------------------*/
 Tracer createTracer() {
     size_t prev_pos = 0;
-    return [&prev_pos](
+    std::pair<size_t, size_t> prev_line;
+    return [&prev_pos, &prev_line](
             const char* name,
             const char* s,
             size_t /*n*/,
@@ -2152,6 +2156,18 @@ Tracer createTracer() {
     {
         auto pos = static_cast<size_t>(s - c.s);
         auto backtrack = (pos < prev_pos ? "*" : "");
+        auto line = line_info(c.s, s);
+        if (line.first != prev_line.first) {
+            prev_line = line;
+            auto endPos = pos;
+            while(endPos < c.l -1 && c.s[++endPos] != '\0' && c.s[endPos] != '\n');
+            auto linePos = pos - line.second +1;
+            std::string txt(&c.s[linePos], endPos - linePos);
+            std::cout << "--------------------------------------------------" << std::endl <<
+                         "at line:" + std::to_string(line.first) << ":" << txt << std::endl <<
+                         "--------------------------------------------------" << std::endl;
+
+        }
         std::string indent;
         size_t level = 0;
         while (level++ < c.nest_level)
@@ -2857,7 +2873,7 @@ private:
         g["Class"]      <= seq(chr('['), tok(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-        g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
+        g["Char"]       <= cho(seq(chr('\\'), cls("nrtswd'\"[]\\")),
                                seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
                                seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
