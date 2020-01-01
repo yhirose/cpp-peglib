@@ -1127,7 +1127,7 @@ public:
         assert(c.parseSuccess());
         c.trace("ZeroOrMore", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
-        size_t i = 0;
+        size_t i = 0; int cnt = 0;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1151,9 +1151,16 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail();
+                if (c.tracer) {
+                    std::string str = "*found " + std::to_string(cnt) + "*";
+                    --c.nest_level;
+                    c.trace(str.c_str(), s, n, sv, dt);
+                    ++c.nest_level;
+                }
                 break;
             }
             i += len;
+            ++cnt;
         }
         return i;
     }
@@ -1190,7 +1197,7 @@ public:
         // if we reached here we have at least one found
 
         auto save_error_pos = c.error_pos;
-        auto i = len;
+        auto i = len; int cnt = 0;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1214,9 +1221,16 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail(); // we have at least one found before entering loop
+                if (c.tracer) {
+                    std::string str = "*found " + std::to_string(cnt) + "*";
+                    --c.nest_level;
+                    c.trace(str.c_str(), s, n, sv, dt);
+                    ++c.nest_level;
+                }
                 break;
             }
             i += len;
+            ++cnt;
         }
         return i;
     }
@@ -1247,6 +1261,11 @@ public:
         auto len = rule.parse(s, n, sv, c, dt);
         if (c.parseSuccess()) {
             c.shift_capture_values();
+            if (c.tracer) {
+                --c.nest_level;
+                c.trace("*found*", s, n, sv, dt);
+                ++c.nest_level;
+            }
             return len;
         } else {
             if (sv.size() != save_sv_size) {
@@ -1376,7 +1395,12 @@ class CharacterClass : public Ope
                 case 'w': ranges_.emplace_back(std::make_pair(wdch, wdch)); break;
                 case 'd': ranges_.emplace_back(std::make_pair(dgch, dgch)); break;
                 case '\\': ranges_.emplace_back(std::make_pair('\\', '\\')); break;
-                default:;
+                default: {
+                    std::string message = "Unsupported escape char '\\";
+                    message += static_cast<const char>(chars[i]);
+                    message += "'";
+                    throw parse_error(message.c_str());
+                }
                 }
             } else {
                 auto cp = chars[i++];
@@ -1416,8 +1440,8 @@ public:
     CharacterClass(const std::string& str) {
         // find the char class '[' chrs ']'
         const char *s = str.c_str(), *e = s + str.length();
-        while((*s <= ' ' || *s == '[') && *(++s) != 0); // find front
-        while((*e <= ' ' || *e == ']') && --e > s); // find back
+        while((*s < ' ' || *s == '[') && *(++s) != 0); // find front
+        while((*e < ' ' || *e == ']') && --e > s); // find back
         // first char in char class might negate char class
         negated = *s == '^';
         if (negated) ++s;
@@ -2775,24 +2799,26 @@ void logPrint(const char *s, Log log, const Definition::Result &r, std::string m
 
     const char *cmsg;
     if (r.message_pos) {
-        msg += r.message;
         cmsg = r.message_pos;
     } else
         cmsg = r.error_pos;
     line = line_info(s, cmsg);
 
-    // pretty print syntax errors
-    const char *lineStart = cmsg - line.second +1,
-               *lineEnd = lineStart;
-    while (*(lineEnd++) != '\n' && *lineEnd != '\r' && *lineEnd != '\0') {
-        auto len = codepoint_length(lineEnd, 1);
-        if (len > 1) lineEnd += len -1;
-    }
+    // don't print where it failed if we have a message (from thrown error)
+    if (r.message.empty()) {
+        // pretty print syntax errors
+        const char *lineStart = cmsg - line.second +1,
+                   *lineEnd = lineStart;
+        while (*(lineEnd++) != '\n' && *lineEnd != '\r' && *lineEnd != '\0') {
+            auto len = codepoint_length(lineEnd, 1);
+            if (len > 1) lineEnd += len -1;
+        }
 
-    msg += "\n"; msg.append(lineStart, lineEnd - lineStart);
-    std::string fill;
-    if (line.second > 2) fill.resize(line.second -2, '-');
-    msg += "\n" + fill + "^";
+        msg += "\n"; msg.append(lineStart, static_cast<size_t>(lineEnd - lineStart));
+        std::string fill;
+        if (line.second > 2) fill.resize(line.second -2, '-');
+        msg += "\n" + fill + "^";
+    }
 
     log(line.first, line.second, msg);
 }
