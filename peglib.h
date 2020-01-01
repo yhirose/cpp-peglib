@@ -392,7 +392,7 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
     size_t i = 0;
     while (i < n) {
         auto ch = s[i];
-        if (ch == '\\') {
+        if (ch == '\\' && i < n-1) {
             i++;
             switch (s[i]) {
                 case 'n':  r += '\n'; i++; break;
@@ -1401,6 +1401,7 @@ class CharacterClass : public Ope
                 case 's': ranges_.emplace_back(std::make_pair(whsp, whsp)); break;
                 case 'w': ranges_.emplace_back(std::make_pair(wdch, wdch)); break;
                 case 'd': ranges_.emplace_back(std::make_pair(dgch, dgch)); break;
+                case '\\': ranges_.emplace_back(std::make_pair('\\', '\\')); break;
                 default:;
                 }
             } else {
@@ -1464,6 +1465,8 @@ public:
         assert(c.parseSuccess());
         if (c.tracer) {
             std::string str = "CharacterClass [";
+            if (negated)
+                str += "^";
             for(auto p : ranges_) {
                 if (p.first == p.second)
                     str += printable_escape_chars(p.first);
@@ -2368,6 +2371,7 @@ private:
 inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
         const std::string& lit, bool& init_is_word, bool& is_word, bool ignore_case)
 {
+    assert(c.parseSuccess());
     size_t i = 0;
     for (; i < lit.size(); i++) {
         if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
@@ -2385,8 +2389,8 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     if (!init_is_word) { // TODO: Protect with mutex
         if (c.wordOpe) {
             c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
-            is_word = c.parseSuccess();
-            c.clearParseFail();
+            is_word = dummy_c.parseSuccess();
+            dummy_c.clearParseFail();
         }
         init_is_word = true;
     }
@@ -2394,7 +2398,8 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
         auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
-        if (c.parseFail()) {
+        if (dummy_c.parseFail()) {
+            dummy_c.clearParseFail();
             return static_cast<size_t>(-1);
         }
         i += len;
