@@ -933,6 +933,7 @@ public:
                 return;
             } else {
                 len = static_cast<size_t>(-1);
+                setParseFail();
                 return;
             }
         } else {
@@ -1480,6 +1481,7 @@ public:
 
         if (n < 1) {
             c.set_error_pos(s);
+            c.setParseFail();
             return static_cast<size_t>(-1);
         }
 
@@ -2400,6 +2402,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
         if (dummy_c.parseFail()) {
             dummy_c.clearParseFail();
+            c.setParseFail();
             return static_cast<size_t>(-1);
         }
         i += len;
@@ -2451,10 +2454,10 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
 
 inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     assert(c.parseSuccess());
-//    if (c.tracer) {
-//        std::string str = "Holder lookup=" + outer_->name;
-//        c.trace(str.c_str(), s, n, sv, dt);
-//    }
+    if (c.tracer) {
+        std::string str = "Holder lookup=" + outer_->name;
+        c.trace(str.c_str(), s, n, sv, dt);
+    }
     if (!ope_) {
         throw std::logic_error("Uninitialized definition ope was used...");
     }
@@ -2511,6 +2514,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
+                c.setParseFail();
                 len = static_cast<size_t>(-1);
             }
         }
@@ -2523,6 +2527,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         }
         if (c.tracer) {
             std::string str = "*" + outer_->name + " matched*";
+            str += " len:" + std::to_string(len);
             --c.nest_level;
             c.trace(str.c_str(), s, n, sv, dt);
             ++c.nest_level;
@@ -2536,6 +2541,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         }
         if (c.tracer) {
             std::string str ="-" + outer_->name + " not matched-";
+            str += " len:" + std::to_string(len);
             --c.nest_level;
             c.trace(str.c_str(), s, n, sv, dt);
             ++c.nest_level;
