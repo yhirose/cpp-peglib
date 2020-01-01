@@ -2141,44 +2141,50 @@ private:
 };
 
 /*-----------------------------------------------------------------------------
- *  tracer fuunction
+ *  tracer Object, must be a object captures overwrote stackpointer
  *---------------------------------------------------------------------------*/
-Tracer createTracer() {
-    size_t prev_pos = 0;
-    std::pair<size_t, size_t> prev_line;
-    return [&prev_pos, &prev_line](
-            const char* name,
-            const char* s,
-            size_t /*n*/,
-            const peg::SemanticValues& /*sv*/,
-            const peg::Context& c,
-            const peg::any& /*dt*/)
-    {
-        auto pos = static_cast<size_t>(s - c.s);
-        auto backtrack = (pos < prev_pos ? "*" : "");
-        auto line = line_info(c.s, s);
-        if (line.first != prev_line.first) {
-            prev_line = line;
-            auto endPos = pos;
-            while(endPos < c.l -1 && c.s[++endPos] != '\0' && c.s[endPos] != '\n');
-            auto linePos = pos - line.second +1;
-            std::string txt(&c.s[linePos], endPos - linePos);
-            std::cout << "--------------------------------------------------" << std::endl <<
-                         "at line:" + std::to_string(line.first) << ":" << txt << std::endl <<
-                         "--------------------------------------------------" << std::endl;
+class TracerObj {
+    size_t m_prev_pos = 0;
+    std::pair<size_t, size_t> m_prev_line;
+public:
+    TracerObj() = default;
+    Tracer callback() {
+        size_t &prev_pos = m_prev_pos;
+        std::pair<size_t, size_t> &prev_line = m_prev_line;
+        return [&prev_pos, &prev_line](
+                const char* name,
+                const char* s,
+                size_t /*n*/,
+                const peg::SemanticValues& /*sv*/,
+                const peg::Context& c,
+                const peg::any& /*dt*/)
+        {
+            auto pos = static_cast<size_t>(s - c.s);
+            auto backtrack = (pos < prev_pos ? "*" : "");
+            auto line = line_info(c.s, s);
+            if (line.first != prev_line.first) {
+                prev_line = line;
+                auto endPos = pos;
+                while(endPos < c.l -1 && c.s[++endPos] != '\0' && c.s[endPos] != '\n');
+                auto linePos = pos - line.second +1;
+                std::string txt(&c.s[linePos], endPos - linePos);
+                std::cout << "--------------------------------------------------" << std::endl <<
+                             "at line:" + std::to_string(line.first) << ":" << txt << std::endl <<
+                             "--------------------------------------------------" << std::endl;
 
-        }
-        std::string indent;
-        size_t level = 0;
-        while (level++ < c.nest_level)
-            indent += level % 2 == 0 ? ". " : "  ";
+            }
+            std::string indent;
+            size_t level = 0;
+            while (level++ < c.nest_level)
+                indent += level % 2 == 0 ? ". " : "  ";
 
-        std::cout
-                << pos << ":" << c.nest_level << backtrack << "\t"
-                << indent << name << std::endl << std::flush;
-        prev_pos = static_cast<size_t>(pos);
-    };
-}
+            std::cout
+                    << pos << ":" << c.nest_level << backtrack << "\t"
+                    << indent << name << std::endl << std::flush;
+            prev_pos = static_cast<size_t>(pos);
+        };
+    }
+};
 
 /*
  * Keywords

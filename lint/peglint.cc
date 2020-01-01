@@ -77,9 +77,10 @@ int main(int argc, const char** argv)
     }
 
     peg::parser parser;
+    peg::TracerObj tracer;
 
     if (opt_trace_grmr) {
-        parser.enable_trace(peg::createTracer());
+        parser.enable_trace(tracer.callback());
     }
 
     if (opt_enable_pakrat) {
@@ -95,6 +96,8 @@ int main(int argc, const char** argv)
         cerr << "could not load grammar." << std::endl;
         return -1;
     }
+    if (opt_trace_grmr && !opt_trace)
+        parser.enable_trace(nullptr);
 
     if (path_list.size() < 2 && !opt_source) {
         cout << "No sourcefile or sourcecode given." << std::endl;
@@ -116,7 +119,7 @@ int main(int argc, const char** argv)
     };
 
     if (opt_trace && !opt_trace_grmr) {
-        parser.enable_trace(peg::createTracer());
+        parser.enable_trace(tracer.callback());
     }
 
     if (opt_ast) {
