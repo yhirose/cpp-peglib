@@ -455,7 +455,7 @@ std::string printable_escape_chars_str(const std::string &str) {
     std::string ret;
     const char *s = str.c_str();
     size_t len = str.length();
-    for(size_t i = 0; i < len; ++i) {
+    for(size_t i = 0; i < len;) {
         char32_t ch;
         i += decode_codepoint(&s[i], len - i, ch);
         ret += printable_escape_chars(ch);
@@ -1003,6 +1003,21 @@ public:
     virtual ~Ope() {}
     virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
+protected:
+    void traceResult(bool match, size_t cnt, const char *name, const char *s,
+                     size_t n, SemanticValues& sv, Context& c, any& dt) const
+    {
+        if (c.tracer) {
+            std::stringstream str;
+            if (match) {
+                str << "*" << name << " matched " << std::to_string(cnt) << "*";
+            } else
+                str << "-" << name << " exit count:" << std::to_string(cnt) << "-";
+            --c.nest_level;
+            c.trace(str.str().c_str(), s, n, sv, dt);
+            ++c.nest_level;
+        }
+    }
 };
 
 class Sequence : public Ope
@@ -1106,10 +1121,14 @@ public:
                 sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
 
                 c.shift_capture_values();
+
+                traceResult(true, 1, "PrioritizedChoice", s, n, sv, c, dt);
                 return len;
-            }
+            } //else if (len == 0)
+              //  break;
             id++;
         }
+        traceResult(false, 0, "PrioritizedChoice", s, n, sv, c, dt);
         c.setParseFail();
         return 0;
     }
@@ -1123,18 +1142,6 @@ public:
 
 class ZeroOrMore : public Ope
 {
-    void trace(bool match, int cnt, const char *s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-        if (c.tracer) {
-            std::string str;
-            if (match)
-                str = "*matched " + std::to_string(cnt) + "*";
-            else
-                str = "-not matched-";
-            --c.nest_level;
-            c.trace(str.c_str(), s, n, sv, dt);
-            ++c.nest_level;
-        }
-    }
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
@@ -1156,7 +1163,7 @@ public:
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
-                trace(true, cnt +1, s, n, sv, c, dt);
+                traceResult(true, cnt +1, "ZeroOrMore", s, n, sv, c, dt);
                 if (len == 0) break; // prevent endless loop
             } else {
                 if (sv.size() != save_sv_size) {
@@ -1168,7 +1175,7 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail();
-                trace(false, cnt, s, n, sv, c, dt);
+                traceResult(false, cnt, "ZeroOrMore", s, n, sv, c, dt);
                 break;
             }
             i += len;
@@ -1184,18 +1191,6 @@ public:
 
 class OneOrMore : public Ope
 {
-    void trace(bool match, int cnt, const char *s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-        if (c.tracer) {
-            std::string str;
-            if (match)
-                str = "*matched " + std::to_string(cnt) + "*";
-            else
-                str = "-not matched-";
-            --c.nest_level;
-            c.trace(str.c_str(), s, n, sv, dt);
-            ++c.nest_level;
-        }
-    }
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
@@ -1213,10 +1208,10 @@ public:
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (c.parseSuccess()) {
-                trace(true, 1, s, n, sv, c, dt);
+                traceResult(true, 1, "OneOrMore", s, n, sv, c, dt);
                 c.shift_capture_values();
             } else {
-                trace(false, 0, s, n, sv, c, dt);
+                traceResult(false, 0, "OneOrMore", s, n, sv, c, dt);
                 return 0;
             }
         }
@@ -1237,7 +1232,7 @@ public:
             len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
-                trace(true, cnt +1, s, n, sv, c, dt);
+                traceResult(true, cnt +1, "OneOrMore", s, n, sv, c, dt);
                 if (len == 0) break; // unstuck enless loop
             } else {
                 if (sv.size() != save_sv_size) {
@@ -1249,7 +1244,7 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail(); // we have at least one found before entering loop
-                trace(false, cnt, s, n, sv, c, dt);
+                traceResult(false, cnt, "OneOrMore", s, n, sv, c, dt);
                 break;
             }
             i += len;
@@ -1284,11 +1279,7 @@ public:
         auto len = rule.parse(s, n, sv, c, dt);
         if (c.parseSuccess()) {
             c.shift_capture_values();
-            if (c.tracer) {
-                --c.nest_level;
-                c.trace("*found*", s, n, sv, dt);
-                ++c.nest_level;
-            }
+            traceResult(true, 1, "Option", s, n, sv, c, dt);
             return len;
         } else {
             if (sv.size() != save_sv_size) {
@@ -1300,6 +1291,7 @@ public:
             }
             c.error_pos = save_error_pos;
             c.clearParseFail();
+            traceResult(false, 0, "Option", s, n, sv, c, dt);
             return 0;
         }
     }
@@ -2612,11 +2604,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             sv.tags.emplace_back(str2tag(outer_->name.c_str()));
         }
         if (c.tracer) {
-            std::string str = "*" + outer_->name + " matched*";
-            str += " len:" + std::to_string(len);
-            --c.nest_level;
-            c.trace(str.c_str(), s, n, sv, dt);
-            ++c.nest_level;
+            traceResult(true, len, outer_->name.c_str(), s, n, sv, c, dt);
         }
     } else {
         if (outer_->error_message) {
@@ -2626,11 +2614,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             }
         }
         if (c.tracer) {
-            std::string str ="-" + outer_->name + " not matched-";
-            str += " len:" + std::to_string(len);
-            --c.nest_level;
-            c.trace(str.c_str(), s, n, sv, dt);
-            ++c.nest_level;
+            traceResult(false, len, outer_->name.c_str(), s, n, sv, c, dt);
         }
     }
 
@@ -2850,7 +2834,7 @@ void log_print(const char *s, Log log, const Definition::Result &r, std::string 
         // pretty print syntax errors
         const char *lineStart = cmsg - line.second +1,
                    *lineEnd = lineStart;
-        while (*(lineEnd++) != '\n' && *lineEnd != '\r' && *lineEnd != '\0') {
+        while (*lineEnd != '\n' && *lineEnd != '\r' && *(++lineEnd) != '\0') {
             auto len = codepoint_length(lineEnd, 1);
             if (len > 1) lineEnd += len -1;
         }
@@ -3261,8 +3245,7 @@ private:
         if (!ret) {
             for (const auto& x: data.duplicates) {
                 if (log) {
-                    Definition::Result r;
-                    r.ret = 1; r.error_pos = x.second;
+                    Definition::Result r{1, 0, x.second, nullptr, std::string()};
                     const auto& name = x.first;
                     log_print(s, log, r, "'" + name + "' is already defined.");
                 }
@@ -3279,8 +3262,7 @@ private:
                 const auto& name = y.first;
                 //const auto ptr = y.second;
                 if (log) {
-                    Definition::Result r;
-                    r.ret = 1; r.error_pos = y.second;
+                    Definition::Result r{1, 0, y.second, nullptr, std::string()};
                     log_print(s, log, r, vis.error_message[name]);
                 }
                 ret = false;
@@ -3309,8 +3291,7 @@ private:
             rule.accept(vis);
             if (vis.error_s) {
                 if (log) {
-                    Definition::Result r;
-                    r.ret = 1; r.error_pos = vis.error_s;
+                    Definition::Result r{1, 0, vis.error_s, nullptr, std::string()};
                     log_print(s, log, r, "'" + name + " is left recursive.");
                 }
                 ret = false;
