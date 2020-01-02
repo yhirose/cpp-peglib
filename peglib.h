@@ -908,7 +908,7 @@ public:
                 std::tie(len, val) = cache_values[key];
                 return;
             } else {
-                len = static_cast<size_t>(-1);
+                len = ERROR_LEN;
                 setParseFail();
                 return;
             }
@@ -989,6 +989,8 @@ public:
     inline bool parseFail() const { return parse_fail; }
     void clearParseFail() { parse_fail = false; }
     void setParseFail() { parse_fail = true; }
+
+    static const size_t ERROR_LEN = 0;
 };
 
 
@@ -1322,7 +1324,7 @@ public:
         if (c.parseSuccess()) {
             return 0;
         } else {
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
     }
 
@@ -1353,7 +1355,7 @@ public:
         if (c.parseSuccess()) {
             c.setParseFail();
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         } else {
             c.clearParseFail();
             c.error_pos = save_error_pos;
@@ -1514,7 +1516,7 @@ public:
         if (n < 1) {
             c.set_error_pos(s);
             c.setParseFail();
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
 
         char32_t cp;
@@ -1537,7 +1539,7 @@ public:
 fail:
         c.setParseFail();
         c.set_error_pos(s);
-        return static_cast<size_t>(-1);
+        return c.ERROR_LEN;
     }
 
     void accept(Visitor& v) override;
@@ -1561,7 +1563,7 @@ public:
         if (n < 1 || s[0] != ch_) {
             c.setParseFail();
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         return 1;
     }
@@ -1582,7 +1584,7 @@ public:
         if (len < 1) {
             c.setParseFail();
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         return len;
     }
@@ -2457,7 +2459,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
             c.set_error_pos(s);
             c.setParseFail();
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
     }
 
@@ -2481,7 +2483,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         if (dummy_c.parseFail()) {
             dummy_c.clearParseFail();
             c.setParseFail();
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         i += len;
     }
@@ -2491,7 +2493,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
             if (c.parseFail()) {
-                return static_cast<size_t>(-1);
+                return c.ERROR_LEN;
             }
             i += len;
         }
@@ -2522,7 +2524,7 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
             if (c.parseFail()) {
-                return static_cast<size_t>(-1);
+                return c.ERROR_LEN;
             }
             len += l;
         }
@@ -2593,7 +2595,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                     }
                 }
                 c.setParseFail();
-                len = static_cast<size_t>(-1);
+                len = c.ERROR_LEN;
             }
         }
     });
