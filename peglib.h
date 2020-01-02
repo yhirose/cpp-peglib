@@ -872,7 +872,7 @@ public:
                 std::tie(len, val) = cache_values[key];
                 return;
             } else {
-                len = static_cast<size_t>(-1);
+                len = ERROR_LEN;
                 return;
             }
         } else {
@@ -943,6 +943,8 @@ public:
     void trace(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
         if (tracer) tracer(name, a_s, n, sv, *this, dt);
     }
+
+    static const size_t ERROR_LEN = static_cast<size_t>(-1);
 };
 
 /*
@@ -1230,7 +1232,7 @@ public:
         if (success(len)) {
             return 0;
         } else {
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
     }
 
@@ -1259,7 +1261,7 @@ public:
         auto len = rule.parse(s, n, chldsv, c, dt);
         if (success(len)) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         } else {
             c.error_pos = save_error_pos;
             return 0;
@@ -1320,7 +1322,7 @@ public:
 
         if (n < 1) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
 
         char32_t cp;
@@ -1335,7 +1337,7 @@ public:
         }
 
         c.set_error_pos(s);
-        return static_cast<size_t>(-1);
+        return c.ERROR_LEN;
     }
 
     void accept(Visitor& v) override;
@@ -1353,7 +1355,7 @@ public:
         c.trace("Character", s, n, sv, dt);
         if (n < 1 || s[0] != ch_) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         return 1;
     }
@@ -1372,7 +1374,7 @@ public:
         auto len = codepoint_length(s, n);
         if (len < 1) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         return len;
     }
@@ -2190,7 +2192,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     for (; i < lit.size(); i++) {
         if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
             c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
     }
 
@@ -2211,7 +2213,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
         auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
         if (fail(len)) {
-            return static_cast<size_t>(-1);
+            return c.ERROR_LEN;
         }
         i += len;
     }
@@ -2221,7 +2223,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
             if (fail(len)) {
-                return static_cast<size_t>(-1);
+                return c.ERROR_LEN;
             }
             i += len;
         }
@@ -2246,7 +2248,7 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
             if (fail(l)) {
-                return static_cast<size_t>(-1);
+                return c.ERROR_LEN;
             }
             len += l;
         }
@@ -2311,7 +2313,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
-                len = static_cast<size_t>(-1);
+                len = c.ERROR_LEN;
             }
         }
     });
