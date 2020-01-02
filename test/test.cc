@@ -94,7 +94,18 @@ TEST_CASE("String capture test2", "[general]")
     TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& sv) { tags.push_back(sv.str()); };
     WS       <= zom(cls(" \t"));
 
+//    // can't use temporary
+//    peg::TracerObj tr;
+//    ROOT.tracer = tr.callback();
+
+//    ROOT.name       = "ROOT";
+//    TAG.name        = "TAG";
+//    TAG_NAME.name   = "TAG_NAME";
+//    WS.name         = "WS";
+
     auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
+
+//    ROOT.tracer = nullptr;
 
     REQUIRE(r.ret == true);
     REQUIRE(tags.size() == 3);
@@ -127,6 +138,106 @@ TEST_CASE("String capture test3", "[general]")
     REQUIRE(tags[2] == "tag-3");
 }
 
+TEST_CASE("String capture test4", "[general]")
+{
+    parser pg(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <- ('[' [\w:\-]+ ']')+
+              WH    <- [\s]*
+         )");
+
+    std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+    pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+    auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+    REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+    REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
+TEST_CASE("String capture test5", "[general]")
+{
+    parser pg(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <- ('[' [a-z]+ [:\-]* [\d]+ ']')+
+              WH    <- [\s]*
+         )");
+
+    std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+    pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+    auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+    REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+    REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
+TEST_CASE("String capture test6", "[general]")
+{
+    parser pg;
+    TracerObj tr;
+//    pg.enable_trace(tr.callback());
+//    pg.log = [&](size_t ln, size_t col, const std::string& msg) {
+//        std::cerr << ":" << ln << ":" << col << ": " << msg << std::endl;
+//    };
+    pg.load_grammar(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <-  [^\s]+
+              WH    <- [^\w\[\]]*
+         )");
+
+    std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+    pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+    auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+//    pg.enable_trace(nullptr);
+
+    REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+    REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
 TEST_CASE("Cyclic grammer test", "[general]")
 {
     Definition PARENT;
@@ -134,6 +245,20 @@ TEST_CASE("Cyclic grammer test", "[general]")
 
     PARENT <= seq(CHILD);
     CHILD  <= seq(PARENT);
+}
+
+TEST_CASE("Cyclic test2", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- [\w\d]*
+        WH    <- [\s]*
+    )");
+
+    auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+    REQUIRE(ret == false);
 }
 
 TEST_CASE("Visit test", "[general]")

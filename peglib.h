@@ -395,6 +395,9 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
                 case 'n':  r += '\n'; i++; break;
                 case 'r':  r += '\r'; i++; break;
                 case 't':  r += '\t'; i++; break;
+                case 's':  r += "\\s"; i++; break;
+                case 'd':  r += "\\d"; i++; break;
+                case 'w':  r += "\\w"; i++; break;
                 case '\'': r += '\''; i++; break;
                 case '"':  r += '"';  i++; break;
                 case '[':  r += '[';  i++; break;
@@ -1120,6 +1123,18 @@ public:
 
 class ZeroOrMore : public Ope
 {
+    void trace(bool match, int cnt, const char *s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+        if (c.tracer) {
+            std::string str;
+            if (match)
+                str = "*matched " + std::to_string(cnt) + "*";
+            else
+                str = "-not matched-";
+            --c.nest_level;
+            c.trace(str.c_str(), s, n, sv, dt);
+            ++c.nest_level;
+        }
+    }
 public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
@@ -1141,6 +1156,8 @@ public:
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
+                trace(true, cnt +1, s, n, sv, c, dt);
+                if (len == 0) break; // prevent endless loop
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1151,12 +1168,7 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail();
-                if (c.tracer) {
-                    std::string str = "*found " + std::to_string(cnt) + "*";
-                    --c.nest_level;
-                    c.trace(str.c_str(), s, n, sv, dt);
-                    ++c.nest_level;
-                }
+                trace(false, cnt, s, n, sv, c, dt);
                 break;
             }
             i += len;
@@ -1172,6 +1184,18 @@ public:
 
 class OneOrMore : public Ope
 {
+    void trace(bool match, int cnt, const char *s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+        if (c.tracer) {
+            std::string str;
+            if (match)
+                str = "*matched " + std::to_string(cnt) + "*";
+            else
+                str = "-not matched-";
+            --c.nest_level;
+            c.trace(str.c_str(), s, n, sv, dt);
+            ++c.nest_level;
+        }
+    }
 public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
@@ -1189,15 +1213,17 @@ public:
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (c.parseSuccess()) {
+                trace(true, 1, s, n, sv, c, dt);
                 c.shift_capture_values();
             } else {
+                trace(false, 0, s, n, sv, c, dt);
                 return 0;
             }
         }
         // if we reached here we have at least one found
 
         auto save_error_pos = c.error_pos;
-        auto i = len; int cnt = 0;
+        auto i = len; int cnt = 1;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1211,6 +1237,8 @@ public:
             len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
+                trace(true, cnt +1, s, n, sv, c, dt);
+                if (len == 0) break; // unstuck enless loop
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1221,12 +1249,7 @@ public:
                 }
                 c.error_pos = save_error_pos;
                 c.clearParseFail(); // we have at least one found before entering loop
-                if (c.tracer) {
-                    std::string str = "*found " + std::to_string(cnt) + "*";
-                    --c.nest_level;
-                    c.trace(str.c_str(), s, n, sv, dt);
-                    ++c.nest_level;
-                }
+                trace(false, cnt, s, n, sv, c, dt);
                 break;
             }
             i += len;
@@ -1375,25 +1398,54 @@ public:
 class CharacterClass : public Ope
     , public std::enable_shared_from_this<CharacterClass>
 {
-    enum { whsp = 0x0B, wdch = 0x0E, dgch = 0x0F };
+    std::unordered_map<size_t, std::pair<const char*, size_t>> specialChars;
     bool negated;
+    void insertWhiteSpace(size_t pos) {
+        // \s matches whitespace (short for [ \f\n\r\t\v\u00A0\u2028\u2029]).
+        ranges_.emplace_back(std::make_pair(' ', ' '));
+        ranges_.emplace_back(std::make_pair('\f', '\f'));
+        ranges_.emplace_back(std::make_pair('\n', '\n'));
+        ranges_.emplace_back(std::make_pair('\r', '\r'));
+        ranges_.emplace_back(std::make_pair('\t', '\t'));
+        ranges_.emplace_back(std::make_pair('\v', '\v'));
+        ranges_.emplace_back(std::make_pair(0xA0, 0xA0));
+        ranges_.emplace_back(std::make_pair(0x2028, 0x2028));
+        ranges_.emplace_back(std::make_pair(0x2029, 0x2029));
+        specialChars[pos] = std::make_pair("\\s", 9);
+    }
+
+    void insertWordMatches(size_t pos) {
+        ranges_.emplace_back(std::make_pair('_', '_'));
+        ranges_.emplace_back(std::make_pair('a', 'z'));
+        ranges_.emplace_back(std::make_pair('A', 'Z'));
+        ranges_.emplace_back(std::make_pair('0', '9'));
+        specialChars[pos] = std::make_pair("\\w", 4);
+    }
+
     void fillfromString(const std::string &str) {
         auto chars = decode(str.c_str(), str.length());
-        auto i = 0u;
-        while (i < chars.size()) {
-            if (i + 2 < chars.size() && chars[i + 1] == '-') {
+        for (size_t i = 0u; i < chars.size(); ++i) {
+            if (i + 2 < chars.size() && chars[i + 1] == '-' && chars[i] != '\\') {
                 auto cp1 = chars[i];
                 auto cp2 = chars[i + 2];
                 ranges_.emplace_back(std::make_pair(cp1, cp2));
-                i += 3;
+                i += 2;
             } else if (i+1 < chars.size() && chars[i] == '\\') {
                 // subset of regex shorthands
                 // http://www.javascriptkit.com/javatutors/redev2.shtml
                 ++i;
-                switch (chars[i++]) {
-                case 's': ranges_.emplace_back(std::make_pair(whsp, whsp)); break;
-                case 'w': ranges_.emplace_back(std::make_pair(wdch, wdch)); break;
-                case 'd': ranges_.emplace_back(std::make_pair(dgch, dgch)); break;
+                switch (chars[i]) {
+                case '-': case '^': case '[': case ']':
+                    --i;
+                    break;
+                case 's':
+                    insertWhiteSpace(i-1); break;
+                case 'w':
+                    insertWordMatches(i-1); break;
+                case 'd':
+                    ranges_.emplace_back(std::make_pair('0', '9'));
+                    specialChars[i-1] = std::make_pair("\\d", 1);
+                    break;
                 case '\\': ranges_.emplace_back(std::make_pair('\\', '\\')); break;
                 default: {
                     std::string message = "Unsupported escape char '\\";
@@ -1403,49 +1455,20 @@ class CharacterClass : public Ope
                 }
                 }
             } else {
-                auto cp = chars[i++];
+                auto cp = chars[i];
                 ranges_.emplace_back(std::make_pair(cp, cp));
             }
         }
     }
-    void specialChars() {
-        char32_t prevCh = 0;
-        for (auto &p : ranges_) {
-            if (p.first == p.second && prevCh == '\\') {
-                switch (p.first) {
-                case 's':
-                    // \s matches whitespace (short for [\f\n\r\t\v\u00A0\u2028\u2029]).
-                    p.first = '\f'; p.second = '\f';
-                    ranges_.emplace_back(std::make_pair('\n', '\n'));
-                    ranges_.emplace_back(std::make_pair('\r', '\r'));
-                    ranges_.emplace_back(std::make_pair('\t', '\t'));
-                    ranges_.emplace_back(std::make_pair('\v', '\v'));
-                    ranges_.emplace_back(std::make_pair(0xA0, 0xA0));
-                    ranges_.emplace_back(std::make_pair(0x2028, 0x2028));
-                    ranges_.emplace_back(std::make_pair(0x2029, 0x2029));
-                    break;
-                case 'w':
-                    p.first = '_'; p.second = '_';
-                    ranges_.emplace_back(std::make_pair('a', 'z'));
-                    ranges_.emplace_back(std::make_pair('A', 'Z'));
-                    ranges_.emplace_back(std::make_pair('0', '9'));
-                    break;
-                case 'd': p.first = '0'; p.second = '9'; break;
-                }
-            }
-            prevCh = p.first;
-        }
-    }
+
 public:
     CharacterClass(const std::string& str) {
-        // find the char class '[' chrs ']'
-        const char *s = str.c_str(), *e = s + str.length();
-        while((*s < ' ' || *s == '[') && *(++s) != 0); // find front
-        while((*e < ' ' || *e == ']') && --e > s); // find back
         // first char in char class might negate char class
-        negated = *s == '^';
-        if (negated) ++s;
-        std::string st = resolve_escape_sequence(s, static_cast<size_t>(e - s +1));
+        negated = str.front() == '^';
+        size_t pos = 0;
+        if (negated) ++pos;
+        std::string st = resolve_escape_sequence(str.substr(pos).c_str(),
+                                                 str.length() - pos);
         fillfromString(st);
     }
 
@@ -1455,8 +1478,22 @@ public:
         auto itSt = ranges.begin();
         if (negated)
             ++itSt;
-        ranges_.insert(ranges_.begin(), itSt, ranges.end());
-        specialChars();
+
+        char32_t prevCh = 0;
+        for (size_t i = 0; i < ranges.size(); ++i) {
+            auto &p = ranges[i];
+            if (p.first == p.second && prevCh == '\\') {
+                switch (p.first) {
+                case 's': insertWhiteSpace(i-1); break;
+                case 'w': insertWordMatches(i-1); break;
+                case 'd': ranges_.emplace_back(std::make_pair('0', '9')); break;
+                default: ranges_.emplace_back(std::move(p));
+                }
+            } else {
+                ranges_.emplace_back(std::move(p));
+            }
+            prevCh = p.first;
+        }
     }
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
@@ -1465,8 +1502,12 @@ public:
             std::string str = "CharacterClass [";
             if (negated)
                 str += "^";
-            for(auto p : ranges_) {
-                if (p.first == p.second)
+            for(size_t i = 0; i < ranges_.size(); ++i) {
+                auto &p = ranges_[i];
+                if (specialChars.find(i) != specialChars.end()) {
+                    str += specialChars.at(i).first;
+                    i += specialChars.at(i).second;
+                } else if (p.first == p.second)
                     str += printable_escape_chars(p.first);
                 else
                     str += printable_escape_chars(p.first) + "-" +
@@ -2793,7 +2834,7 @@ Tracer Definition::tracer = nullptr;
 typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
-void logPrint(const char *s, Log log, const Definition::Result &r, std::string msg) {
+void log_print(const char *s, Log log, const Definition::Result &r, std::string msg) {
 
     std::pair<size_t, size_t> line;
 
@@ -2816,11 +2857,13 @@ void logPrint(const char *s, Log log, const Definition::Result &r, std::string m
 
         msg += "\n"; msg.append(lineStart, static_cast<size_t>(lineEnd - lineStart));
         std::string fill;
-        if (line.second > 2) fill.resize(line.second -2, '-');
+        if (line.second > 2) fill.resize(line.second -1, '-');
         msg += "\n" + fill + "^";
-    }
 
-    log(line.first, line.second, msg);
+        log(line.first, line.second, msg);
+    } else
+        log(line.first, line.second, r.message);
+
 }
 
 class ParserGenerator
@@ -2906,6 +2949,7 @@ private:
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
         g["Char"]       <= cho(seq(chr('\\'), cls("nrtswd'\"[]\\")),
+                               seq(chr('\\'), chr('-')),
                                seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
                                seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
@@ -3115,6 +3159,14 @@ private:
         };
 
         g["Class"] = [](const SemanticValues& sv) {
+            if (sv.str().find('\\') != std::string::npos) {
+                // might have special meaning chars \s or \w
+                std::string str = sv.str();
+                size_t stPos = str.front() == '[' ? 1 :0,
+                       len = str.back() == ']' ? str.length() - stPos -1 : str.length();
+                return cls(str.substr(stPos, len));
+            }
+
             auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
             return cls(ranges);
         };
@@ -3178,17 +3230,9 @@ private:
         if (!r.ret) {
             if (log) {
                 if (r.message_pos) {
-                    //auto line = line_info(s, r.message_pos);
-                    logPrint(s, log, r, nullptr);
-                    //log(line.first, line.second, r.message);
+                    log_print(s, log, r, "");
                 } else {
-//                    const char *lineEnd = r.error_pos;
-//                    while (*(++lineEnd) != '\n' && *lineEnd != '\0');
-//                    auto line = line_info(s, r.error_pos);
-//                    std::string msg("grammar syntax error: '");
-//                    msg.append(r.error_pos, lineEnd - r.error_pos);
-                    logPrint(s, log, r, "grammar syntax error");
-                    //log(line.first, line.second, msg + "'");
+                    log_print(s, log, r, "grammar syntax error");
                 }
             }
             return nullptr;
@@ -3220,10 +3264,7 @@ private:
                     Definition::Result r;
                     r.ret = 1; r.error_pos = x.second;
                     const auto& name = x.first;
-                    //auto ptr = x.second;
-                    //auto line = line_info(s, ptr);
-                    logPrint(s, log, r, "'" + name + "' is already defined.");
-                    //log(line.first, line.second, "'" + name + "' is already defined.");
+                    log_print(s, log, r, "'" + name + "' is already defined.");
                 }
             }
         }
@@ -3240,9 +3281,7 @@ private:
                 if (log) {
                     Definition::Result r;
                     r.ret = 1; r.error_pos = y.second;
-                    logPrint(s, log, r, vis.error_message[name]);
-                    //auto line = line_info(s, ptr);
-                    //log(line.first, line.second, vis.error_message[name]);
+                    log_print(s, log, r, vis.error_message[name]);
                 }
                 ret = false;
             }
@@ -3272,9 +3311,7 @@ private:
                 if (log) {
                     Definition::Result r;
                     r.ret = 1; r.error_pos = vis.error_s;
-                    logPrint(s, log, r, "'" + name + " is left recursive.");
-  //                  auto line = line_info(s, vis.error_s);
-  //                  log(line.first, line.second, "'" + name + "' is left recursive.");
+                    log_print(s, log, r, "'" + name + " is left recursive.");
                 }
                 ret = false;
             }
@@ -3693,18 +3730,12 @@ private:
         if (log) {
             if (!r.ret) {
                 if (r.message_pos) {
-                    logPrint(s, log, r, r.message);
-                    //auto line = line_info(s, r.message_pos);
-                    //log(line.first, line.second, r.message);
+                    log_print(s, log, r, r.message);
                 } else {
-                    logPrint(s, log, r, "syntax error");
-                    //auto line = line_info(s, r.error_pos);
-                    //log(line.first, line.second, "syntax error");
+                    log_print(s, log, r, "syntax error");
                 }
             } else if (r.len != n) {
-                logPrint(s, log, r, "syntax error");
-                //auto line = line_info(s, s + r.len);
-                //log(line.first, line.second, "syntax error");
+                log_print(s, log, r, "syntax error");
             }
         }
     }
