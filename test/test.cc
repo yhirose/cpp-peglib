@@ -20,10 +20,19 @@ TEST_CASE("Simple syntax test (with unicode)", "[general]")
 
 TEST_CASE("Simple syntax test", "[general]")
 {
-    peg::parser parser(
+    peg::parser parser;
+
+//    parser.log = [&](size_t ln, size_t col, const std::string& msg) {
+//        std::cerr <<  ":" << ln << ":" << col << ": " << msg << std::endl;
+//    };
+//    peg::TracerObj tracer;
+//    parser.enable_trace(tracer.callback());
+
+    parser.load_grammar(
         " ROOT <- _ "
         " _ <- ' ' "
     );
+//    parser.enable_trace(nullptr);
 
     bool ret = parser;
     REQUIRE(ret == true);
@@ -1279,7 +1288,7 @@ TEST_CASE("User defined rule test", "[user rule]")
                         return name.size();
                     }
                 }
-                c.setParseFail();
+                c.setParseFail(s);
                 return 0;
             })
         },

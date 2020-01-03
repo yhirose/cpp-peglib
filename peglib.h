@@ -488,6 +488,23 @@ inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
     return std::make_pair(no, col);
 }
 
+/// get start and end pos of line containing pos
+/// returns pair<lineStart, lineEnd>
+std::pair<const char*, const char*> line_bounds(const char* start, size_t pos) {
+    const char *lineStart, *lineEnd;
+
+    // get start and end pos of line
+    lineStart = start + pos;
+    while (lineStart > start && *(lineStart -1) != '\n' && *(lineStart-1) != '\r')
+        --lineStart;
+
+    lineEnd = lineStart;
+    while (*(lineEnd) != '\n' && *(lineEnd) != '\r' && *(lineEnd) != '\0')
+        ++lineEnd;
+
+    return std::pair<const char*, const char*>(lineStart, lineEnd);
+}
+
 /*
 * String tag
 */
@@ -818,6 +835,7 @@ private:
  */
 class Context;
 class Ope;
+class Holder;
 class Definition;
 
 typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> Tracer;
@@ -859,6 +877,12 @@ public:
     std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_values;
 
     std::function<void (const char*, const char*, size_t, const SemanticValues&, const Context&, const any&)> tracer;
+
+    /// when we fail, we store a stack of IDs to trace back later
+    /// <operator, posInStr>
+    std::vector<std::pair<std::shared_ptr<Ope>, size_t>> failStack;
+    std::vector<std::pair<std::shared_ptr<Ope>, size_t>> parseStack;
+
 
     Context(
         const char*          a_path,
@@ -906,10 +930,11 @@ public:
             if (cache_success[idx]) {
                 auto key = std::make_pair(col, def_id);
                 std::tie(len, val) = cache_values[key];
+                parse_fail = false;
                 return;
             } else {
                 len = ERROR_LEN;
-                setParseFail();
+                parse_fail = true;
                 return;
             }
         } else {
@@ -987,8 +1012,12 @@ public:
      */
     inline bool parseSuccess() const { return !parse_fail; }
     inline bool parseFail() const { return parse_fail; }
-    void clearParseFail() { parse_fail = false; }
-    void setParseFail() { parse_fail = true; }
+    void clearParseFail();
+    void setParseFail(const char *pos);
+
+    void parseStackPush(const std::weak_ptr<Ope> ope, const char *pos);
+    void parseStackPop();
+    void traceFail(const char *pos);
 
     static const size_t ERROR_LEN = 0;
 };
@@ -1001,10 +1030,35 @@ class Ope
 {
 public:
     struct Visitor;
-
+    Ope(const char *name) :
+        opName(name),
+        grammartxt_pos_(nullptr),
+        grammartxt_len_(0) { }
     virtual ~Ope() {}
-    virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
+    virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) = 0;
     virtual void accept(Visitor& v) = 0;
+    virtual bool isBool() { return false; } // AndPredicate and NotPredicate
+
+    std::shared_ptr<Holder> holder() const { return holder_; }
+    void setHolder(std::shared_ptr<Holder> holder) { holder = holder_; }
+
+    // weak_ptr to the shared object that holds this obj in memory
+    const std::weak_ptr<Ope> self() const { return myself_; }
+    std::shared_ptr<Ope> setSelf(const std::shared_ptr<Ope>& owner) {
+        myself_ = owner;
+        return owner;
+    }
+
+    /// get startpos in grammar file
+    const char* grammar_pos() const { return grammartxt_pos_; }
+    size_t grammar_pos_len() const { return grammartxt_len_; }
+    std::shared_ptr<Ope> setGrammarPos(const char* pos, size_t len) {
+        grammartxt_pos_ = pos;
+        grammartxt_len_ = len;
+        return myself_.lock();
+    }
+
+    const char *opName; // Classname of this operator
 protected:
     void traceResult(bool match, size_t cnt, const char *name, const char *s,
                      size_t n, SemanticValues& sv, Context& c, any& dt) const
@@ -1020,12 +1074,17 @@ protected:
             ++c.nest_level;
         }
     }
+    const char *grammartxt_pos_;
+    size_t grammartxt_len_;
+
+    std::shared_ptr<Holder> holder_;
+    std::weak_ptr<Ope> myself_;
 };
 
 class Sequence : public Ope
 {
 public:
-    Sequence(const Sequence& rhs) : opes_(rhs.opes_) {}
+    Sequence(const Sequence& rhs) : Ope("Sequence"), opes_(rhs.opes_) {}
 
 #if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
     // NOTE: Compiler Error C2797 on Visual Studio 2013
@@ -1035,28 +1094,33 @@ public:
     // silently converted to a function call, which could lead to bad code
     // generation. Visual Studio 2013 Update 3 reports this as an error."
     template <typename... Args>
-    Sequence(const Args& ...args) {
+    Sequence(const Args& ...args) : Ope("Sequence") {
         opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
     }
 #else
     template <typename... Args>
-    Sequence(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
+    Sequence(const Args& ...args) : Ope("Sequence"), opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
 #endif
 
-    Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
+    Sequence(const std::vector<std::shared_ptr<Ope>>& opes) :
+        Ope("Sequence"), opes_(opes) {}
+    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) :
+        Ope("Sequence"), opes_(opes) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
         c.trace("Sequence", s, n, sv, dt);
+        c.parseStackPush(self(), s);
         auto& chldsv = c.push();
         size_t i = 0;
         for (const auto& ope : opes_) {
+            c.parseStackPush(self(), s + i);
             c.nest_level++;
             auto se = make_scope_exit([&]() { c.nest_level--; });
-            const auto& rule = *ope;
+            auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, chldsv, c, dt);
             if (c.parseFail()) {
+                c.parseStackPop();
                 return 0;
             }
             i += len;
@@ -1066,6 +1130,7 @@ public:
         sv.s_ = chldsv.c_str();
         sv.n_ = chldsv.length();
         sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
+        c.parseStackPop();
         return i;
     }
 
@@ -1085,19 +1150,22 @@ public:
     // silently converted to a function call, which could lead to bad code
     // generation. Visual Studio 2013 Update 3 reports this as an error."
     template <typename... Args>
-    PrioritizedChoice(const Args& ...args) {
+    PrioritizedChoice(const Args& ...args) : Ope("PriortizedChoice") {
         opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
     }
 #else
     template <typename... Args>
-    PrioritizedChoice(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
+    PrioritizedChoice(const Args& ...args) : Ope("PrioritizedChoice"), opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
 #endif
 
-    PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
+    PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) :
+        Ope("PrioritizedChoice"), opes_(opes) {}
+    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) :
+        Ope("PrioritizedChoice"), opes_(opes) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("PrioritizedChoice", s, n, sv, dt);
         size_t id = 0;
         for (const auto& ope : opes_) {
@@ -1111,7 +1179,8 @@ public:
                 c.pop();
                 c.pop_capture_scope();
             });
-            const auto& rule = *ope;
+
+            auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (c.parseSuccess()) {
                 sv.insert(sv.end(), chldsv.begin(), chldsv.end());
@@ -1125,13 +1194,15 @@ public:
                 c.shift_capture_values();
 
                 traceResult(true, 1, "PrioritizedChoice", s, n, sv, c, dt);
+                c.parseStackPop();
                 return len;
-            } //else if (len == 0)
-              //  break;
+            }
             id++;
         }
         traceResult(false, 0, "PrioritizedChoice", s, n, sv, c, dt);
-        c.setParseFail();
+        c.set_error_pos(s);
+        c.setParseFail(s);
+        c.parseStackPop();
         return 0;
     }
 
@@ -1145,13 +1216,15 @@ public:
 class ZeroOrMore : public Ope
 {
 public:
-    ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    ZeroOrMore(const std::shared_ptr<Ope>& ope) :
+        Ope("ZeroOrMore"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("ZeroOrMore", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
-        size_t i = 0; int cnt = 0;
+        size_t i = 0, cnt = 0;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1161,11 +1234,12 @@ public:
             });
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
-            const auto& rule = *ope_;
+            auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
                 traceResult(true, cnt +1, "ZeroOrMore", s, n, sv, c, dt);
+                if (ope_->isBool() && len == 0) ++len;
                 if (len == 0) break; // prevent endless loop
             } else {
                 if (sv.size() != save_sv_size) {
@@ -1183,6 +1257,7 @@ public:
             i += len;
             ++cnt;
         }
+        c.parseStackPop();
         return i;
     }
 
@@ -1194,11 +1269,12 @@ public:
 class OneOrMore : public Ope
 {
 public:
-    OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    OneOrMore(const std::shared_ptr<Ope>& ope) : Ope("OneOrMore"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
-        c.trace("OneOrMore", s, n, sv, dt);
+        c.parseStackPush(self(), s);
+        c.trace(opName, s, n, sv, dt);
         size_t len = 0;
         {
             c.nest_level++;
@@ -1207,20 +1283,21 @@ public:
                 c.nest_level--;
                 c.pop_capture_scope();
             });
-            const auto& rule = *ope_;
+            auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (c.parseSuccess()) {
                 traceResult(true, 1, "OneOrMore", s, n, sv, c, dt);
                 c.shift_capture_values();
             } else {
                 traceResult(false, 0, "OneOrMore", s, n, sv, c, dt);
+                c.parseStackPop();
                 return 0;
             }
         }
         // if we reached here we have at least one found
 
         auto save_error_pos = c.error_pos;
-        auto i = len; int cnt = 1;
+        size_t i = len, cnt = 1;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1230,11 +1307,12 @@ public:
             });
             auto save_sv_size = sv.size();
             auto save_tok_size = sv.tokens.size();
-            const auto& rule = *ope_;
+            auto& rule = *ope_;
             len = rule.parse(s + i, n - i, sv, c, dt);
             if (c.parseSuccess()) {
                 c.shift_capture_values();
                 traceResult(true, cnt +1, "OneOrMore", s, n, sv, c, dt);
+                if (ope_->isBool() && len == 0) ++len;
                 if (len == 0) break; // unstuck enless loop
             } else {
                 if (sv.size() != save_sv_size) {
@@ -1252,6 +1330,7 @@ public:
             i += len;
             ++cnt;
         }
+        c.parseStackPop();
         return i;
     }
 
@@ -1263,10 +1342,11 @@ public:
 class Option : public Ope
 {
 public:
-    Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    Option(const std::shared_ptr<Ope>& ope) : Ope("Option"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("Option", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
@@ -1277,11 +1357,12 @@ public:
             c.nest_level--;
             c.pop_capture_scope();
         });
-        const auto& rule = *ope_;
+        auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (c.parseSuccess()) {
             c.shift_capture_values();
             traceResult(true, 1, "Option", s, n, sv, c, dt);
+            c.parseStackPop();
             return len;
         } else {
             if (sv.size() != save_sv_size) {
@@ -1294,6 +1375,7 @@ public:
             c.error_pos = save_error_pos;
             c.clearParseFail();
             traceResult(false, 0, "Option", s, n, sv, c, dt);
+            c.parseStackPop();
             return 0;
         }
     }
@@ -1306,10 +1388,11 @@ public:
 class AndPredicate : public Ope
 {
 public:
-    AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    AndPredicate(const std::shared_ptr<Ope>& ope) : Ope("AndPredicate"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("AndPredicate", s, n, sv, dt);
         c.nest_level++;
         auto& chldsv = c.push();
@@ -1319,16 +1402,19 @@ public:
             c.pop();
             c.pop_capture_scope();
         });
-        const auto& rule = *ope_;
+        auto& rule = *ope_;
         rule.parse(s, n, chldsv, c, dt);
         if (c.parseSuccess()) {
+            c.parseStackPop();
             return 0;
         } else {
+            c.parseStackPop();
             return c.ERROR_LEN;
         }
     }
 
     void accept(Visitor& v) override;
+    bool isBool() override { return true; }
 
     std::shared_ptr<Ope> ope_;
 };
@@ -1336,10 +1422,11 @@ public:
 class NotPredicate : public Ope
 {
 public:
-    NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    NotPredicate(const std::shared_ptr<Ope>& ope) : Ope("NotPredicate"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("NotPredicate", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
@@ -1350,20 +1437,23 @@ public:
             c.pop();
             c.pop_capture_scope();
         });
-        const auto& rule = *ope_;
-        rule.parse(s, n, chldsv, c, dt);
+        auto& rule = *ope_;
+        auto len = rule.parse(s, n, chldsv, c, dt);
         if (c.parseSuccess()) {
-            c.setParseFail();
+            c.setParseFail(s +len);
             c.set_error_pos(s);
+            c.parseStackPop();
             return c.ERROR_LEN;
         } else {
             c.clearParseFail();
             c.error_pos = save_error_pos;
-            return 0;
+            c.parseStackPop();
+            return len;
         }
     }
 
     void accept(Visitor& v) override;
+    bool isBool() override { return true; }
 
     std::shared_ptr<Ope> ope_;
 };
@@ -1373,13 +1463,14 @@ class LiteralString : public Ope
 {
 public:
     LiteralString(const std::string& s, bool ignore_case)
-        : lit_(s)
+        : Ope("LiteralString")
+        , lit_(s)
         , ignore_case_(ignore_case)
         , init_is_word_(false)
         , is_word_(false)
         {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override;
 
     void accept(Visitor& v) override;
 
@@ -1456,7 +1547,7 @@ class CharacterClass : public Ope
     }
 
 public:
-    CharacterClass(const std::string& str) {
+    CharacterClass(const std::string& str) : Ope("CharacterClass") {
         // first char in char class might negate char class
         negated = str.front() == '^';
         size_t pos = 0;
@@ -1466,7 +1557,8 @@ public:
         fillfromString(st);
     }
 
-    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges)
+    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) :
+        Ope("CharacterClass")
     {
         negated = ranges.front().first == '^';
         auto itSt = ranges.begin();
@@ -1490,8 +1582,9 @@ public:
         }
     }
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         if (c.tracer) {
             std::string str = "CharacterClass [";
             if (negated)
@@ -1515,7 +1608,8 @@ public:
 
         if (n < 1) {
             c.set_error_pos(s);
-            c.setParseFail();
+            c.setParseFail(s);
+            c.parseStackPop();
             return c.ERROR_LEN;
         }
 
@@ -1528,17 +1622,21 @@ public:
                     if (range.first <= cp && cp <= range.second)
                         goto fail;
                 }
+                c.parseStackPop();
                 return len;
             } else {
                 for (const auto& range: ranges_) {
-                    if (range.first <= cp && cp <= range.second)
+                    if (range.first <= cp && cp <= range.second) {
+                        c.parseStackPop();
                         return len;
+                    }
                 }
             }
         }
 fail:
-        c.setParseFail();
+        c.setParseFail(s);
         c.set_error_pos(s);
+        c.parseStackPop();
         return c.ERROR_LEN;
     }
 
@@ -1551,20 +1649,23 @@ class Character : public Ope
     , public std::enable_shared_from_this<Character>
 {
 public:
-    Character(char ch) : ch_(ch) {}
+    Character(char ch) : Ope("Character"), ch_(ch) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         if (c.tracer) {
             std::string str = "Character '" + printable_escape_chars(ch_) + "'='" +
                               printable_escape_chars(s[0]) + "'";
             c.trace(str.c_str(), s, n, sv, dt);
         }
         if (n < 1 || s[0] != ch_) {
-            c.setParseFail();
+            c.setParseFail(s);
             c.set_error_pos(s);
+            c.parseStackPop();
             return c.ERROR_LEN;
         }
+        c.parseStackPop();
         return 1;
     }
 
@@ -1577,15 +1678,19 @@ class AnyCharacter : public Ope
     , public std::enable_shared_from_this<AnyCharacter>
 {
 public:
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    AnyCharacter() : Ope("AnyCharacter") {}
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("AnyCharacter", s, n, sv, dt);
         auto len = codepoint_length(s, n);
         if (len < 1) {
-            c.setParseFail();
+            c.setParseFail(s);
             c.set_error_pos(s);
+            c.parseStackPop();
             return c.ERROR_LEN;
         }
+        c.parseStackPop();
         return len;
     }
 
@@ -1596,16 +1701,18 @@ class CaptureScope : public Ope
 {
 public:
     CaptureScope(const std::shared_ptr<Ope>& ope)
-        : ope_(ope) {}
+        : Ope("CaptureScope"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.push_capture_scope();
         auto se = make_scope_exit([&]() {
             c.pop_capture_scope();
         });
-        const auto& rule = *ope_;
+        auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
+        c.parseStackPop();
         return len;
     }
 
@@ -1620,15 +1727,17 @@ public:
     typedef std::function<void (const char* s, size_t n, Context& c)> MatchAction;
 
     Capture(const std::shared_ptr<Ope>& ope, MatchAction ma)
-        : ope_(ope), match_action_(ma) {}
+        : Ope("Capture"), ope_(ope), match_action_(ma) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
-        const auto& rule = *ope_;
+        c.parseStackPush(self(), s);
+        auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
         if (c.parseSuccess() && match_action_) {
             match_action_(s, len, c);
         }
+        c.parseStackPop();
         return len;
     }
 
@@ -1641,9 +1750,9 @@ public:
 class TokenBoundary : public Ope
 {
 public:
-    TokenBoundary(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    TokenBoundary(const std::shared_ptr<Ope>& ope) : Ope("TokenBoundary"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override;
 
     void accept(Visitor& v) override;
 
@@ -1653,15 +1762,17 @@ public:
 class Ignore : public Ope
 {
 public:
-    Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    Ignore(const std::shared_ptr<Ope>& ope) : Ope("Ignore"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& dt) override {
         assert(c.parseSuccess());
-        const auto& rule = *ope_;
+        c.parseStackPush(self(), s);
+        auto& rule = *ope_;
         auto& chldsv = c.push();
         auto se = make_scope_exit([&]() {
             c.pop();
             c.clearParseFail();
+            c.parseStackPop();
         });
         return rule.parse(s, n, chldsv, c, dt);
     }
@@ -1676,12 +1787,15 @@ typedef std::function<size_t (const char* s, size_t n, SemanticValues& sv, Conte
 class User : public Ope
 {
 public:
-    User(Parser fn) : fn_(fn) {}
-     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    User(Parser fn) : Ope("User"), fn_(fn) {}
+     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         c.trace("User", s, n, sv, dt);
         assert(fn_);
-        return fn_(s, n, sv, c, dt);
+        auto len = fn_(s, n, sv, c, dt);
+        c.parseStackPop();
+        return len;
     }
      void accept(Visitor& v) override;
      std::function<size_t (const char* s, size_t n, SemanticValues& sv, Context& c, any& dt)> fn_;
@@ -1690,15 +1804,18 @@ public:
 class WeakHolder : public Ope
 {
 public:
-    WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
+    WeakHolder(const std::shared_ptr<Ope>& ope) : Ope("WeakHolder"), weak_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         //c.trace("WeakHolder", s, n, sv, dt);
         auto ope = weak_.lock();
         assert(ope);
-        const auto& rule = *ope;
-        return rule.parse(s, n, sv, c, dt);
+        auto& rule = *ope;
+        auto len = rule.parse(s, n, sv, c, dt);
+        c.parseStackPop();
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -1710,9 +1827,9 @@ class Holder : public Ope
 {
 public:
     Holder(Definition* outer)
-       : outer_(outer) {}
+       : Ope("Holder"), outer_(outer) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override;
 
     void accept(Visitor& v) override;
 
@@ -1736,7 +1853,8 @@ public:
         const char* s,
         bool is_macro,
         const std::vector<std::shared_ptr<Ope>>& args)
-        : grammar_(grammar)
+        : Ope("Reference")
+        , grammar_(grammar)
         , name_(name)
         , s_(s)
         , is_macro_(is_macro)
@@ -1745,7 +1863,7 @@ public:
         , iarg_(0)
         {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override;
 
     void accept(Visitor& v) override;
 
@@ -1765,17 +1883,21 @@ public:
 class Whitespace : public Ope
 {
 public:
-    Whitespace(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+    Whitespace(const std::shared_ptr<Ope>& ope) : Ope("Whitespace"), ope_(ope) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override {
         assert(c.parseSuccess());
+        c.parseStackPush(self(), s);
         if (c.in_whitespace) {
+            c.parseStackPop();
             return 0;
         }
         c.in_whitespace = true;
         auto se = make_scope_exit([&]() { c.in_whitespace = false; });
-        const auto& rule = *ope_;
-        return rule.parse(s, n, sv, c, dt);
+        auto& rule = *ope_;
+        auto len = rule.parse(s, n, sv, c, dt);
+        c.parseStackPop();
+        return len;
     }
 
     void accept(Visitor& v) override;
@@ -1786,9 +1908,9 @@ public:
 class BackReference : public Ope
 {
 public:
-    BackReference(const std::string& name) : name_(name) {}
+    BackReference(const std::string& name) : Ope("BackReference"), name_(name) {}
 
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) override;
 
     void accept(Visitor& v) override;
 
@@ -1800,88 +1922,112 @@ public:
  */
 template <typename... Args>
 std::shared_ptr<Ope> seq(Args&& ...args) {
-    return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
+    std::shared_ptr<Ope> ptr = std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
+    return ptr->setSelf(ptr);
 }
 
 template <typename... Args>
 std::shared_ptr<Ope> cho(Args&& ...args) {
-    return std::make_shared<PrioritizedChoice>(static_cast<std::shared_ptr<Ope>>(args)...);
+    std::shared_ptr<Ope> ptr = std::make_shared<PrioritizedChoice>(static_cast<std::shared_ptr<Ope>>(args)...);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<ZeroOrMore>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<ZeroOrMore>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<OneOrMore>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<OneOrMore>(ope);
+    return ptr->setSelf(ptr);
+
 }
 
 inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Option>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<Option>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<AndPredicate>(ope);
+   std::shared_ptr<Ope> ptr = std::make_shared<AndPredicate>(ope);
+   return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<NotPredicate>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<NotPredicate>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> lit(const std::string& s) {
-    return std::make_shared<LiteralString>(s, false);
+    std::shared_ptr<Ope> ptr = std::make_shared<LiteralString>(s, false);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> liti(const std::string& s) {
-    return std::make_shared<LiteralString>(s, true);
+    std::shared_ptr<Ope> ptr = std::make_shared<LiteralString>(s, true);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> cls(const std::string& s) {
-    return std::make_shared<CharacterClass>(s);
+    std::shared_ptr<Ope> ptr = std::make_shared<CharacterClass>(s);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> cls(const std::vector<std::pair<char32_t, char32_t>>& ranges) {
-    return std::make_shared<CharacterClass>(ranges);
+    std::shared_ptr<Ope> ptr = std::make_shared<CharacterClass>(ranges);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> chr(char dt) {
-    return std::make_shared<Character>(dt);
+    std::shared_ptr<Ope> ptr = std::make_shared<Character>(dt);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> dot() {
-    return std::make_shared<AnyCharacter>();
+    std::shared_ptr<Ope> ptr = std::make_shared<AnyCharacter>();
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> csc(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<CaptureScope>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<CaptureScope>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, Capture::MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma);
+    std::shared_ptr<Ope> ptr = std::make_shared<Capture>(ope, ma);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<TokenBoundary>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<TokenBoundary>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Ignore>(ope);
+    std::shared_ptr<Ope> ptr = std::make_shared<Ignore>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, SemanticValues& sv, Context& c, any& dt)> fn) {
-    return std::make_shared<User>(fn);
+    std::shared_ptr<Ope> ptr = std::make_shared<User>(fn);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> ref(const Grammar& grammar, const std::string& name, const char* s, bool is_macro, const std::vector<std::shared_ptr<Ope>>& args) {
-    return std::make_shared<Reference>(grammar, name, s, is_macro, args);
+    std::shared_ptr<Ope> ptr = std::make_shared<Reference>(grammar, name, s, is_macro, args);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Whitespace>(std::make_shared<Ignore>(ope));
+    std::shared_ptr<Ope> ign = std::make_shared<Ignore>(ope);
+    ign->setSelf(ign);
+    std::shared_ptr<Ope> ptr = std::make_shared<Whitespace>(ope);
+    return ptr->setSelf(ptr);
 }
 
 inline std::shared_ptr<Ope> bkr(const std::string& name) {
-    return std::make_shared<BackReference>(name);
+    std::shared_ptr<Ope> ptr = std::make_shared<BackReference>(name);
+    return ptr->setSelf(ptr);
 }
 
 /*
@@ -2147,6 +2293,7 @@ struct FindReference : public Ope::Visitor {
             opes.push_back(found_ope);
         }
         found_ope = std::make_shared<Sequence>(opes);
+        found_ope->setSelf(found_ope); // smart ptrs is a pain...
     }
     void visit(PrioritizedChoice& ope) override {
         std::vector<std::shared_ptr<Ope>> opes;
@@ -2155,24 +2302,65 @@ struct FindReference : public Ope::Visitor {
             opes.push_back(found_ope);
         }
         found_ope = std::make_shared<PrioritizedChoice>(opes);
+        found_ope->setSelf(found_ope);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); found_ope = zom(found_ope); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); found_ope = oom(found_ope); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); found_ope = opt(found_ope); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); found_ope = apd(found_ope); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); found_ope = npd(found_ope); }
+    void visit(ZeroOrMore& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = zom(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(OneOrMore& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = oom(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(Option& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = opt(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(AndPredicate& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = apd(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(NotPredicate& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = npd(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
     void visit(LiteralString& ope) override { found_ope = ope.shared_from_this(); }
     void visit(CharacterClass& ope) override { found_ope = ope.shared_from_this(); }
     void visit(Character& ope) override { found_ope = ope.shared_from_this(); }
     void visit(AnyCharacter& ope) override { found_ope = ope.shared_from_this(); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); found_ope = csc(found_ope); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); found_ope = cap(found_ope, ope.match_action_); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); found_ope = tok(found_ope); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); found_ope = ign(found_ope); }
+    void visit(CaptureScope& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = csc(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(Capture& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = cap(found_ope, ope.match_action_);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(TokenBoundary& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = tok(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
+    void visit(Ignore& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = ign(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
     void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
     void visit(Holder& ope) override { ope.ope_->accept(*this); }
     void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); found_ope = wsp(found_ope); }
+    void visit(Whitespace& ope) override {
+        ope.ope_->accept(*this);
+        found_ope = wsp(found_ope);
+        found_ope->setGrammarPos(ope.ope_->grammar_pos(), ope.ope_->grammar_pos_len());
+    }
 
     std::shared_ptr<Ope> found_ope;
 
@@ -2258,11 +2446,20 @@ class Definition
 {
 public:
     struct Result {
+        Result(bool ret = false, size_t len = 0,
+               const char* error_pos = nullptr,
+               const char* message_pos = nullptr,
+               std::string message = std::string()) :
+            ret(ret), len(len), error_pos(error_pos),
+            message_pos(message_pos),
+            message(message)
+        {}
         bool              ret;
         size_t            len;
         const char*       error_pos;
         const char*       message_pos;
         const std::string message;
+        std::vector<std::pair<std::shared_ptr<Ope>, size_t>> failstack;
     };
 
     Definition()
@@ -2270,7 +2467,13 @@ public:
         , enablePackratParsing(false)
         , is_macro(false)
         , holder_(std::make_shared<Holder>(this))
-        , is_token_(false) {}
+        , is_token_(false)
+        , grammartxtpos_(nullptr)
+        , grammartxtpos_len_(0)
+    {
+        // must store a pointer to the owner ptr
+        holder_->setSelf(holder_);
+    }
 
     Definition(const Definition& rhs)
         : name(rhs.name)
@@ -2279,8 +2482,11 @@ public:
         , is_macro(false)
         , holder_(rhs.holder_)
         , is_token_(false)
+        , grammartxtpos_(nullptr)
+        , grammartxtpos_len_(0)
     {
         holder_->outer_ = this;
+        holder_->setSelf(holder_);
     }
 
     Definition(Definition&& rhs)
@@ -2292,8 +2498,11 @@ public:
         , is_macro(rhs.is_macro)
         , holder_(std::move(rhs.holder_))
         , is_token_(rhs.is_token_)
+        , grammartxtpos_(nullptr)
+        , grammartxtpos_len_(0)
     {
         holder_->outer_ = this;
+        holder_->setSelf(holder_);
     }
 
     Definition(const std::shared_ptr<Ope>& ope)
@@ -2302,16 +2511,21 @@ public:
         , is_macro(false)
         , holder_(std::make_shared<Holder>(this))
         , is_token_(false)
+        , grammartxtpos_(nullptr)
+        , grammartxtpos_len_(0)
     {
+        holder_->setSelf(holder_);
         *this <= ope;
     }
 
     operator std::shared_ptr<Ope>() {
-        return std::make_shared<WeakHolder>(holder_);
+        std::shared_ptr<Ope> ptr = std::make_shared<WeakHolder>(holder_);
+        return ptr->setSelf(ptr);
     }
 
     Definition& operator<=(const std::shared_ptr<Ope>& ope) {
         holder_->ope_ = ope;
+        ope->setHolder(holder_);
         return *this;
     }
 
@@ -2400,6 +2614,19 @@ public:
         return is_token_;
     }
 
+    const char* grammar_pos() const {
+        return grammartxtpos_;
+    }
+
+    size_t grammar_pos_len() const {
+        return grammartxtpos_len_;
+    }
+
+    void set_grammar_pos(const char* pos, size_t len) {
+        grammartxtpos_ = pos;
+        grammartxtpos_len_ = len;
+    }
+
     std::string                                                                          name;
     size_t                                                                               id;
     Action                                                                               action;
@@ -2428,6 +2655,7 @@ private:
 
         if (whitespaceOpe) {
             ope = std::make_shared<Sequence>(whitespaceOpe, ope);
+            ope->setSelf(ope);
             whitespaceOpe->accept(vis);
         }
 
@@ -2438,19 +2666,68 @@ private:
         Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
         cxt.error_pos = cxt.max_error_pos > cxt.error_pos ? cxt.max_error_pos : cxt.error_pos;
-        return Result{ cxt.parseSuccess(), len, cxt.error_pos, cxt.message_pos, cxt.message };
+        Result res(cxt.parseSuccess(), len, cxt.error_pos, cxt.message_pos, cxt.message);
+        for(auto &p : cxt.failStack)
+            res.failstack.emplace_back(p);
+        return res;
     }
 
     std::shared_ptr<Holder> holder_;
     mutable std::once_flag  is_token_init_;
     mutable bool            is_token_;
+    const char             *grammartxtpos_;
+    size_t                  grammartxtpos_len_;
 };
 
 /*
  * Implementations
  */
 
-inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
+void Context::setParseFail(const char *pos) {
+    parse_fail = true;
+    if (tracer)
+        traceFail(pos);
+}
+
+void Context::clearParseFail() {
+    parse_fail = false;
+    //if (tracer && !failStack.empty())
+    //    failStack.clear();
+}
+
+void Context::parseStackPush(const std::weak_ptr<Ope> ope, const char *pos)
+{
+    if (ope.expired() || !tracer)
+        return;
+
+    std::shared_ptr<Ope> opeTmp = ope.lock();
+    auto posInStr = static_cast<size_t>(pos - s);
+    parseStack.emplace_back(std::make_pair(opeTmp, posInStr));
+}
+
+void Context::parseStackPop()
+{
+    if (tracer && !parseStack.empty())
+        parseStack.pop_back();
+}
+
+void Context::traceFail(const char* pos) {
+    if (parseStack.empty())
+        return;
+
+    auto posInStr = static_cast<size_t>(pos - s);
+
+    if (!failStack.empty() && failStack.back().second > posInStr)
+        return;
+
+    // copy our current stack into failstack
+    parseStack.back().second = posInStr;
+    failStack.clear();
+    for(auto &p : parseStack)
+        failStack.emplace_back(p);
+}
+
+inline size_t parse_literal(const std::weak_ptr<Ope> &self, const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
         const std::string& lit, bool& init_is_word, bool& is_word, bool ignore_case)
 {
     assert(c.parseSuccess());
@@ -2458,7 +2735,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     for (; i < lit.size(); i++) {
         if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
             c.set_error_pos(s);
-            c.setParseFail();
+            c.setParseFail(c.s + i);
             return c.ERROR_LEN;
         }
     }
@@ -2479,16 +2756,17 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
 
     if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
+        ope->setSelf(ope);
         auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
         if (dummy_c.parseFail()) {
             dummy_c.clearParseFail();
-            c.setParseFail();
+            c.setParseFail(s + i);
             return c.ERROR_LEN;
         }
         i += len;
     }
 
-    // Skip whiltespace
+    // Skip whitespace
     if (!c.in_token) {
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
@@ -2498,25 +2776,36 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
             i += len;
         }
     }
-
+    if (!c.parseStack.empty())
+        c.parseStack.back().second += i;
     return i;
 }
 
-inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) {
     assert(c.parseSuccess());
+    c.parseStackPush(self(), s);
     if (c.tracer) {
-        std::string str = "LiteralString '" + printable_escape_chars_str(lit_) +
-                          "'='" + printable_escape_chars_str(sv.str()) + "'";
+        std::string str = "LiteralString '" + printable_escape_chars_str(lit_) + "'='";
+        size_t end = lit_.length() <= n ? lit_.length() : n;
+        for (size_t i = 0; i < end;) {
+            char32_t cp;
+            i += decode_codepoint(&s[i], n - i, cp);
+            str += printable_escape_chars(cp);
+        }
+        str += "'";
         c.trace(str.c_str(), s, n, sv, dt);
     }
-    return parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
+    auto len = parse_literal(self(), s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
+    c.parseStackPop();
+    return len;
 }
 
-inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) {
     assert(c.parseSuccess());
+    c.parseStackPush(self(), s);
     c.in_token = true;
     auto se = make_scope_exit([&]() { c.in_token = false; });
-    const auto& rule = *ope_;
+    auto& rule = *ope_;
     auto len = rule.parse(s, n, sv, c, dt);
     if (c.parseSuccess()) {
         sv.tokens.push_back(std::make_pair(s, len));
@@ -2524,16 +2813,19 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
             if (c.parseFail()) {
+                c.parseStackPop();
                 return c.ERROR_LEN;
             }
             len += l;
         }
     }
+    c.parseStackPop();
     return len;
 }
 
-inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) {
     assert(c.parseSuccess());
+    c.parseStackPush(self(), s);
     if (c.tracer) {
         std::string str = "Holder lookup=" + outer_->name;
         c.trace(str.c_str(), s, n, sv, dt);
@@ -2551,7 +2843,9 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
     // Macro reference
     // TODO: need packrat support
     if (outer_->is_macro) {
-        return ope_->parse(s, n, sv, c, dt);
+        auto len = ope_->parse(s, n, sv, c, dt);
+        c.parseStackPop();
+        return len;
     }
 
     size_t len;
@@ -2571,7 +2865,6 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         });
 
         auto& chldsv = c.push();
-
         len = ope_->parse(s, n, chldsv, c, dt);
 
         // Invoke action
@@ -2594,7 +2887,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
-                c.setParseFail();
+                c.setParseFail(s);
                 len = c.ERROR_LEN;
             }
         }
@@ -2620,6 +2913,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         }
     }
 
+    c.parseStackPop();
     return len;
 }
 
@@ -2634,7 +2928,9 @@ inline any Holder::reduce(SemanticValues& sv, any& dt) const {
 }
 
 inline size_t Reference::parse(
-    const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) {
+    assert(c.parseSuccess());
+    c.parseStackPush(self(), s);
     if (rule_) {
         // Reference rule
         if (rule_->is_macro) {
@@ -2647,20 +2943,25 @@ inline size_t Reference::parse(
                 arg->accept(vis);
                 args.push_back(vis.found_ope);
             }
-
             c.push_args(args);
             auto se = make_scope_exit([&]() { c.pop_args(); });
             auto ope = get_core_operator();
-            return ope->parse(s, n, sv, c, dt);
+            auto len = ope->parse(s, n, sv, c, dt);
+            c.parseStackPop();
+            return len;
         } else {
             // Definition
             auto ope = get_core_operator();
-            return ope->parse(s, n, sv, c, dt);
+            auto len = ope->parse(s, n, sv, c, dt);
+            c.parseStackPop();
+            return len;
         }
     } else {
         // Reference parameter in macro
         const auto& args = c.top_args();
-        return args[iarg_]->parse(s, n, sv, c, dt);
+        auto len = args[iarg_]->parse(s, n, sv, c, dt);
+        c.parseStackPop();
+        return len;
     }
 }
 
@@ -2668,8 +2969,9 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
     return rule_->holder_;
 }
 
-inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) {
     assert(c.parseSuccess());
+    c.parseStackPush(self(), s);
     c.trace("BackReference", s, n, sv, dt);
     auto it = c.capture_scope_stack.rbegin();
     while (it != c.capture_scope_stack.rend()) {
@@ -2678,7 +2980,9 @@ inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, 
             const auto& lit = captures.at(name_);
             auto init_is_word = false;
             auto is_word = false;
-            return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
+            auto len = parse_literal(self(), s, n, sv, c, dt, lit, init_is_word, is_word, false);
+            c.parseStackPop();
+            return len;
         }
         ++it;
     }
@@ -2820,59 +3124,32 @@ Tracer Definition::tracer = nullptr;
 typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
-void log_print(const char *s, Log log, const Definition::Result &r, std::string msg) {
-
-    std::pair<size_t, size_t> line;
-
-    const char *cmsg;
-    if (r.message_pos) {
-        cmsg = r.message_pos;
-    } else
-        cmsg = r.error_pos;
-    line = line_info(s, cmsg);
-
-    // don't print where it failed if we have a message (from thrown error)
-    if (r.message.empty()) {
-        // pretty print syntax errors
-        const char *lineStart = cmsg - line.second +1,
-                   *lineEnd = lineStart;
-        while (*lineEnd != '\n' && *lineEnd != '\r' && *(++lineEnd) != '\0') {
-            auto len = codepoint_length(lineEnd, 1);
-            if (len > 1) lineEnd += len -1;
-        }
-
-        msg += "\n"; msg.append(lineStart, static_cast<size_t>(lineEnd - lineStart));
-        std::string fill;
-        if (line.second > 2) fill.resize(line.second -1, '-');
-        msg += "\n" + fill + "^";
-
-        log(line.first, line.second, msg);
-    } else
-        log(line.first, line.second, r.message);
-
-}
+class parser;
+void log_print(const parser &parser, const char *s, Log log, const Definition::Result &r, std::string msg);
 
 class ParserGenerator
 {
 public:
     static std::shared_ptr<Grammar> parse(
+        parser&      parser,
         const char*  s,
         size_t       n,
         const Rules& rules,
         std::string& start,
         Log          log)
     {
-        return get_instance().perform_core(s, n, rules, start, log);
+        return get_instance().perform_core(parser, s, n, rules, start, log);
     }
 
      static std::shared_ptr<Grammar> parse(
+        parser&      parser,
         const char*  s,
         size_t       n,
         std::string& start,
         Log          log)
     {
         Rules dummy;
-        return parse(s, n, dummy, start, log);
+        return parse(parser, s, n, dummy, start, log);
     }
 
     // For debuging purpose
@@ -3013,6 +3290,7 @@ private:
                 rule.ignoreSemanticValue = ignore;
                 rule.is_macro = is_macro;
                 rule.params = params;
+                rule.set_grammar_pos(sv.c_str(), sv.length());
 
                 if (data.start.empty()) {
                     data.start = name;
@@ -3031,7 +3309,8 @@ private:
                     opes.emplace_back(any_cast<std::shared_ptr<Ope>>(sv[i]));
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
-                return ope;
+                ope->setSelf(ope);
+                return ope->setGrammarPos(sv.c_str(), sv.length());
             }
         };
 
@@ -3044,7 +3323,8 @@ private:
                     opes.emplace_back(any_cast<std::shared_ptr<Ope>>(x));
                 }
                 const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
-                return ope;
+                ope->setSelf(ope);
+                return ope->setGrammarPos(sv.c_str(), sv.length());
             }
         };
 
@@ -3061,6 +3341,7 @@ private:
                 } else { // '!'
                     ope = npd(ope);
                 }
+                ope->setGrammarPos(sv.c_str(), sv.length());
             }
             return ope;
         };
@@ -3073,11 +3354,11 @@ private:
                 assert(sv.size() == 2);
                 auto tok = any_cast<char>(sv[1]);
                 if (tok == '?') {
-                    return opt(ope);
+                    return opt(ope)->setGrammarPos(sv.c_str(), sv.length());
                 } else if (tok == '*') {
-                    return zom(ope);
+                    return zom(ope)->setGrammarPos(sv.c_str(), sv.length());
                 } else { // '+'
-                    return oom(ope);
+                    return oom(ope)->setGrammarPos(sv.c_str(), sv.length());
                 }
             }
         };
@@ -3098,26 +3379,30 @@ private:
                     }
 
                     if (ignore) {
-                        return ign(ref(*data.grammar, ident, sv.c_str(), is_macro, args));
+                        return ign(ref(*data.grammar, ident, sv.c_str(), is_macro, args))
+                                    ->setGrammarPos(sv.c_str(), sv.length());
                     } else {
-                        return ref(*data.grammar, ident, sv.c_str(), is_macro, args);
+                        return ref(*data.grammar, ident, sv.c_str(), is_macro, args)
+                                    ->setGrammarPos(sv.c_str(), sv.length());
                     }
                 }
                 case 2: { // (Expression)
                     return any_cast<std::shared_ptr<Ope>>(sv[0]);
                 }
                 case 3: { // TokenBoundary
-                    return tok(any_cast<std::shared_ptr<Ope>>(sv[0]));
+                    return tok(any_cast<std::shared_ptr<Ope>>(sv[0]))
+                                ->setGrammarPos(sv.c_str(), sv.length());
                 }
                 case 4: { // CaptureScope
-                    return csc(any_cast<std::shared_ptr<Ope>>(sv[0]));
+                    return csc(any_cast<std::shared_ptr<Ope>>(sv[0]))
+                                ->setGrammarPos(sv.c_str(), sv.length());
                 }
                 case 5: { // Capture
                     const auto& name = any_cast<std::string>(sv[0]);
                     auto ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
                     return cap(ope, [name](const char* a_s, size_t a_n, Context& c) {
                         c.capture_scope_stack.back()[name] = std::string(a_s, a_n);
-                    });
+                    })->setGrammarPos(sv.c_str(), sv.length());
                 }
                 default: {
                     return any_cast<std::shared_ptr<Ope>>(sv[0]);
@@ -3137,11 +3422,13 @@ private:
 
         g["LiteralI"] = [](const SemanticValues& sv) {
             const auto& tok = sv.tokens.front();
-            return liti(resolve_escape_sequence(tok.first, tok.second));
+            return liti(resolve_escape_sequence(tok.first, tok.second))
+                        ->setGrammarPos(sv.c_str(), sv.length());
         };
         g["Literal"] = [](const SemanticValues& sv) {
             const auto& tok = sv.tokens.front();
-            return lit(resolve_escape_sequence(tok.first, tok.second));
+            return lit(resolve_escape_sequence(tok.first, tok.second))
+                        ->setGrammarPos(sv.c_str(), sv.length());
         };
 
         g["Class"] = [](const SemanticValues& sv) {
@@ -3150,11 +3437,11 @@ private:
                 std::string str = sv.str();
                 size_t stPos = str.front() == '[' ? 1 :0,
                        len = str.back() == ']' ? str.length() - stPos -1 : str.length();
-                return cls(str.substr(stPos, len));
+                return cls(str.substr(stPos, len))->setGrammarPos(sv.c_str(), sv.length());
             }
 
             auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
-            return cls(ranges);
+            return cls(ranges)->setGrammarPos(sv.c_str(), sv.length());
         };
         g["Range"] = [](const SemanticValues& sv) {
             switch (sv.choice()) {
@@ -3183,12 +3470,14 @@ private:
         g["STAR"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
         g["PLUS"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
 
-        g["DOT"] = [](const SemanticValues& /*sv*/) { return dot(); };
+        g["DOT"] = [](const SemanticValues& sv) {
+            return dot()->setGrammarPos(sv.c_str(), sv.length());
+        };
 
         g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
 
         g["BackRef"] = [&](const SemanticValues& sv) {
-            return bkr(sv.token());
+            return bkr(sv.token())->setGrammarPos(sv.c_str(), sv.length());
         };
 
         g["Ignore"] = [](const SemanticValues& sv) { return sv.size() > 0; };
@@ -3203,6 +3492,7 @@ private:
     }
 
     std::shared_ptr<Grammar> perform_core(
+        parser&      parser,
         const char*  s,
         size_t       n,
         const Rules& rules,
@@ -3216,9 +3506,9 @@ private:
         if (!r.ret) {
             if (log) {
                 if (r.message_pos) {
-                    log_print(s, log, r, "");
+                    log_print(parser, s, log, r, "");
                 } else {
-                    log_print(s, log, r, "grammar syntax error");
+                    log_print(parser, s, log, r, "grammar syntax error");
                 }
             }
             return nullptr;
@@ -3249,7 +3539,7 @@ private:
                 if (log) {
                     Definition::Result r{1, 0, x.second, nullptr, std::string()};
                     const auto& name = x.first;
-                    log_print(s, log, r, "'" + name + "' is already defined.");
+                    log_print(parser, s, log, r, "'" + name + "' is already defined.");
                 }
             }
         }
@@ -3265,7 +3555,7 @@ private:
                 //const auto ptr = y.second;
                 if (log) {
                     Definition::Result r{1, 0, y.second, nullptr, std::string()};
-                    log_print(s, log, r, vis.error_message[name]);
+                    log_print(parser, s, log, r, vis.error_message[name]);
                 }
                 ret = false;
             }
@@ -3294,7 +3584,7 @@ private:
             if (vis.error_s) {
                 if (log) {
                     Definition::Result r{1, 0, vis.error_s, nullptr, std::string()};
-                    log_print(s, log, r, "'" + name + " is left recursive.");
+                    log_print(parser, s, log, r, "'" + name + " is left recursive.");
                 }
                 ret = false;
             }
@@ -3313,12 +3603,13 @@ private:
                 auto& rule = x.second;
                 auto ope = rule.get_core_operator();
                 if (IsLiteralToken::check(*ope)) {
-                    rule <= tok(ope);
+                    rule <= tok(ope)->setGrammarPos(ope->grammar_pos(), ope->grammar_pos_len());
                 }
             }
 
             auto& rule = (*data.grammar)[start];
-            rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+            auto ws = (*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator();
+            rule.whitespaceOpe = wsp(ws)->setGrammarPos(ws->grammar_pos(), ws->grammar_pos_len());
         }
 
         // Word expression
@@ -3519,14 +3810,16 @@ typedef AstBase<EmptyType> Ast;
 class parser
 {
 public:
-    parser() = default;
+    parser() : grammartxt_(nullptr), grammartxtlen_(0) {}
 
-    parser(const char* s, size_t n, const Rules& rules) {
+    parser(const char* s, size_t n, const Rules& rules) :
+         grammartxt_(nullptr), grammartxtlen_(0)
+    {
         load_grammar(s, n, rules);
     }
 
     parser(const char* s, const Rules& rules)
-        : parser(s, strlen(s), rules) {}
+        :  parser(s, strlen(s), rules) {}
 
     parser(const char* s, size_t n)
         : parser(s, n, Rules()) {}
@@ -3539,7 +3832,9 @@ public:
     }
 
     bool load_grammar(const char* s, size_t n, const Rules& rules) {
-        grammar_ = ParserGenerator::parse(s, n, rules, start_, log);
+        grammartxt_ = s;
+        grammartxtlen_ = n;
+        grammar_ = ParserGenerator::parse(*this, s, n, rules, start_, log);
         return grammar_ != nullptr;
     }
 
@@ -3708,24 +4003,183 @@ public:
 
     Log log;
 
+
+    std::pair<const char*, size_t> grammar_text() const {
+        return std::make_pair(grammartxt_, grammartxtlen_);
+    }
+
 private:
     void output_log(const char* s, size_t n, const Definition::Result& r) const {
         if (log) {
             if (!r.ret) {
                 if (r.message_pos) {
-                    log_print(s, log, r, r.message);
+                    log_print(*this, s, log, r, r.message);
                 } else {
-                    log_print(s, log, r, "syntax error");
+                    log_print(*this, s, log, r, "syntax error");
                 }
             } else if (r.len != n) {
-                log_print(s, log, r, "syntax error");
+                log_print(*this, s, log, r, "syntax error");
             }
         }
     }
 
     std::shared_ptr<Grammar> grammar_;
     std::string              start_;
+    const char*              grammartxt_;
+    size_t                   grammartxtlen_;
+    static parser*           instance;
 };
+// static
+parser* parser::instance = nullptr;
+
+void log_print(const parser &parser, const char *s, Log log, const Definition::Result &r, std::string msg) {
+    struct row {
+        size_t indent;
+        std::string rule;
+        std::string type;
+        size_t ruleLine;
+    };
+
+    std::pair<size_t, size_t> line;
+
+    const char *cmsg;
+    if (r.message_pos) {
+        cmsg = r.message_pos;
+    } else
+        cmsg = r.error_pos;
+
+    line = line_info(s, cmsg);
+
+    auto bounds = line_bounds(s, static_cast<size_t>(cmsg - s));
+
+    // don't print where it failed if we have a message (from thrown error)
+    if (r.message.empty()) {
+        // pretty print syntax errors
+        msg += "\n"; msg.append(bounds.first,
+                                static_cast<size_t>(bounds.second - bounds.first));
+        std::string fill;
+        if (line.second > 2) fill.resize(line.second -1, '-');
+        msg += "\n" + fill + "^";
+
+        log(line.first, line.second, msg);
+    } else
+        log(line.first, line.second, r.message);
+
+    // print trace back
+    if (!r.failstack.empty()) {
+        std::string tr("\n----------------------trace--------------------------------\n"
+                       "line\tplace  operator   [[operatortype:line in grammar]]\n");
+
+        size_t linePosInStr = 0, curLine = 0;
+        const char* ruleLinePos = 0;
+        for (size_t i = 0; i < r.failstack.size(); ++i) {
+            auto p = r.failstack[i];
+            line = line_info(s, s + p.second);
+            if (curLine != line.first) {
+                tr += "----------------------------------------------------------------\n";
+                bounds = line_bounds(s, p.second);
+                curLine = line.first;
+                linePosInStr = static_cast<size_t>(bounds.first - s);
+                tr += std::to_string(curLine); tr += "\t";
+                tr.append(bounds.first, static_cast<size_t>(bounds.second - bounds.first));
+                tr += "\n";
+            }
+
+            size_t maxPos = 0, maxRuleLen = 0;
+
+            // inner loop to reverse each rule to print the highest match first
+            std::vector<row> rules;
+
+            for (size_t j = i; j < r.failstack.size(); ++j, ++i) {
+                p = r.failstack[j];
+                line = line_info(s, s + p.second);
+                if (line.first != curLine)
+                    break; // done with this source line
+
+                row row;
+                // marker indent
+                row.indent = p.second+1 > linePosInStr ? p.second+1 - linePosInStr : 0;
+                if (maxPos < p.second +1)
+                    maxPos = p.second +1 - linePosInStr;
+
+                // print which rule applied
+                auto ope = p.first;
+
+                auto holder = std::dynamic_pointer_cast<Holder>(ope);
+                if (ope->grammar_pos_len()) {
+                    if (ope->grammar_pos() > ruleLinePos)
+                        row.rule.resize(static_cast<size_t>(ope->grammar_pos() - ruleLinePos), ' ');
+                    row.rule += "'" + std::string(ope->grammar_pos(), ope->grammar_pos_len());
+                    row.rule.erase(row.rule.find_last_not_of(" \n\r\t")+1);
+                    row.rule += "'";
+                } else if (holder && holder->outer_->grammar_pos_len()) {
+                    row.rule += "'" + std::string(holder->outer_->grammar_pos(),
+                                              holder->outer_->grammar_pos_len());
+                    row.rule.erase((row.rule.find_last_not_of(" \r\n\t") +1));
+                    row.rule += "'";
+                }
+                if (!rules.empty() && rules.back().rule == row.rule) {
+                    rules.back().indent = row.indent;
+                    continue; // be less verbose
+                }
+
+                if (row.rule.length() > maxRuleLen)
+                    maxRuleLen = row.rule.length();
+
+                if (holder) {
+                    row.type += "Definition"; //fill += holder->outer_->name;
+                    ruleLinePos = holder->outer_->grammar_pos();
+                } else {
+                    row.type += p.first->opName;
+                }
+
+                if (ope->grammar_pos()) {
+                    auto grmLine = line_info(parser.grammar_text().first,
+                                             ope->grammar_pos());
+                    row.ruleLine = grmLine.first;
+                } else if (holder && holder->outer_->grammar_pos()){
+                    auto grmLine = line_info(parser.grammar_text().first,
+                                             holder->outer_->grammar_pos());
+                    row.ruleLine = grmLine.first;
+                } else {
+                    row.ruleLine = 0;
+                }
+
+                rules.emplace_back(row);
+            }
+
+            // now print in reverse order
+            for(auto it = rules.rbegin(); it != rules.rend(); ++it) {
+                std::string tmp;
+                size_t spaceCnt = it->indent -1;
+                if (it->indent > 0)
+                    tmp.resize(spaceCnt, '-');
+                tmp += '^';
+
+                // do the manual indent for each line
+                std::string fill;
+                spaceCnt = maxPos - it->indent+1;
+                fill.resize(spaceCnt, ' ');
+                tmp += fill + it->rule;
+
+                // do the type
+                fill.clear();
+                fill.resize(maxRuleLen - it->rule.length(), ' ');
+                fill += "    [[" + it->type;
+                if (it->ruleLine > 0)
+                    fill += ":" + std::to_string(it->ruleLine);
+                fill += "]]";
+
+
+                // append to traceback string
+                tr += "\t" + tmp + fill + "\n";
+            }
+        }
+
+        log(line.first, line.second, tr);
+    }
+}
+
 
 } // namespace peg
 
