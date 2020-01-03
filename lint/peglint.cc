@@ -32,6 +32,7 @@ int main(int argc, const char** argv)
     auto opt_source = false;
     auto opt_enable_pakrat = false;
     auto opt_trace_grmr = false;
+    auto opt_traceback = false;
     vector<char> source;
     auto opt_trace = false;
     vector<const char*> path_list;
@@ -55,6 +56,8 @@ int main(int argc, const char** argv)
             opt_trace = true;
         } else if (string("--tracegrammar") == arg) {
             opt_trace_grmr = true;
+        }else if (string("--traceback") == arg) {
+            opt_traceback = true;
         } else if (string("--pakrat") == arg) {
             opt_enable_pakrat = true;
         } else {
@@ -63,7 +66,7 @@ int main(int argc, const char** argv)
     }
 
     if (path_list.empty() || opt_help) {
-        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [--tracegrammar] [grammar file path] [source file path]" << endl;
+        cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [--tracegrammar] [--traceback] [grammar file path] [source file path]" << endl;
         return 1;
     }
 
@@ -121,6 +124,16 @@ int main(int argc, const char** argv)
     if (opt_trace && !opt_trace_grmr) {
         parser.enable_trace(tracer.callback());
     }
+
+
+    // enable traceback after grammar is loaded
+    auto trlog = [&](size_t ln, size_t col, const string& msg) {
+        cerr << source_path << ":" <<  ln << ":" << col << "\n" << msg << endl;
+    };
+    peg::TracebackObj trObj(parser, trlog);
+    if (opt_traceback)
+        parser.enable_traceback(trObj.callback());
+
 
     if (opt_ast) {
 	    parser.enable_ast();

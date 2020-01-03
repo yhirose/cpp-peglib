@@ -871,6 +871,7 @@ public:
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
+    static bool                                  enableTraceback;
     std::vector<bool>                            cache_registered;
     std::vector<bool>                            cache_success;
 
@@ -1021,6 +1022,8 @@ public:
 
     static const size_t ERROR_LEN = 0;
 };
+// static
+bool Context::enableTraceback = false;
 
 
 /*
@@ -2685,19 +2688,17 @@ private:
 
 void Context::setParseFail(const char *pos) {
     parse_fail = true;
-    if (tracer)
+    if (enableTraceback)
         traceFail(pos);
 }
 
 void Context::clearParseFail() {
     parse_fail = false;
-    //if (tracer && !failStack.empty())
-    //    failStack.clear();
 }
 
 void Context::parseStackPush(const std::weak_ptr<Ope> ope, const char *pos)
 {
-    if (ope.expired() || !tracer)
+    if (!enableTraceback || ope.expired())
         return;
 
     std::shared_ptr<Ope> opeTmp = ope.lock();
@@ -2707,7 +2708,7 @@ void Context::parseStackPush(const std::weak_ptr<Ope> ope, const char *pos)
 
 void Context::parseStackPop()
 {
-    if (tracer && !parseStack.empty())
+    if (enableTraceback && !parseStack.empty())
         parseStack.pop_back();
 }
 
@@ -2727,7 +2728,7 @@ void Context::traceFail(const char* pos) {
         failStack.emplace_back(p);
 }
 
-inline size_t parse_literal(const std::weak_ptr<Ope> &self, const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
+inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
         const std::string& lit, bool& init_is_word, bool& is_word, bool ignore_case)
 {
     assert(c.parseSuccess());
@@ -2795,7 +2796,7 @@ inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, 
         str += "'";
         c.trace(str.c_str(), s, n, sv, dt);
     }
-    auto len = parse_literal(self(), s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
+    auto len = parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
     c.parseStackPop();
     return len;
 }
@@ -2980,7 +2981,7 @@ inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, 
             const auto& lit = captures.at(name_);
             auto init_is_word = false;
             auto is_word = false;
-            auto len = parse_literal(self(), s, n, sv, c, dt, lit, init_is_word, is_word, false);
+            auto len = parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
             c.parseStackPop();
             return len;
         }
@@ -3125,37 +3126,38 @@ typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
 typedef std::function<void (size_t, size_t, const std::string&)> Log;
 
 class parser;
-void log_print(const parser &parser, const char *s, Log log, const Definition::Result &r, std::string msg);
+void log_print(const char *s, Log log, const Definition::Result &r, std::string msg);
+typedef std::function<void (const char *s, size_t n, const Definition::Result &r)> Traceback;
 
 class ParserGenerator
 {
 public:
     static std::shared_ptr<Grammar> parse(
-        parser&      parser,
         const char*  s,
         size_t       n,
         const Rules& rules,
         std::string& start,
         Log          log)
     {
-        return get_instance().perform_core(parser, s, n, rules, start, log);
+        return get_instance().perform_core(s, n, rules, start, log);
     }
 
      static std::shared_ptr<Grammar> parse(
-        parser&      parser,
         const char*  s,
         size_t       n,
         std::string& start,
         Log          log)
     {
         Rules dummy;
-        return parse(parser, s, n, dummy, start, log);
+        return parse(s, n, dummy, start, log);
     }
 
     // For debuging purpose
     static Grammar& grammar() {
         return get_instance().g;
     }
+
+    static Traceback trlog;
 
 private:
     static ParserGenerator& get_instance() {
@@ -3492,7 +3494,6 @@ private:
     }
 
     std::shared_ptr<Grammar> perform_core(
-        parser&      parser,
         const char*  s,
         size_t       n,
         const Rules& rules,
@@ -3506,9 +3507,12 @@ private:
         if (!r.ret) {
             if (log) {
                 if (r.message_pos) {
-                    log_print(parser, s, log, r, "");
+                    log_print(s, log, r, "");
                 } else {
-                    log_print(parser, s, log, r, "grammar syntax error");
+                    log_print(s, log, r, "grammar syntax error");
+                }
+                if (trlog) {
+                    trlog(s, n, r);
                 }
             }
             return nullptr;
@@ -3539,7 +3543,11 @@ private:
                 if (log) {
                     Definition::Result r{1, 0, x.second, nullptr, std::string()};
                     const auto& name = x.first;
-                    log_print(parser, s, log, r, "'" + name + "' is already defined.");
+                    log_print(s, log, r, "'" + name + "' is already defined.");
+                }
+                if (trlog) {
+                    Definition::Result r{1, 0, x.second, nullptr, std::string()};
+                    trlog(s, n, r);
                 }
             }
         }
@@ -3555,7 +3563,11 @@ private:
                 //const auto ptr = y.second;
                 if (log) {
                     Definition::Result r{1, 0, y.second, nullptr, std::string()};
-                    log_print(parser, s, log, r, vis.error_message[name]);
+                    log_print(s, log, r, vis.error_message[name]);
+                }
+                if (trlog) {
+                    Definition::Result r{1, 0, y.second, nullptr, std::string()};
+                    trlog(s, n, r);
                 }
                 ret = false;
             }
@@ -3584,7 +3596,11 @@ private:
             if (vis.error_s) {
                 if (log) {
                     Definition::Result r{1, 0, vis.error_s, nullptr, std::string()};
-                    log_print(parser, s, log, r, "'" + name + " is left recursive.");
+                    log_print(s, log, r, "'" + name + " is left recursive.");
+                }
+                if (trlog) {
+                    Definition::Result r{1, 0, vis.error_s, nullptr, std::string()};
+                    trlog(s, n, r);
                 }
                 ret = false;
             }
@@ -3623,6 +3639,8 @@ private:
 
     Grammar g;
 };
+// static
+Traceback ParserGenerator::trlog = nullptr;
 
 /*-----------------------------------------------------------------------------
  *  AST
@@ -3834,7 +3852,7 @@ public:
     bool load_grammar(const char* s, size_t n, const Rules& rules) {
         grammartxt_ = s;
         grammartxtlen_ = n;
-        grammar_ = ParserGenerator::parse(*this, s, n, rules, start_, log);
+        grammar_ = ParserGenerator::parse(s, n, rules, start_, log);
         return grammar_ != nullptr;
     }
 
@@ -4001,6 +4019,11 @@ public:
         Definition::tracer = tracer;
     }
 
+    void enable_traceback(Traceback trlogfn) {
+        ParserGenerator::trlog = trlogfn;
+        Context::enableTraceback = trlogfn != nullptr;
+    }
+
     Log log;
 
 
@@ -4013,12 +4036,18 @@ private:
         if (log) {
             if (!r.ret) {
                 if (r.message_pos) {
-                    log_print(*this, s, log, r, r.message);
+                    log_print(s, log, r, r.message);
                 } else {
-                    log_print(*this, s, log, r, "syntax error");
+                    log_print(s, log, r, "syntax error");
+                }
+                if (ParserGenerator::trlog) {
+                    ParserGenerator::trlog(s, n, r);
                 }
             } else if (r.len != n) {
-                log_print(*this, s, log, r, "syntax error");
+                log_print(s, log, r, "syntax error");
+                if (ParserGenerator::trlog) {
+                    ParserGenerator::trlog(s, n, r);
+                }
             }
         }
     }
@@ -4027,20 +4056,10 @@ private:
     std::string              start_;
     const char*              grammartxt_;
     size_t                   grammartxtlen_;
-    static parser*           instance;
 };
-// static
-parser* parser::instance = nullptr;
 
-void log_print(const parser &parser, const char *s, Log log, const Definition::Result &r, std::string msg) {
-    struct row {
-        size_t indent;
-        std::string rule;
-        std::string type;
-        size_t ruleLine;
-    };
 
-    std::pair<size_t, size_t> line;
+void log_print(const char *s, Log log, const Definition::Result &r, std::string msg) {
 
     const char *cmsg;
     if (r.message_pos) {
@@ -4048,8 +4067,7 @@ void log_print(const parser &parser, const char *s, Log log, const Definition::R
     } else
         cmsg = r.error_pos;
 
-    line = line_info(s, cmsg);
-
+    auto line = line_info(s, cmsg);
     auto bounds = line_bounds(s, static_cast<size_t>(cmsg - s));
 
     // don't print where it failed if we have a message (from thrown error)
@@ -4065,121 +4083,153 @@ void log_print(const parser &parser, const char *s, Log log, const Definition::R
     } else
         log(line.first, line.second, r.message);
 
-    // print trace back
-    if (!r.failstack.empty()) {
-        std::string tr("\n----------------------trace--------------------------------\n"
-                       "line\tplace  operator   [[operatortype:line in grammar]]\n");
-
-        size_t linePosInStr = 0, curLine = 0;
-        const char* ruleLinePos = 0;
-        for (size_t i = 0; i < r.failstack.size(); ++i) {
-            auto p = r.failstack[i];
-            line = line_info(s, s + p.second);
-            if (curLine != line.first) {
-                tr += "----------------------------------------------------------------\n";
-                bounds = line_bounds(s, p.second);
-                curLine = line.first;
-                linePosInStr = static_cast<size_t>(bounds.first - s);
-                tr += std::to_string(curLine); tr += "\t";
-                tr.append(bounds.first, static_cast<size_t>(bounds.second - bounds.first));
-                tr += "\n";
-            }
-
-            size_t maxPos = 0, maxRuleLen = 0;
-
-            // inner loop to reverse each rule to print the highest match first
-            std::vector<row> rules;
-
-            for (size_t j = i; j < r.failstack.size(); ++j, ++i) {
-                p = r.failstack[j];
-                line = line_info(s, s + p.second);
-                if (line.first != curLine)
-                    break; // done with this source line
-
-                row row;
-                // marker indent
-                row.indent = p.second+1 > linePosInStr ? p.second+1 - linePosInStr : 0;
-                if (maxPos < p.second +1)
-                    maxPos = p.second +1 - linePosInStr;
-
-                // print which rule applied
-                auto ope = p.first;
-
-                auto holder = std::dynamic_pointer_cast<Holder>(ope);
-                if (ope->grammar_pos_len()) {
-                    if (ope->grammar_pos() > ruleLinePos)
-                        row.rule.resize(static_cast<size_t>(ope->grammar_pos() - ruleLinePos), ' ');
-                    row.rule += "'" + std::string(ope->grammar_pos(), ope->grammar_pos_len());
-                    row.rule.erase(row.rule.find_last_not_of(" \n\r\t")+1);
-                    row.rule += "'";
-                } else if (holder && holder->outer_->grammar_pos_len()) {
-                    row.rule += "'" + std::string(holder->outer_->grammar_pos(),
-                                              holder->outer_->grammar_pos_len());
-                    row.rule.erase((row.rule.find_last_not_of(" \r\n\t") +1));
-                    row.rule += "'";
-                }
-                if (!rules.empty() && rules.back().rule == row.rule) {
-                    rules.back().indent = row.indent;
-                    continue; // be less verbose
-                }
-
-                if (row.rule.length() > maxRuleLen)
-                    maxRuleLen = row.rule.length();
-
-                if (holder) {
-                    row.type += "Definition"; //fill += holder->outer_->name;
-                    ruleLinePos = holder->outer_->grammar_pos();
-                } else {
-                    row.type += p.first->opName;
-                }
-
-                if (ope->grammar_pos()) {
-                    auto grmLine = line_info(parser.grammar_text().first,
-                                             ope->grammar_pos());
-                    row.ruleLine = grmLine.first;
-                } else if (holder && holder->outer_->grammar_pos()){
-                    auto grmLine = line_info(parser.grammar_text().first,
-                                             holder->outer_->grammar_pos());
-                    row.ruleLine = grmLine.first;
-                } else {
-                    row.ruleLine = 0;
-                }
-
-                rules.emplace_back(row);
-            }
-
-            // now print in reverse order
-            for(auto it = rules.rbegin(); it != rules.rend(); ++it) {
-                std::string tmp;
-                size_t spaceCnt = it->indent -1;
-                if (it->indent > 0)
-                    tmp.resize(spaceCnt, '-');
-                tmp += '^';
-
-                // do the manual indent for each line
-                std::string fill;
-                spaceCnt = maxPos - it->indent+1;
-                fill.resize(spaceCnt, ' ');
-                tmp += fill + it->rule;
-
-                // do the type
-                fill.clear();
-                fill.resize(maxRuleLen - it->rule.length(), ' ');
-                fill += "    [[" + it->type;
-                if (it->ruleLine > 0)
-                    fill += ":" + std::to_string(it->ruleLine);
-                fill += "]]";
-
-
-                // append to traceback string
-                tr += "\t" + tmp + fill + "\n";
-            }
-        }
-
-        log(line.first, line.second, tr);
-    }
 }
 
+/* --------------------------------------------------------------------------------
+ *   traceback obj, can be used to print tracebacks
+ * -------------------------------------------------------------------------------*/
+class TracebackObj {
+    parser& parser_;
+    struct row {
+        size_t indent;
+        std::string rule;
+        std::string type;
+        size_t ruleLine;
+    };
+    Log log_;
+
+public:
+
+    explicit TracebackObj(parser &parser, Log log) :
+        parser_(parser), log_(log)
+    {
+        assert(log && "Must have log function.");
+    }
+
+    Traceback callback() {
+        return [&](const char *s, size_t n, const Definition::Result &r) {
+            // print traceback
+            if (!r.failstack.empty()) {
+                std::string tr("\n----------------------trace--------------------------------\n"
+                               "line\tplace  operator   [[operatortype:line in grammar]]\n");
+
+                size_t linePosInStr = 0, curLine = 0;
+                std::pair<const char*, const char*> bounds;
+                const char* ruleLinePos = nullptr;
+
+                for (size_t i = 0; i < r.failstack.size(); ++i) {
+                    auto p = r.failstack[i];
+                    if (p.second >= n)
+                        break;
+
+                    auto line = line_info(s, s + p.second);
+                    if (curLine != line.first) {
+                        tr += "----------------------------------------------------------------\n";
+                        bounds = line_bounds(s, p.second);
+                        curLine = line.first;
+                        linePosInStr = static_cast<size_t>(bounds.first - s);
+                        tr += std::to_string(curLine); tr += "\t";
+                        tr.append(bounds.first, static_cast<size_t>(bounds.second - bounds.first));
+                        tr += "\n";
+                    }
+
+                    size_t maxPos = 0, maxRuleLen = 0;
+
+                    // inner loop to reverse each rule to print the highest match first
+                    std::vector<row> rules;
+
+                    for (size_t j = i; j < r.failstack.size(); ++j, ++i) {
+                        p = r.failstack[j];
+                        line = line_info(s, s + p.second);
+                        if (line.first != curLine)
+                            break; // done with this source line
+
+                        row row;
+                        // marker indent
+                        row.indent = p.second+1 > linePosInStr ? p.second+1 - linePosInStr : 0;
+                        if (maxPos < p.second +1)
+                            maxPos = p.second +1 - linePosInStr;
+
+                        // print which rule applied
+                        auto ope = p.first;
+
+                        auto holder = std::dynamic_pointer_cast<Holder>(ope);
+                        if (ope->grammar_pos_len()) {
+                            if (ope->grammar_pos() > ruleLinePos)
+                                row.rule.resize(static_cast<size_t>(ope->grammar_pos() - ruleLinePos), ' ');
+                            row.rule += "'" + std::string(ope->grammar_pos(), ope->grammar_pos_len());
+                            row.rule.erase(row.rule.find_last_not_of(" \n\r\t")+1);
+                            row.rule += "'";
+                        } else if (holder && holder->outer_->grammar_pos_len()) {
+                            row.rule += "'" + std::string(holder->outer_->grammar_pos(),
+                                                      holder->outer_->grammar_pos_len());
+                            row.rule.erase((row.rule.find_last_not_of(" \r\n\t") +1));
+                            row.rule += "'";
+                        }
+                        if (!rules.empty() && rules.back().rule == row.rule) {
+                            rules.back().indent = row.indent;
+                            continue; // be less verbose
+                        }
+
+                        if (row.rule.length() > maxRuleLen)
+                            maxRuleLen = row.rule.length();
+
+                        if (holder) {
+                            row.type += "Definition"; //fill += holder->outer_->name;
+                            ruleLinePos = holder->outer_->grammar_pos();
+                        } else {
+                            row.type += p.first->opName;
+                        }
+
+                        if (ope->grammar_pos()) {
+                            auto grmLine = line_info(parser_.grammar_text().first,
+                                                     ope->grammar_pos());
+                            row.ruleLine = grmLine.first;
+                        } else if (holder && holder->outer_->grammar_pos()){
+                            auto grmLine = line_info(parser_.grammar_text().first,
+                                                     holder->outer_->grammar_pos());
+                            row.ruleLine = grmLine.first;
+                        } else {
+                            row.ruleLine = 0;
+                        }
+
+                        rules.emplace_back(row);
+                    }
+
+                    // now print in reverse order
+                    for(auto it = rules.rbegin(); it != rules.rend(); ++it) {
+                        std::string tmp;
+                        size_t spaceCnt = it->indent -1;
+                        if (it->indent > 0)
+                            tmp.resize(spaceCnt, '-');
+                        tmp += '^';
+
+                        // do the manual indent for each line
+                        std::string fill;
+                        spaceCnt = maxPos - it->indent+1;
+                        fill.resize(spaceCnt, ' ');
+                        tmp += fill + it->rule;
+
+                        // do the type
+                        fill.clear();
+                        fill.resize(maxRuleLen - it->rule.length(), ' ');
+                        fill += "    [[" + it->type;
+                        if (it->ruleLine > 0)
+                            fill += ":" + std::to_string(it->ruleLine);
+                        fill += "]]";
+
+
+                        // append to traceback string
+                        tr += "\t" + tmp + fill + "\n";
+                    }
+                }
+
+                auto line = line_info(s, s + r.failstack.back().second);
+                log_(line.first, line.second, tr);
+            }
+        };
+    }
+};
 
 } // namespace peg
 
