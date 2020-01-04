@@ -1289,7 +1289,7 @@ TEST_CASE("User defined rule test", "[user rule]")
                     }
                 }
                 c.setParseFail(s);
-                return 0;
+                return c.ERROR_LEN;
             })
         },
         {
