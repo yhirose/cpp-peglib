@@ -1042,8 +1042,8 @@ public:
     virtual void accept(Visitor& v) = 0;
     virtual bool isBool() { return false; } // AndPredicate and NotPredicate
 
-    std::shared_ptr<Holder> holder() const { return holder_; }
-    void setHolder(std::shared_ptr<Holder> holder) { holder = holder_; }
+    std::weak_ptr<Holder> holder() const { return holder_; }
+    void setHolder(std::shared_ptr<Holder> holder) { holder_ = holder; }
 
     // weak_ptr to the shared object that holds this obj in memory
     const std::weak_ptr<Ope> self() const { return myself_; }
@@ -1080,7 +1080,7 @@ protected:
     const char *grammartxt_pos_;
     size_t grammartxt_len_;
 
-    std::shared_ptr<Holder> holder_;
+    std::weak_ptr<Holder> holder_;
     std::weak_ptr<Ope> myself_;
 };
 
@@ -4095,6 +4095,8 @@ class TracebackObj {
         std::string rule;
         std::string type;
         size_t ruleLine;
+        size_t ruleIndent;
+        bool backtrack;
     };
     Log log_;
 
@@ -4111,11 +4113,10 @@ public:
             // print traceback
             if (!r.failstack.empty()) {
                 std::string tr("\n----------------------trace--------------------------------\n"
-                               "line\tplace  operator   [[operatortype:line in grammar]]\n");
+                               "line\tplace  \t\toperator   [[operatortype:line in grammar]]\n");
 
                 size_t linePosInStr = 0, curLine = 0;
                 std::pair<const char*, const char*> bounds;
-                const char* ruleLinePos = nullptr;
 
                 for (size_t i = 0; i < r.failstack.size(); ++i) {
                     auto p = r.failstack[i];
@@ -4140,23 +4141,28 @@ public:
 
                     for (size_t j = i; j < r.failstack.size(); ++j, ++i) {
                         p = r.failstack[j];
-                        line = line_info(s, s + p.second);
-                        if (line.first != curLine)
-                            break; // done with this source line
 
                         row row;
+                        bool inNextLine = (s + p.second > bounds.second);
+
+                        row.backtrack  = p.second+1 < linePosInStr;
+
                         // marker indent
-                        row.indent = p.second+1 > linePosInStr ? p.second+1 - linePosInStr : 0;
-                        if (maxPos < p.second +1)
-                            maxPos = p.second +1 - linePosInStr;
+                        if (p.second > linePosInStr && !row.backtrack)
+                            row.indent = p.second - linePosInStr;
+                        else
+                            row.indent = 0;
+
+                        // max advance pos in sourceline
+                        if ((maxPos < p.second - linePosInStr) && !inNextLine && !row.backtrack)
+                            maxPos = p.second - linePosInStr; // not last rule as that might end in another line
 
                         // print which rule applied
                         auto ope = p.first;
 
+                        // get the rule
                         auto holder = std::dynamic_pointer_cast<Holder>(ope);
                         if (ope->grammar_pos_len()) {
-                            if (ope->grammar_pos() > ruleLinePos)
-                                row.rule.resize(static_cast<size_t>(ope->grammar_pos() - ruleLinePos), ' ');
                             row.rule += "'" + std::string(ope->grammar_pos(), ope->grammar_pos_len());
                             row.rule.erase(row.rule.find_last_not_of(" \n\r\t")+1);
                             row.rule += "'";
@@ -4166,33 +4172,56 @@ public:
                             row.rule.erase((row.rule.find_last_not_of(" \r\n\t") +1));
                             row.rule += "'";
                         }
-                        if (!rules.empty() && rules.back().rule == row.rule) {
+
+                        if (!rules.empty() && rules.back().rule == row.rule && !inNextLine) {
                             rules.back().indent = row.indent;
                             continue; // be less verbose
                         }
 
-                        if (row.rule.length() > maxRuleLen)
-                            maxRuleLen = row.rule.length();
-
                         if (holder) {
                             row.type += "Definition"; //fill += holder->outer_->name;
-                            ruleLinePos = holder->outer_->grammar_pos();
                         } else {
                             row.type += p.first->opName;
                         }
+                        //row.type += ":" + std::to_string(j); // iteration count
 
-                        if (ope->grammar_pos()) {
-                            auto grmLine = line_info(parser_.grammar_text().first,
-                                                     ope->grammar_pos());
+                        do { // bust out block
+                            size_t rulePos = 0;
+                            const char* grmr = parser_.grammar_text().first,
+                                      * grmrPos = grmr;
+                            if (ope->grammar_pos()) {
+                                grmrPos = ope->grammar_pos();
+                            } else if (holder && holder->outer_->grammar_pos()) {
+                                grmrPos = holder->outer_->grammar_pos();
+                            } else {
+                                row.ruleLine = row.ruleIndent = 0;
+                                break;
+                            }
+
+                            rulePos = static_cast<size_t>(grmrPos - grmr);
+                            auto grmBounds = line_bounds(grmr, rulePos);
+                            row.ruleIndent = static_cast<size_t>(grmrPos - grmBounds.first);
+                            auto grmLine = line_info(grmr, grmrPos);
                             row.ruleLine = grmLine.first;
-                        } else if (holder && holder->outer_->grammar_pos()){
-                            auto grmLine = line_info(parser_.grammar_text().first,
-                                                     holder->outer_->grammar_pos());
-                            row.ruleLine = grmLine.first;
-                        } else {
-                            row.ruleLine = 0;
+                        } while (false);
+
+                        if (row.rule.length() + row.ruleIndent > maxRuleLen)
+                            maxRuleLen = row.rule.length() + row.ruleIndent;
+
+                        if (inNextLine) {
+                            // this line actually end on another line
+                            // display this accordingly
+                            auto next = line_info(s, s + p.second);
+                            auto nextBounds = line_bounds(s, p.second);
+                            tr += std::to_string(next.first); tr += "\t";
+                            tr.append(nextBounds.first, static_cast<size_t>(nextBounds.second - nextBounds.first));
+                            tr += "\n";
+                            row.indent -= static_cast<size_t>(nextBounds.first - &s[linePosInStr]);
+                            if (maxPos < row.indent)
+                                maxPos = row.indent;
+                            rules.emplace_back(row);
+                            break; // done with this line
                         }
-
                         rules.emplace_back(row);
                     }
 
@@ -4208,16 +4237,24 @@ public:
                         std::string fill;
                         spaceCnt = maxPos - it->indent+1;
                         fill.resize(spaceCnt, ' ');
+                        tmp += fill;
+
+                        // indent rule
+                        fill.clear();
+                        fill.resize(it->ruleIndent, ' ');
                         tmp += fill + it->rule;
 
                         // do the type
                         fill.clear();
-                        fill.resize(maxRuleLen - it->rule.length(), ' ');
+                        spaceCnt = maxRuleLen - it->rule.length() - it->ruleIndent;
+                        fill.resize(spaceCnt, ' ');
                         fill += "    [[" + it->type;
                         if (it->ruleLine > 0)
                             fill += ":" + std::to_string(it->ruleLine);
                         fill += "]]";
 
+                        if (it->backtrack)
+                            tr += '*';
 
                         // append to traceback string
                         tr += "\t" + tmp + fill + "\n";
