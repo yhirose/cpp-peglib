@@ -846,6 +846,14 @@ class Context
                      // such as ZeroOrMore class which tries this value
 
 public:
+    struct Traceback {
+        Traceback(const std::shared_ptr<Ope> ope, size_t posInStr, size_t nestLevel) :
+            ope(ope), posInStr(posInStr), nestLevel(nestLevel)
+        {}
+        std::shared_ptr<Ope> ope;
+        size_t posInStr;
+        size_t nestLevel;
+    };
     const char*                                  path;
     const char*                                  s;
     const size_t                                 l;
@@ -881,8 +889,8 @@ public:
 
     /// when we fail, we store a stack of IDs to trace back later
     /// <operator, posInStr>
-    std::vector<std::pair<std::shared_ptr<Ope>, size_t>> failStack;
-    std::vector<std::pair<std::shared_ptr<Ope>, size_t>> parseStack;
+    std::vector<Traceback> failStack;
+    std::vector<Traceback> parseStack;
 
 
     Context(
@@ -2462,7 +2470,7 @@ public:
         const char*       error_pos;
         const char*       message_pos;
         const std::string message;
-        std::vector<std::pair<std::shared_ptr<Ope>, size_t>> failstack;
+        std::vector<Context::Traceback> failstack;
     };
 
     Definition()
@@ -2703,7 +2711,7 @@ void Context::parseStackPush(const std::weak_ptr<Ope> ope, const char *pos)
 
     std::shared_ptr<Ope> opeTmp = ope.lock();
     auto posInStr = static_cast<size_t>(pos - s);
-    parseStack.emplace_back(std::make_pair(opeTmp, posInStr));
+    parseStack.emplace_back(Traceback(opeTmp, posInStr, nest_level));
 }
 
 void Context::parseStackPop()
@@ -2718,11 +2726,12 @@ void Context::traceFail(const char* pos) {
 
     auto posInStr = static_cast<size_t>(pos - s);
 
-    if (!failStack.empty() && failStack.back().second > posInStr)
+    if (!failStack.empty() && failStack.back().posInStr > posInStr)
         return;
 
     // copy our current stack into failstack
-    parseStack.back().second = posInStr;
+    parseStack.back().posInStr = posInStr;
+    parseStack.back().nestLevel = nest_level;
     failStack.clear();
     for(auto &p : parseStack)
         failStack.emplace_back(p);
@@ -2778,7 +2787,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
         }
     }
     if (!c.parseStack.empty())
-        c.parseStack.back().second += i;
+        c.parseStack.back().posInStr += i;
     return i;
 }
 
@@ -4088,7 +4097,10 @@ void log_print(const char *s, Log log, const Definition::Result &r, std::string 
 /* --------------------------------------------------------------------------------
  *   traceback obj, can be used to print tracebacks
  * -------------------------------------------------------------------------------*/
-class TracebackObj {
+struct TracebackObj {
+    enum filterType { Continue = 1, JumpIn = 1 << 1,
+                      Fail = 1 << 2, Match = 1 << 3, All = 0x0F };
+private:
     parser& parser_;
     struct row {
         size_t indent;
@@ -4096,14 +4108,16 @@ class TracebackObj {
         std::string type;
         size_t ruleLine;
         size_t ruleIndent;
+        filterType action;
         bool backtrack;
     };
     Log log_;
+    filterType filterMask;
 
 public:
 
-    explicit TracebackObj(parser &parser, Log log) :
-        parser_(parser), log_(log)
+    explicit TracebackObj(parser &parser, Log log, /*filterType*/ int filter = Match) :
+        parser_(parser), log_(log), filterMask(static_cast<filterType>(filter))
     {
         assert(log && "Must have log function.");
     }
@@ -4112,21 +4126,21 @@ public:
         return [&](const char *s, size_t n, const Definition::Result &r) {
             // print traceback
             if (!r.failstack.empty()) {
-                std::string tr("\n----------------------trace--------------------------------\n"
-                               "line\tplace  \t\toperator   [[operatortype:line in grammar]]\n");
+                std::string tr("\n----------------------trace--------------------------------\n");
 
-                size_t linePosInStr = 0, curLine = 0;
+                size_t linePosInStr = 0, curLine = 0, nestLevel = 0, prevPosInStr = 0;
                 std::pair<const char*, const char*> bounds;
 
                 for (size_t i = 0; i < r.failstack.size(); ++i) {
                     auto p = r.failstack[i];
-                    if (p.second >= n)
+                    if (p.posInStr >= n)
                         break;
 
-                    auto line = line_info(s, s + p.second);
+                    auto line = line_info(s, s + p.posInStr);
                     if (curLine != line.first) {
-                        tr += "----------------------------------------------------------------\n";
-                        bounds = line_bounds(s, p.second);
+                        tr += "----------------------------------------------------------------\n"
+                              "line\tplace  \t\toperator   [[operatortype:line in grammar:level]]\n";
+                        bounds = line_bounds(s, p.posInStr);
                         curLine = line.first;
                         linePosInStr = static_cast<size_t>(bounds.first - s);
                         tr += std::to_string(curLine); tr += "\t";
@@ -4143,22 +4157,30 @@ public:
                         p = r.failstack[j];
 
                         row row;
-                        bool inNextLine = (s + p.second > bounds.second);
+                        bool inNextLine = (s + p.posInStr > bounds.second);
 
-                        row.backtrack  = p.second+1 < linePosInStr;
+                        row.backtrack  = p.posInStr+1 < linePosInStr;
+                        if (p.nestLevel > nestLevel)
+                            row.action = JumpIn;
+                        else if (p.nestLevel < nestLevel)
+                            row.action = p.posInStr > prevPosInStr ? Match : Fail;
+                        else
+                            row.action = Continue;
+                        nestLevel = p.nestLevel;
+                        prevPosInStr = p.posInStr;
 
                         // marker indent
-                        if (p.second > linePosInStr && !row.backtrack)
-                            row.indent = p.second - linePosInStr;
+                        if (p.posInStr > linePosInStr && !row.backtrack)
+                            row.indent = p.posInStr - linePosInStr;
                         else
                             row.indent = 0;
 
                         // max advance pos in sourceline
-                        if ((maxPos < p.second - linePosInStr) && !inNextLine && !row.backtrack)
-                            maxPos = p.second - linePosInStr; // not last rule as that might end in another line
+                        if ((maxPos < p.posInStr - linePosInStr && p.posInStr >= linePosInStr) && !inNextLine && !row.backtrack)
+                            maxPos = p.posInStr - linePosInStr; // not last rule as that might end in another line
 
                         // print which rule applied
-                        auto ope = p.first;
+                        auto ope = p.ope;
 
                         // get the rule
                         auto holder = std::dynamic_pointer_cast<Holder>(ope);
@@ -4173,7 +4195,9 @@ public:
                             row.rule += "'";
                         }
 
-                        if (!rules.empty() && rules.back().rule == row.rule && !inNextLine) {
+                        if (!rules.empty() && rules.back().action != Match &&
+                            !inNextLine && (row.action & filterMask) == 0)
+                        {
                             rules.back().indent = row.indent;
                             continue; // be less verbose
                         }
@@ -4181,7 +4205,7 @@ public:
                         if (holder) {
                             row.type += "Definition"; //fill += holder->outer_->name;
                         } else {
-                            row.type += p.first->opName;
+                            row.type += p.ope->opName;
                         }
                         //row.type += ":" + std::to_string(j); // iteration count
 
@@ -4203,6 +4227,8 @@ public:
                             row.ruleIndent = static_cast<size_t>(grmrPos - grmBounds.first);
                             auto grmLine = line_info(grmr, grmrPos);
                             row.ruleLine = grmLine.first;
+
+                            row.type += ":" + std::to_string(p.nestLevel);
                         } while (false);
 
                         if (row.rule.length() + row.ruleIndent > maxRuleLen)
@@ -4211,8 +4237,8 @@ public:
                         if (inNextLine) {
                             // this line actually end on another line
                             // display this accordingly
-                            auto next = line_info(s, s + p.second);
-                            auto nextBounds = line_bounds(s, p.second);
+                            auto next = line_info(s, s + p.posInStr);
+                            auto nextBounds = line_bounds(s, p.posInStr);
                             tr += std::to_string(next.first); tr += "\t";
                             tr.append(nextBounds.first, static_cast<size_t>(nextBounds.second - nextBounds.first));
                             tr += "\n";
@@ -4244,6 +4270,15 @@ public:
                         fill.resize(it->ruleIndent, ' ');
                         tmp += fill + it->rule;
 
+                        // display how this rule applied
+                        switch (it->action) {
+                        case Fail:     tmp[0] = '<'; break;
+                        case JumpIn:   tmp[0] = '>'; break;
+                        case Match:    tmp[0] = '*'; break;
+                        case All: // fallthrough
+                        case Continue: tmp[0] = ' '; break;
+                        }
+
                         // do the type
                         fill.clear();
                         spaceCnt = maxRuleLen - it->rule.length() - it->ruleIndent;
@@ -4261,7 +4296,7 @@ public:
                     }
                 }
 
-                auto line = line_info(s, s + r.failstack.back().second);
+                auto line = line_info(s, s + r.failstack.back().posInStr);
                 log_(line.first, line.second, tr);
             }
         };
