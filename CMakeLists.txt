@@ -57,6 +57,7 @@ enable_testing()
 
 add_subdirectory(test)
 add_subdirectory(example)
+
 if(BUILD_PL0)
     add_subdirectory(pl0)
 endif()

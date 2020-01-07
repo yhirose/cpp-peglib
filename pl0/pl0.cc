@@ -9,18 +9,20 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
-#include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/GenericValue.h"
-#include "llvm/ExecutionEngine/MCJIT.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/ValueSymbolTable.h"
-#include "llvm/IR/Verifier.h"
-#include <llvm/IR/LLVMContext.h>
-#include "llvm/Support/TargetSelect.h"
+#ifdef WITH_JIT
+# include "llvm/ExecutionEngine/ExecutionEngine.h"
+# include "llvm/ExecutionEngine/GenericValue.h"
+# include "llvm/ExecutionEngine/MCJIT.h"
+# include "llvm/IR/IRBuilder.h"
+# include "llvm/IR/ValueSymbolTable.h"
+# include "llvm/IR/Verifier.h"
+# include <llvm/IR/LLVMContext.h>
+# include "llvm/Support/TargetSelect.h"
+ using namespace llvm;
+#endif
 
 using namespace peg;
 using namespace peg::udl;
-using namespace llvm;
 using namespace std;
 
 /*
@@ -532,6 +534,7 @@ struct Interpreter {
 /*
  * LLVM
  */
+#ifdef WITH_JIT
 struct LLVM {
   LLVM(const shared_ptr<AstPL0> ast) :
       builder_(context_),
@@ -895,13 +898,18 @@ struct LLVM {
                                         APInt(32, ast->token, 10));
   }
 };
+#endif
 
 /*
  * Main
  */
 int main(int argc, const char** argv) {
   if (argc < 2) {
+#ifdef WITH_JIT
     cout << "usage: pl0 PATH [--ast] [--llvm] [--jit]" << endl;
+#else
+    cout << "usage: pl0 PATH [--ast]" << endl;
+#endif
     return 1;
   }
 
@@ -954,6 +962,7 @@ int main(int argc, const char** argv) {
         cout << ast_to_s<AstPL0>(ast);
       }
 
+#ifdef WITH_JIT
       if (opt_llvm || opt_jit) {
         LLVM compiler(ast);
 
@@ -966,6 +975,9 @@ int main(int argc, const char** argv) {
       } else {
         Interpreter::exec(ast);
       }
+#else
+      Interpreter::exec(ast);
+#endif
 
     } catch (const runtime_error& e) {
       cerr << e.what() << endl;
