@@ -21,6 +21,8 @@ if(${found} EQUAL -1)
 endif()
 
 set(CMAKE_CXX_EXTENSIONS OFF)
+option(BUILD_LINT "Build grammar lint tool" ON)
+option(BUILD_PL0 "Build PL0 interpreter" ON)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
     OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
@@ -55,3 +57,10 @@ enable_testing()
 
 add_subdirectory(test)
 add_subdirectory(example)
+
+if(BUILD_LINT)
+    add_subdirectory(lint)
+endif()
+if(BUILD_PL0)
+    add_subdirectory(pl0)
+endif()
