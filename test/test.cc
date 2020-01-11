@@ -127,6 +127,99 @@ TEST_CASE("String capture test3", "[general]")
     REQUIRE(tags[2] == "tag-3");
 }
 
+TEST_CASE("String capture test4", "[general]")
+{
+    parser pg(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <- ('[' [\w:\-]+ ']')+
+              WH    <- [\s]*
+         )");
+
+     std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+     pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+     auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+     REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+     REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
+ TEST_CASE("String capture test5", "[general]")
+{
+    parser pg(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <- ('[' [a-z]+ [:\-]* [\d]+ ']')+
+              WH    <- [\s]*
+         )");
+
+     std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+     pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+     auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+     REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+     REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
+ TEST_CASE("String capture test6", "[general]")
+{
+    parser pg(R"(
+              ROOT  <- WH (TOKEN WH)+
+              TOKEN <-  [^\s]+
+              WH    <- [^\w\[\]]*
+         )");
+
+     std::vector<std::string> tags;
+    int spaces = 0, spaces_len = 0;
+
+    pg["TOKEN"] = [&](const SemanticValues& sv) {
+        tags.push_back(sv.token());
+    };
+    pg["WH"] = [&](const SemanticValues& sv) {
+        spaces_len += sv.str().length();
+        ++spaces;
+    };
+
+     auto ret = pg.parse(" [tag1]  [tag:2] [tag-3]  ");
+
+     REQUIRE(ret == true);
+    REQUIRE(tags.size() == 3);
+    REQUIRE(tags[0] == "[tag1]");
+    REQUIRE(tags[1] == "[tag:2]");
+    REQUIRE(tags[2] == "[tag-3]");
+
+     REQUIRE(spaces == 4);
+    REQUIRE(spaces_len == 6);
+}
+
 TEST_CASE("Cyclic grammer test", "[general]")
 {
     Definition PARENT;
