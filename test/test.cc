@@ -136,6 +136,48 @@ TEST_CASE("Cyclic grammer test", "[general]")
     CHILD  <= seq(PARENT);
 }
 
+TEST_CASE("Endless loop1", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- [a-z0-9]*
+        WH    <- [ \t]*
+    )");
+
+    auto ret = pg.parse(" word1  word2 word3  ");
+
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Endless loop2", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN+ WH
+        TOKEN <- [a-z0-9]*
+        WH    <- [ \t]*
+    )");
+
+    auto ret = pg.parse(" word1  word2 word3  ");
+
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Endless loop3", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN? WH
+        TOKEN <- [a-z0-9]*
+        WH    <- [ \t]*
+    )");
+
+    auto ret = pg.parse(" word1  word2 word3  ");
+
+    REQUIRE(ret == false);
+}
+
 TEST_CASE("Visit test", "[general]")
 {
     Definition ROOT, TAG, TAG_NAME, WS;
