@@ -1,4 +1,4 @@
-﻿//
+//
 //  peglib.h
 //
 //  Copyright (c) 2015-18 Yuji Hirose. All rights reserved.
@@ -772,17 +772,6 @@ private:
 };
 
 /*
- * Result
- */
-inline bool success(size_t len) {
-    return len != static_cast<size_t>(-1);
-}
-
-inline bool fail(size_t len) {
-    return len == static_cast<size_t>(-1);
-}
-
-/*
  * Context
  */
 class Context;
@@ -793,12 +782,15 @@ typedef std::function<void (const char* name, const char* s, size_t n, const Sem
 
 class Context
 {
+    bool parse_fail; // true when a parse have failed, might get cleared by parent parse
+                     // such as ZeroOrMore class which tries this value
 public:
     const char*                                  path;
     const char*                                  s;
     const size_t                                 l;
 
     const char*                                  error_pos;
+    const char*                                  max_error_pos;  // stores the furthest pos it has reached yet when error was set
     const char*                                  message_pos;
     std::string                                  message; // TODO: should be `int`.
 
@@ -835,10 +827,12 @@ public:
         std::shared_ptr<Ope> a_wordOpe,
         bool                 a_enablePackratParsing,
         Tracer               a_tracer)
-        : path(a_path)
+        : parse_fail(false)
+        , path(a_path)
         , s(a_s)
         , l(a_l)
         , error_pos(nullptr)
+        , max_error_pos(nullptr)
         , message_pos(nullptr)
         , value_stack_size(0)
         , nest_level(0)
@@ -870,16 +864,18 @@ public:
             if (cache_success[idx]) {
                 auto key = std::make_pair(col, def_id);
                 std::tie(len, val) = cache_values[key];
+                parse_fail = false;
                 return;
             } else {
                 len = ERROR_LEN;
+                parse_fail = true;
                 return;
             }
         } else {
             fn(val);
             cache_registered[idx] = true;
-            cache_success[idx] = success(len);
-            if (success(len)) {
+            cache_success[idx] = parseSuccess();
+            if (parseSuccess()) {
                 auto key = std::make_pair(col, def_id);
                 cache_values[key] = std::make_pair(len, val);
             }
@@ -938,13 +934,22 @@ public:
 
     void set_error_pos(const char* a_s) {
         if (error_pos < a_s) error_pos = a_s;
+        if (max_error_pos < a_s) max_error_pos = a_s;
     }
 
     void trace(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
         if (tracer) tracer(name, a_s, n, sv, *this, dt);
     }
 
-    static const size_t ERROR_LEN = static_cast<size_t>(-1);
+    /*
+     * Result of last parse
+     */
+    inline bool parseSuccess() const { return !parse_fail; }
+    inline bool parseFail() const { return parse_fail; }
+    void clearParseFail();
+    void setParseFail(const char *pos);
+
+    static const size_t ERROR_LEN = 0;
 };
 
 /*
@@ -958,6 +963,7 @@ public:
     virtual ~Ope() {}
     virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
+    virtual bool isBool() { return false; } // AndPredicate and NotPredicate
 };
 
 class Sequence : public Ope
@@ -985,6 +991,7 @@ public:
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("Sequence", s, n, sv, dt);
         auto& chldsv = c.push();
         size_t i = 0;
@@ -993,8 +1000,8 @@ public:
             auto se = make_scope_exit([&]() { c.nest_level--; });
             const auto& rule = *ope;
             auto len = rule.parse(s + i, n - i, chldsv, c, dt);
-            if (fail(len)) {
-                return static_cast<size_t>(-1);
+            if (c.parseFail()) {
+                return 0;
             }
             i += len;
         }
@@ -1034,9 +1041,12 @@ public:
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("PrioritizedChoice", s, n, sv, dt);
         size_t id = 0;
         for (const auto& ope : opes_) {
+            c.clearParseFail();
+
             c.nest_level++;
             auto& chldsv = c.push();
             c.push_capture_scope();
@@ -1047,7 +1057,7 @@ public:
             });
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
-            if (success(len)) {
+            if (c.parseSuccess()) {
                 sv.insert(sv.end(), chldsv.begin(), chldsv.end());
                 sv.tags.insert(sv.tags.end(), chldsv.tags.begin(), chldsv.tags.end());
                 sv.s_ = chldsv.c_str();
@@ -1061,7 +1071,9 @@ public:
             }
             id++;
         }
-        return static_cast<size_t>(-1);
+        c.set_error_pos(s);
+        c.setParseFail(s);
+        return 0;
     }
 
     void accept(Visitor& v) override;
@@ -1077,6 +1089,7 @@ public:
     ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("ZeroOrMore", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         size_t i = 0;
@@ -1091,8 +1104,10 @@ public:
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             auto len = rule.parse(s + i, n - i, sv, c, dt);
-            if (success(len)) {
+            if (c.parseSuccess()) {
                 c.shift_capture_values();
+                if (ope_->isBool() && len == 0) ++len;
+                if (len == 0) break; // prevent endless loop
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1102,6 +1117,7 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                c.clearParseFail();
                 break;
             }
             i += len;
@@ -1120,6 +1136,7 @@ public:
     OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("OneOrMore", s, n, sv, dt);
         size_t len = 0;
         {
@@ -1131,12 +1148,14 @@ public:
             });
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
-            if (success(len)) {
+            if (c.parseSuccess()) {
                 c.shift_capture_values();
             } else {
-                return static_cast<size_t>(-1);
+                return 0;
             }
         }
+        // if we reached here we have at least one found
+
         auto save_error_pos = c.error_pos;
         auto i = len;
         while (n - i > 0) {
@@ -1150,8 +1169,10 @@ public:
             auto save_tok_size = sv.tokens.size();
             const auto& rule = *ope_;
             len = rule.parse(s + i, n - i, sv, c, dt);
-            if (success(len)) {
+            if (c.parseSuccess()) {
                 c.shift_capture_values();
+                if (ope_->isBool() && len == 0) ++len;
+                if (len == 0) break; // unstuck endless loop
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1161,6 +1182,7 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                c.clearParseFail(); // we have at least one found before entering loop
                 break;
             }
             i += len;
@@ -1179,6 +1201,7 @@ public:
     Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("Option", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
@@ -1191,7 +1214,7 @@ public:
         });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len)) {
+        if (c.parseSuccess()) {
             c.shift_capture_values();
             return len;
         } else {
@@ -1203,6 +1226,7 @@ public:
                 sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
             }
             c.error_pos = save_error_pos;
+            c.clearParseFail();
             return 0;
         }
     }
@@ -1218,6 +1242,7 @@ public:
     AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("AndPredicate", s, n, sv, dt);
         c.nest_level++;
         auto& chldsv = c.push();
@@ -1228,8 +1253,8 @@ public:
             c.pop_capture_scope();
         });
         const auto& rule = *ope_;
-        auto len = rule.parse(s, n, chldsv, c, dt);
-        if (success(len)) {
+        rule.parse(s, n, chldsv, c, dt);
+        if (c.parseSuccess()) {
             return 0;
         } else {
             return c.ERROR_LEN;
@@ -1237,6 +1262,7 @@ public:
     }
 
     void accept(Visitor& v) override;
+    bool isBool() override { return true; }
 
     std::shared_ptr<Ope> ope_;
 };
@@ -1247,6 +1273,7 @@ public:
     NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("NotPredicate", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
         c.nest_level++;
@@ -1259,16 +1286,19 @@ public:
         });
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, chldsv, c, dt);
-        if (success(len)) {
+        if (c.parseSuccess()) {
+            c.setParseFail(s +len);
             c.set_error_pos(s);
             return c.ERROR_LEN;
         } else {
+            c.clearParseFail();
             c.error_pos = save_error_pos;
-            return 0;
+            return len;
         }
     }
 
     void accept(Visitor& v) override;
+    bool isBool() override { return true; }
 
     std::shared_ptr<Ope> ope_;
 };
@@ -1318,10 +1348,12 @@ public:
     CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) : ranges_(ranges) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("CharacterClass", s, n, sv, dt);
 
         if (n < 1) {
             c.set_error_pos(s);
+            c.setParseFail(s);
             return c.ERROR_LEN;
         }
 
@@ -1336,6 +1368,7 @@ public:
             }
         }
 
+        c.setParseFail(s);
         c.set_error_pos(s);
         return c.ERROR_LEN;
     }
@@ -1352,8 +1385,10 @@ public:
     Character(char ch) : ch_(ch) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("Character", s, n, sv, dt);
         if (n < 1 || s[0] != ch_) {
+            c.setParseFail(s);
             c.set_error_pos(s);
             return c.ERROR_LEN;
         }
@@ -1370,9 +1405,11 @@ class AnyCharacter : public Ope
 {
 public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("AnyCharacter", s, n, sv, dt);
         auto len = codepoint_length(s, n);
         if (len < 1) {
+            c.setParseFail(s);
             c.set_error_pos(s);
             return c.ERROR_LEN;
         }
@@ -1389,6 +1426,7 @@ public:
         : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.push_capture_scope();
         auto se = make_scope_exit([&]() {
             c.pop_capture_scope();
@@ -1412,9 +1450,10 @@ public:
         : ope_(ope), match_action_(ma) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         const auto& rule = *ope_;
         auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len) && match_action_) {
+        if (c.parseSuccess() && match_action_) {
             match_action_(s, len, c);
         }
         return len;
@@ -1444,10 +1483,12 @@ public:
     Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& /*sv*/, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         const auto& rule = *ope_;
         auto& chldsv = c.push();
         auto se = make_scope_exit([&]() {
             c.pop();
+            c.clearParseFail();
         });
         return rule.parse(s, n, chldsv, c, dt);
     }
@@ -1464,6 +1505,7 @@ class User : public Ope
 public:
     User(Parser fn) : fn_(fn) {}
      size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         c.trace("User", s, n, sv, dt);
         assert(fn_);
         return fn_(s, n, sv, dt);
@@ -1478,6 +1520,7 @@ public:
     WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         auto ope = weak_.lock();
         assert(ope);
         const auto& rule = *ope;
@@ -1551,6 +1594,7 @@ public:
     Whitespace(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
+        assert(c.parseSuccess());
         if (c.in_whitespace) {
             return 0;
         }
@@ -2173,7 +2217,7 @@ private:
 
         Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
-        return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
+        return Result{ cxt.parseSuccess(), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
 
     std::shared_ptr<Holder> holder_;
@@ -2185,13 +2229,23 @@ private:
  * Implementations
  */
 
+void Context::setParseFail(const char *pos) {
+    parse_fail = true;
+}
+
+void Context::clearParseFail() {
+    parse_fail = false;
+}
+
 inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
         const std::string& lit, bool& init_is_word, bool& is_word, bool ignore_case)
 {
+    assert(c.parseSuccess());
     size_t i = 0;
     for (; i < lit.size(); i++) {
         if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
             c.set_error_pos(s);
+            c.setParseFail(c.s + i);
             return c.ERROR_LEN;
         }
     }
@@ -2203,8 +2257,9 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
 
     if (!init_is_word) { // TODO: Protect with mutex
         if (c.wordOpe) {
-            auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
-            is_word = success(len);
+            c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
+            is_word = dummy_c.parseSuccess();
+            dummy_c.clearParseFail();
         }
         init_is_word = true;
     }
@@ -2212,7 +2267,9 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     if (is_word) {
         auto ope = std::make_shared<NotPredicate>(c.wordOpe);
         auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
-        if (fail(len)) {
+        if (dummy_c.parseFail()) {
+            dummy_c.clearParseFail();
+            c.setParseFail(s + i);
             return c.ERROR_LEN;
         }
         i += len;
@@ -2222,7 +2279,7 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
     if (!c.in_token) {
         if (c.whitespaceOpe) {
             auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
-            if (fail(len)) {
+            if (c.parseFail()) {
                 return c.ERROR_LEN;
             }
             i += len;
@@ -2233,21 +2290,23 @@ inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context
 }
 
 inline size_t LiteralString::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    assert(c.parseSuccess());
     c.trace("LiteralString", s, n, sv, dt);
     return parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
 }
 
 inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    assert(c.parseSuccess());
     c.in_token = true;
     auto se = make_scope_exit([&]() { c.in_token = false; });
     const auto& rule = *ope_;
     auto len = rule.parse(s, n, sv, c, dt);
-    if (success(len)) {
+    if (c.parseSuccess()) {
         sv.tokens.push_back(std::make_pair(s, len));
 
         if (c.whitespaceOpe) {
             auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
-            if (fail(l)) {
+            if (c.parseFail()) {
                 return c.ERROR_LEN;
             }
             len += l;
@@ -2257,6 +2316,7 @@ inline size_t TokenBoundary::parse(const char* s, size_t n, SemanticValues& sv, 
 }
 
 inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    assert(c.parseSuccess());
     if (!ope_) {
         throw std::logic_error("Uninitialized definition ope was used...");
     }
@@ -2294,7 +2354,7 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
         len = ope_->parse(s, n, chldsv, c, dt);
 
         // Invoke action
-        if (success(len)) {
+        if (c.parseSuccess()) {
             chldsv.s_ = s;
             chldsv.n_ = len;
             chldsv.name_ = outer_->name;
@@ -2313,12 +2373,13 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
                         c.message = e.what();
                     }
                 }
+                c.setParseFail(s);
                 len = c.ERROR_LEN;
             }
         }
     });
 
-    if (success(len)) {
+    if (c.parseSuccess()) {
         if (!outer_->ignoreSemanticValue) {
             sv.emplace_back(val);
             sv.tags.emplace_back(str2tag(outer_->name.c_str()));
@@ -2347,6 +2408,7 @@ inline any Holder::reduce(SemanticValues& sv, any& dt) const {
 
 inline size_t Reference::parse(
     const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    assert(c.parseSuccess());
     if (rule_) {
         // Reference rule
         if (rule_->is_macro) {
@@ -2381,6 +2443,7 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
 }
 
 inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
+    assert(c.parseSuccess());
     c.trace("BackReference", s, n, sv, dt);
     auto it = c.capture_scope_stack.rbegin();
     while (it != c.capture_scope_stack.rend()) {
