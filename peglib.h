@@ -29,6 +29,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
 #if PEGLIB_USE_STD_ANY
@@ -956,6 +957,21 @@ public:
     virtual ~Ope() {}
     virtual size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
     virtual void accept(Visitor& v) = 0;
+protected:
+    void traceResult(bool match, size_t cnt, const char *name, const char *s,
+                     size_t n, SemanticValues& sv, Context& c, any& dt) const
+    {
+        if (c.tracer) {
+            std::stringstream str;
+            if (match) {
+                str << "*" << name << " matched " << std::to_string(cnt) << "*";
+            } else
+                str << "-" << name << " exit count:" << std::to_string(cnt) << "-";
+            --c.nest_level;
+            c.trace(str.str().c_str(), s, n, sv, dt);
+            ++c.nest_level;
+        }
+    }
 };
 
 class Sequence : public Ope
@@ -1055,10 +1071,12 @@ public:
                 sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
 
                 c.shift_capture_values();
+                traceResult(true, 1, "PrioritizedChoice", s, n, sv, c, dt);
                 return len;
             }
             id++;
         }
+        traceResult(false, 0, "PrioritizedChoice", s, n, sv, c, dt);
         return static_cast<size_t>(-1);
     }
 
@@ -1077,7 +1095,7 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("ZeroOrMore", s, n, sv, dt);
         auto save_error_pos = c.error_pos;
-        size_t i = 0;
+        size_t i = 0, cnt = 0;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1091,6 +1109,7 @@ public:
             auto len = rule.parse(s + i, n - i, sv, c, dt);
             if (success(len)) {
                 c.shift_capture_values();
+                traceResult(true, cnt +1, "ZeroOrMore", s, n, sv, c, dt);
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1100,9 +1119,11 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                traceResult(false, cnt, "ZeroOrMore", s, n, sv, c, dt);
                 break;
             }
             i += len;
+            ++cnt;
         }
         return i;
     }
@@ -1130,13 +1151,15 @@ public:
             const auto& rule = *ope_;
             len = rule.parse(s, n, sv, c, dt);
             if (success(len)) {
+                traceResult(true, 1, "OneOrMore", s, n, sv, c, dt);
                 c.shift_capture_values();
             } else {
+                traceResult(false, 0, "OneOrMore", s, n, sv, c, dt);
                 return static_cast<size_t>(-1);
             }
         }
         auto save_error_pos = c.error_pos;
-        auto i = len;
+        size_t i = len, cnt = 0;
         while (n - i > 0) {
             c.nest_level++;
             c.push_capture_scope();
@@ -1150,6 +1173,7 @@ public:
             len = rule.parse(s + i, n - i, sv, c, dt);
             if (success(len)) {
                 c.shift_capture_values();
+                traceResult(true, cnt +1, "OneOrMore", s, n, sv, c, dt);
             } else {
                 if (sv.size() != save_sv_size) {
                     sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
@@ -1159,9 +1183,11 @@ public:
                     sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
                 }
                 c.error_pos = save_error_pos;
+                traceResult(false, cnt, "OneOrMore", s, n, sv, c, dt);
                 break;
             }
             i += len;
+            ++cnt;
         }
         return i;
     }
@@ -1191,6 +1217,7 @@ public:
         auto len = rule.parse(s, n, sv, c, dt);
         if (success(len)) {
             c.shift_capture_values();
+            traceResult(true, 1, "Option", s, n, sv, c, dt);
             return len;
         } else {
             if (sv.size() != save_sv_size) {
@@ -1201,6 +1228,7 @@ public:
                 sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
             }
             c.error_pos = save_error_pos;
+            traceResult(false, 0, "Option", s, n, sv, c, dt);
             return 0;
         }
     }
@@ -2321,12 +2349,18 @@ inline size_t Holder::parse(const char* s, size_t n, SemanticValues& sv, Context
             sv.emplace_back(val);
             sv.tags.emplace_back(str2tag(outer_->name.c_str()));
         }
+        if (c.tracer) {
+            traceResult(true, len, outer_->name.c_str(), s, n, sv, c, dt);
+        }
     } else {
         if (outer_->error_message) {
             if (c.message_pos < s) {
                 c.message_pos = s;
                 c.message = outer_->error_message();
             }
+        }
+        if (c.tracer) {
+            traceResult(false, len, outer_->name.c_str(), s, n, sv, c, dt);
         }
     }
 
