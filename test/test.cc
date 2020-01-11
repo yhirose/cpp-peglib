@@ -178,6 +178,35 @@ TEST_CASE("Endless loop3", "[general]")
     REQUIRE(ret == false);
 }
 
+TEST_CASE("Endless not test", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- !'word1'
+        WH    <- [ \t]*
+    )");
+
+    auto ret = pg.parse(" word2 ");
+
+    REQUIRE(ret == false);
+}
+
+
+TEST_CASE("Endless and test", "[general]")
+{
+    // this was triggering an endless loop
+    parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- &'word1'
+        WH    <- [ \t]*
+    )");
+
+    auto ret = pg.parse(" word1 ");
+
+    REQUIRE(ret == false);
+}
+
 TEST_CASE("Visit test", "[general]")
 {
     Definition ROOT, TAG, TAG_NAME, WS;
