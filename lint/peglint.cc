@@ -30,6 +30,7 @@ int main(int argc, const char** argv)
     auto opt_optimize_ast_nodes = false;
     auto opt_help = false;
     auto opt_source = false;
+    auto opt_trace_grmr = false;
     vector<char> source;
     auto opt_trace = false;
     vector<const char*> path_list;
@@ -51,6 +52,8 @@ int main(int argc, const char** argv)
             }
         } else if (string("--trace") == arg) {
             opt_trace = true;
+        } else if (string("--tracegrammar") == arg) {
+            opt_trace_grmr = true;
         } else {
             path_list.push_back(arg);
         }
@@ -71,21 +74,30 @@ int main(int argc, const char** argv)
     }
 
     peg::parser parser;
+    peg::TracerObj tracer;
+
+    if (opt_trace_grmr) {
+        parser.enable_trace(tracer.callback());
+    }
 
     parser.log = [&](size_t ln, size_t col, const string& msg) {
         cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
     if (!parser.load_grammar(syntax.data(), syntax.size())) {
+        cerr << "could not load grammar." << std::endl;
         return -1;
     }
+    if (opt_trace_grmr && !opt_trace)
+        parser.enable_trace(nullptr);
 
     if (path_list.size() < 2 && !opt_source) {
+        cout << "No sourcefile or sourcecode given." << std::endl;
         return 0;
     }
 
     // Check source
-    std::string source_path = "[commendline]";
+    std::string source_path = "[commandline]";
     if (path_list.size() >= 2) {
         if (!read_file(path_list[1], source)) {
             cerr << "can't open the code file." << endl;
@@ -98,29 +110,9 @@ int main(int argc, const char** argv)
         cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
     };
 
-    if (opt_trace) {
-        std::cout << "pos:lev\trule/ope" << std::endl;
-        std::cout << "-------\t--------" << std::endl;
-        size_t prev_pos = 0;
-        parser.enable_trace([&](
-            const char* name,
-            const char* s,
-            size_t /*n*/,
-            const peg::SemanticValues& /*sv*/,
-            const peg::Context& c,
-            const peg::any& /*dt*/) {
-            auto pos = static_cast<size_t>(s - c.s);
-            auto backtrack = (pos < prev_pos ? "*" : "");
-            string indent;
-            auto level = c.nest_level;
-            while (level--) {
-                indent += "  ";
-            }
-            std::cout
-                << pos << ":" << c.nest_level << backtrack << "\t"
-                << indent << name << std::endl;
-            prev_pos = static_cast<size_t>(pos);
-        });
+
+    if (opt_trace && !opt_trace_grmr) {
+        parser.enable_trace(tracer.callback());
     }
 
     if (opt_ast) {
