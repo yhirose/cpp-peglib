@@ -29,6 +29,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
 #if PEGLIB_USE_STD_ANY
@@ -389,16 +390,23 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
     while (i < n) {
         auto ch = s[i];
         if (ch == '\\') {
+            if (i+1 == n) { // if last char is '\' it should return '\'
+                r += '\\';
+                return r;
+            }
             i++;
             switch (s[i]) {
-                case 'n':  r += '\n'; i++; break;
-                case 'r':  r += '\r'; i++; break;
-                case 't':  r += '\t'; i++; break;
-                case '\'': r += '\''; i++; break;
-                case '"':  r += '"';  i++; break;
-                case '[':  r += '[';  i++; break;
-                case ']':  r += ']';  i++; break;
-                case '\\': r += '\\'; i++; break;
+                case 'n':  r += '\n';  i++; break;
+                case 'r':  r += '\r';  i++; break;
+                case 't':  r += '\t';  i++; break;
+                case 's':  r += "\\s"; i++; break;
+                case 'd':  r += "\\d"; i++; break;
+                case 'w':  r += "\\w"; i++; break;
+                case '\'': r += '\'';  i++; break;
+                case '"':  r += '"';   i++; break;
+                case '[':  r += '[';   i++; break;
+                case ']':  r += ']';   i++; break;
+                case '\\': r += '\\';  i++; break;
                 case 'x':
                 case 'u': {
                     char32_t cp;
@@ -419,6 +427,44 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
         }
     }
     return r;
+}
+
+std::string printable_escape_chars(char32_t escapeCh) {
+    auto printAsHex = [escapeCh]() {
+        std::stringstream stream;
+        stream << "0x" << std::hex << escapeCh;
+        return stream.str();
+    };
+
+    switch (escapeCh) {
+    case '\0': return "\\0";
+    case '\n': return "\\n";
+    case '\r': return "\\r";
+    case '\t': return "\\t";
+    case '\b': return "\\b";
+    case '\f': return "\\f";
+    case '\v': return "\\v";
+    case '\\': return "\\";
+    case 0x00A0: case 0x2028: case 0x2029: // javascript \s
+    case 0x80:   case 0xFFFF: //lower and upper range defined for peg language (utf8)
+        return printAsHex();
+    default:
+        if (escapeCh < ' ')
+            return printAsHex();
+        return encode_codepoint(escapeCh);
+    }
+}
+
+std::string printable_escape_chars_str(const std::string &str) {
+    std::string ret;
+    const char *s = str.c_str();
+    size_t len = str.length();
+    for(size_t i = 0; i < len;) {
+        char32_t ch;
+        i += decode_codepoint(&s[i], len - i, ch);
+        ret += printable_escape_chars(ch);
+    }
+    return ret;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1295,25 +1341,104 @@ public:
 class CharacterClass : public Ope
     , public std::enable_shared_from_this<CharacterClass>
 {
-public:
-    CharacterClass(const std::string& s) {
-        auto chars = decode(s.c_str(), s.length());
-        auto i = 0u;
-        while (i < chars.size()) {
-            if (i + 2 < chars.size() && chars[i + 1] == '-') {
+    std::unordered_map<size_t, std::pair<const char*, size_t>> specialChars;
+    bool negated;
+    void insertWhiteSpace(size_t pos) {
+        // \s matches whitespace (short for [ \f\n\r\t\v\u00A0\u2028\u2029]).
+        ranges_.emplace_back(std::make_pair(' ', ' '));
+        ranges_.emplace_back(std::make_pair('\f', '\f'));
+        ranges_.emplace_back(std::make_pair('\n', '\n'));
+        ranges_.emplace_back(std::make_pair('\r', '\r'));
+        ranges_.emplace_back(std::make_pair('\t', '\t'));
+        ranges_.emplace_back(std::make_pair('\v', '\v'));
+        ranges_.emplace_back(std::make_pair(0xA0, 0xA0));
+        ranges_.emplace_back(std::make_pair(0x2028, 0x2028));
+        ranges_.emplace_back(std::make_pair(0x2029, 0x2029));
+        specialChars[pos] = std::make_pair("\\s", 9);
+    }
+
+    void insertWordMatches(size_t pos) {
+        ranges_.emplace_back(std::make_pair('_', '_'));
+        ranges_.emplace_back(std::make_pair('a', 'z'));
+        ranges_.emplace_back(std::make_pair('A', 'Z'));
+        ranges_.emplace_back(std::make_pair('0', '9'));
+        specialChars[pos] = std::make_pair("\\w", 4);
+    }
+
+    void fillfromString(const std::string &str) {
+        auto chars = decode(str.c_str(), str.length());
+        for (size_t i = 0u; i < chars.size(); ++i) {
+            if (i + 2 < chars.size() && chars[i + 1] == '-' && chars[i] != '\\') {
                 auto cp1 = chars[i];
                 auto cp2 = chars[i + 2];
                 ranges_.emplace_back(std::make_pair(cp1, cp2));
-                i += 3;
+                i += 2;
+            } else if (i+1 < chars.size() && chars[i] == '\\') {
+                // subset of regex shorthands
+                // http://www.javascriptkit.com/javatutors/redev2.shtml
+                ++i;
+                switch (chars[i]) {
+                case '-': case '^': case '[': case ']':
+                    --i;
+                    break;
+                case 's':
+                    insertWhiteSpace(i-1); break;
+                case 'w':
+                    insertWordMatches(i-1); break;
+                case 'd':
+                    ranges_.emplace_back(std::make_pair('0', '9'));
+                    specialChars[i-1] = std::make_pair("\\d", 1);
+                    break;
+                case '\\': ranges_.emplace_back(std::make_pair('\\', '\\')); break;
+                default: {
+                    std::string message = "Unsupported escape char '\\";
+                    message += static_cast<const char>(chars[i]);
+                    message += "'";
+                    throw parse_error(message.c_str());
+                }
+                }
             } else {
                 auto cp = chars[i];
                 ranges_.emplace_back(std::make_pair(cp, cp));
-                i += 1;
             }
         }
     }
 
-    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges) : ranges_(ranges) {}
+public:
+    CharacterClass(const std::string& str)
+    {
+        // first char in char class might negate char class
+        negated = str.front() == '^';
+        size_t pos = 0;
+        if (negated) ++pos;
+        std::string st = resolve_escape_sequence(str.substr(pos).c_str(),
+                                                 str.length() - pos);
+        fillfromString(st);
+    }
+
+    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges)
+    {
+        negated = ranges.front().first == '^';
+        auto itSt = ranges.begin();
+        if (negated)
+            ++itSt;
+
+        char32_t prevCh = 0;
+        for (size_t i = 0; i < ranges.size(); ++i) {
+            auto &p = ranges[i];
+            if (p.first == p.second && prevCh == '\\') {
+                switch (p.first) {
+                case 's': insertWhiteSpace(i-1); break;
+                case 'w': insertWordMatches(i-1); break;
+                case 'd': ranges_.emplace_back(std::make_pair('0', '9')); break;
+                default: ranges_.emplace_back(std::move(p));
+                }
+            } else {
+                ranges_.emplace_back(std::move(p));
+            }
+            prevCh = p.first;
+        }
+    }
 
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("CharacterClass", s, n, sv, dt);
@@ -1327,13 +1452,21 @@ public:
         auto len = decode_codepoint(s, n, cp);
 
         if (!ranges_.empty()) {
-            for (const auto& range: ranges_) {
-                if (range.first <= cp && cp <= range.second) {
-                    return len;
+            if (negated) {
+                for (const auto& range: ranges_) {
+                    if (range.first <= cp && cp <= range.second)
+                        goto fail;
+                }
+                return len;
+            } else {
+                for (const auto& range: ranges_) {
+                    if (range.first <= cp && cp <= range.second) {
+                        return len;
+                    }
                 }
             }
         }
-
+fail:
         c.set_error_pos(s);
         return static_cast<size_t>(-1);
     }
@@ -2608,7 +2741,8 @@ private:
         g["Class"]      <= seq(chr('['), tok(zom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
 
         g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-        g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\")),
+        g["Char"]       <= cho(seq(chr('\\'), cls("nrtswd'\"[]\\")),
+                               seq(chr('\\'), chr('-')),
                                seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
                                seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
                                seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
@@ -2818,6 +2952,13 @@ private:
         };
 
         g["Class"] = [](const SemanticValues& sv) {
+            if (sv.str().find('\\') != std::string::npos) {
+                // might have special meaning chars \s or \w
+                std::string str = sv.str();
+                size_t stPos = str.front() == '[' ? 1 :0,
+                       len = str.back() == ']' ? str.length() - stPos -1 : str.length();
+                return cls(str.substr(stPos, len));
+            }
             auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
             return cls(ranges);
         };
