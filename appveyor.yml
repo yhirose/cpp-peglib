@@ -8,6 +8,9 @@ environment:
     - JOB: Visual Studio 2017
       APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
       CMAKE_GENERATOR: "Visual Studio 15 2017"
+    - JOB: Visual Studio 2019
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2019
+      CMAKE_GENERATOR: "Visual Studio 16 2019"
 
 platform:
   - x86
