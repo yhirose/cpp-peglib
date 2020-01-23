@@ -37,7 +37,7 @@
 
 // guard for older versions of VC++
 #ifdef _MSC_VER
-#if (_MSC_VER < 1900)
+#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
 #error "Requires complete C+11 support"
 #endif
 #endif
@@ -940,24 +940,8 @@ public:
 class Sequence : public Ope
 {
 public:
-    Sequence(const Sequence& rhs) : opes_(rhs.opes_) {}
-
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
-    // NOTE: Compiler Error C2797 on Visual Studio 2013
-    // "The C++ compiler in Visual Studio does not implement list
-    // initialization inside either a member initializer list or a non-static
-    // data member initializer. Before Visual Studio 2013 Update 3, this was
-    // silently converted to a function call, which could lead to bad code
-    // generation. Visual Studio 2013 Update 3 reports this as an error."
-    template <typename... Args>
-    Sequence(const Args& ...args) {
-        opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
-    }
-#else
     template <typename... Args>
     Sequence(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
-#endif
-
     Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
@@ -991,22 +975,8 @@ public:
 class PrioritizedChoice : public Ope
 {
 public:
-#if defined(_MSC_VER) && _MSC_VER < 1900 // Less than Visual Studio 2015
-    // NOTE: Compiler Error C2797 on Visual Studio 2013
-    // "The C++ compiler in Visual Studio does not implement list
-    // initialization inside either a member initializer list or a non-static
-    // data member initializer. Before Visual Studio 2013 Update 3, this was
-    // silently converted to a function call, which could lead to bad code
-    // generation. Visual Studio 2013 Update 3 reports this as an error."
-    template <typename... Args>
-    PrioritizedChoice(const Args& ...args) {
-        opes_ = std::vector<std::shared_ptr<Ope>>{ static_cast<std::shared_ptr<Ope>>(args)... };
-    }
-#else
     template <typename... Args>
     PrioritizedChoice(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
-#endif
-
     PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
     PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
 
