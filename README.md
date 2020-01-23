@@ -528,18 +528,6 @@ PEG debug
 
 A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug) for the detail. You can see a parse result of PL/0 code [here](https://mqnc.github.io/pegdebug/example/output.html).
 
-Tested compilers
-----------------
-
-  * Visual Studio 2017
-  * Visual Studio 2015
-  * Visual Studio 2013 with update 5
-  * Clang++ 5.0.1
-  * Clang++ 5.0
-  * Clang++ 4.0
-  * Clang++ 3.5
-  * G++ 5.4 on Ubuntu 16.04
-
 TODO
 ----
 
@@ -548,4 +536,4 @@ TODO
 License
 -------
 
-MIT license (© 2018 Yuji Hirose)
+MIT license (© 2020 Yuji Hirose)
