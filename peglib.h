@@ -469,8 +469,8 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 struct SemanticValues : protected std::vector<any>
 {
     // Input text
-    const char* path;
-    const char* ss;
+    const char* path = nullptr;
+    const char* ss = nullptr;
 
     // Matched string
     const char* c_str() const { return s_; }
@@ -493,10 +493,10 @@ struct SemanticValues : protected std::vector<any>
     }
 
     // Choice count
-    size_t      choice_count() const { return choice_count_; }
+    size_t choice_count() const { return choice_count_; }
 
     // Choice number (0 based index)
-    size_t      choice() const { return choice_; }
+    size_t choice() const { return choice_; }
 
     // Tokens
     std::vector<std::pair<const char*, size_t>> tokens;
@@ -515,8 +515,6 @@ struct SemanticValues : protected std::vector<any>
     auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
         return this->transform(beg, end, [](const any& v) { return any_cast<T>(v); });
     }
-
-    SemanticValues() : s_(nullptr), n_(0), choice_count_(0), choice_(0) {}
 
     using std::vector<any>::iterator;
     using std::vector<any>::const_iterator;
@@ -547,10 +545,10 @@ private:
     friend class PrioritizedChoice;
     friend class Holder;
 
-    const char* s_;
-    size_t      n_;
-    size_t      choice_count_;
-    size_t      choice_;
+    const char* s_ = nullptr;
+    size_t      n_ = 0;
+    size_t      choice_count_ = 0;
+    size_t      choice_ = 0;
     std::string name_;
 
     template <typename F>
@@ -618,8 +616,7 @@ class Action
 {
 public:
     Action() = default;
-
-    Action(const Action& rhs) : fn_(rhs.fn_) {}
+    Action(const Action& rhs) = default;
 
     template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
     Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
@@ -798,20 +795,20 @@ public:
     const char*                                  s;
     const size_t                                 l;
 
-    const char*                                  error_pos;
-    const char*                                  message_pos;
+    const char*                                  error_pos = nullptr;
+    const char*                                  message_pos = nullptr;
     std::string                                  message; // TODO: should be `int`.
 
     std::vector<std::shared_ptr<SemanticValues>> value_stack;
-    size_t                                       value_stack_size;
+    size_t                                       value_stack_size = 0;
     std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
 
-    size_t                                       nest_level;
+    size_t                                       nest_level = 0;
 
-    bool                                         in_token;
+    bool                                         in_token = false;
 
     std::shared_ptr<Ope>                         whitespaceOpe;
-    bool                                         in_whitespace;
+    bool                                         in_whitespace = false;
 
     std::shared_ptr<Ope>                         wordOpe;
 
@@ -838,13 +835,7 @@ public:
         : path(a_path)
         , s(a_s)
         , l(a_l)
-        , error_pos(nullptr)
-        , message_pos(nullptr)
-        , value_stack_size(0)
-        , nest_level(0)
-        , in_token(false)
         , whitespaceOpe(a_whitespaceOpe)
-        , in_whitespace(false)
         , wordOpe(a_wordOpe)
         , def_count(a_def_count)
         , enablePackratParsing(a_enablePackratParsing)
@@ -2000,42 +1991,17 @@ public:
     };
 
     Definition()
-        : ignoreSemanticValue(false)
-        , enablePackratParsing(false)
-        , is_macro(false)
-        , holder_(std::make_shared<Holder>(this))
-        , is_token_(false) {}
+        : holder_(std::make_shared<Holder>(this)) {}
 
     Definition(const Definition& rhs)
         : name(rhs.name)
-        , ignoreSemanticValue(false)
-        , enablePackratParsing(false)
-        , is_macro(false)
         , holder_(rhs.holder_)
-        , is_token_(false)
-    {
-        holder_->outer_ = this;
-    }
-
-    Definition(Definition&& rhs)
-        : name(std::move(rhs.name))
-        , ignoreSemanticValue(rhs.ignoreSemanticValue)
-        , whitespaceOpe(rhs.whitespaceOpe)
-        , wordOpe(rhs.wordOpe)
-        , enablePackratParsing(rhs.enablePackratParsing)
-        , is_macro(rhs.is_macro)
-        , holder_(std::move(rhs.holder_))
-        , is_token_(rhs.is_token_)
     {
         holder_->outer_ = this;
     }
 
     Definition(const std::shared_ptr<Ope>& ope)
-        : ignoreSemanticValue(false)
-        , enablePackratParsing(false)
-        , is_macro(false)
-        , holder_(std::make_shared<Holder>(this))
-        , is_token_(false)
+        : holder_(std::make_shared<Holder>(this))
     {
         *this <= ope;
     }
@@ -2135,16 +2101,16 @@ public:
     }
 
     std::string                                                                          name;
-    size_t                                                                               id;
+    size_t                                                                               id = 0;
     Action                                                                               action;
     std::function<void (const char* s, size_t n, any& dt)>                               enter;
     std::function<void (const char* s, size_t n, size_t matchlen, any& value, any& dt)>  leave;
     std::function<std::string ()>                                                        error_message;
-    bool                                                                                 ignoreSemanticValue;
+    bool                                                                                 ignoreSemanticValue = false;
     std::shared_ptr<Ope>                                                                 whitespaceOpe;
     std::shared_ptr<Ope>                                                                 wordOpe;
-    bool                                                                                 enablePackratParsing;
-    bool                                                                                 is_macro;
+    bool                                                                                 enablePackratParsing = false;
+    bool                                                                                 is_macro = false;
     std::vector<std::string>                                                             params;
     Tracer                                                                               tracer;
 
@@ -2176,7 +2142,7 @@ private:
 
     std::shared_ptr<Holder> holder_;
     mutable std::once_flag  is_token_init_;
-    mutable bool            is_token_;
+    mutable bool            is_token_ = false;
 };
 
 /*
