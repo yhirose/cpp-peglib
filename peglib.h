@@ -2927,13 +2927,11 @@ private:
 template <typename Annotation>
 struct AstBase : public Annotation
 {
-    AstBase(const char* a_path, size_t a_line, size_t a_column,
+    AstBase(const char* a_path,
             const char* a_name, size_t a_position, size_t a_length,
             size_t a_choice_count, size_t a_choice,
             const std::vector<std::shared_ptr<AstBase>>& a_nodes)
         : path(a_path ? a_path : "")
-        , line(a_line)
-        , column(a_column)
         , name(a_name)
         , position(a_position)
         , length(a_length)
@@ -2948,13 +2946,11 @@ struct AstBase : public Annotation
         , nodes(a_nodes)
     {}
 
-    AstBase(const char* a_path, size_t a_line, size_t a_column,
+    AstBase(const char* a_path,
             const char* a_name, size_t a_position, size_t a_length,
             size_t a_choice_count, size_t a_choice,
             const std::string& a_token)
         : path(a_path ? a_path : "")
-        , line(a_line)
-        , column(a_column)
         , name(a_name)
         , position(a_position)
         , length(a_length)
@@ -2973,8 +2969,6 @@ struct AstBase : public Annotation
             size_t a_position, size_t a_length,
             size_t a_original_choice_count, size_t a_original_choise)
         : path(ast.path)
-        , line(ast.line)
-        , column(ast.column)
         , name(ast.name)
         , position(a_position)
         , length(a_length)
@@ -2992,8 +2986,6 @@ struct AstBase : public Annotation
     {}
 
     const std::string                 path;
-    const size_t                      line;
-    const size_t                      column;
 
     const std::string                 name;
     size_t                            position;
@@ -3257,17 +3249,15 @@ public:
 
             if (!rule.action) {
                 rule.action = [&](const SemanticValues& sv) {
-                    auto line = line_info(sv.ss, sv.c_str());
-
                     if (rule.is_token()) {
                         return std::make_shared<T>(
-                            sv.path, line.first, line.second,
+                            sv.path,
                             name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                             sv.token());
                     }
 
                     auto ast = std::make_shared<T>(
-                        sv.path, line.first, line.second,
+                        sv.path,
                         name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                         sv.transform<std::shared_ptr<T>>());
 
