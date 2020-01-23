@@ -1,7 +1,7 @@
 ﻿//
 //  peglib.h
 //
-//  Copyright (c) 2015-18 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2020 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -37,25 +37,17 @@
 
 // guard for older versions of VC++
 #ifdef _MSC_VER
-// VS2013 has no constexpr
-#if (_MSC_VER == 1800)
-#define PEGLIB_NO_CONSTEXPR_SUPPORT
-#elif (_MSC_VER >= 1800)
-// good to go
-#else //(_MSC_VER < 1800)
-#error "Requires C+11 support"
+#if (_MSC_VER < 1900)
+#error "Requires complete C+11 support"
 #endif
 #endif
-
-// define if the compiler doesn't support unicode characters reliably in the
-// source code
-//#define PEGLIB_NO_UNICODE_CHARS
 
 namespace peg {
 
 /*-----------------------------------------------------------------------------
  *  any
  *---------------------------------------------------------------------------*/
+
 #if PEGLIB_USE_STD_ANY
 using any = std::any;
 
@@ -449,7 +441,6 @@ inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
 /*
 * String tag
 */
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
 inline constexpr unsigned int str2tag(const char* str, int h = 0) {
     return (*str == '\0') ? h : str2tag(str + 1, (h * 33) ^ static_cast<unsigned char>(*str));
 }
@@ -461,7 +452,6 @@ inline constexpr unsigned int operator "" _(const char* s, size_t) {
 }
 
 }
-#endif
 
 /*
 * Semantic values
@@ -483,9 +473,7 @@ struct SemanticValues : protected std::vector<any>
     // Definition name
     const std::string& name() const { return name_; }
 
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
     std::vector<unsigned int> tags;
-#endif
 
     // Line number and column at which the matched string is
     std::pair<size_t, size_t> line_info() const {
@@ -2581,11 +2569,7 @@ private:
                                seq(lit("\\u"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F")),
                                seq(npd(chr('\\')), dot()));
 
-#if defined(PEGLIB_NO_UNICODE_CHARS)
-        g["LEFTARROW"]  <= seq(lit("<-"), g["Spacing"]);
-#else
         g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
-#endif
         ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
         g["AND"]        <= seq(chr('&'), g["Spacing"]);
         g["NOT"]        <= seq(chr('!'), g["Spacing"]);
@@ -2988,10 +2972,8 @@ struct AstBase : public Annotation
         , original_name(a_name)
         , original_choice_count(a_choice_count)
         , original_choice(a_choice)
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(str2tag(a_name))
         , original_tag(tag)
-#endif
         , is_token(false)
         , nodes(a_nodes)
     {}
@@ -3011,10 +2993,8 @@ struct AstBase : public Annotation
         , original_name(a_name)
         , original_choice_count(a_choice_count)
         , original_choice(a_choice)
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(str2tag(a_name))
         , original_tag(tag)
-#endif
         , is_token(true)
         , token(a_token)
     {}
@@ -3033,10 +3013,8 @@ struct AstBase : public Annotation
         , original_name(a_original_name)
         , original_choice_count(a_original_choice_count)
         , original_choice(a_original_choise)
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
         , tag(ast.tag)
         , original_tag(str2tag(a_original_name))
-#endif
         , is_token(ast.is_token)
         , token(ast.token)
         , nodes(ast.nodes)
@@ -3055,10 +3033,8 @@ struct AstBase : public Annotation
     const std::string                 original_name;
     const size_t                      original_choice_count;
     const size_t                      original_choice;
-#ifndef PEGLIB_NO_CONSTEXPR_SUPPORT
     const unsigned int                tag;
     const unsigned int                original_tag;
-#endif
 
     const bool                        is_token;
     const std::string                 token;
