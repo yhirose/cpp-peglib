@@ -2078,22 +2078,29 @@ private:
     Definition& operator=(const Definition& rhs);
     Definition& operator=(Definition&& rhs);
 
+    void initialize_definition_ids() const {
+        std::call_once(definition_ids_init_, [&]() {
+            AssignIDToDefinition vis;
+            holder_->accept(vis);
+            if (whitespaceOpe) {
+                whitespaceOpe->accept(vis);
+            }
+            if (wordOpe) {
+                wordOpe->accept(vis);
+            }
+            definition_ids_.swap(vis.ids);
+        });
+    }
+
     Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt, const char* path) const {
+        initialize_definition_ids();
+
         std::shared_ptr<Ope> ope = holder_;
-
-        AssignIDToDefinition vis;
-        holder_->accept(vis);
-
         if (whitespaceOpe) {
             ope = std::make_shared<Sequence>(whitespaceOpe, ope);
-            whitespaceOpe->accept(vis);
         }
 
-        if (wordOpe) {
-            wordOpe->accept(vis);
-        }
-
-        Context cxt(path, s, n, vis.ids.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
+        Context cxt(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe, enablePackratParsing, tracer);
         auto len = ope->parse(s, n, sv, cxt, dt);
         return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
     }
@@ -2101,6 +2108,9 @@ private:
     std::shared_ptr<Holder> holder_;
     mutable std::once_flag  is_token_init_;
     mutable bool            is_token_ = false;
+    mutable std::once_flag  assign_id_to_definition_init_;
+    mutable std::once_flag  definition_ids_init_;
+    mutable std::unordered_map<void*, size_t> definition_ids_;
 };
 
 /*
