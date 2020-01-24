@@ -85,7 +85,7 @@ int main(int argc, const char** argv)
     }
 
     // Check source
-    std::string source_path = "[commendline]";
+    std::string source_path = "[commandline]";
     if (path_list.size() >= 2) {
         if (!read_file(path_list[1], source)) {
             cerr << "can't open the code file." << endl;
