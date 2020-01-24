@@ -441,7 +441,7 @@ inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
 /*
 * String tag
 */
-inline constexpr unsigned int str2tag(const char* str, int h = 0) {
+inline constexpr unsigned int str2tag(const char* str, unsigned int h = 0) {
     return (*str == '\0') ? h : str2tag(str + 1, (h * 33) ^ static_cast<unsigned char>(*str));
 }
 
