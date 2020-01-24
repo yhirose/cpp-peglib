@@ -829,10 +829,13 @@ public:
         , enablePackratParsing(a_enablePackratParsing)
         , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
-        , tracer(a_tracer)
-    {
+        , tracer(a_tracer) {
         args_stack.resize(1);
         capture_scope_stack.resize(1);
+    }
+
+    ~Context() {
+        assert(!value_stack_size);
     }
 
     template <typename T>
@@ -948,6 +951,7 @@ public:
     size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
         c.trace("Sequence", s, n, sv, dt);
         auto& chldsv = c.push();
+        auto pop_se = make_scope_exit([&]() { c.pop(); });
         size_t i = 0;
         for (const auto& ope : opes_) {
             c.nest_level++;
