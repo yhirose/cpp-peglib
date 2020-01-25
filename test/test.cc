@@ -36,6 +36,101 @@ TEST_CASE("Empty syntax test", "[general]")
     REQUIRE(ret == false);
 }
 
+TEST_CASE("Infinite loop 1", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- [a-z0-9]*
+        WH    <- [ \t]*
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Infinite loop 2", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        ROOT  <- WH TOKEN+ WH
+        TOKEN <- [a-z0-9]*
+        WH    <- [ \t]*
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Infinite loop 3", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- !'word1'
+        WH    <- [ \t]*
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Infinite loop 4", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        ROOT  <- WH TOKEN* WH
+        TOKEN <- &'word1'
+        WH    <- [ \t]*
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Infinite loop 5", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        Numbers <- Number*
+        Number <- [0-9]+ / Spacing
+        Spacing <- ' ' / '\t' / '\n' / EOF # EOF is empty
+        EOF <- !.
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Not infinite 1", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        Numbers <- Number* EOF
+        Number <- [0-9]+ / Spacing
+        Spacing <- ' ' / '\t' / '\n'
+        EOF <- !.
+    )");
+
+    REQUIRE(!!pg); // OK
+}
+
+TEST_CASE("Not infinite 2", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        ROOT      <-  _ ('[' TAG_NAME ']' _)*
+        # In a sequence operator, if there is at least one non-empty element, we can treat it as non-empty
+        TAG_NAME  <-  (!']' .)+
+        _         <-  [ \t]*
+    )");
+
+    REQUIRE(!!pg); // OK
+}
+
+TEST_CASE("Not infinite 3", "[infinite loop]")
+{
+    peg::parser pg(R"(
+        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
+        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
+        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _ # Recursive...
+        TERM_OPERATOR    <-  < [-+] > _
+        FACTOR_OPERATOR  <-  < [/*] > _
+        NUMBER           <-  < [0-9]+ > _
+        _                <-  [ \t\r\n]*
+    )");
+
+    REQUIRE(!!pg); // OK
+}
+
 TEST_CASE("Action taking non const Semantic Values parameter", "[general]")
 {
     peg::parser parser(R"(
@@ -61,11 +156,11 @@ TEST_CASE("Action taking non const Semantic Values parameter", "[general]")
 
 TEST_CASE("String capture test", "[general]")
 {
-    peg::parser parser(
-        "  ROOT      <-  _ ('[' TAG_NAME ']' _)*  "
-        "  TAG_NAME  <-  (!']' .)+                "
-        "  _         <-  [ \t]*                   "
-    );
+    peg::parser parser(R"(
+        ROOT      <-  _ ('[' TAG_NAME ']' _)*
+        TAG_NAME  <-  (!']' .)+
+        _         <-  [ \t]*
+    )");
 
     std::vector<std::string> tags;
 

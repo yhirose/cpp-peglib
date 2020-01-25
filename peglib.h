@@ -24,6 +24,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1702,8 +1703,6 @@ struct AssignIDToDefinition : public Ope::Visitor
 
 struct IsLiteralToken : public Ope::Visitor
 {
-    IsLiteralToken() : result_(false) {}
-
     void visit(PrioritizedChoice& ope) override {
         for (auto op: ope.opes_) {
             if (!IsLiteralToken::check(*op)) {
@@ -1724,13 +1723,11 @@ struct IsLiteralToken : public Ope::Visitor
     }
 
 private:
-    bool result_;
+    bool result_ = false;
 };
 
 struct TokenChecker : public Ope::Visitor
 {
-    TokenChecker() : has_token_boundary_(false), has_rule_(false) {}
-
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
             op->accept(*this);
@@ -1763,13 +1760,12 @@ struct TokenChecker : public Ope::Visitor
     }
 
 private:
-    bool has_token_boundary_;
-    bool has_rule_;
+    bool has_token_boundary_ = false;
+    bool has_rule_ = false;
 };
 
 struct DetectLeftRecursion : public Ope::Visitor {
-    DetectLeftRecursion(const std::string& name)
-        : error_s(nullptr), name_(name), done_(false) {}
+    DetectLeftRecursion(const std::string& name) : name_(name) {}
 
     void visit(Sequence& ope) override {
         for (auto op: ope.opes_) {
@@ -1811,12 +1807,122 @@ struct DetectLeftRecursion : public Ope::Visitor {
     void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
     void visit(BackReference& /*ope*/) override { done_ = true; }
 
-    const char* error_s;
+    const char* error_s = nullptr;
 
 private:
     std::string           name_;
     std::set<std::string> refs_;
-    bool                  done_;
+    bool                  done_ = false;
+};
+
+struct HasEmptyElement : public Ope::Visitor
+{
+    HasEmptyElement(std::list<std::pair<const char*, std::string>>& refs): refs_(refs) {}
+
+    void visit(Sequence& ope) override {
+        bool save_is_empty = false;
+        const char* save_error_s = nullptr;
+        std::string save_error_name;
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+            if (!is_empty) { return; }
+            save_is_empty = is_empty;
+            save_error_s = error_s;
+            save_error_name = error_name;
+            is_empty = false;
+            error_name.clear();
+        }
+        is_empty = save_is_empty;
+        error_s = save_error_s;
+        error_name = save_error_name;
+    }
+    void visit(PrioritizedChoice& ope) override {
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+            if (is_empty) { return; }
+        }
+    }
+    void visit(ZeroOrMore& /*ope*/) override { set_error(); }
+    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
+    void visit(Option& /*ope*/) override { set_error(); }
+    void visit(AndPredicate& /*ope*/) override { set_error(); }
+    void visit(NotPredicate& /*ope*/) override { set_error(); }
+    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
+    void visit(Capture& ope) override { ope.ope_->accept(*this); }
+    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
+    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
+    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
+    void visit(Holder& ope) override { ope.ope_->accept(*this); }
+    void visit(Reference& ope) override;
+    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+
+    bool is_empty = false;
+    const char* error_s = nullptr;
+    std::string error_name;
+
+private:
+    void set_error() {
+        is_empty = true;
+        error_s = refs_.back().first;
+        error_name = refs_.back().second;
+    }
+    std::list<std::pair<const char*, std::string>>& refs_;
+};
+
+struct DetectInfiniteLoop : public Ope::Visitor
+{
+    DetectInfiniteLoop(const char* s, const std::string& name) {
+        refs_.emplace_back(s, name);
+    }
+
+    void visit(Sequence& ope) override {
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+            if (has_error) { return; }
+        }
+    }
+    void visit(PrioritizedChoice& ope) override {
+        for (auto op: ope.opes_) {
+            op->accept(*this);
+            if (has_error) { return; }
+        }
+    }
+    void visit(ZeroOrMore& ope) override {
+        HasEmptyElement vis(refs_);
+        ope.ope_->accept(vis);
+        if (vis.is_empty) {
+            has_error = true;
+            error_s = vis.error_s;
+            error_name = vis.error_name;
+        }
+    }
+    void visit(OneOrMore& ope) override {
+        HasEmptyElement vis(refs_);
+        ope.ope_->accept(vis);
+        if (vis.is_empty) {
+            has_error = true;
+            error_s = vis.error_s;
+            error_name = vis.error_name;
+        }
+    }
+    void visit(Option& ope) override { ope.ope_->accept(*this); }
+    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
+    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
+    void visit(Capture& ope) override { ope.ope_->accept(*this); }
+    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
+    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
+    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
+    void visit(Holder& ope) override { ope.ope_->accept(*this); }
+    void visit(Reference& ope) override;
+    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+
+    bool has_error = false;
+    const char* error_s = nullptr;
+    std::string error_name;
+
+private:
+    std::list<std::pair<const char*, std::string>> refs_;
 };
 
 struct ReferenceChecker : public Ope::Visitor {
@@ -1941,8 +2047,6 @@ private:
 
 struct IsPrioritizedChoice : public Ope::Visitor
 {
-    IsPrioritizedChoice() : result_(false) {}
-
     void visit(PrioritizedChoice& /*ope*/) override {
         result_ = true;
     }
@@ -1954,7 +2058,7 @@ struct IsPrioritizedChoice : public Ope::Visitor
     }
 
 private:
-    bool result_;
+    bool result_ = false;
 };
 
 /*
@@ -2425,6 +2529,36 @@ inline void DetectLeftRecursion::visit(Reference& ope) {
     done_ = true;
 }
 
+inline void HasEmptyElement::visit(Reference& ope) {
+    auto it = std::find_if(refs_.begin(), refs_.end(), [&](const auto& ref) {
+        return ope.name_ == ref.second;
+    });
+    if (it != refs_.end()) {
+        return;
+    }
+
+    if (ope.rule_) {
+        refs_.emplace_back(ope.s_, ope.name_);
+        ope.rule_->accept(*this);
+        refs_.pop_back();
+    }
+}
+
+inline void DetectInfiniteLoop::visit(Reference& ope) {
+    auto it = std::find_if(refs_.begin(), refs_.end(), [&](const auto& ref) {
+        return ope.name_ == ref.second;
+    });
+    if (it != refs_.end()) {
+        return;
+    }
+
+    if (ope.rule_) {
+        refs_.emplace_back(ope.s_, ope.name_);
+        ope.rule_->accept(*this);
+        refs_.pop_back();
+    }
+}
+
 inline void ReferenceChecker::visit(Reference& ope) {
     auto it = std::find(params_.begin(), params_.end(), ope.name_);
     if (it != params_.end()) {
@@ -2531,6 +2665,7 @@ private:
     struct Data {
         std::shared_ptr<Grammar>                         grammar;
         std::string                                      start;
+        const char*                                      start_pos = nullptr;
         std::vector<std::pair<std::string, const char*>> duplicates;
 
         Data(): grammar(std::make_shared<Grammar>()) {}
@@ -2648,6 +2783,7 @@ private:
 
                 if (data.start.empty()) {
                     data.start = name;
+                    data.start_pos = sv.c_str();
                 }
             } else {
                 data.duplicates.emplace_back(name, sv.c_str());
@@ -2931,7 +3067,20 @@ private:
         }
 
         // Set root definition
-        start = data.start;
+        auto& start_rule = (*data.grammar)[data.start];
+
+        // Check infinite loop
+        {
+            DetectInfiniteLoop vis(data.start_pos, data.start);
+            start_rule.accept(vis);
+            if (vis.has_error) {
+                if (log) {
+                    auto line = line_info(s, vis.error_s);
+                    log(line.first, line.second, "infinite loop is detected in '" + vis.error_name + "'.");
+                }
+                return nullptr;
+            }
+        }
 
         // Automatic whitespace skipping
         if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
@@ -2943,15 +3092,16 @@ private:
                 }
             }
 
-            auto& rule = (*data.grammar)[start];
-            rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+            start_rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
         }
 
         // Word expression
         if (grammar.count(WORD_DEFINITION_NAME)) {
-            auto& rule = (*data.grammar)[start];
-            rule.wordOpe = (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
+            start_rule.wordOpe = (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
         }
+
+        // Set root definition
+        start = data.start;
 
         return data.grammar;
     }
