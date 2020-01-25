@@ -461,6 +461,7 @@ struct SemanticValues : protected std::vector<any>
     // Input text
     const char* path = nullptr;
     const char* ss = nullptr;
+    const std::vector<size_t>* source_line_index = nullptr;
 
     // Matched string
     const char* c_str() const { return s_; }
@@ -477,7 +478,16 @@ struct SemanticValues : protected std::vector<any>
 
     // Line number and column at which the matched string is
     std::pair<size_t, size_t> line_info() const {
-        return peg::line_info(ss, s_);
+        const auto& idx = *source_line_index;
+
+        auto cur = static_cast<size_t>(std::distance(ss, s_));
+        auto it = std::lower_bound(idx.begin(), idx.end(), cur,
+            [](size_t element, size_t value) { return element < value; }
+        );
+
+        auto id = static_cast<size_t>(std::distance(idx.begin(), it));
+        auto off = cur - (id == 0 ? 0 : idx[id - 1] + 1);
+        return std::make_pair(id + 1, off + 1);
     }
 
     // Choice count
@@ -561,6 +571,7 @@ private:
     void reset() {
         path = nullptr;
         ss = nullptr;
+        source_line_index = nullptr;
         tokens.clear();
 
         s_ = nullptr;
@@ -782,6 +793,7 @@ public:
     const char*                                  path;
     const char*                                  s;
     const size_t                                 l;
+    std::vector<size_t>                          source_line_index;
 
     const char*                                  error_pos = nullptr;
     const char*                                  message_pos = nullptr;
@@ -830,6 +842,14 @@ public:
         , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
         , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
         , tracer(a_tracer) {
+
+        for (size_t pos = 0; pos < l; pos++) {
+            if (s[pos] == '\n') {
+                source_line_index.push_back(pos);
+            }
+        }
+        source_line_index.push_back(l);
+
         args_stack.resize(1);
         capture_scope_stack.resize(1);
     }
@@ -837,6 +857,10 @@ public:
     ~Context() {
         assert(!value_stack_size);
     }
+
+    Context(const Context&) = delete;
+    Context(Context&&) = delete;
+    Context operator=(const Context&) = delete;
 
     template <typename T>
     void packrat(const char* a_s, size_t def_id, size_t& len, any& val, T fn) {
@@ -882,6 +906,7 @@ public:
         sv.reset();
         sv.path = path;
         sv.ss = s;
+        sv.source_line_index = &source_line_index;
         return sv;
     }
 
@@ -2941,11 +2966,13 @@ private:
 template <typename Annotation>
 struct AstBase : public Annotation
 {
-    AstBase(const char* a_path,
+    AstBase(const char* a_path, size_t a_line, size_t a_column,
             const char* a_name, size_t a_position, size_t a_length,
             size_t a_choice_count, size_t a_choice,
             const std::vector<std::shared_ptr<AstBase>>& a_nodes)
         : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
         , name(a_name)
         , position(a_position)
         , length(a_length)
@@ -2960,11 +2987,13 @@ struct AstBase : public Annotation
         , nodes(a_nodes)
     {}
 
-    AstBase(const char* a_path,
+    AstBase(const char* a_path, size_t a_line, size_t a_column,
             const char* a_name, size_t a_position, size_t a_length,
             size_t a_choice_count, size_t a_choice,
             const std::string& a_token)
         : path(a_path ? a_path : "")
+        , line(a_line)
+        , column(a_column)
         , name(a_name)
         , position(a_position)
         , length(a_length)
@@ -2983,6 +3012,8 @@ struct AstBase : public Annotation
             size_t a_position, size_t a_length,
             size_t a_original_choice_count, size_t a_original_choise)
         : path(ast.path)
+        , line(ast.line)
+        , column(ast.column)
         , name(ast.name)
         , position(a_position)
         , length(a_length)
@@ -3000,6 +3031,8 @@ struct AstBase : public Annotation
     {}
 
     const std::string                 path;
+    const size_t                      line = 1;
+    const size_t                      column = 1;
 
     const std::string                 name;
     size_t                            position;
@@ -3263,15 +3296,17 @@ public:
 
             if (!rule.action) {
                 rule.action = [&](const SemanticValues& sv) {
+                    auto line = sv.line_info();
+
                     if (rule.is_token()) {
                         return std::make_shared<T>(
-                            sv.path,
+                            sv.path, line.first, line.second,
                             name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                             sv.token());
                     }
 
                     auto ast = std::make_shared<T>(
-                        sv.path,
+                        sv.path, line.first, line.second,
                         name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
                         sv.transform<std::shared_ptr<T>>());
 
