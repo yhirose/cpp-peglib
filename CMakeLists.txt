@@ -36,6 +36,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
     -Wno-switch-enum
     -Wno-missing-noreturn
     -Wno-covered-switch-default
+    -Wno-c++2a-compat
     )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(warning_options -Wall -Wpedantic -Wextra)
