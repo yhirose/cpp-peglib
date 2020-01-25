@@ -604,9 +604,7 @@ struct LLVM {
         FunctionType::get(builder_.getInt32Ty(),
                           PointerType::get(builder_.getInt8Ty(), 0), true));
 
-    // auto outC = module_->getOrInsertFunction(
-    //     "out", builder_.getVoidTy(), builder_.getInt32Ty());
-    auto funccallee = module_->getOrInsertFunction("out", builder_.getInt32Ty());
+    auto funccallee = module_->getOrInsertFunction("out", builder_.getVoidTy(), builder_.getInt32Ty());
     auto outC = funccallee.getCallee();
     auto outF = cast<Function>(outC);
 
@@ -625,7 +623,6 @@ struct LLVM {
   }
 
   void compile_program(const shared_ptr<AstPL0> ast) {
-    // auto c = module_->getOrInsertFunction("main", builder_.getVoidTy());
     auto funccallee = module_->getOrInsertFunction("main", builder_.getVoidTy());
     auto c = funccallee.getCallee();
     auto fn = cast<Function>(c);
