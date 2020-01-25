@@ -604,8 +604,12 @@ struct LLVM {
         FunctionType::get(builder_.getInt32Ty(),
                           PointerType::get(builder_.getInt8Ty(), 0), true));
 
+#if LLVM_VERSION_MAJOR >= 9
     auto funccallee = module_->getOrInsertFunction("out", builder_.getVoidTy(), builder_.getInt32Ty());
     auto outC = funccallee.getCallee();
+#else
+    auto outC = module_->getOrInsertFunction("out", builder_.getVoidTy(), builder_.getInt32Ty());
+#endif
     auto outF = cast<Function>(outC);
 
     {
@@ -623,8 +627,12 @@ struct LLVM {
   }
 
   void compile_program(const shared_ptr<AstPL0> ast) {
+#if LLVM_VERSION_MAJOR >= 9
     auto funccallee = module_->getOrInsertFunction("main", builder_.getVoidTy());
     auto c = funccallee.getCallee();
+#else
+    auto c = module_->getOrInsertFunction("main", builder_.getVoidTy());
+#endif
     auto fn = cast<Function>(c);
 
     {
@@ -669,8 +677,12 @@ struct LLVM {
       std::vector<Type*> pt(block->scope->free_variables.size(),
                             Type::getInt32PtrTy(context_));
       auto ft = FunctionType::get(builder_.getVoidTy(), pt, false);
+#if LLVM_VERSION_MAJOR >= 9
       auto funccallee = module_->getOrInsertFunction(ident, ft);
       auto c = funccallee.getCallee();
+#else
+      auto c = module_->getOrInsertFunction(ident, ft);
+#endif
       auto fn = cast<Function>(c);
 
       {
