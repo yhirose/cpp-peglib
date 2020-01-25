@@ -1,7 +1,7 @@
 //
 //  pl0.cc - PL/0 language (https://en.wikipedia.org/wiki/PL/0)
 //
-//  Copyright (c) 2018 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2020 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 

@@ -2530,9 +2530,11 @@ inline void DetectLeftRecursion::visit(Reference& ope) {
 }
 
 inline void HasEmptyElement::visit(Reference& ope) {
-    auto it = std::find_if(refs_.begin(), refs_.end(), [&](const auto& ref) {
-        return ope.name_ == ref.second;
-    });
+    auto it = std::find_if(refs_.begin(), refs_.end(),
+        [&](const std::pair<const char*, std::string>& ref) {
+            return ope.name_ == ref.second;
+        }
+    );
     if (it != refs_.end()) {
         return;
     }
@@ -2545,9 +2547,11 @@ inline void HasEmptyElement::visit(Reference& ope) {
 }
 
 inline void DetectInfiniteLoop::visit(Reference& ope) {
-    auto it = std::find_if(refs_.begin(), refs_.end(), [&](const auto& ref) {
-        return ope.name_ == ref.second;
-    });
+    auto it = std::find_if(refs_.begin(), refs_.end(),
+        [&](const std::pair<const char*, std::string>& ref) {
+            return ope.name_ == ref.second;
+        }
+    );
     if (it != refs_.end()) {
         return;
     }
