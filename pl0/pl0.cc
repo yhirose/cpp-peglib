@@ -84,9 +84,9 @@ struct Annotation {
 
 typedef AstBase<Annotation> AstPL0;
 shared_ptr<SymbolScope> get_closest_scope(shared_ptr<AstPL0> ast) {
-  ast = ast->parent;
+  ast = ast->parent.lock();
   while (ast->tag != "block"_) {
-    ast = ast->parent;
+    ast = ast->parent.lock();
   }
   return ast->scope;
 }
@@ -604,8 +604,12 @@ struct LLVM {
         FunctionType::get(builder_.getInt32Ty(),
                           PointerType::get(builder_.getInt8Ty(), 0), true));
 
-    auto outF = cast<Function>(module_->getOrInsertFunction(
-        "out", builder_.getVoidTy(), builder_.getInt32Ty()));
+    // auto outC = module_->getOrInsertFunction(
+    //     "out", builder_.getVoidTy(), builder_.getInt32Ty());
+    auto funccallee = module_->getOrInsertFunction("out", builder_.getInt32Ty());
+    auto outC = funccallee.getCallee();
+    auto outF = cast<Function>(outC);
+
     {
       auto BB = BasicBlock::Create(context_, "entry", outF);
       builder_.SetInsertPoint(BB);
@@ -621,8 +625,11 @@ struct LLVM {
   }
 
   void compile_program(const shared_ptr<AstPL0> ast) {
-    auto fn = cast<Function>(
-        module_->getOrInsertFunction("main", builder_.getVoidTy()));
+    // auto c = module_->getOrInsertFunction("main", builder_.getVoidTy());
+    auto funccallee = module_->getOrInsertFunction("main", builder_.getVoidTy());
+    auto c = funccallee.getCallee();
+    auto fn = cast<Function>(c);
+
     {
       auto BB = BasicBlock::Create(context_, "entry", fn);
       builder_.SetInsertPoint(BB);
@@ -665,7 +672,9 @@ struct LLVM {
       std::vector<Type*> pt(block->scope->free_variables.size(),
                             Type::getInt32PtrTy(context_));
       auto ft = FunctionType::get(builder_.getVoidTy(), pt, false);
-      auto fn = cast<Function>(module_->getOrInsertFunction(ident, ft));
+      auto funccallee = module_->getOrInsertFunction(ident, ft);
+      auto c = funccallee.getCallee();
+      auto fn = cast<Function>(c);
 
       {
         auto it = block->scope->free_variables.begin();
