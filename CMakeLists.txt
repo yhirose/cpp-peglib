@@ -57,3 +57,8 @@ enable_testing()
 add_subdirectory(test)
 add_subdirectory(example)
 add_subdirectory(lint)
+
+find_package(LLVM CONFIG)
+if(LLVM_FOUND)
+  add_subdirectory(pl0)
+endif()
