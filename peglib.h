@@ -383,6 +383,9 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
         auto ch = s[i];
         if (ch == '\\') {
             i++;
+            if (i == n) {
+                throw std::runtime_error("Invalid escape sequence...");
+            }
             switch (s[i]) {
                 case 'n':  r += '\n'; i++; break;
                 case 'r':  r += '\r'; i++; break;

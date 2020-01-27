@@ -20,10 +20,10 @@ TEST_CASE("Simple syntax test (with unicode)", "[general]")
 
 TEST_CASE("Simple syntax test", "[general]")
 {
-    peg::parser parser(
-        " ROOT <- _ "
-        " _ <- ' ' "
-    );
+    peg::parser parser(R"(
+        ROOT <- _
+        _ <- ' '
+    )");
 
     bool ret = parser;
     REQUIRE(ret == true);
@@ -32,6 +32,28 @@ TEST_CASE("Simple syntax test", "[general]")
 TEST_CASE("Empty syntax test", "[general]")
 {
     peg::parser parser("");
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Backslash escape sequence test", "[general]")
+{
+    peg::parser parser(R"(
+        ROOT <- _
+        _ <- '\\'
+    )");
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+}
+
+TEST_CASE("Invalid escape sequence test", "[general]")
+{
+    peg::parser parser(R"(
+        ROOT <- _
+        _ <- '\'
+    )");
+
     bool ret = parser;
     REQUIRE(ret == false);
 }
@@ -1727,6 +1749,7 @@ TEST_CASE("PEG Literal", "[peg]")
     REQUIRE(exact(g, "Literal", "\"'\"abc\"'\" ") == false);
     REQUIRE(exact(g, "Literal", "abc") == false);
     REQUIRE(exact(g, "Literal", "") == false);
+    REQUIRE(exact(g, "Literal", "\\") == false);
     REQUIRE(exact(g, "Literal", u8"'日本語'") == true);
     REQUIRE(exact(g, "Literal", u8"\"日本語\"") == true);
     REQUIRE(exact(g, "Literal", u8"日本語") == false);
