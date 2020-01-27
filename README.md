@@ -11,6 +11,7 @@ You can also try the online version, PEG Playground at https://yhirose.github.io
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf). *cpp-peglib* also supports the following additional syntax for now:
 
   * `'...'i` (Case-insensitive literal operator)
+  * `[^...]` (Negated character class operator)
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)
@@ -371,26 +372,27 @@ auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
 The following are available operators:
 
-| Operator |     Description       |
-| :------- | :-------------------- |
-| seq      | Sequence              |
-| cho      | Prioritized Choice    |
-| zom      | Zero or More          |
-| oom      | One or More           |
-| opt      | Optional              |
-| apd      | And predicate         |
-| npd      | Not predicate         |
-| lit      | Literal string        |
+| Operator |     Description                 |
+| :------- | :------------------------------ |
+| seq      | Sequence                        |
+| cho      | Prioritized Choice              |
+| zom      | Zero or More                    |
+| oom      | One or More                     |
+| opt      | Optional                        |
+| apd      | And predicate                   |
+| npd      | Not predicate                   |
+| lit      | Literal string                  |
 | liti     | Case-insensitive Literal string |
-| cls      | Character class       |
-| chr      | Character             |
-| dot      | Any character         |
-| tok      | Token boundary        |
-| ign      | Ignore semantic value |
-| csc      | Capture scope         |
-| cap      | Capture               |
-| bkr      | Back reference        |
-| usr      | User defined parser   |
+| cls      | Character class                 |
+| ncls     | Negated Character class         |
+| chr      | Character                       |
+| dot      | Any character                   |
+| tok      | Token boundary                  |
+| ign      | Ignore semantic value           |
+| csc      | Capture scope                   |
+| cap      | Capture                         |
+| bkr      | Back reference                  |
+| usr      | User defined parser             |
 
 Adjust definitions
 ------------------

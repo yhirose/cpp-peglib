@@ -1000,6 +1000,21 @@ TEST_CASE("Semantic value tag", "[general]")
     }
 }
 
+TEST_CASE("Negated Class test", "[general]")
+{
+    peg::parser parser(R"(
+        ROOT <- [^a-z_]+
+    )");
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+    REQUIRE(parser.parse("ABC123"));
+    REQUIRE_FALSE(parser.parse("ABcZ"));
+    REQUIRE_FALSE(parser.parse("ABCZ_"));
+    REQUIRE_FALSE(parser.parse(""));
+}
+
 TEST_CASE("Packrat parser test with %whitespace%", "[packrat]")
 {
     peg::parser parser(R"(
@@ -1758,7 +1773,7 @@ TEST_CASE("PEG Literal", "[peg]")
 TEST_CASE("PEG Class", "[peg]")
 {
     auto g = ParserGenerator::grammar();
-    REQUIRE(exact(g, "Class", "[]") == true);
+    REQUIRE(exact(g, "Class", "[]") == false); // NOTE: This is different from the Brian Ford's paper, but same as RegExp
     REQUIRE(exact(g, "Class", "[a]") == true);
     REQUIRE(exact(g, "Class", "[a-z]") == true);
     REQUIRE(exact(g, "Class", "[az]") == true);
@@ -1774,6 +1789,29 @@ TEST_CASE("PEG Class", "[peg]")
     REQUIRE(exact(g, "Class", u8"あ-ん") == false);
     REQUIRE(exact(g, "Class", "[-+]") == true);
     REQUIRE(exact(g, "Class", "[+-]") == false);
+    REQUIRE(exact(g, "Class", "[\\^]") == true);
+}
+
+TEST_CASE("PEG Negated Class", "[peg]")
+{
+    auto g = ParserGenerator::grammar();
+    REQUIRE(exact(g, "NegatedClass", "[^]") == false);
+    REQUIRE(exact(g, "NegatedClass", "[^a]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^a-z]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^az]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^a-zA-Z-]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^a-zA-Z-0-9]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^a-]") == false);
+    REQUIRE(exact(g, "NegatedClass", "[^-a]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^") == false);
+    REQUIRE(exact(g, "NegatedClass", "[^a") == false);
+    REQUIRE(exact(g, "NegatedClass", "^]") == false);
+    REQUIRE(exact(g, "NegatedClass", "^a]") == false);
+    REQUIRE(exact(g, "NegatedClass", u8"[^あ-ん]") == true);
+    REQUIRE(exact(g, "NegatedClass", u8"^あ-ん") == false);
+    REQUIRE(exact(g, "NegatedClass", "[^-+]") == true);
+    REQUIRE(exact(g, "NegatedClass", "[^+-]") == false);
+    REQUIRE(exact(g, "NegatedClass", "[^^]") == true);
 }
 
 TEST_CASE("PEG Range", "[peg]")
