@@ -7,6 +7,7 @@
 
 #include <peglib.h>
 #include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -99,28 +100,59 @@ int main(int argc, const char** argv)
     };
 
     if (opt_trace) {
-        std::cout << "pos:lev\trule/ope" << std::endl;
-        std::cout << "-------\t--------" << std::endl;
         size_t prev_pos = 0;
-        parser.enable_trace([&](
-            const char* name,
-            const char* s,
-            size_t /*n*/,
-            const peg::SemanticValues& /*sv*/,
-            const peg::Context& c,
-            const peg::any& /*dt*/) {
-            auto pos = static_cast<size_t>(s - c.s);
-            auto backtrack = (pos < prev_pos ? "*" : "");
-            string indent;
-            auto level = c.nest_level;
-            while (level--) {
-                indent += "  ";
+        parser.enable_trace(
+            [&](const char* name,
+                const char* s,
+                size_t /*n*/,
+                const peg::SemanticValues& /*sv*/,
+                const peg::Context& c,
+                const peg::any& /*dt*/) {
+                auto pos = static_cast<size_t>(s - c.s);
+                auto backtrack = (pos < prev_pos ? "*" : "");
+                string indent;
+                auto level = c.trace_ids.size() - 1;
+                while (level--) { indent += "│"; }
+                std::cout
+                    << "E " << pos << backtrack << "\t"
+                    << indent << "┌" << name
+                    << " #" << c.trace_ids.back()
+                    << std::endl;
+                prev_pos = static_cast<size_t>(pos);
+            },
+            [&](const char* name,
+                const char* s,
+                size_t /*n*/,
+                const peg::SemanticValues& sv,
+                const peg::Context& c,
+                const peg::any& /*dt*/,
+                size_t len) {
+                auto pos = static_cast<size_t>(s - c.s);
+                if (len != -1) {
+                    pos += len;
+                }
+                string indent;
+                auto level = c.trace_ids.size() - 1;
+                while (level--) { indent += "│"; }
+                auto ret = len != -1 ? "└o " : "└x ";
+                std::stringstream choice;
+                if (sv.choice_count() > 0) {
+                    choice << " " << sv.choice() << "/" << sv.choice_count();
+                }
+                std::string token;
+                if (!sv.tokens.empty()) {
+                    const auto& tok = sv.tokens[0];
+                    token += " '" + std::string(tok.first, tok.second) + "'";
+                }
+                std::cout
+                    << "L " << pos << "\t"
+                    << indent << ret << name
+                    << " #" << c.trace_ids.back()
+                    << choice.str()
+                    << token
+                    << std::endl;
             }
-            std::cout
-                << pos << ":" << c.nest_level << backtrack << "\t"
-                << indent << name << std::endl;
-            prev_pos = static_cast<size_t>(pos);
-        });
+        );
     }
 
     if (opt_ast) {
