@@ -61,7 +61,7 @@ auto any_cast( Args&&... args ) -> decltype(std::any_cast<T>(std::forward<Args>(
 class any
 {
 public:
-    any() : content_(nullptr) {}
+    any() = default;
 
     any(const any& rhs) : content_(rhs.clone()) {}
 
@@ -126,7 +126,7 @@ private:
         return content_ ? content_->clone() : nullptr;
     }
 
-    placeholder* content_;
+    placeholder* content_ = nullptr;
 };
 
 template <typename T>
@@ -571,18 +571,6 @@ private:
         }
         return r;
     }
-
-    void reset() {
-        path = nullptr;
-        ss = nullptr;
-        source_line_index = nullptr;
-        tokens.clear();
-
-        s_ = nullptr;
-        n_ = 0;
-        choice_count_ = 0;
-        choice_ = 0;
-    }
 };
 
 /*
@@ -816,7 +804,8 @@ public:
 
     std::shared_ptr<Ope>                         wordOpe;
 
-    std::vector<std::unordered_map<std::string, std::string>> capture_scope_stack;
+    std::vector<std::map<std::string, std::string>> capture_scope_stack;
+    size_t                                       capture_scope_stack_size = 0;
 
     const size_t                                 def_count;
     const bool                                   enablePackratParsing;
@@ -855,7 +844,8 @@ public:
         source_line_index.push_back(l);
 
         args_stack.resize(1);
-        capture_scope_stack.resize(1);
+
+        push_capture_scope();
     }
 
     ~Context() {
@@ -901,13 +891,20 @@ public:
         assert(value_stack_size <= value_stack.size());
         if (value_stack_size == value_stack.size()) {
             value_stack.emplace_back(std::make_shared<SemanticValues>());
+        } else {
+            auto& sv = *value_stack[value_stack_size];
+            if (!sv.empty()) {
+                sv.clear();
+                sv.tags.clear();
+            }
+            sv.s_ = nullptr;
+            sv.n_ = 0;
+            sv.choice_count_ = 0;
+            sv.choice_ = 0;
+            sv.tokens.clear();
         }
+
         auto& sv = *value_stack[value_stack_size++];
-        if (!sv.empty()) {
-            sv.clear();
-            sv.tags.clear();
-        }
-        sv.reset();
         sv.path = path;
         sv.ss = s;
         sv.source_line_index = &source_line_index;
@@ -918,8 +915,8 @@ public:
         value_stack_size--;
     }
 
-    void push_args(const std::vector<std::shared_ptr<Ope>>& args) {
-        args_stack.push_back(args);
+    void push_args(std::vector<std::shared_ptr<Ope>>&& args) {
+        args_stack.emplace_back(args);
     }
 
     void pop_args() {
@@ -931,19 +928,26 @@ public:
     }
 
     void push_capture_scope() {
-        capture_scope_stack.resize(capture_scope_stack.size() + 1);
+        assert(capture_scope_stack_size <= capture_scope_stack.size());
+        if (capture_scope_stack_size == capture_scope_stack.size()) {
+            capture_scope_stack.emplace_back(std::map<std::string, std::string>());
+        } else {
+            auto& cs = capture_scope_stack[capture_scope_stack_size];
+            cs.clear();
+        }
+        capture_scope_stack_size++;
     }
 
     void pop_capture_scope() {
-        capture_scope_stack.pop_back();
+        capture_scope_stack_size--;
     }
 
     void shift_capture_values() {
         assert(capture_scope_stack.size() >= 2);
-        auto it = capture_scope_stack.rbegin();
-        auto it_prev = it + 1;
-        for (const auto& kv: *it) {
-            (*it_prev)[kv.first] = kv.second;
+        auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
+        auto prev = curr - 1;
+        for (const auto& kv: *curr) {
+            (*prev)[kv.first] = kv.second;
         }
     }
 
@@ -992,11 +996,23 @@ public:
             }
             i += len;
         }
-        sv.insert(sv.end(), chldsv.begin(), chldsv.end());
-        sv.tags.insert(sv.tags.end(), chldsv.tags.begin(), chldsv.tags.end());
+        if (!chldsv.empty()) {
+            for (size_t i = 0; i < chldsv.size(); i++) {
+                sv.emplace_back(std::move(chldsv[i]));
+            }
+        }
+        if (!chldsv.tags.empty()) {
+            for (size_t i = 0; i < chldsv.tags.size(); i++) {
+                sv.tags.emplace_back(std::move(chldsv.tags[i]));
+            }
+        }
         sv.s_ = chldsv.c_str();
         sv.n_ = chldsv.length();
-        sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
+        if (!chldsv.tokens.empty()) {
+            for (size_t i = 0; i < chldsv.tokens.size(); i++) {
+                sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
+            }
+        }
         return i;
     }
 
@@ -1028,13 +1044,25 @@ public:
             const auto& rule = *ope;
             auto len = rule.parse(s, n, chldsv, c, dt);
             if (success(len)) {
-                sv.insert(sv.end(), chldsv.begin(), chldsv.end());
-                sv.tags.insert(sv.tags.end(), chldsv.tags.begin(), chldsv.tags.end());
+                if (!chldsv.empty()) {
+                    for (size_t i = 0; i < chldsv.size(); i++) {
+                        sv.emplace_back(std::move(chldsv[i]));
+                    }
+                }
+                if (!chldsv.tags.empty()) {
+                    for (size_t i = 0; i < chldsv.tags.size(); i++) {
+                        sv.tags.emplace_back(std::move(chldsv.tags[i]));
+                    }
+                }
                 sv.s_ = chldsv.c_str();
                 sv.n_ = chldsv.length();
                 sv.choice_count_ = opes_.size();
                 sv.choice_ = id;
-                sv.tokens.insert(sv.tokens.end(), chldsv.tokens.begin(), chldsv.tokens.end());
+                if (!chldsv.tokens.empty()) {
+                    for (size_t i = 0; i < chldsv.tokens.size(); i++) {
+                        sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
+                    }
+                }
 
                 c.shift_capture_values();
                 return len;
@@ -2447,7 +2475,7 @@ inline size_t Reference::parse(
                 args.push_back(vis.found_ope);
             }
 
-            c.push_args(args);
+            c.push_args(std::move(args));
             auto se = make_scope_exit([&]() { c.pop_args(); });
             auto ope = get_core_operator();
             return ope->parse(s, n, sv, c, dt);
@@ -2469,16 +2497,14 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
 
 inline size_t BackReference::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
     c.trace("BackReference", s, n, sv, dt);
-    auto it = c.capture_scope_stack.rbegin();
-    while (it != c.capture_scope_stack.rend()) {
-        const auto& captures = *it;
-        if (captures.find(name_) != captures.end()) {
-            const auto& lit = captures.at(name_);
+    for (int i = c.capture_scope_stack_size - 1; i >= 0; i--) {
+        const auto& cs = c.capture_scope_stack[i];
+        if (cs.find(name_) != cs.end()) {
+            const auto& lit = cs.at(name_);
             auto init_is_word = false;
             auto is_word = false;
             return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
         }
-        ++it;
     }
     throw std::runtime_error("Invalid back reference...");
 }
@@ -2912,7 +2938,8 @@ private:
                     const auto& name = any_cast<std::string>(sv[0]);
                     auto ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
                     return cap(ope, [name](const char* a_s, size_t a_n, Context& c) {
-                        c.capture_scope_stack.back()[name] = std::string(a_s, a_n);
+                        auto& cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
+                        cs[name] = std::string(a_s, a_n);
                     });
                 }
                 default: {
@@ -2923,12 +2950,6 @@ private:
 
         g["IdentCont"] = [](const SemanticValues& sv) {
             return std::string(sv.c_str(), sv.length());
-        };
-        g["IdentStart"] = [](const SemanticValues& /*sv*/) {
-            return std::string();
-        };
-        g["IdentRest"] = [](const SemanticValues& /*sv*/) {
-            return std::string();
         };
 
         g["LiteralI"] = [](const SemanticValues& sv) {
