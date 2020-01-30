@@ -3500,31 +3500,6 @@ public:
         return parse_n(s, n, dt, val);
     }
 
-    bool search(const char* s, size_t n, size_t& mpos, size_t& mlen) const {
-        const auto& rule = (*grammar_)[start_];
-        if (grammar_ != nullptr) {
-            size_t pos = 0;
-            while (pos < n) {
-                size_t len = n - pos;
-                auto r = rule.parse(s + pos, len);
-                if (r.ret) {
-                    mpos = pos;
-                    mlen = len;
-                    return true;
-                }
-                pos++;
-            }
-        }
-        mpos = 0;
-        mlen = 0;
-        return false;
-    }
-
-    bool search(const char* s, size_t& mpos, size_t& mlen) const {
-        auto n = strlen(s);
-        return search(s, n, mpos, mlen);
-    }
-
     Definition& operator[](const char* s) {
         return (*grammar_)[s];
     }
