@@ -17,8 +17,8 @@
 #endif // PEGLIB_USE_STD_ANY
 
 #include <algorithm>
-#include <cctype>
 #include <cassert>
+#include <cctype>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -54,157 +54,120 @@ using any = std::any;
 
 // Define a function alias to std::any_cast using perfect forwarding
 template <typename T, typename... Args>
-auto any_cast( Args&&... args ) -> decltype(std::any_cast<T>(std::forward<Args>( args )... )) {
-  return std::any_cast<T>( std::forward<Args>( args )... );
+auto any_cast(Args &&... args)
+    -> decltype(std::any_cast<T>(std::forward<Args>(args)...)) {
+  return std::any_cast<T>(std::forward<Args>(args)...);
 }
 #else
-class any
-{
+class any {
 public:
-    any() = default;
+  any() = default;
 
-    any(const any& rhs) : content_(rhs.clone()) {}
+  any(const any &rhs) : content_(rhs.clone()) {}
 
-    any(any&& rhs) : content_(rhs.content_) {
-        rhs.content_ = nullptr;
+  any(any &&rhs) : content_(rhs.content_) { rhs.content_ = nullptr; }
+
+  template <typename T> any(const T &value) : content_(new holder<T>(value)) {}
+
+  any &operator=(const any &rhs) {
+    if (this != &rhs) {
+      if (content_) { delete content_; }
+      content_ = rhs.clone();
     }
+    return *this;
+  }
 
-    template <typename T>
-    any(const T& value) : content_(new holder<T>(value)) {}
-
-    any& operator=(const any& rhs) {
-        if (this != &rhs) {
-            if (content_) {
-                delete content_;
-            }
-            content_ = rhs.clone();
-        }
-        return *this;
+  any &operator=(any &&rhs) {
+    if (this != &rhs) {
+      if (content_) { delete content_; }
+      content_ = rhs.content_;
+      rhs.content_ = nullptr;
     }
+    return *this;
+  }
 
-    any& operator=(any&& rhs) {
-        if (this != &rhs) {
-            if (content_) {
-                delete content_;
-            }
-            content_ = rhs.content_;
-            rhs.content_ = nullptr;
-        }
-        return *this;
-    }
+  ~any() { delete content_; }
 
-    ~any() {
-        delete content_;
-    }
+  bool has_value() const { return content_ != nullptr; }
 
-    bool has_value() const {
-        return content_ != nullptr;
-    }
+  template <typename T> friend T &any_cast(any &val);
 
-    template <typename T>
-    friend T& any_cast(any& val);
-
-    template <typename T>
-    friend const T& any_cast(const any& val);
+  template <typename T> friend const T &any_cast(const any &val);
 
 private:
-    struct placeholder {
-        virtual ~placeholder() {}
-        virtual placeholder* clone() const = 0;
-    };
+  struct placeholder {
+    virtual ~placeholder() {}
+    virtual placeholder *clone() const = 0;
+  };
 
-    template <typename T>
-    struct holder : placeholder {
-        holder(const T& value) : value_(value) {}
-        placeholder* clone() const override {
-            return new holder(value_);
-        }
-        T value_;
-    };
+  template <typename T> struct holder : placeholder {
+    holder(const T &value) : value_(value) {}
+    placeholder *clone() const override { return new holder(value_); }
+    T value_;
+  };
 
-    placeholder* clone() const {
-        return content_ ? content_->clone() : nullptr;
-    }
+  placeholder *clone() const { return content_ ? content_->clone() : nullptr; }
 
-    placeholder* content_ = nullptr;
+  placeholder *content_ = nullptr;
 };
 
-template <typename T>
-T& any_cast(any& val) {
-    if (!val.content_) {
-        throw std::bad_cast();
-    }
-    auto p = dynamic_cast<any::holder<T>*>(val.content_);
-    assert(p);
-    if (!p) {
-        throw std::bad_cast();
-    }
-    return p->value_;
+template <typename T> T &any_cast(any &val) {
+  if (!val.content_) { throw std::bad_cast(); }
+  auto p = dynamic_cast<any::holder<T> *>(val.content_);
+  assert(p);
+  if (!p) { throw std::bad_cast(); }
+  return p->value_;
 }
 
-template <>
-any& any_cast<any>(any& val) {
-    return val;
+template <> any &any_cast<any>(any &val) { return val; }
+
+template <typename T> const T &any_cast(const any &val) {
+  assert(val.content_);
+  auto p = dynamic_cast<any::holder<T> *>(val.content_);
+  assert(p);
+  if (!p) { throw std::bad_cast(); }
+  return p->value_;
 }
 
-template <typename T>
-const T& any_cast(const any& val) {
-    assert(val.content_);
-    auto p = dynamic_cast<any::holder<T>*>(val.content_);
-    assert(p);
-    if (!p) {
-        throw std::bad_cast();
-    }
-    return p->value_;
-}
-
-template <>
-const any& any_cast<any>(const any& val) {
-    return val;
-}
+template <> const any &any_cast<any>(const any &val) { return val; }
 #endif
 
 /*-----------------------------------------------------------------------------
  *  scope_exit
  *---------------------------------------------------------------------------*/
 
-// This is based on "http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4189".
+// This is based on
+// "http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4189".
 
-template <typename EF>
-struct scope_exit
-{
-    explicit scope_exit(EF&& f)
-        : exit_function(std::move(f))
-        , execute_on_destruction{true} {}
+template <typename EF> struct scope_exit {
+  explicit scope_exit(EF &&f)
+      : exit_function(std::move(f)), execute_on_destruction{true} {}
 
-    scope_exit(scope_exit&& rhs)
-        : exit_function(std::move(rhs.exit_function))
-        , execute_on_destruction{rhs.execute_on_destruction} {
-            rhs.release();
-    }
+  scope_exit(scope_exit &&rhs)
+      : exit_function(std::move(rhs.exit_function)),
+        execute_on_destruction{rhs.execute_on_destruction} {
+    rhs.release();
+  }
 
-    ~scope_exit() {
-        if (execute_on_destruction) {
-            this->exit_function();
-        }
-    }
+  ~scope_exit() {
+    if (execute_on_destruction) { this->exit_function(); }
+  }
 
-    void release() {
-        this->execute_on_destruction = false;
-    }
+  void release() { this->execute_on_destruction = false; }
 
 private:
-    scope_exit(const scope_exit&) = delete;
-    void operator=(const scope_exit&) = delete;
-    scope_exit& operator=(scope_exit&&) = delete;
+  scope_exit(const scope_exit &) = delete;
+  void operator=(const scope_exit &) = delete;
+  scope_exit &operator=(scope_exit &&) = delete;
 
-    EF   exit_function;
-    bool execute_on_destruction;
+  EF exit_function;
+  bool execute_on_destruction;
 };
 
 template <typename EF>
-auto make_scope_exit(EF&& exit_function) -> scope_exit<EF> {
-    return scope_exit<typename std::remove_reference<EF>::type>(std::forward<EF>(exit_function));
+auto make_scope_exit(EF &&exit_function) -> scope_exit<EF> {
+  return scope_exit<typename std::remove_reference<EF>::type>(
+      std::forward<EF>(exit_function));
 }
 
 /*-----------------------------------------------------------------------------
@@ -303,9 +266,7 @@ inline bool decode_codepoint(const char *s8, size_t l, size_t &bytes,
 
 inline size_t decode_codepoint(const char *s8, size_t l, char32_t &out) {
   size_t bytes;
-  if (decode_codepoint(s8, l, bytes, out)) {
-    return bytes;
-  }
+  if (decode_codepoint(s8, l, bytes, out)) { return bytes; }
   return 0;
 }
 
@@ -332,89 +293,113 @@ inline std::u32string decode(const char *s8, size_t l) {
  *  resolve_escape_sequence
  *---------------------------------------------------------------------------*/
 
-inline bool is_hex(char c, int& v) {
-    if ('0' <= c && c <= '9') {
-        v = c - '0';
-        return true;
-    } else if ('a' <= c && c <= 'f') {
-        v = c - 'a' + 10;
-        return true;
-    } else if ('A' <= c && c <= 'F') {
-        v = c - 'A' + 10;
-        return true;
-    }
-    return false;
+inline bool is_hex(char c, int &v) {
+  if ('0' <= c && c <= '9') {
+    v = c - '0';
+    return true;
+  } else if ('a' <= c && c <= 'f') {
+    v = c - 'a' + 10;
+    return true;
+  } else if ('A' <= c && c <= 'F') {
+    v = c - 'A' + 10;
+    return true;
+  }
+  return false;
 }
 
-inline bool is_digit(char c, int& v) {
-    if ('0' <= c && c <= '9') {
-        v = c - '0';
-        return true;
-    }
-    return false;
+inline bool is_digit(char c, int &v) {
+  if ('0' <= c && c <= '9') {
+    v = c - '0';
+    return true;
+  }
+  return false;
 }
 
-inline std::pair<int, size_t> parse_hex_number(const char* s, size_t n, size_t i) {
-    int ret = 0;
-    int val;
-    while (i < n && is_hex(s[i], val)) {
-        ret = static_cast<int>(ret * 16 + val);
+inline std::pair<int, size_t> parse_hex_number(const char *s, size_t n,
+                                               size_t i) {
+  int ret = 0;
+  int val;
+  while (i < n && is_hex(s[i], val)) {
+    ret = static_cast<int>(ret * 16 + val);
+    i++;
+  }
+  return std::make_pair(ret, i);
+}
+
+inline std::pair<int, size_t> parse_octal_number(const char *s, size_t n,
+                                                 size_t i) {
+  int ret = 0;
+  int val;
+  while (i < n && is_digit(s[i], val)) {
+    ret = static_cast<int>(ret * 8 + val);
+    i++;
+  }
+  return std::make_pair(ret, i);
+}
+
+inline std::string resolve_escape_sequence(const char *s, size_t n) {
+  std::string r;
+  r.reserve(n);
+
+  size_t i = 0;
+  while (i < n) {
+    auto ch = s[i];
+    if (ch == '\\') {
+      i++;
+      if (i == n) { throw std::runtime_error("Invalid escape sequence..."); }
+      switch (s[i]) {
+      case 'n':
+        r += '\n';
         i++;
-    }
-    return std::make_pair(ret, i);
-}
-
-inline std::pair<int, size_t> parse_octal_number(const char* s, size_t n, size_t i) {
-    int ret = 0;
-    int val;
-    while (i < n && is_digit(s[i], val)) {
-        ret = static_cast<int>(ret * 8 + val);
+        break;
+      case 'r':
+        r += '\r';
         i++;
+        break;
+      case 't':
+        r += '\t';
+        i++;
+        break;
+      case '\'':
+        r += '\'';
+        i++;
+        break;
+      case '"':
+        r += '"';
+        i++;
+        break;
+      case '[':
+        r += '[';
+        i++;
+        break;
+      case ']':
+        r += ']';
+        i++;
+        break;
+      case '\\':
+        r += '\\';
+        i++;
+        break;
+      case 'x':
+      case 'u': {
+        char32_t cp;
+        std::tie(cp, i) = parse_hex_number(s, n, i + 1);
+        r += encode_codepoint(cp);
+        break;
+      }
+      default: {
+        char32_t cp;
+        std::tie(cp, i) = parse_octal_number(s, n, i);
+        r += encode_codepoint(cp);
+        break;
+      }
+      }
+    } else {
+      r += ch;
+      i++;
     }
-    return std::make_pair(ret, i);
-}
-
-inline std::string resolve_escape_sequence(const char* s, size_t n) {
-    std::string r;
-    r.reserve(n);
-
-    size_t i = 0;
-    while (i < n) {
-        auto ch = s[i];
-        if (ch == '\\') {
-            i++;
-            if (i == n) {
-                throw std::runtime_error("Invalid escape sequence...");
-            }
-            switch (s[i]) {
-                case 'n':  r += '\n'; i++; break;
-                case 'r':  r += '\r'; i++; break;
-                case 't':  r += '\t'; i++; break;
-                case '\'': r += '\''; i++; break;
-                case '"':  r += '"';  i++; break;
-                case '[':  r += '[';  i++; break;
-                case ']':  r += ']';  i++; break;
-                case '\\': r += '\\'; i++; break;
-                case 'x':
-                case 'u': {
-                    char32_t cp;
-                    std::tie(cp, i) = parse_hex_number(s, n, i + 1);
-                    r += encode_codepoint(cp);
-                    break;
-                }
-                default: {
-                    char32_t cp;
-                    std::tie(cp, i) = parse_octal_number(s, n, i);
-                    r += encode_codepoint(cp);
-                    break;
-                }
-            }
-        } else {
-            r += ch;
-            i++;
-        }
-    }
-    return r;
+  }
+  return r;
 }
 
 /*-----------------------------------------------------------------------------
@@ -422,353 +407,353 @@ inline std::string resolve_escape_sequence(const char* s, size_t n) {
  *---------------------------------------------------------------------------*/
 
 /*
-* Line information utility function
-*/
-inline std::pair<size_t, size_t> line_info(const char* start, const char* cur) {
-    auto p = start;
-    auto col_ptr = p;
-    auto no = 1;
+ * Line information utility function
+ */
+inline std::pair<size_t, size_t> line_info(const char *start, const char *cur) {
+  auto p = start;
+  auto col_ptr = p;
+  auto no = 1;
 
-    while (p < cur) {
-        if (*p == '\n') {
-            no++;
-            col_ptr = p + 1;
-        }
-        p++;
+  while (p < cur) {
+    if (*p == '\n') {
+      no++;
+      col_ptr = p + 1;
     }
+    p++;
+  }
 
-    auto col = p - col_ptr + 1;
+  auto col = p - col_ptr + 1;
 
-    return std::make_pair(no, col);
+  return std::make_pair(no, col);
 }
 
 /*
-* String tag
-*/
-inline constexpr unsigned int str2tag(const char* str, unsigned int h = 0) {
-    return (*str == '\0') ? h : str2tag(str + 1, (h * 33) ^ static_cast<unsigned char>(*str));
+ * String tag
+ */
+inline constexpr unsigned int str2tag(const char *str, unsigned int h = 0) {
+  return (*str == '\0')
+             ? h
+             : str2tag(str + 1, (h * 33) ^ static_cast<unsigned char>(*str));
 }
 
 namespace udl {
 
-inline constexpr unsigned int operator "" _(const char* s, size_t) {
-    return str2tag(s);
+inline constexpr unsigned int operator"" _(const char *s, size_t) {
+  return str2tag(s);
 }
 
-}
+} // namespace udl
 
 /*
-* Semantic values
-*/
-struct SemanticValues : protected std::vector<any>
-{
-    // Input text
-    const char* path = nullptr;
-    const char* ss = nullptr;
-    const std::vector<size_t>* source_line_index = nullptr;
+ * Semantic values
+ */
+struct SemanticValues : protected std::vector<any> {
+  // Input text
+  const char *path = nullptr;
+  const char *ss = nullptr;
+  const std::vector<size_t> *source_line_index = nullptr;
 
-    // Matched string
-    const char* c_str() const { return s_; }
-    size_t      length() const { return n_; }
+  // Matched string
+  const char *c_str() const { return s_; }
+  size_t length() const { return n_; }
 
-    std::string str() const {
-        return std::string(s_, n_);
+  std::string str() const { return std::string(s_, n_); }
+
+  // Definition name
+  const std::string &name() const { return name_; }
+
+  std::vector<unsigned int> tags;
+
+  // Line number and column at which the matched string is
+  std::pair<size_t, size_t> line_info() const {
+    const auto &idx = *source_line_index;
+
+    auto cur = static_cast<size_t>(std::distance(ss, s_));
+    auto it = std::lower_bound(
+        idx.begin(), idx.end(), cur,
+        [](size_t element, size_t value) { return element < value; });
+
+    auto id = static_cast<size_t>(std::distance(idx.begin(), it));
+    auto off = cur - (id == 0 ? 0 : idx[id - 1] + 1);
+    return std::make_pair(id + 1, off + 1);
+  }
+
+  // Choice count
+  size_t choice_count() const { return choice_count_; }
+
+  // Choice number (0 based index)
+  size_t choice() const { return choice_; }
+
+  // Tokens
+  std::vector<std::pair<const char *, size_t>> tokens;
+
+  std::string token(size_t id = 0) const {
+    if (!tokens.empty()) {
+      assert(id < tokens.size());
+      const auto &tok = tokens[id];
+      return std::string(tok.first, tok.second);
     }
+    return std::string(s_, n_);
+  }
 
-    // Definition name
-    const std::string& name() const { return name_; }
+  // Transform the semantic value vector to another vector
+  template <typename T>
+  auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const
+      -> vector<T> {
+    return this->transform(beg, end,
+                           [](const any &v) { return any_cast<T>(v); });
+  }
 
-    std::vector<unsigned int> tags;
-
-    // Line number and column at which the matched string is
-    std::pair<size_t, size_t> line_info() const {
-        const auto& idx = *source_line_index;
-
-        auto cur = static_cast<size_t>(std::distance(ss, s_));
-        auto it = std::lower_bound(idx.begin(), idx.end(), cur,
-            [](size_t element, size_t value) { return element < value; }
-        );
-
-        auto id = static_cast<size_t>(std::distance(idx.begin(), it));
-        auto off = cur - (id == 0 ? 0 : idx[id - 1] + 1);
-        return std::make_pair(id + 1, off + 1);
-    }
-
-    // Choice count
-    size_t choice_count() const { return choice_count_; }
-
-    // Choice number (0 based index)
-    size_t choice() const { return choice_; }
-
-    // Tokens
-    std::vector<std::pair<const char*, size_t>> tokens;
-
-    std::string token(size_t id = 0) const {
-        if (!tokens.empty()) {
-            assert(id < tokens.size());
-            const auto& tok = tokens[id];
-            return std::string(tok.first, tok.second);
-        }
-        return std::string(s_, n_);
-    }
-
-    // Transform the semantic value vector to another vector
-    template <typename T>
-    auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const -> vector<T> {
-        return this->transform(beg, end, [](const any& v) { return any_cast<T>(v); });
-    }
-
-    using std::vector<any>::iterator;
-    using std::vector<any>::const_iterator;
-    using std::vector<any>::size;
-    using std::vector<any>::empty;
-    using std::vector<any>::assign;
-    using std::vector<any>::begin;
-    using std::vector<any>::end;
-    using std::vector<any>::rbegin;
-    using std::vector<any>::rend;
-    using std::vector<any>::operator[];
-    using std::vector<any>::at;
-    using std::vector<any>::resize;
-    using std::vector<any>::front;
-    using std::vector<any>::back;
-    using std::vector<any>::push_back;
-    using std::vector<any>::pop_back;
-    using std::vector<any>::insert;
-    using std::vector<any>::erase;
-    using std::vector<any>::clear;
-    using std::vector<any>::swap;
-    using std::vector<any>::emplace;
-    using std::vector<any>::emplace_back;
+  using std::vector<any>::iterator;
+  using std::vector<any>::const_iterator;
+  using std::vector<any>::size;
+  using std::vector<any>::empty;
+  using std::vector<any>::assign;
+  using std::vector<any>::begin;
+  using std::vector<any>::end;
+  using std::vector<any>::rbegin;
+  using std::vector<any>::rend;
+  using std::vector<any>::operator[];
+  using std::vector<any>::at;
+  using std::vector<any>::resize;
+  using std::vector<any>::front;
+  using std::vector<any>::back;
+  using std::vector<any>::push_back;
+  using std::vector<any>::pop_back;
+  using std::vector<any>::insert;
+  using std::vector<any>::erase;
+  using std::vector<any>::clear;
+  using std::vector<any>::swap;
+  using std::vector<any>::emplace;
+  using std::vector<any>::emplace_back;
 
 private:
-    friend class Context;
-    friend class Sequence;
-    friend class PrioritizedChoice;
-    friend class Holder;
+  friend class Context;
+  friend class Sequence;
+  friend class PrioritizedChoice;
+  friend class Holder;
 
-    const char* s_ = nullptr;
-    size_t      n_ = 0;
-    size_t      choice_count_ = 0;
-    size_t      choice_ = 0;
-    std::string name_;
+  const char *s_ = nullptr;
+  size_t n_ = 0;
+  size_t choice_count_ = 0;
+  size_t choice_ = 0;
+  std::string name_;
 
-    template <typename F>
-    auto transform(F f) const -> vector<typename std::remove_const<decltype(f(any()))>::type> {
-        vector<typename std::remove_const<decltype(f(any()))>::type> r;
-        for (const auto& v: *this) {
-            r.emplace_back(f(v));
-        }
-        return r;
+  template <typename F>
+  auto transform(F f) const
+      -> vector<typename std::remove_const<decltype(f(any()))>::type> {
+    vector<typename std::remove_const<decltype(f(any()))>::type> r;
+    for (const auto &v : *this) {
+      r.emplace_back(f(v));
     }
+    return r;
+  }
 
-    template <typename F>
-    auto transform(size_t beg, size_t end, F f) const -> vector<typename std::remove_const<decltype(f(any()))>::type> {
-        vector<typename std::remove_const<decltype(f(any()))>::type> r;
-        end = (std::min)(end, size());
-        for (size_t i = beg; i < end; i++) {
-            r.emplace_back(f((*this)[i]));
-        }
-        return r;
+  template <typename F>
+  auto transform(size_t beg, size_t end, F f) const
+      -> vector<typename std::remove_const<decltype(f(any()))>::type> {
+    vector<typename std::remove_const<decltype(f(any()))>::type> r;
+    end = (std::min)(end, size());
+    for (size_t i = beg; i < end; i++) {
+      r.emplace_back(f((*this)[i]));
     }
+    return r;
+  }
 };
 
 /*
  * Semantic action
  */
-template <
-    typename R, typename F,
-    typename std::enable_if<std::is_void<R>::value, std::nullptr_t>::type = nullptr,
-    typename... Args>
-any call(F fn, Args&&... args) {
-    fn(std::forward<Args>(args)...);
-    return any();
+template <typename R, typename F,
+          typename std::enable_if<std::is_void<R>::value,
+                                  std::nullptr_t>::type = nullptr,
+          typename... Args>
+any call(F fn, Args &&... args) {
+  fn(std::forward<Args>(args)...);
+  return any();
 }
 
-template <
-    typename R, typename F,
-    typename std::enable_if<std::is_same<typename std::remove_cv<R>::type, any>::value, std::nullptr_t>::type = nullptr,
-    typename... Args>
-any call(F fn, Args&&... args) {
-    return fn(std::forward<Args>(args)...);
+template <typename R, typename F,
+          typename std::enable_if<
+              std::is_same<typename std::remove_cv<R>::type, any>::value,
+              std::nullptr_t>::type = nullptr,
+          typename... Args>
+any call(F fn, Args &&... args) {
+  return fn(std::forward<Args>(args)...);
 }
 
-template <
-    typename R, typename F,
-    typename std::enable_if<
-        !std::is_void<R>::value &&
-        !std::is_same<typename std::remove_cv<R>::type, any>::value, std::nullptr_t>::type = nullptr,
-    typename... Args>
-any call(F fn, Args&&... args) {
-    return any(fn(std::forward<Args>(args)...));
+template <typename R, typename F,
+          typename std::enable_if<
+              !std::is_void<R>::value &&
+                  !std::is_same<typename std::remove_cv<R>::type, any>::value,
+              std::nullptr_t>::type = nullptr,
+          typename... Args>
+any call(F fn, Args &&... args) {
+  return any(fn(std::forward<Args>(args)...));
 }
 
-class Action
-{
+class Action {
 public:
-    Action() = default;
-    Action(const Action& rhs) = default;
+  Action() = default;
+  Action(const Action &rhs) = default;
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
-    Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
+  template <typename F,
+            typename std::enable_if<!std::is_pointer<F>::value &&
+                                        !std::is_same<F, std::nullptr_t>::value,
+                                    std::nullptr_t>::type = nullptr>
+  Action(F fn) : fn_(make_adaptor(fn, &F::operator())) {}
 
-    template <typename F, typename std::enable_if<std::is_pointer<F>::value, std::nullptr_t>::type = nullptr>
-    Action(F fn) : fn_(make_adaptor(fn, fn)) {}
+  template <typename F, typename std::enable_if<std::is_pointer<F>::value,
+                                                std::nullptr_t>::type = nullptr>
+  Action(F fn) : fn_(make_adaptor(fn, fn)) {}
 
-    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
-    Action(F /*fn*/) {}
+  template <typename F,
+            typename std::enable_if<std::is_same<F, std::nullptr_t>::value,
+                                    std::nullptr_t>::type = nullptr>
+  Action(F /*fn*/) {}
 
-    template <typename F, typename std::enable_if<!std::is_pointer<F>::value && !std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
-    void operator=(F fn) {
-        fn_ = make_adaptor(fn, &F::operator());
-    }
+  template <typename F,
+            typename std::enable_if<!std::is_pointer<F>::value &&
+                                        !std::is_same<F, std::nullptr_t>::value,
+                                    std::nullptr_t>::type = nullptr>
+  void operator=(F fn) {
+    fn_ = make_adaptor(fn, &F::operator());
+  }
 
-    template <typename F, typename std::enable_if<std::is_pointer<F>::value, std::nullptr_t>::type = nullptr>
-    void operator=(F fn) {
-        fn_ = make_adaptor(fn, fn);
-    }
+  template <typename F, typename std::enable_if<std::is_pointer<F>::value,
+                                                std::nullptr_t>::type = nullptr>
+  void operator=(F fn) {
+    fn_ = make_adaptor(fn, fn);
+  }
 
-    template <typename F, typename std::enable_if<std::is_same<F, std::nullptr_t>::value, std::nullptr_t>::type = nullptr>
-    void operator=(F /*fn*/) {}
+  template <typename F,
+            typename std::enable_if<std::is_same<F, std::nullptr_t>::value,
+                                    std::nullptr_t>::type = nullptr>
+  void operator=(F /*fn*/) {}
 
-    Action& operator=(const Action& rhs) = default;
+  Action &operator=(const Action &rhs) = default;
 
-    operator bool() const {
-        return bool(fn_);
-    }
+  operator bool() const { return bool(fn_); }
 
-    any operator()(SemanticValues& sv, any& dt) const {
-        return fn_(sv, dt);
-    }
+  any operator()(SemanticValues &sv, any &dt) const { return fn_(sv, dt); }
 
 private:
-    template <typename R>
-    struct TypeAdaptor_sv {
-        TypeAdaptor_sv(std::function<R (SemanticValues& sv)> fn)
-            : fn_(fn) {}
-        any operator()(SemanticValues& sv, any& /*dt*/) {
-            return call<R>(fn_, sv);
-        }
-        std::function<R (SemanticValues& sv)> fn_;
-    };
-
-    template <typename R>
-    struct TypeAdaptor_csv {
-        TypeAdaptor_csv(std::function<R (const SemanticValues& sv)> fn)
-            : fn_(fn) {}
-        any operator()(SemanticValues& sv, any& /*dt*/) {
-            return call<R>(fn_, sv);
-        }
-        std::function<R (const SemanticValues& sv)> fn_;
-    };
-
-    template <typename R>
-    struct TypeAdaptor_sv_dt {
-        TypeAdaptor_sv_dt(std::function<R (SemanticValues& sv, any& dt)> fn)
-            : fn_(fn) {}
-        any operator()(SemanticValues& sv, any& dt) {
-            return call<R>(fn_, sv, dt);
-        }
-        std::function<R (SemanticValues& sv, any& dt)> fn_;
-    };
-
-    template <typename R>
-    struct TypeAdaptor_csv_dt {
-        TypeAdaptor_csv_dt(std::function<R (const SemanticValues& sv, any& dt)> fn)
-            : fn_(fn) {}
-        any operator()(SemanticValues& sv, any& dt) {
-            return call<R>(fn_, sv, dt);
-        }
-        std::function<R (const SemanticValues& sv, any& dt)> fn_;
-    };
-
-    typedef std::function<any (SemanticValues& sv, any& dt)> Fty;
-
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv) const) {
-        return TypeAdaptor_sv<R>(fn);
+  template <typename R> struct TypeAdaptor_sv {
+    TypeAdaptor_sv(std::function<R(SemanticValues &sv)> fn) : fn_(fn) {}
+    any operator()(SemanticValues &sv, any & /*dt*/) {
+      return call<R>(fn_, sv);
     }
+    std::function<R(SemanticValues &sv)> fn_;
+  };
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv) const) {
-        return TypeAdaptor_csv<R>(fn);
+  template <typename R> struct TypeAdaptor_csv {
+    TypeAdaptor_csv(std::function<R(const SemanticValues &sv)> fn) : fn_(fn) {}
+    any operator()(SemanticValues &sv, any & /*dt*/) {
+      return call<R>(fn_, sv);
     }
+    std::function<R(const SemanticValues &sv)> fn_;
+  };
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv)) {
-        return TypeAdaptor_sv<R>(fn);
-    }
+  template <typename R> struct TypeAdaptor_sv_dt {
+    TypeAdaptor_sv_dt(std::function<R(SemanticValues &sv, any &dt)> fn)
+        : fn_(fn) {}
+    any operator()(SemanticValues &sv, any &dt) { return call<R>(fn_, sv, dt); }
+    std::function<R(SemanticValues &sv, any &dt)> fn_;
+  };
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv)) {
-        return TypeAdaptor_csv<R>(fn);
-    }
+  template <typename R> struct TypeAdaptor_csv_dt {
+    TypeAdaptor_csv_dt(std::function<R(const SemanticValues &sv, any &dt)> fn)
+        : fn_(fn) {}
+    any operator()(SemanticValues &sv, any &dt) { return call<R>(fn_, sv, dt); }
+    std::function<R(const SemanticValues &sv, any &dt)> fn_;
+  };
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (* /*mf*/)(SemanticValues& sv)) {
-        return TypeAdaptor_sv<R>(fn);
-    }
+  typedef std::function<any(SemanticValues &sv, any &dt)> Fty;
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (* /*mf*/)(const SemanticValues& sv)) {
-        return TypeAdaptor_csv<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv) const) {
+    return TypeAdaptor_sv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv, any& dt) const) {
-        return TypeAdaptor_sv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv) const) {
+    return TypeAdaptor_csv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt) const) {
-        return TypeAdaptor_csv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv)) {
+    return TypeAdaptor_sv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_sv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv)) {
+    return TypeAdaptor_csv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_csv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (*/*mf*/)(SemanticValues &sv)) {
+    return TypeAdaptor_sv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R(* /*mf*/)(SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_sv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (*/*mf*/)(const SemanticValues &sv)) {
+    return TypeAdaptor_csv<R>(fn);
+  }
 
-    template<typename F, typename R>
-    Fty make_adaptor(F fn, R(* /*mf*/)(const SemanticValues& sv, any& dt)) {
-        return TypeAdaptor_csv_dt<R>(fn);
-    }
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv, any &dt) const) {
+    return TypeAdaptor_sv_dt<R>(fn);
+  }
 
-    Fty fn_;
+  template <typename F, typename R>
+  Fty make_adaptor(F fn,
+                   R (F::* /*mf*/)(const SemanticValues &sv, any &dt) const) {
+    return TypeAdaptor_csv_dt<R>(fn);
+  }
+
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv, any &dt)) {
+    return TypeAdaptor_sv_dt<R>(fn);
+  }
+
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv, any &dt)) {
+    return TypeAdaptor_csv_dt<R>(fn);
+  }
+
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (*/*mf*/)(SemanticValues &sv, any &dt)) {
+    return TypeAdaptor_sv_dt<R>(fn);
+  }
+
+  template <typename F, typename R>
+  Fty make_adaptor(F fn, R (*/*mf*/)(const SemanticValues &sv, any &dt)) {
+    return TypeAdaptor_csv_dt<R>(fn);
+  }
+
+  Fty fn_;
 };
 
 /*
  * Semantic predicate
  */
-// Note: 'parse_error' exception class should be be used in sematic action handlers to reject the rule.
+// Note: 'parse_error' exception class should be be used in sematic action
+// handlers to reject the rule.
 struct parse_error {
-    parse_error() = default;
-    parse_error(const char* s) : s_(s) {}
-    const char* what() const { return s_.empty() ? nullptr : s_.c_str(); }
+  parse_error() = default;
+  parse_error(const char *s) : s_(s) {}
+  const char *what() const { return s_.empty() ? nullptr : s_.c_str(); }
+
 private:
-    std::string s_;
+  std::string s_;
 };
 
 /*
  * Result
  */
-inline bool success(size_t len) {
-    return len != static_cast<size_t>(-1);
-}
+inline bool success(size_t len) { return len != static_cast<size_t>(-1); }
 
-inline bool fail(size_t len) {
-    return len == static_cast<size_t>(-1);
-}
+inline bool fail(size_t len) { return len == static_cast<size_t>(-1); }
 
 /*
  * Context
@@ -777,1953 +762,1924 @@ class Context;
 class Ope;
 class Definition;
 
-typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt)> TracerEnter;
+typedef std::function<void(const char *name, const char *s, size_t n,
+                           const SemanticValues &sv, const Context &c,
+                           const any &dt)>
+    TracerEnter;
 
-typedef std::function<void (const char* name, const char* s, size_t n, const SemanticValues& sv, const Context& c, const any& dt, size_t)> TracerLeave;
+typedef std::function<void(const char *name, const char *s, size_t n,
+                           const SemanticValues &sv, const Context &c,
+                           const any &dt, size_t)>
+    TracerLeave;
 
-class Context
-{
+class Context {
 public:
-    const char*                                  path;
-    const char*                                  s;
-    const size_t                                 l;
-    std::vector<size_t>                          source_line_index;
+  const char *path;
+  const char *s;
+  const size_t l;
+  std::vector<size_t> source_line_index;
 
-    const char*                                  error_pos = nullptr;
-    const char*                                  message_pos = nullptr;
-    std::string                                  message; // TODO: should be `int`.
+  const char *error_pos = nullptr;
+  const char *message_pos = nullptr;
+  std::string message; // TODO: should be `int`.
 
-    std::vector<std::shared_ptr<SemanticValues>> value_stack;
-    size_t                                       value_stack_size = 0;
-    std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
+  std::vector<std::shared_ptr<SemanticValues>> value_stack;
+  size_t value_stack_size = 0;
+  std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
 
-    bool                                         in_token = false;
+  bool in_token = false;
 
-    std::shared_ptr<Ope>                         whitespaceOpe;
-    bool                                         in_whitespace = false;
+  std::shared_ptr<Ope> whitespaceOpe;
+  bool in_whitespace = false;
 
-    std::shared_ptr<Ope>                         wordOpe;
+  std::shared_ptr<Ope> wordOpe;
 
-    std::vector<std::map<std::string, std::string>> capture_scope_stack;
-    size_t                                       capture_scope_stack_size = 0;
+  std::vector<std::map<std::string, std::string>> capture_scope_stack;
+  size_t capture_scope_stack_size = 0;
 
-    const size_t                                 def_count;
-    const bool                                   enablePackratParsing;
-    std::vector<bool>                            cache_registered;
-    std::vector<bool>                            cache_success;
+  const size_t def_count;
+  const bool enablePackratParsing;
+  std::vector<bool> cache_registered;
+  std::vector<bool> cache_success;
 
-    std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_values;
+  std::map<std::pair<size_t, size_t>, std::tuple<size_t, any>> cache_values;
 
-    TracerEnter tracer_enter;
-    TracerLeave tracer_leave;
+  TracerEnter tracer_enter;
+  TracerLeave tracer_leave;
 
-    Context(
-        const char*          a_path,
-        const char*          a_s,
-        size_t               a_l,
-        size_t               a_def_count,
-        std::shared_ptr<Ope> a_whitespaceOpe,
-        std::shared_ptr<Ope> a_wordOpe,
-        bool                 a_enablePackratParsing,
-        TracerEnter          a_tracer_enter,
-        TracerLeave          a_tracer_leave)
-        : path(a_path)
-        , s(a_s)
-        , l(a_l)
-        , whitespaceOpe(a_whitespaceOpe)
-        , wordOpe(a_wordOpe)
-        , def_count(a_def_count)
-        , enablePackratParsing(a_enablePackratParsing)
-        , cache_registered(enablePackratParsing ? def_count * (l + 1) : 0)
-        , cache_success(enablePackratParsing ? def_count * (l + 1) : 0)
-        , tracer_enter(a_tracer_enter)
-        , tracer_leave(a_tracer_leave) {
+  Context(const char *a_path, const char *a_s, size_t a_l, size_t a_def_count,
+          std::shared_ptr<Ope> a_whitespaceOpe, std::shared_ptr<Ope> a_wordOpe,
+          bool a_enablePackratParsing, TracerEnter a_tracer_enter,
+          TracerLeave a_tracer_leave)
+      : path(a_path), s(a_s), l(a_l), whitespaceOpe(a_whitespaceOpe),
+        wordOpe(a_wordOpe), def_count(a_def_count),
+        enablePackratParsing(a_enablePackratParsing),
+        cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
+        cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
+        tracer_enter(a_tracer_enter), tracer_leave(a_tracer_leave) {
 
-        for (size_t pos = 0; pos < l; pos++) {
-            if (s[pos] == '\n') {
-                source_line_index.push_back(pos);
-            }
-        }
-        source_line_index.push_back(l);
+    for (size_t pos = 0; pos < l; pos++) {
+      if (s[pos] == '\n') { source_line_index.push_back(pos); }
+    }
+    source_line_index.push_back(l);
 
-        args_stack.resize(1);
+    args_stack.resize(1);
 
-        push_capture_scope();
+    push_capture_scope();
+  }
+
+  ~Context() { assert(!value_stack_size); }
+
+  Context(const Context &) = delete;
+  Context(Context &&) = delete;
+  Context operator=(const Context &) = delete;
+
+  template <typename T>
+  void packrat(const char *a_s, size_t def_id, size_t &len, any &val, T fn) {
+    if (!enablePackratParsing) {
+      fn(val);
+      return;
     }
 
-    ~Context() {
-        assert(!value_stack_size);
+    auto col = a_s - s;
+    auto idx = def_count * static_cast<size_t>(col) + def_id;
+
+    if (cache_registered[idx]) {
+      if (cache_success[idx]) {
+        auto key = std::make_pair(col, def_id);
+        std::tie(len, val) = cache_values[key];
+        return;
+      } else {
+        len = static_cast<size_t>(-1);
+        return;
+      }
+    } else {
+      fn(val);
+      cache_registered[idx] = true;
+      cache_success[idx] = success(len);
+      if (success(len)) {
+        auto key = std::make_pair(col, def_id);
+        cache_values[key] = std::make_pair(len, val);
+      }
+      return;
+    }
+  }
+
+  SemanticValues &push() {
+    assert(value_stack_size <= value_stack.size());
+    if (value_stack_size == value_stack.size()) {
+      value_stack.emplace_back(std::make_shared<SemanticValues>());
+    } else {
+      auto &sv = *value_stack[value_stack_size];
+      if (!sv.empty()) {
+        sv.clear();
+        sv.tags.clear();
+      }
+      sv.s_ = nullptr;
+      sv.n_ = 0;
+      sv.choice_count_ = 0;
+      sv.choice_ = 0;
+      sv.tokens.clear();
     }
 
-    Context(const Context&) = delete;
-    Context(Context&&) = delete;
-    Context operator=(const Context&) = delete;
+    auto &sv = *value_stack[value_stack_size++];
+    sv.path = path;
+    sv.ss = s;
+    sv.source_line_index = &source_line_index;
+    return sv;
+  }
 
-    template <typename T>
-    void packrat(const char* a_s, size_t def_id, size_t& len, any& val, T fn) {
-        if (!enablePackratParsing) {
-            fn(val);
-            return;
-        }
+  void pop() { value_stack_size--; }
 
-        auto col = a_s - s;
-        auto idx = def_count * static_cast<size_t>(col) + def_id;
+  void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
+    args_stack.emplace_back(args);
+  }
 
-        if (cache_registered[idx]) {
-            if (cache_success[idx]) {
-                auto key = std::make_pair(col, def_id);
-                std::tie(len, val) = cache_values[key];
-                return;
-            } else {
-                len = static_cast<size_t>(-1);
-                return;
-            }
-        } else {
-            fn(val);
-            cache_registered[idx] = true;
-            cache_success[idx] = success(len);
-            if (success(len)) {
-                auto key = std::make_pair(col, def_id);
-                cache_values[key] = std::make_pair(len, val);
-            }
-            return;
-        }
+  void pop_args() { args_stack.pop_back(); }
+
+  const std::vector<std::shared_ptr<Ope>> &top_args() const {
+    return args_stack[args_stack.size() - 1];
+  }
+
+  void push_capture_scope() {
+    assert(capture_scope_stack_size <= capture_scope_stack.size());
+    if (capture_scope_stack_size == capture_scope_stack.size()) {
+      capture_scope_stack.emplace_back(std::map<std::string, std::string>());
+    } else {
+      auto &cs = capture_scope_stack[capture_scope_stack_size];
+      cs.clear();
     }
+    capture_scope_stack_size++;
+  }
 
-    SemanticValues& push() {
-        assert(value_stack_size <= value_stack.size());
-        if (value_stack_size == value_stack.size()) {
-            value_stack.emplace_back(std::make_shared<SemanticValues>());
-        } else {
-            auto& sv = *value_stack[value_stack_size];
-            if (!sv.empty()) {
-                sv.clear();
-                sv.tags.clear();
-            }
-            sv.s_ = nullptr;
-            sv.n_ = 0;
-            sv.choice_count_ = 0;
-            sv.choice_ = 0;
-            sv.tokens.clear();
-        }
+  void pop_capture_scope() { capture_scope_stack_size--; }
 
-        auto& sv = *value_stack[value_stack_size++];
-        sv.path = path;
-        sv.ss = s;
-        sv.source_line_index = &source_line_index;
-        return sv;
+  void shift_capture_values() {
+    assert(capture_scope_stack.size() >= 2);
+    auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
+    auto prev = curr - 1;
+    for (const auto &kv : *curr) {
+      (*prev)[kv.first] = kv.second;
     }
+  }
 
-    void pop() {
-        value_stack_size--;
-    }
+  void set_error_pos(const char *a_s) {
+    if (error_pos < a_s) error_pos = a_s;
+  }
 
-    void push_args(std::vector<std::shared_ptr<Ope>>&& args) {
-        args_stack.emplace_back(args);
-    }
+  void trace_enter(const char *name, const char *a_s, size_t n,
+                   SemanticValues &sv, any &dt) const;
+  void trace_leave(const char *name, const char *a_s, size_t n,
+                   SemanticValues &sv, any &dt, size_t len) const;
+  bool is_traceable(const Ope &ope) const;
 
-    void pop_args() {
-        args_stack.pop_back();
-    }
-
-    const std::vector<std::shared_ptr<Ope>>& top_args() const {
-        return args_stack[args_stack.size() - 1];
-    }
-
-    void push_capture_scope() {
-        assert(capture_scope_stack_size <= capture_scope_stack.size());
-        if (capture_scope_stack_size == capture_scope_stack.size()) {
-            capture_scope_stack.emplace_back(std::map<std::string, std::string>());
-        } else {
-            auto& cs = capture_scope_stack[capture_scope_stack_size];
-            cs.clear();
-        }
-        capture_scope_stack_size++;
-    }
-
-    void pop_capture_scope() {
-        capture_scope_stack_size--;
-    }
-
-    void shift_capture_values() {
-        assert(capture_scope_stack.size() >= 2);
-        auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
-        auto prev = curr - 1;
-        for (const auto& kv: *curr) {
-            (*prev)[kv.first] = kv.second;
-        }
-    }
-
-    void set_error_pos(const char* a_s) {
-        if (error_pos < a_s) error_pos = a_s;
-    }
-
-    void trace_enter(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const;
-    void trace_leave(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt, size_t len) const;
-    bool is_traceable(const Ope& ope) const;
-
-    mutable size_t next_trace_id = 0;
-    mutable std::list<size_t> trace_ids;
+  mutable size_t next_trace_id = 0;
+  mutable std::list<size_t> trace_ids;
 };
 
 /*
  * Parser operators
  */
-class Ope
-{
+class Ope {
 public:
-    struct Visitor;
+  struct Visitor;
 
-    virtual ~Ope() {}
-    size_t parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const;
-    virtual size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const = 0;
-    virtual void accept(Visitor& v) = 0;
+  virtual ~Ope() {}
+  size_t parse(const char *s, size_t n, SemanticValues &sv, Context &c,
+               any &dt) const;
+  virtual size_t parse_core(const char *s, size_t n, SemanticValues &sv,
+                            Context &c, any &dt) const = 0;
+  virtual void accept(Visitor &v) = 0;
 };
 
-class Sequence : public Ope
-{
+class Sequence : public Ope {
 public:
-    template <typename... Args>
-    Sequence(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
-    Sequence(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    Sequence(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
+  template <typename... Args>
+  Sequence(const Args &... args)
+      : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
+  Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
+  Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto& chldsv = c.push();
-        auto pop_se = make_scope_exit([&]() { c.pop(); });
-        size_t i = 0;
-        for (const auto& ope : opes_) {
-            const auto& rule = *ope;
-            auto len = rule.parse(s + i, n - i, chldsv, c, dt);
-            if (fail(len)) {
-                return static_cast<size_t>(-1);
-            }
-            i += len;
-        }
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto &chldsv = c.push();
+    auto pop_se = make_scope_exit([&]() { c.pop(); });
+    size_t i = 0;
+    for (const auto &ope : opes_) {
+      const auto &rule = *ope;
+      auto len = rule.parse(s + i, n - i, chldsv, c, dt);
+      if (fail(len)) { return static_cast<size_t>(-1); }
+      i += len;
+    }
+    if (!chldsv.empty()) {
+      for (size_t i = 0; i < chldsv.size(); i++) {
+        sv.emplace_back(std::move(chldsv[i]));
+      }
+    }
+    if (!chldsv.tags.empty()) {
+      for (size_t i = 0; i < chldsv.tags.size(); i++) {
+        sv.tags.emplace_back(std::move(chldsv.tags[i]));
+      }
+    }
+    sv.s_ = chldsv.c_str();
+    sv.n_ = chldsv.length();
+    if (!chldsv.tokens.empty()) {
+      for (size_t i = 0; i < chldsv.tokens.size(); i++) {
+        sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
+      }
+    }
+    return i;
+  }
+
+  void accept(Visitor &v) override;
+
+  std::vector<std::shared_ptr<Ope>> opes_;
+};
+
+class PrioritizedChoice : public Ope {
+public:
+  template <typename... Args>
+  PrioritizedChoice(const Args &... args)
+      : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
+  PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
+      : opes_(opes) {}
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    size_t id = 0;
+    for (const auto &ope : opes_) {
+      auto &chldsv = c.push();
+      c.push_capture_scope();
+      auto se = make_scope_exit([&]() {
+        c.pop();
+        c.pop_capture_scope();
+      });
+      const auto &rule = *ope;
+      auto len = rule.parse(s, n, chldsv, c, dt);
+      if (success(len)) {
         if (!chldsv.empty()) {
-            for (size_t i = 0; i < chldsv.size(); i++) {
-                sv.emplace_back(std::move(chldsv[i]));
-            }
+          for (size_t i = 0; i < chldsv.size(); i++) {
+            sv.emplace_back(std::move(chldsv[i]));
+          }
         }
         if (!chldsv.tags.empty()) {
-            for (size_t i = 0; i < chldsv.tags.size(); i++) {
-                sv.tags.emplace_back(std::move(chldsv.tags[i]));
-            }
+          for (size_t i = 0; i < chldsv.tags.size(); i++) {
+            sv.tags.emplace_back(std::move(chldsv.tags[i]));
+          }
         }
         sv.s_ = chldsv.c_str();
         sv.n_ = chldsv.length();
+        sv.choice_count_ = opes_.size();
+        sv.choice_ = id;
         if (!chldsv.tokens.empty()) {
-            for (size_t i = 0; i < chldsv.tokens.size(); i++) {
-                sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
-            }
+          for (size_t i = 0; i < chldsv.tokens.size(); i++) {
+            sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
+          }
         }
-        return i;
+
+        c.shift_capture_values();
+        return len;
+      }
+      id++;
     }
+    return static_cast<size_t>(-1);
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::vector<std::shared_ptr<Ope>> opes_;
+  size_t size() const { return opes_.size(); }
+
+  std::vector<std::shared_ptr<Ope>> opes_;
 };
 
-class PrioritizedChoice : public Ope
-{
+class ZeroOrMore : public Ope {
 public:
-    template <typename... Args>
-    PrioritizedChoice(const Args& ...args) : opes_{ static_cast<std::shared_ptr<Ope>>(args)... } {}
-    PrioritizedChoice(const std::vector<std::shared_ptr<Ope>>& opes) : opes_(opes) {}
-    PrioritizedChoice(std::vector<std::shared_ptr<Ope>>&& opes) : opes_(opes) {}
+  ZeroOrMore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        size_t id = 0;
-        for (const auto& ope : opes_) {
-            auto& chldsv = c.push();
-            c.push_capture_scope();
-            auto se = make_scope_exit([&]() {
-                c.pop();
-                c.pop_capture_scope();
-            });
-            const auto& rule = *ope;
-            auto len = rule.parse(s, n, chldsv, c, dt);
-            if (success(len)) {
-                if (!chldsv.empty()) {
-                    for (size_t i = 0; i < chldsv.size(); i++) {
-                        sv.emplace_back(std::move(chldsv[i]));
-                    }
-                }
-                if (!chldsv.tags.empty()) {
-                    for (size_t i = 0; i < chldsv.tags.size(); i++) {
-                        sv.tags.emplace_back(std::move(chldsv.tags[i]));
-                    }
-                }
-                sv.s_ = chldsv.c_str();
-                sv.n_ = chldsv.length();
-                sv.choice_count_ = opes_.size();
-                sv.choice_ = id;
-                if (!chldsv.tokens.empty()) {
-                    for (size_t i = 0; i < chldsv.tokens.size(); i++) {
-                        sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
-                    }
-                }
-
-                c.shift_capture_values();
-                return len;
-            }
-            id++;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto save_error_pos = c.error_pos;
+    size_t i = 0;
+    while (n - i > 0) {
+      c.push_capture_scope();
+      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+      auto save_sv_size = sv.size();
+      auto save_tok_size = sv.tokens.size();
+      const auto &rule = *ope_;
+      auto len = rule.parse(s + i, n - i, sv, c, dt);
+      if (success(len)) {
+        c.shift_capture_values();
+      } else {
+        if (sv.size() != save_sv_size) {
+          sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+          sv.tags.erase(sv.tags.begin() +
+                        static_cast<std::ptrdiff_t>(save_sv_size));
         }
+        if (sv.tokens.size() != save_tok_size) {
+          sv.tokens.erase(sv.tokens.begin() +
+                          static_cast<std::ptrdiff_t>(save_tok_size));
+        }
+        c.error_pos = save_error_pos;
+        break;
+      }
+      i += len;
+    }
+    return i;
+  }
+
+  void accept(Visitor &v) override;
+
+  std::shared_ptr<Ope> ope_;
+};
+
+class OneOrMore : public Ope {
+public:
+  OneOrMore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    size_t len = 0;
+    {
+      c.push_capture_scope();
+      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+      const auto &rule = *ope_;
+      len = rule.parse(s, n, sv, c, dt);
+      if (success(len)) {
+        c.shift_capture_values();
+      } else {
         return static_cast<size_t>(-1);
+      }
     }
+    auto save_error_pos = c.error_pos;
+    auto i = len;
+    while (n - i > 0) {
+      c.push_capture_scope();
+      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+      auto save_sv_size = sv.size();
+      auto save_tok_size = sv.tokens.size();
+      const auto &rule = *ope_;
+      len = rule.parse(s + i, n - i, sv, c, dt);
+      if (success(len)) {
+        c.shift_capture_values();
+      } else {
+        if (sv.size() != save_sv_size) {
+          sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+          sv.tags.erase(sv.tags.begin() +
+                        static_cast<std::ptrdiff_t>(save_sv_size));
+        }
+        if (sv.tokens.size() != save_tok_size) {
+          sv.tokens.erase(sv.tokens.begin() +
+                          static_cast<std::ptrdiff_t>(save_tok_size));
+        }
+        c.error_pos = save_error_pos;
+        break;
+      }
+      i += len;
+    }
+    return i;
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    size_t size() const { return opes_.size();  }
-
-    std::vector<std::shared_ptr<Ope>> opes_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class ZeroOrMore : public Ope
-{
+class Option : public Ope {
 public:
-    ZeroOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  Option(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto save_error_pos = c.error_pos;
-        size_t i = 0;
-        while (n - i > 0) {
-            c.push_capture_scope();
-            auto se = make_scope_exit([&]() {
-                c.pop_capture_scope();
-            });
-            auto save_sv_size = sv.size();
-            auto save_tok_size = sv.tokens.size();
-            const auto& rule = *ope_;
-            auto len = rule.parse(s + i, n - i, sv, c, dt);
-            if (success(len)) {
-                c.shift_capture_values();
-            } else {
-                if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-                    sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-                }
-                if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
-                }
-                c.error_pos = save_error_pos;
-                break;
-            }
-            i += len;
-        }
-        return i;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto save_error_pos = c.error_pos;
+    auto save_sv_size = sv.size();
+    auto save_tok_size = sv.tokens.size();
+    c.push_capture_scope();
+    auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+    const auto &rule = *ope_;
+    auto len = rule.parse(s, n, sv, c, dt);
+    if (success(len)) {
+      c.shift_capture_values();
+      return len;
+    } else {
+      if (sv.size() != save_sv_size) {
+        sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
+        sv.tags.erase(sv.tags.begin() +
+                      static_cast<std::ptrdiff_t>(save_sv_size));
+      }
+      if (sv.tokens.size() != save_tok_size) {
+        sv.tokens.erase(sv.tokens.begin() +
+                        static_cast<std::ptrdiff_t>(save_tok_size));
+      }
+      c.error_pos = save_error_pos;
+      return 0;
     }
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class OneOrMore : public Ope
-{
+class AndPredicate : public Ope {
 public:
-    OneOrMore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  AndPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        size_t len = 0;
-        {
-            c.push_capture_scope();
-            auto se = make_scope_exit([&]() {
-                c.pop_capture_scope();
-            });
-            const auto& rule = *ope_;
-            len = rule.parse(s, n, sv, c, dt);
-            if (success(len)) {
-                c.shift_capture_values();
-            } else {
-                return static_cast<size_t>(-1);
-            }
-        }
-        auto save_error_pos = c.error_pos;
-        auto i = len;
-        while (n - i > 0) {
-            c.push_capture_scope();
-            auto se = make_scope_exit([&]() {
-                c.pop_capture_scope();
-            });
-            auto save_sv_size = sv.size();
-            auto save_tok_size = sv.tokens.size();
-            const auto& rule = *ope_;
-            len = rule.parse(s + i, n - i, sv, c, dt);
-            if (success(len)) {
-                c.shift_capture_values();
-            } else {
-                if (sv.size() != save_sv_size) {
-                    sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-                    sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-                }
-                if (sv.tokens.size() != save_tok_size) {
-                    sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
-                }
-                c.error_pos = save_error_pos;
-                break;
-            }
-            i += len;
-        }
-        return i;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto &chldsv = c.push();
+    c.push_capture_scope();
+    auto se = make_scope_exit([&]() {
+      c.pop();
+      c.pop_capture_scope();
+    });
+    const auto &rule = *ope_;
+    auto len = rule.parse(s, n, chldsv, c, dt);
+    if (success(len)) {
+      return 0;
+    } else {
+      return static_cast<size_t>(-1);
     }
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class Option : public Ope
-{
+class NotPredicate : public Ope {
 public:
-    Option(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  NotPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto save_error_pos = c.error_pos;
-        auto save_sv_size = sv.size();
-        auto save_tok_size = sv.tokens.size();
-        c.push_capture_scope();
-        auto se = make_scope_exit([&]() {
-            c.pop_capture_scope();
-        });
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len)) {
-            c.shift_capture_values();
-            return len;
-        } else {
-            if (sv.size() != save_sv_size) {
-                sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-                sv.tags.erase(sv.tags.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-            }
-            if (sv.tokens.size() != save_tok_size) {
-                sv.tokens.erase(sv.tokens.begin() + static_cast<std::ptrdiff_t>(save_tok_size));
-            }
-            c.error_pos = save_error_pos;
-            return 0;
-        }
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto save_error_pos = c.error_pos;
+    auto &chldsv = c.push();
+    c.push_capture_scope();
+    auto se = make_scope_exit([&]() {
+      c.pop();
+      c.pop_capture_scope();
+    });
+    const auto &rule = *ope_;
+    auto len = rule.parse(s, n, chldsv, c, dt);
+    if (success(len)) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
+    } else {
+      c.error_pos = save_error_pos;
+      return 0;
     }
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class AndPredicate : public Ope
-{
+class LiteralString : public Ope,
+                      public std::enable_shared_from_this<LiteralString> {
 public:
-    AndPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  LiteralString(const std::string &s, bool ignore_case)
+      : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
+        is_word_(false) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto& chldsv = c.push();
-        c.push_capture_scope();
-        auto se = make_scope_exit([&]() {
-            c.pop();
-            c.pop_capture_scope();
-        });
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, chldsv, c, dt);
-        if (success(len)) {
-            return 0;
-        } else {
-            return static_cast<size_t>(-1);
-        }
-    }
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::string lit_;
+  bool ignore_case_;
+  mutable bool init_is_word_;
+  mutable bool is_word_;
 };
 
-class NotPredicate : public Ope
-{
+class CharacterClass : public Ope,
+                       public std::enable_shared_from_this<CharacterClass> {
 public:
-    NotPredicate(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  CharacterClass(const std::string &s, bool negated) : negated_(negated) {
+    auto chars = decode(s.c_str(), s.length());
+    auto i = 0u;
+    while (i < chars.size()) {
+      if (i + 2 < chars.size() && chars[i + 1] == '-') {
+        auto cp1 = chars[i];
+        auto cp2 = chars[i + 2];
+        ranges_.emplace_back(std::make_pair(cp1, cp2));
+        i += 3;
+      } else {
+        auto cp = chars[i];
+        ranges_.emplace_back(std::make_pair(cp, cp));
+        i += 1;
+      }
+    }
+    assert(!ranges_.empty());
+  }
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto save_error_pos = c.error_pos;
-        auto& chldsv = c.push();
-        c.push_capture_scope();
-        auto se = make_scope_exit([&]() {
-            c.pop();
-            c.pop_capture_scope();
-        });
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, chldsv, c, dt);
-        if (success(len)) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        } else {
-            c.error_pos = save_error_pos;
-            return 0;
-        }
+  CharacterClass(const std::vector<std::pair<char32_t, char32_t>> &ranges,
+                 bool negated)
+      : ranges_(ranges), negated_(negated) {
+    assert(!ranges_.empty());
+  }
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    if (n < 1) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
     }
 
-    void accept(Visitor& v) override;
+    char32_t cp = 0;
+    auto len = decode_codepoint(s, n, cp);
 
-    std::shared_ptr<Ope> ope_;
-};
-
-class LiteralString : public Ope
-    , public std::enable_shared_from_this<LiteralString>
-{
-public:
-    LiteralString(const std::string& s, bool ignore_case)
-        : lit_(s)
-        , ignore_case_(ignore_case)
-        , init_is_word_(false)
-        , is_word_(false)
-        {}
-
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
-
-    void accept(Visitor& v) override;
-
-    std::string lit_;
-    bool ignore_case_;
-    mutable bool init_is_word_;
-    mutable bool is_word_;
-};
-
-class CharacterClass : public Ope
-    , public std::enable_shared_from_this<CharacterClass>
-{
-public:
-    CharacterClass(const std::string& s, bool negated): negated_(negated) {
-        auto chars = decode(s.c_str(), s.length());
-        auto i = 0u;
-        while (i < chars.size()) {
-            if (i + 2 < chars.size() && chars[i + 1] == '-') {
-                auto cp1 = chars[i];
-                auto cp2 = chars[i + 2];
-                ranges_.emplace_back(std::make_pair(cp1, cp2));
-                i += 3;
-            } else {
-                auto cp = chars[i];
-                ranges_.emplace_back(std::make_pair(cp, cp));
-                i += 1;
-            }
-        }
-        assert(!ranges_.empty());
-    }
-
-    CharacterClass(const std::vector<std::pair<char32_t, char32_t>>& ranges, bool negated) : ranges_(ranges), negated_(negated) {
-        assert(!ranges_.empty());
-    }
-
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        if (n < 1) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        }
-
-        char32_t cp = 0;
-        auto len = decode_codepoint(s, n, cp);
-
-        for (const auto& range: ranges_) {
-            if (range.first <= cp && cp <= range.second) {
-                if (negated_) {
-                    c.set_error_pos(s);
-                    return static_cast<size_t>(-1);
-                } else {
-                    return len;
-                }
-            }
-        }
-
+    for (const auto &range : ranges_) {
+      if (range.first <= cp && cp <= range.second) {
         if (negated_) {
-            return len;
+          c.set_error_pos(s);
+          return static_cast<size_t>(-1);
         } else {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
+          return len;
         }
+      }
     }
 
-    void accept(Visitor& v) override;
-
-    std::vector<std::pair<char32_t, char32_t>> ranges_;
-    bool negated_;
-};
-
-class Character : public Ope
-    , public std::enable_shared_from_this<Character>
-{
-public:
-    Character(char ch) : ch_(ch) {}
-
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        if (n < 1 || s[0] != ch_) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        }
-        return 1;
+    if (negated_) {
+      return len;
+    } else {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
     }
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    char ch_;
+  std::vector<std::pair<char32_t, char32_t>> ranges_;
+  bool negated_;
 };
 
-class AnyCharacter : public Ope
-    , public std::enable_shared_from_this<AnyCharacter>
-{
+class Character : public Ope, public std::enable_shared_from_this<Character> {
 public:
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto len = codepoint_length(s, n);
-        if (len < 1) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        }
-        return len;
+  Character(char ch) : ch_(ch) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    if (n < 1 || s[0] != ch_) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
     }
+    return 1;
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
+
+  char ch_;
 };
 
-class CaptureScope : public Ope
-{
+class AnyCharacter : public Ope,
+                     public std::enable_shared_from_this<AnyCharacter> {
 public:
-    CaptureScope(const std::shared_ptr<Ope>& ope)
-        : ope_(ope) {}
-
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        c.push_capture_scope();
-        auto se = make_scope_exit([&]() {
-            c.pop_capture_scope();
-        });
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
-        return len;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto len = codepoint_length(s, n);
+    if (len < 1) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
     }
+    return len;
+  }
 
-    void accept(Visitor& v) override;
-
-    std::shared_ptr<Ope> ope_;
+  void accept(Visitor &v) override;
 };
 
-class Capture : public Ope
-{
+class CaptureScope : public Ope {
 public:
-    typedef std::function<void (const char* s, size_t n, Context& c)> MatchAction;
+  CaptureScope(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    Capture(const std::shared_ptr<Ope>& ope, MatchAction ma)
-        : ope_(ope), match_action_(ma) {}
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    c.push_capture_scope();
+    auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+    const auto &rule = *ope_;
+    auto len = rule.parse(s, n, sv, c, dt);
+    return len;
+  }
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        const auto& rule = *ope_;
-        auto len = rule.parse(s, n, sv, c, dt);
-        if (success(len) && match_action_) {
-            match_action_(s, len, c);
-        }
-        return len;
-    }
+  void accept(Visitor &v) override;
 
-    void accept(Visitor& v) override;
-
-    std::shared_ptr<Ope> ope_;
-    MatchAction          match_action_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class TokenBoundary : public Ope
-{
+class Capture : public Ope {
 public:
-    TokenBoundary(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  typedef std::function<void(const char *s, size_t n, Context &c)> MatchAction;
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+  Capture(const std::shared_ptr<Ope> &ope, MatchAction ma)
+      : ope_(ope), match_action_(ma) {}
 
-    void accept(Visitor& v) override;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    const auto &rule = *ope_;
+    auto len = rule.parse(s, n, sv, c, dt);
+    if (success(len) && match_action_) { match_action_(s, len, c); }
+    return len;
+  }
 
-    std::shared_ptr<Ope> ope_;
+  void accept(Visitor &v) override;
+
+  std::shared_ptr<Ope> ope_;
+  MatchAction match_action_;
 };
 
-class Ignore : public Ope
-{
+class TokenBoundary : public Ope {
 public:
-    Ignore(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  TokenBoundary(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        const auto& rule = *ope_;
-        auto& chldsv = c.push();
-        auto se = make_scope_exit([&]() {
-            c.pop();
-        });
-        return rule.parse(s, n, chldsv, c, dt);
-    }
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::shared_ptr<Ope> ope_;
 };
 
-typedef std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> Parser;
-
-class User : public Ope
-{
+class Ignore : public Ope {
 public:
-    User(Parser fn) : fn_(fn) {}
-     size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        assert(fn_);
-        return fn_(s, n, sv, dt);
-    }
-     void accept(Visitor& v) override;
-     std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn_;
+  Ignore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    const auto &rule = *ope_;
+    auto &chldsv = c.push();
+    auto se = make_scope_exit([&]() { c.pop(); });
+    return rule.parse(s, n, chldsv, c, dt);
+  }
+
+  void accept(Visitor &v) override;
+
+  std::shared_ptr<Ope> ope_;
 };
 
-class WeakHolder : public Ope
-{
+typedef std::function<size_t(const char *s, size_t n, SemanticValues &sv,
+                             any &dt)>
+    Parser;
+
+class User : public Ope {
 public:
-    WeakHolder(const std::shared_ptr<Ope>& ope) : weak_(ope) {}
-
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        auto ope = weak_.lock();
-        assert(ope);
-        const auto& rule = *ope;
-        return rule.parse(s, n, sv, c, dt);
-    }
-
-    void accept(Visitor& v) override;
-
-    std::weak_ptr<Ope> weak_;
+  User(Parser fn) : fn_(fn) {}
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    assert(fn_);
+    return fn_(s, n, sv, dt);
+  }
+  void accept(Visitor &v) override;
+  std::function<size_t(const char *s, size_t n, SemanticValues &sv, any &dt)>
+      fn_;
 };
 
-class Holder : public Ope
-{
+class WeakHolder : public Ope {
 public:
-    Holder(Definition* outer)
-       : outer_(outer) {}
+  WeakHolder(const std::shared_ptr<Ope> &ope) : weak_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    auto ope = weak_.lock();
+    assert(ope);
+    const auto &rule = *ope;
+    return rule.parse(s, n, sv, c, dt);
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    any reduce(SemanticValues& sv, any& dt) const;
+  std::weak_ptr<Ope> weak_;
+};
 
-    const char* trace_name() const;
+class Holder : public Ope {
+public:
+  Holder(Definition *outer) : outer_(outer) {}
 
-    std::shared_ptr<Ope> ope_;
-    Definition*          outer_;
-    mutable std::string  trace_name_;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
 
-    friend class Definition;
+  void accept(Visitor &v) override;
+
+  any reduce(SemanticValues &sv, any &dt) const;
+
+  const char *trace_name() const;
+
+  std::shared_ptr<Ope> ope_;
+  Definition *outer_;
+  mutable std::string trace_name_;
+
+  friend class Definition;
 };
 
 typedef std::unordered_map<std::string, Definition> Grammar;
 
-class Reference : public Ope
-    , public std::enable_shared_from_this<Reference>
-{
+class Reference : public Ope, public std::enable_shared_from_this<Reference> {
 public:
-    Reference(
-        const Grammar& grammar,
-        const std::string& name,
-        const char* s,
-        bool is_macro,
-        const std::vector<std::shared_ptr<Ope>>& args)
-        : grammar_(grammar)
-        , name_(name)
-        , s_(s)
-        , is_macro_(is_macro)
-        , args_(args)
-        , rule_(nullptr)
-        , iarg_(0)
-        {}
+  Reference(const Grammar &grammar, const std::string &name, const char *s,
+            bool is_macro, const std::vector<std::shared_ptr<Ope>> &args)
+      : grammar_(grammar), name_(name), s_(s), is_macro_(is_macro), args_(args),
+        rule_(nullptr), iarg_(0) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> get_core_operator() const;
+  std::shared_ptr<Ope> get_core_operator() const;
 
-    const Grammar&    grammar_;
-    const std::string name_;
-    const char*       s_;
+  const Grammar &grammar_;
+  const std::string name_;
+  const char *s_;
 
-    const bool is_macro_;
-    const std::vector<std::shared_ptr<Ope>> args_;
+  const bool is_macro_;
+  const std::vector<std::shared_ptr<Ope>> args_;
 
-    Definition* rule_;
-    size_t iarg_;
+  Definition *rule_;
+  size_t iarg_;
 };
 
-class Whitespace : public Ope
-{
+class Whitespace : public Ope {
 public:
-    Whitespace(const std::shared_ptr<Ope>& ope) : ope_(ope) {}
+  Whitespace(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override {
-        if (c.in_whitespace) {
-            return 0;
-        }
-        c.in_whitespace = true;
-        auto se = make_scope_exit([&]() { c.in_whitespace = false; });
-        const auto& rule = *ope_;
-        return rule.parse(s, n, sv, c, dt);
-    }
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    if (c.in_whitespace) { return 0; }
+    c.in_whitespace = true;
+    auto se = make_scope_exit([&]() { c.in_whitespace = false; });
+    const auto &rule = *ope_;
+    return rule.parse(s, n, sv, c, dt);
+  }
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::shared_ptr<Ope> ope_;
+  std::shared_ptr<Ope> ope_;
 };
 
-class BackReference : public Ope
-{
+class BackReference : public Ope {
 public:
-    BackReference(const std::string& name) : name_(name) {}
+  BackReference(const std::string &name) : name_(name) {}
 
-    size_t parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const override;
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
 
-    void accept(Visitor& v) override;
+  void accept(Visitor &v) override;
 
-    std::string name_;
+  std::string name_;
 };
 
 /*
  * Factories
  */
-template <typename... Args>
-std::shared_ptr<Ope> seq(Args&& ...args) {
-    return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
+template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
+  return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args>
-std::shared_ptr<Ope> cho(Args&& ...args) {
-    return std::make_shared<PrioritizedChoice>(static_cast<std::shared_ptr<Ope>>(args)...);
+template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
+  return std::make_shared<PrioritizedChoice>(
+      static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<ZeroOrMore>(ope);
+inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<ZeroOrMore>(ope);
 }
 
-inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<OneOrMore>(ope);
+inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<OneOrMore>(ope);
 }
 
-inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Option>(ope);
+inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<Option>(ope);
 }
 
-inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<AndPredicate>(ope);
+inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<AndPredicate>(ope);
 }
 
-inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<NotPredicate>(ope);
+inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<NotPredicate>(ope);
 }
 
-inline std::shared_ptr<Ope> lit(const std::string& s) {
-    return std::make_shared<LiteralString>(s, false);
+inline std::shared_ptr<Ope> lit(const std::string &s) {
+  return std::make_shared<LiteralString>(s, false);
 }
 
-inline std::shared_ptr<Ope> liti(const std::string& s) {
-    return std::make_shared<LiteralString>(s, true);
+inline std::shared_ptr<Ope> liti(const std::string &s) {
+  return std::make_shared<LiteralString>(s, true);
 }
 
-inline std::shared_ptr<Ope> cls(const std::string& s) {
-    return std::make_shared<CharacterClass>(s, false);
+inline std::shared_ptr<Ope> cls(const std::string &s) {
+  return std::make_shared<CharacterClass>(s, false);
 }
 
-inline std::shared_ptr<Ope> cls(const std::vector<std::pair<char32_t, char32_t>>& ranges) {
-    return std::make_shared<CharacterClass>(ranges, false);
+inline std::shared_ptr<Ope>
+cls(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
+  return std::make_shared<CharacterClass>(ranges, false);
 }
 
-inline std::shared_ptr<Ope> ncls(const std::string& s) {
-    return std::make_shared<CharacterClass>(s, true);
+inline std::shared_ptr<Ope> ncls(const std::string &s) {
+  return std::make_shared<CharacterClass>(s, true);
 }
 
-inline std::shared_ptr<Ope> ncls(const std::vector<std::pair<char32_t, char32_t>>& ranges) {
-    return std::make_shared<CharacterClass>(ranges, true);
+inline std::shared_ptr<Ope>
+ncls(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
+  return std::make_shared<CharacterClass>(ranges, true);
 }
 
 inline std::shared_ptr<Ope> chr(char dt) {
-    return std::make_shared<Character>(dt);
+  return std::make_shared<Character>(dt);
 }
 
-inline std::shared_ptr<Ope> dot() {
-    return std::make_shared<AnyCharacter>();
+inline std::shared_ptr<Ope> dot() { return std::make_shared<AnyCharacter>(); }
+
+inline std::shared_ptr<Ope> csc(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<CaptureScope>(ope);
 }
 
-inline std::shared_ptr<Ope> csc(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<CaptureScope>(ope);
+inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope> &ope,
+                                Capture::MatchAction ma) {
+  return std::make_shared<Capture>(ope, ma);
 }
 
-inline std::shared_ptr<Ope> cap(const std::shared_ptr<Ope>& ope, Capture::MatchAction ma) {
-    return std::make_shared<Capture>(ope, ma);
+inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<TokenBoundary>(ope);
 }
 
-inline std::shared_ptr<Ope> tok(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<TokenBoundary>(ope);
+inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<Ignore>(ope);
 }
 
-inline std::shared_ptr<Ope> ign(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Ignore>(ope);
+inline std::shared_ptr<Ope>
+usr(std::function<size_t(const char *s, size_t n, SemanticValues &sv, any &dt)>
+        fn) {
+  return std::make_shared<User>(fn);
 }
 
-inline std::shared_ptr<Ope> usr(std::function<size_t (const char* s, size_t n, SemanticValues& sv, any& dt)> fn) {
-    return std::make_shared<User>(fn);
+inline std::shared_ptr<Ope> ref(const Grammar &grammar, const std::string &name,
+                                const char *s, bool is_macro,
+                                const std::vector<std::shared_ptr<Ope>> &args) {
+  return std::make_shared<Reference>(grammar, name, s, is_macro, args);
 }
 
-inline std::shared_ptr<Ope> ref(const Grammar& grammar, const std::string& name, const char* s, bool is_macro, const std::vector<std::shared_ptr<Ope>>& args) {
-    return std::make_shared<Reference>(grammar, name, s, is_macro, args);
+inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope> &ope) {
+  return std::make_shared<Whitespace>(std::make_shared<Ignore>(ope));
 }
 
-inline std::shared_ptr<Ope> wsp(const std::shared_ptr<Ope>& ope) {
-    return std::make_shared<Whitespace>(std::make_shared<Ignore>(ope));
-}
-
-inline std::shared_ptr<Ope> bkr(const std::string& name) {
-    return std::make_shared<BackReference>(name);
+inline std::shared_ptr<Ope> bkr(const std::string &name) {
+  return std::make_shared<BackReference>(name);
 }
 
 /*
  * Visitor
  */
-struct Ope::Visitor
-{
-    virtual ~Visitor() {}
-    virtual void visit(Sequence& /*ope*/) {}
-    virtual void visit(PrioritizedChoice& /*ope*/) {}
-    virtual void visit(ZeroOrMore& /*ope*/) {}
-    virtual void visit(OneOrMore& /*ope*/) {}
-    virtual void visit(Option& /*ope*/) {}
-    virtual void visit(AndPredicate& /*ope*/) {}
-    virtual void visit(NotPredicate& /*ope*/) {}
-    virtual void visit(LiteralString& /*ope*/) {}
-    virtual void visit(CharacterClass& /*ope*/) {}
-    virtual void visit(Character& /*ope*/) {}
-    virtual void visit(AnyCharacter& /*ope*/) {}
-    virtual void visit(CaptureScope& /*ope*/) {}
-    virtual void visit(Capture& /*ope*/) {}
-    virtual void visit(TokenBoundary& /*ope*/) {}
-    virtual void visit(Ignore& /*ope*/) {}
-    virtual void visit(User& /*ope*/) {}
-    virtual void visit(WeakHolder& /*ope*/) {}
-    virtual void visit(Holder& /*ope*/) {}
-    virtual void visit(Reference& /*ope*/) {}
-    virtual void visit(Whitespace& /*ope*/) {}
-    virtual void visit(BackReference& /*ope*/) {}
+struct Ope::Visitor {
+  virtual ~Visitor() {}
+  virtual void visit(Sequence & /*ope*/) {}
+  virtual void visit(PrioritizedChoice & /*ope*/) {}
+  virtual void visit(ZeroOrMore & /*ope*/) {}
+  virtual void visit(OneOrMore & /*ope*/) {}
+  virtual void visit(Option & /*ope*/) {}
+  virtual void visit(AndPredicate & /*ope*/) {}
+  virtual void visit(NotPredicate & /*ope*/) {}
+  virtual void visit(LiteralString & /*ope*/) {}
+  virtual void visit(CharacterClass & /*ope*/) {}
+  virtual void visit(Character & /*ope*/) {}
+  virtual void visit(AnyCharacter & /*ope*/) {}
+  virtual void visit(CaptureScope & /*ope*/) {}
+  virtual void visit(Capture & /*ope*/) {}
+  virtual void visit(TokenBoundary & /*ope*/) {}
+  virtual void visit(Ignore & /*ope*/) {}
+  virtual void visit(User & /*ope*/) {}
+  virtual void visit(WeakHolder & /*ope*/) {}
+  virtual void visit(Holder & /*ope*/) {}
+  virtual void visit(Reference & /*ope*/) {}
+  virtual void visit(Whitespace & /*ope*/) {}
+  virtual void visit(BackReference & /*ope*/) {}
 };
 
-struct IsReference : public Ope::Visitor
-{
-    void visit(Reference& ope) override {
-        is_reference = true;
-    }
-    bool is_reference = false;
+struct IsReference : public Ope::Visitor {
+  void visit(Reference &ope) override { is_reference = true; }
+  bool is_reference = false;
 };
 
-struct TraceOpeName : public Ope::Visitor
-{
-    void visit(Sequence& ope) override { name = "Sequence"; }
-    void visit(PrioritizedChoice& ope) override { name = "PrioritizedChoice"; }
-    void visit(ZeroOrMore& ope) override { name = "ZeroOrMore"; }
-    void visit(OneOrMore& ope) override { name = "OneOrMore"; }
-    void visit(Option& ope) override { name = "Option"; }
-    void visit(AndPredicate& ope) override { name = "AndPredicate"; }
-    void visit(NotPredicate& ope) override { name = "NotPredicate"; }
-    void visit(LiteralString& ope) override { name = "LiteralString"; }
-    void visit(CharacterClass& ope) override { name = "CharacterClass"; }
-    void visit(Character& ope) override { name = "Character"; }
-    void visit(AnyCharacter& ope) override { name = "AnyCharacter"; }
-    void visit(CaptureScope& ope) override { name = "CaptureScope"; }
-    void visit(Capture& ope) override { name = "Capture"; }
-    void visit(TokenBoundary& ope) override { name = "TokenBoundary"; }
-    void visit(Ignore& ope) override { name = "Ignore"; }
-    void visit(User& ope) override { name = "User"; }
-    void visit(WeakHolder& ope) override { name = "WeakHolder"; }
-    void visit(Holder& ope) override {
-        name = ope.trace_name();
-    }
-    void visit(Reference& ope) override {
-        name = "Reference";
-    }
-    void visit(Whitespace& ope) override { name = "Whitespace"; }
-    void visit(BackReference& ope) override { name = "BackReference"; }
+struct TraceOpeName : public Ope::Visitor {
+  void visit(Sequence &ope) override { name = "Sequence"; }
+  void visit(PrioritizedChoice &ope) override { name = "PrioritizedChoice"; }
+  void visit(ZeroOrMore &ope) override { name = "ZeroOrMore"; }
+  void visit(OneOrMore &ope) override { name = "OneOrMore"; }
+  void visit(Option &ope) override { name = "Option"; }
+  void visit(AndPredicate &ope) override { name = "AndPredicate"; }
+  void visit(NotPredicate &ope) override { name = "NotPredicate"; }
+  void visit(LiteralString &ope) override { name = "LiteralString"; }
+  void visit(CharacterClass &ope) override { name = "CharacterClass"; }
+  void visit(Character &ope) override { name = "Character"; }
+  void visit(AnyCharacter &ope) override { name = "AnyCharacter"; }
+  void visit(CaptureScope &ope) override { name = "CaptureScope"; }
+  void visit(Capture &ope) override { name = "Capture"; }
+  void visit(TokenBoundary &ope) override { name = "TokenBoundary"; }
+  void visit(Ignore &ope) override { name = "Ignore"; }
+  void visit(User &ope) override { name = "User"; }
+  void visit(WeakHolder &ope) override { name = "WeakHolder"; }
+  void visit(Holder &ope) override { name = ope.trace_name(); }
+  void visit(Reference &ope) override { name = "Reference"; }
+  void visit(Whitespace &ope) override { name = "Whitespace"; }
+  void visit(BackReference &ope) override { name = "BackReference"; }
 
-    const char* name = nullptr;
+  const char *name = nullptr;
 };
 
-struct AssignIDToDefinition : public Ope::Visitor
-{
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+struct AssignIDToDefinition : public Ope::Visitor {
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override;
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override;
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
-    std::unordered_map<void*, size_t> ids;
+  std::unordered_map<void *, size_t> ids;
 };
 
-struct IsLiteralToken : public Ope::Visitor
-{
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            if (!IsLiteralToken::check(*op)) {
-                return;
-            }
-        }
-        result_ = true;
+struct IsLiteralToken : public Ope::Visitor {
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      if (!IsLiteralToken::check(*op)) { return; }
     }
+    result_ = true;
+  }
 
-    void visit(LiteralString& /*ope*/) override {
-        result_ = true;
-    }
+  void visit(LiteralString & /*ope*/) override { result_ = true; }
 
-    static bool check(Ope& ope) {
-        IsLiteralToken vis;
-        ope.accept(vis);
-        return vis.result_;
-    }
+  static bool check(Ope &ope) {
+    IsLiteralToken vis;
+    ope.accept(vis);
+    return vis.result_;
+  }
 
 private:
-    bool result_ = false;
+  bool result_ = false;
 };
 
-struct TokenChecker : public Ope::Visitor
-{
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+struct TokenChecker : public Ope::Visitor {
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& /*ope*/) override { has_token_boundary_ = true; }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary & /*ope*/) override { has_token_boundary_ = true; }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
-    static bool is_token(Ope& ope) {
-        if (IsLiteralToken::check(ope)) {
-            return true;
-        }
+  static bool is_token(Ope &ope) {
+    if (IsLiteralToken::check(ope)) { return true; }
 
-        TokenChecker vis;
-        ope.accept(vis);
-        return vis.has_token_boundary_ || !vis.has_rule_;
-    }
+    TokenChecker vis;
+    ope.accept(vis);
+    return vis.has_token_boundary_ || !vis.has_rule_;
+  }
 
 private:
-    bool has_token_boundary_ = false;
-    bool has_rule_ = false;
+  bool has_token_boundary_ = false;
+  bool has_rule_ = false;
 };
 
 struct DetectLeftRecursion : public Ope::Visitor {
-    DetectLeftRecursion(const std::string& name) : name_(name) {}
+  DetectLeftRecursion(const std::string &name) : name_(name) {}
 
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (done_) {
-                break;
-            } else if (error_s) {
-                done_ = true;
-                break;
-            }
-        }
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (done_) {
+        break;
+      } else if (error_s) {
+        done_ = true;
+        break;
+      }
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (error_s) {
-                done_ = true;
-                break;
-            }
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (error_s) {
+        done_ = true;
+        break;
+      }
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); done_ = false; }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); done_ = true; }
-    void visit(Option& ope) override { ope.ope_->accept(*this); done_ = false; }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); done_ = false; }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); done_ = false; }
-    void visit(LiteralString& ope) override { done_ = !ope.lit_.empty(); }
-    void visit(CharacterClass& /*ope*/) override { done_ = true; }
-    void visit(Character& /*ope*/) override { done_ = true; }
-    void visit(AnyCharacter& /*ope*/) override { done_ = true; }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(User& /*ope*/) override { done_ = true; }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
-    void visit(BackReference& /*ope*/) override { done_ = true; }
+  }
+  void visit(ZeroOrMore &ope) override {
+    ope.ope_->accept(*this);
+    done_ = false;
+  }
+  void visit(OneOrMore &ope) override {
+    ope.ope_->accept(*this);
+    done_ = true;
+  }
+  void visit(Option &ope) override {
+    ope.ope_->accept(*this);
+    done_ = false;
+  }
+  void visit(AndPredicate &ope) override {
+    ope.ope_->accept(*this);
+    done_ = false;
+  }
+  void visit(NotPredicate &ope) override {
+    ope.ope_->accept(*this);
+    done_ = false;
+  }
+  void visit(LiteralString &ope) override { done_ = !ope.lit_.empty(); }
+  void visit(CharacterClass & /*ope*/) override { done_ = true; }
+  void visit(Character & /*ope*/) override { done_ = true; }
+  void visit(AnyCharacter & /*ope*/) override { done_ = true; }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(User & /*ope*/) override { done_ = true; }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(BackReference & /*ope*/) override { done_ = true; }
 
-    const char* error_s = nullptr;
+  const char *error_s = nullptr;
 
 private:
-    std::string           name_;
-    std::set<std::string> refs_;
-    bool                  done_ = false;
+  std::string name_;
+  std::set<std::string> refs_;
+  bool done_ = false;
 };
 
-struct HasEmptyElement : public Ope::Visitor
-{
-    HasEmptyElement(std::list<std::pair<const char*, std::string>>& refs): refs_(refs) {}
+struct HasEmptyElement : public Ope::Visitor {
+  HasEmptyElement(std::list<std::pair<const char *, std::string>> &refs)
+      : refs_(refs) {}
 
-    void visit(Sequence& ope) override {
-        bool save_is_empty = false;
-        const char* save_error_s = nullptr;
-        std::string save_error_name;
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (!is_empty) { return; }
-            save_is_empty = is_empty;
-            save_error_s = error_s;
-            save_error_name = error_name;
-            is_empty = false;
-            error_name.clear();
-        }
-        is_empty = save_is_empty;
-        error_s = save_error_s;
-        error_name = save_error_name;
+  void visit(Sequence &ope) override {
+    bool save_is_empty = false;
+    const char *save_error_s = nullptr;
+    std::string save_error_name;
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (!is_empty) { return; }
+      save_is_empty = is_empty;
+      save_error_s = error_s;
+      save_error_name = error_name;
+      is_empty = false;
+      error_name.clear();
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (is_empty) { return; }
-        }
+    is_empty = save_is_empty;
+    error_s = save_error_s;
+    error_name = save_error_name;
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (is_empty) { return; }
     }
-    void visit(ZeroOrMore& /*ope*/) override { set_error(); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(Option& /*ope*/) override { set_error(); }
-    void visit(AndPredicate& /*ope*/) override { set_error(); }
-    void visit(NotPredicate& /*ope*/) override { set_error(); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(ZeroOrMore & /*ope*/) override { set_error(); }
+  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(Option & /*ope*/) override { set_error(); }
+  void visit(AndPredicate & /*ope*/) override { set_error(); }
+  void visit(NotPredicate & /*ope*/) override { set_error(); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
-    bool is_empty = false;
-    const char* error_s = nullptr;
-    std::string error_name;
+  bool is_empty = false;
+  const char *error_s = nullptr;
+  std::string error_name;
 
 private:
-    void set_error() {
-        is_empty = true;
-        error_s = refs_.back().first;
-        error_name = refs_.back().second;
-    }
-    std::list<std::pair<const char*, std::string>>& refs_;
+  void set_error() {
+    is_empty = true;
+    error_s = refs_.back().first;
+    error_name = refs_.back().second;
+  }
+  std::list<std::pair<const char *, std::string>> &refs_;
 };
 
-struct DetectInfiniteLoop : public Ope::Visitor
-{
-    DetectInfiniteLoop(const char* s, const std::string& name) {
-        refs_.emplace_back(s, name);
-    }
+struct DetectInfiniteLoop : public Ope::Visitor {
+  DetectInfiniteLoop(const char *s, const std::string &name) {
+    refs_.emplace_back(s, name);
+  }
 
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (has_error) { return; }
-        }
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (has_error) { return; }
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-            if (has_error) { return; }
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+      if (has_error) { return; }
     }
-    void visit(ZeroOrMore& ope) override {
-        HasEmptyElement vis(refs_);
-        ope.ope_->accept(vis);
-        if (vis.is_empty) {
-            has_error = true;
-            error_s = vis.error_s;
-            error_name = vis.error_name;
-        }
+  }
+  void visit(ZeroOrMore &ope) override {
+    HasEmptyElement vis(refs_);
+    ope.ope_->accept(vis);
+    if (vis.is_empty) {
+      has_error = true;
+      error_s = vis.error_s;
+      error_name = vis.error_name;
     }
-    void visit(OneOrMore& ope) override {
-        HasEmptyElement vis(refs_);
-        ope.ope_->accept(vis);
-        if (vis.is_empty) {
-            has_error = true;
-            error_s = vis.error_s;
-            error_name = vis.error_name;
-        }
+  }
+  void visit(OneOrMore &ope) override {
+    HasEmptyElement vis(refs_);
+    ope.ope_->accept(vis);
+    if (vis.is_empty) {
+      has_error = true;
+      error_s = vis.error_s;
+      error_name = vis.error_name;
     }
-    void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
-    bool has_error = false;
-    const char* error_s = nullptr;
-    std::string error_name;
+  bool has_error = false;
+  const char *error_s = nullptr;
+  std::string error_name;
 
 private:
-    std::list<std::pair<const char*, std::string>> refs_;
+  std::list<std::pair<const char *, std::string>> refs_;
 };
 
 struct ReferenceChecker : public Ope::Visitor {
-    ReferenceChecker(
-        const Grammar& grammar,
-        const std::vector<std::string>& params)
-        : grammar_(grammar), params_(params) {}
+  ReferenceChecker(const Grammar &grammar,
+                   const std::vector<std::string> &params)
+      : grammar_(grammar), params_(params) {}
 
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
-    std::unordered_map<std::string, const char*> error_s;
-    std::unordered_map<std::string, std::string> error_message;
+  std::unordered_map<std::string, const char *> error_s;
+  std::unordered_map<std::string, std::string> error_message;
 
 private:
-    const Grammar& grammar_;
-    const std::vector<std::string>& params_;
+  const Grammar &grammar_;
+  const std::vector<std::string> &params_;
 };
 
 struct LinkReferences : public Ope::Visitor {
-    LinkReferences(
-        Grammar& grammar,
-        const std::vector<std::string>& params)
-        : grammar_(grammar), params_(params) {}
+  LinkReferences(Grammar &grammar, const std::vector<std::string> &params)
+      : grammar_(grammar), params_(params) {}
 
-    void visit(Sequence& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(PrioritizedChoice& ope) override {
-        for (auto op: ope.opes_) {
-            op->accept(*this);
-        }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); }
+  }
+  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
+  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
 
 private:
-    Grammar& grammar_;
-    const std::vector<std::string>& params_;
+  Grammar &grammar_;
+  const std::vector<std::string> &params_;
 };
 
 struct FindReference : public Ope::Visitor {
-    FindReference(
-        const std::vector<std::shared_ptr<Ope>>& args,
-        const std::vector<std::string>& params)
-        : args_(args), params_(params) {}
+  FindReference(const std::vector<std::shared_ptr<Ope>> &args,
+                const std::vector<std::string> &params)
+      : args_(args), params_(params) {}
 
-    void visit(Sequence& ope) override {
-        std::vector<std::shared_ptr<Ope>> opes;
-        for (auto o: ope.opes_) {
-            o->accept(*this);
-            opes.push_back(found_ope);
-        }
-        found_ope = std::make_shared<Sequence>(opes);
+  void visit(Sequence &ope) override {
+    std::vector<std::shared_ptr<Ope>> opes;
+    for (auto o : ope.opes_) {
+      o->accept(*this);
+      opes.push_back(found_ope);
     }
-    void visit(PrioritizedChoice& ope) override {
-        std::vector<std::shared_ptr<Ope>> opes;
-        for (auto o: ope.opes_) {
-            o->accept(*this);
-            opes.push_back(found_ope);
-        }
-        found_ope = std::make_shared<PrioritizedChoice>(opes);
+    found_ope = std::make_shared<Sequence>(opes);
+  }
+  void visit(PrioritizedChoice &ope) override {
+    std::vector<std::shared_ptr<Ope>> opes;
+    for (auto o : ope.opes_) {
+      o->accept(*this);
+      opes.push_back(found_ope);
     }
-    void visit(ZeroOrMore& ope) override { ope.ope_->accept(*this); found_ope = zom(found_ope); }
-    void visit(OneOrMore& ope) override { ope.ope_->accept(*this); found_ope = oom(found_ope); }
-    void visit(Option& ope) override { ope.ope_->accept(*this); found_ope = opt(found_ope); }
-    void visit(AndPredicate& ope) override { ope.ope_->accept(*this); found_ope = apd(found_ope); }
-    void visit(NotPredicate& ope) override { ope.ope_->accept(*this); found_ope = npd(found_ope); }
-    void visit(LiteralString& ope) override { found_ope = ope.shared_from_this(); }
-    void visit(CharacterClass& ope) override { found_ope = ope.shared_from_this(); }
-    void visit(Character& ope) override { found_ope = ope.shared_from_this(); }
-    void visit(AnyCharacter& ope) override { found_ope = ope.shared_from_this(); }
-    void visit(CaptureScope& ope) override { ope.ope_->accept(*this); found_ope = csc(found_ope); }
-    void visit(Capture& ope) override { ope.ope_->accept(*this); found_ope = cap(found_ope, ope.match_action_); }
-    void visit(TokenBoundary& ope) override { ope.ope_->accept(*this); found_ope = tok(found_ope); }
-    void visit(Ignore& ope) override { ope.ope_->accept(*this); found_ope = ign(found_ope); }
-    void visit(WeakHolder& ope) override { ope.weak_.lock()->accept(*this); }
-    void visit(Holder& ope) override { ope.ope_->accept(*this); }
-    void visit(Reference& ope) override;
-    void visit(Whitespace& ope) override { ope.ope_->accept(*this); found_ope = wsp(found_ope); }
+    found_ope = std::make_shared<PrioritizedChoice>(opes);
+  }
+  void visit(ZeroOrMore &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = zom(found_ope);
+  }
+  void visit(OneOrMore &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = oom(found_ope);
+  }
+  void visit(Option &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = opt(found_ope);
+  }
+  void visit(AndPredicate &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = apd(found_ope);
+  }
+  void visit(NotPredicate &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = npd(found_ope);
+  }
+  void visit(LiteralString &ope) override {
+    found_ope = ope.shared_from_this();
+  }
+  void visit(CharacterClass &ope) override {
+    found_ope = ope.shared_from_this();
+  }
+  void visit(Character &ope) override { found_ope = ope.shared_from_this(); }
+  void visit(AnyCharacter &ope) override { found_ope = ope.shared_from_this(); }
+  void visit(CaptureScope &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = csc(found_ope);
+  }
+  void visit(Capture &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = cap(found_ope, ope.match_action_);
+  }
+  void visit(TokenBoundary &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = tok(found_ope);
+  }
+  void visit(Ignore &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = ign(found_ope);
+  }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override {
+    ope.ope_->accept(*this);
+    found_ope = wsp(found_ope);
+  }
 
-    std::shared_ptr<Ope> found_ope;
+  std::shared_ptr<Ope> found_ope;
 
 private:
-    const std::vector<std::shared_ptr<Ope>>& args_;
-    const std::vector<std::string>& params_;
+  const std::vector<std::shared_ptr<Ope>> &args_;
+  const std::vector<std::string> &params_;
 };
 
-struct IsPrioritizedChoice : public Ope::Visitor
-{
-    void visit(PrioritizedChoice& /*ope*/) override {
-        result_ = true;
-    }
+struct IsPrioritizedChoice : public Ope::Visitor {
+  void visit(PrioritizedChoice & /*ope*/) override { result_ = true; }
 
-    static bool check(Ope& ope) {
-        IsPrioritizedChoice vis;
-        ope.accept(vis);
-        return vis.result_;
-    }
+  static bool check(Ope &ope) {
+    IsPrioritizedChoice vis;
+    ope.accept(vis);
+    return vis.result_;
+  }
 
 private:
-    bool result_ = false;
+  bool result_ = false;
 };
 
 /*
  * Keywords
  */
-static const char* WHITESPACE_DEFINITION_NAME = "%whitespace";
-static const char* WORD_DEFINITION_NAME = "%word";
+static const char *WHITESPACE_DEFINITION_NAME = "%whitespace";
+static const char *WORD_DEFINITION_NAME = "%word";
 
 /*
  * Definition
  */
-class Definition
-{
+class Definition {
 public:
-    struct Result {
-        bool              ret;
-        size_t            len;
-        const char*       error_pos;
-        const char*       message_pos;
-        const std::string message;
-    };
+  struct Result {
+    bool ret;
+    size_t len;
+    const char *error_pos;
+    const char *message_pos;
+    const std::string message;
+  };
 
-    Definition()
-        : holder_(std::make_shared<Holder>(this)) {}
+  Definition() : holder_(std::make_shared<Holder>(this)) {}
 
-    Definition(const Definition& rhs)
-        : name(rhs.name)
-        , holder_(rhs.holder_)
-    {
-        holder_->outer_ = this;
+  Definition(const Definition &rhs) : name(rhs.name), holder_(rhs.holder_) {
+    holder_->outer_ = this;
+  }
+
+  Definition(const std::shared_ptr<Ope> &ope)
+      : holder_(std::make_shared<Holder>(this)) {
+    *this <= ope;
+  }
+
+  operator std::shared_ptr<Ope>() {
+    return std::make_shared<WeakHolder>(holder_);
+  }
+
+  Definition &operator<=(const std::shared_ptr<Ope> &ope) {
+    holder_->ope_ = ope;
+    return *this;
+  }
+
+  Result parse(const char *s, size_t n, const char *path = nullptr) const {
+    SemanticValues sv;
+    any dt;
+    return parse_core(s, n, sv, dt, path);
+  }
+
+  Result parse(const char *s, const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse(s, n, path);
+  }
+
+  Result parse(const char *s, size_t n, any &dt,
+               const char *path = nullptr) const {
+    SemanticValues sv;
+    return parse_core(s, n, sv, dt, path);
+  }
+
+  Result parse(const char *s, any &dt, const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse(s, n, dt, path);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char *s, size_t n, T &val,
+                             const char *path = nullptr) const {
+    SemanticValues sv;
+    any dt;
+    auto r = parse_core(s, n, sv, dt, path);
+    if (r.ret && !sv.empty() && sv.front().has_value()) {
+      val = any_cast<T>(sv[0]);
     }
+    return r;
+  }
 
-    Definition(const std::shared_ptr<Ope>& ope)
-        : holder_(std::make_shared<Holder>(this))
-    {
-        *this <= ope;
+  template <typename T>
+  Result parse_and_get_value(const char *s, T &val,
+                             const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse_and_get_value(s, n, val, path);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char *s, size_t n, any &dt, T &val,
+                             const char *path = nullptr) const {
+    SemanticValues sv;
+    auto r = parse_core(s, n, sv, dt, path);
+    if (r.ret && !sv.empty() && sv.front().has_value()) {
+      val = any_cast<T>(sv[0]);
     }
+    return r;
+  }
 
-    operator std::shared_ptr<Ope>() {
-        return std::make_shared<WeakHolder>(holder_);
-    }
+  template <typename T>
+  Result parse_and_get_value(const char *s, any &dt, T &val,
+                             const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse_and_get_value(s, n, dt, val, path);
+  }
 
-    Definition& operator<=(const std::shared_ptr<Ope>& ope) {
-        holder_->ope_ = ope;
-        return *this;
-    }
+  Action operator=(Action a) {
+    action = a;
+    return a;
+  }
 
-    Result parse(const char* s, size_t n, const char* path = nullptr) const {
-        SemanticValues sv;
-        any dt;
-        return parse_core(s, n, sv, dt, path);
-    }
+  template <typename T> Definition &operator,(T fn) {
+    operator=(fn);
+    return *this;
+  }
 
-    Result parse(const char* s, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse(s, n, path);
-    }
+  Definition &operator~() {
+    ignoreSemanticValue = true;
+    return *this;
+  }
 
-    Result parse(const char* s, size_t n, any& dt, const char* path = nullptr) const {
-        SemanticValues sv;
-        return parse_core(s, n, sv, dt, path);
-    }
+  void accept(Ope::Visitor &v) { holder_->accept(v); }
 
-    Result parse(const char* s, any& dt, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse(s, n, dt, path);
-    }
+  std::shared_ptr<Ope> get_core_operator() const { return holder_->ope_; }
 
-    template <typename T>
-    Result parse_and_get_value(const char* s, size_t n, T& val, const char* path = nullptr) const {
-        SemanticValues sv;
-        any dt;
-        auto r = parse_core(s, n, sv, dt, path);
-        if (r.ret && !sv.empty() && sv.front().has_value()) {
-            val = any_cast<T>(sv[0]);
-        }
-        return r;
-    }
+  bool is_token() const {
+    std::call_once(is_token_init_, [this]() {
+      is_token_ = TokenChecker::is_token(*get_core_operator());
+    });
+    return is_token_;
+  }
 
-    template <typename T>
-    Result parse_and_get_value(const char* s, T& val, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse_and_get_value(s, n, val, path);
-    }
-
-    template <typename T>
-    Result parse_and_get_value(const char* s, size_t n, any& dt, T& val, const char* path = nullptr) const {
-        SemanticValues sv;
-        auto r = parse_core(s, n, sv, dt, path);
-        if (r.ret && !sv.empty() && sv.front().has_value()) {
-            val = any_cast<T>(sv[0]);
-        }
-        return r;
-    }
-
-    template <typename T>
-    Result parse_and_get_value(const char* s, any& dt, T& val, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse_and_get_value(s, n, dt, val, path);
-    }
-
-    Action operator=(Action a) {
-        action = a;
-        return a;
-    }
-
-    template <typename T>
-    Definition& operator,(T fn) {
-        operator=(fn);
-        return *this;
-    }
-
-    Definition& operator~() {
-        ignoreSemanticValue = true;
-        return *this;
-    }
-
-    void accept(Ope::Visitor& v) {
-        holder_->accept(v);
-    }
-
-    std::shared_ptr<Ope> get_core_operator() const {
-        return holder_->ope_;
-    }
-
-    bool is_token() const {
-        std::call_once(is_token_init_, [this]() {
-            is_token_ = TokenChecker::is_token(*get_core_operator());
-        });
-        return is_token_;
-    }
-
-    std::string                                                                          name;
-    size_t                                                                               id = 0;
-    Action                                                                               action;
-    std::function<void (const char* s, size_t n, any& dt)>                               enter;
-    std::function<void (const char* s, size_t n, size_t matchlen, any& value, any& dt)>  leave;
-    std::function<std::string ()>                                                        error_message;
-    bool                                                                                 ignoreSemanticValue = false;
-    std::shared_ptr<Ope>                                                                 whitespaceOpe;
-    std::shared_ptr<Ope>                                                                 wordOpe;
-    bool                                                                                 enablePackratParsing = false;
-    bool                                                                                 is_macro = false;
-    std::vector<std::string>                                                             params;
-    TracerEnter                                                                          tracer_enter;
-    TracerLeave                                                                          tracer_leave;
+  std::string name;
+  size_t id = 0;
+  Action action;
+  std::function<void(const char *s, size_t n, any &dt)> enter;
+  std::function<void(const char *s, size_t n, size_t matchlen, any &value,
+                     any &dt)>
+      leave;
+  std::function<std::string()> error_message;
+  bool ignoreSemanticValue = false;
+  std::shared_ptr<Ope> whitespaceOpe;
+  std::shared_ptr<Ope> wordOpe;
+  bool enablePackratParsing = false;
+  bool is_macro = false;
+  std::vector<std::string> params;
+  TracerEnter tracer_enter;
+  TracerLeave tracer_leave;
 
 private:
-    friend class Reference;
+  friend class Reference;
 
-    Definition& operator=(const Definition& rhs);
-    Definition& operator=(Definition&& rhs);
+  Definition &operator=(const Definition &rhs);
+  Definition &operator=(Definition &&rhs);
 
-    void initialize_definition_ids() const {
-        std::call_once(definition_ids_init_, [&]() {
-            AssignIDToDefinition vis;
-            holder_->accept(vis);
-            if (whitespaceOpe) {
-                whitespaceOpe->accept(vis);
-            }
-            if (wordOpe) {
-                wordOpe->accept(vis);
-            }
-            definition_ids_.swap(vis.ids);
-        });
-    }
+  void initialize_definition_ids() const {
+    std::call_once(definition_ids_init_, [&]() {
+      AssignIDToDefinition vis;
+      holder_->accept(vis);
+      if (whitespaceOpe) { whitespaceOpe->accept(vis); }
+      if (wordOpe) { wordOpe->accept(vis); }
+      definition_ids_.swap(vis.ids);
+    });
+  }
 
-    Result parse_core(const char* s, size_t n, SemanticValues& sv, any& dt, const char* path) const {
-        initialize_definition_ids();
+  Result parse_core(const char *s, size_t n, SemanticValues &sv, any &dt,
+                    const char *path) const {
+    initialize_definition_ids();
 
-        std::shared_ptr<Ope> ope = holder_;
-        if (whitespaceOpe) {
-            ope = std::make_shared<Sequence>(whitespaceOpe, ope);
-        }
+    std::shared_ptr<Ope> ope = holder_;
+    if (whitespaceOpe) { ope = std::make_shared<Sequence>(whitespaceOpe, ope); }
 
-        Context cxt(
-            path, s, n,
-            definition_ids_.size(),
-            whitespaceOpe, wordOpe,
-            enablePackratParsing,
-            tracer_enter, tracer_leave);
+    Context cxt(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
+                enablePackratParsing, tracer_enter, tracer_leave);
 
-        auto len = ope->parse(s, n, sv, cxt, dt);
-        return Result{ success(len), len, cxt.error_pos, cxt.message_pos, cxt.message };
-    }
+    auto len = ope->parse(s, n, sv, cxt, dt);
+    return Result{success(len), len, cxt.error_pos, cxt.message_pos,
+                  cxt.message};
+  }
 
-    std::shared_ptr<Holder> holder_;
-    mutable std::once_flag  is_token_init_;
-    mutable bool            is_token_ = false;
-    mutable std::once_flag  assign_id_to_definition_init_;
-    mutable std::once_flag  definition_ids_init_;
-    mutable std::unordered_map<void*, size_t> definition_ids_;
+  std::shared_ptr<Holder> holder_;
+  mutable std::once_flag is_token_init_;
+  mutable bool is_token_ = false;
+  mutable std::once_flag assign_id_to_definition_init_;
+  mutable std::once_flag definition_ids_init_;
+  mutable std::unordered_map<void *, size_t> definition_ids_;
 };
 
 /*
  * Implementations
  */
 
-inline size_t parse_literal(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt,
-        const std::string& lit, bool& init_is_word, bool& is_word, bool ignore_case)
-{
-    size_t i = 0;
-    for (; i < lit.size(); i++) {
-        if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i])) : (s[i] != lit[i]))) {
-            c.set_error_pos(s);
-            return static_cast<size_t>(-1);
-        }
+inline size_t parse_literal(const char *s, size_t n, SemanticValues &sv,
+                            Context &c, any &dt, const std::string &lit,
+                            bool &init_is_word, bool &is_word,
+                            bool ignore_case) {
+  size_t i = 0;
+  for (; i < lit.size(); i++) {
+    if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i]))
+                               : (s[i] != lit[i]))) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
     }
+  }
 
-    // Word check
-    static Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr, nullptr);
-    static SemanticValues dummy_sv;
-    static any dummy_dt;
+  // Word check
+  static Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
+                         nullptr);
+  static SemanticValues dummy_sv;
+  static any dummy_dt;
 
-    if (!init_is_word) { // TODO: Protect with mutex
-        if (c.wordOpe) {
-            auto len = c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
-            is_word = success(len);
-        }
-        init_is_word = true;
+  if (!init_is_word) { // TODO: Protect with mutex
+    if (c.wordOpe) {
+      auto len =
+          c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
+      is_word = success(len);
     }
+    init_is_word = true;
+  }
 
-    if (is_word) {
-        auto ope = std::make_shared<NotPredicate>(c.wordOpe);
-        auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
-        if (fail(len)) {
-            return static_cast<size_t>(-1);
-        }
-        i += len;
+  if (is_word) {
+    auto ope = std::make_shared<NotPredicate>(c.wordOpe);
+    auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
+    if (fail(len)) { return static_cast<size_t>(-1); }
+    i += len;
+  }
+
+  // Skip whiltespace
+  if (!c.in_token) {
+    if (c.whitespaceOpe) {
+      auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
+      if (fail(len)) { return static_cast<size_t>(-1); }
+      i += len;
     }
+  }
 
-    // Skip whiltespace
-    if (!c.in_token) {
-        if (c.whitespaceOpe) {
-            auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
-            if (fail(len)) {
-                return static_cast<size_t>(-1);
-            }
-            i += len;
-        }
-    }
-
-    return i;
+  return i;
 }
 
-inline void Context::trace_enter(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt) const {
-    trace_ids.push_back(next_trace_id++);
-    tracer_enter(name, a_s, n, sv, *this, dt);
+inline void Context::trace_enter(const char *name, const char *a_s, size_t n,
+                                 SemanticValues &sv, any &dt) const {
+  trace_ids.push_back(next_trace_id++);
+  tracer_enter(name, a_s, n, sv, *this, dt);
 }
 
-inline void Context::trace_leave(const char* name, const char* a_s, size_t n, SemanticValues& sv, any& dt, size_t len) const {
-    tracer_leave(name, a_s, n, sv, *this, dt, len);
-    trace_ids.pop_back();
+inline void Context::trace_leave(const char *name, const char *a_s, size_t n,
+                                 SemanticValues &sv, any &dt,
+                                 size_t len) const {
+  tracer_leave(name, a_s, n, sv, *this, dt, len);
+  trace_ids.pop_back();
 }
 
-inline bool Context::is_traceable(const Ope& ope) const {
-    if (tracer_enter && tracer_leave) {
-        IsReference vis;
-        const_cast<Ope&>(ope).accept(vis);
-        return !vis.is_reference;
-    }
-    return false;
+inline bool Context::is_traceable(const Ope &ope) const {
+  if (tracer_enter && tracer_leave) {
+    IsReference vis;
+    const_cast<Ope &>(ope).accept(vis);
+    return !vis.is_reference;
+  }
+  return false;
 }
 
-inline size_t Ope::parse(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    if (c.is_traceable(*this)) {
-        TraceOpeName vis;
-        const_cast<Ope&>(*this).accept(vis);
-        c.trace_enter(vis.name, s, n, sv, dt);
-        auto len = parse_core(s, n, sv, c, dt);
-        c.trace_leave(vis.name, s, n, sv, dt, len);
-        return len;
-    }
-    return parse_core(s, n, sv, c, dt);
-}
-
-inline size_t LiteralString::parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    return parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_, ignore_case_);
-}
-
-inline size_t TokenBoundary::parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    c.in_token = true;
-    auto se = make_scope_exit([&]() { c.in_token = false; });
-    const auto& rule = *ope_;
-    auto len = rule.parse(s, n, sv, c, dt);
-    if (success(len)) {
-        sv.tokens.push_back(std::make_pair(s, len));
-
-        if (c.whitespaceOpe) {
-            auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
-            if (fail(l)) {
-                return static_cast<size_t>(-1);
-            }
-            len += l;
-        }
-    }
+inline size_t Ope::parse(const char *s, size_t n, SemanticValues &sv,
+                         Context &c, any &dt) const {
+  if (c.is_traceable(*this)) {
+    TraceOpeName vis;
+    const_cast<Ope &>(*this).accept(vis);
+    c.trace_enter(vis.name, s, n, sv, dt);
+    auto len = parse_core(s, n, sv, c, dt);
+    c.trace_leave(vis.name, s, n, sv, dt, len);
     return len;
+  }
+  return parse_core(s, n, sv, c, dt);
 }
 
-inline size_t Holder::parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    if (!ope_) {
-        throw std::logic_error("Uninitialized definition ope was used...");
+inline size_t LiteralString::parse_core(const char *s, size_t n,
+                                        SemanticValues &sv, Context &c,
+                                        any &dt) const {
+  return parse_literal(s, n, sv, c, dt, lit_, init_is_word_, is_word_,
+                       ignore_case_);
+}
+
+inline size_t TokenBoundary::parse_core(const char *s, size_t n,
+                                        SemanticValues &sv, Context &c,
+                                        any &dt) const {
+  c.in_token = true;
+  auto se = make_scope_exit([&]() { c.in_token = false; });
+  const auto &rule = *ope_;
+  auto len = rule.parse(s, n, sv, c, dt);
+  if (success(len)) {
+    sv.tokens.push_back(std::make_pair(s, len));
+
+    if (c.whitespaceOpe) {
+      auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
+      if (fail(l)) { return static_cast<size_t>(-1); }
+      len += l;
     }
+  }
+  return len;
+}
 
-    // Macro reference
-    // TODO: need packrat support
-    if (outer_->is_macro) {
-        return ope_->parse(s, n, sv, c, dt);
-    }
+inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
+                                 Context &c, any &dt) const {
+  if (!ope_) {
+    throw std::logic_error("Uninitialized definition ope was used...");
+  }
 
-    size_t len;
-    any    val;
+  // Macro reference
+  // TODO: need packrat support
+  if (outer_->is_macro) { return ope_->parse(s, n, sv, c, dt); }
 
-    c.packrat(s, outer_->id, len, val, [&](any& a_val) {
-        if (outer_->enter) {
-            outer_->enter(s, n, dt);
-        }
+  size_t len;
+  any val;
 
-        auto se2 = make_scope_exit([&]() {
-            c.pop();
+  c.packrat(s, outer_->id, len, val, [&](any &a_val) {
+    if (outer_->enter) { outer_->enter(s, n, dt); }
 
-            if (outer_->leave) {
-                outer_->leave(s, n, len, a_val, dt);
-            }
-        });
+    auto se2 = make_scope_exit([&]() {
+      c.pop();
 
-        auto& chldsv = c.push();
-
-        len = ope_->parse(s, n, chldsv, c, dt);
-
-        // Invoke action
-        if (success(len)) {
-            chldsv.s_ = s;
-            chldsv.n_ = len;
-            chldsv.name_ = outer_->name;
-
-            if (!IsPrioritizedChoice::check(*ope_)) {
-                chldsv.choice_count_ = 0;
-                chldsv.choice_ = 0;
-            }
-
-            try {
-                a_val = reduce(chldsv, dt);
-            } catch (const parse_error& e) {
-                if (e.what()) {
-                    if (c.message_pos < s) {
-                        c.message_pos = s;
-                        c.message = e.what();
-                    }
-                }
-                len = static_cast<size_t>(-1);
-            }
-        }
+      if (outer_->leave) { outer_->leave(s, n, len, a_val, dt); }
     });
 
+    auto &chldsv = c.push();
+
+    len = ope_->parse(s, n, chldsv, c, dt);
+
+    // Invoke action
     if (success(len)) {
-        if (!outer_->ignoreSemanticValue) {
-            sv.emplace_back(val);
-            sv.tags.emplace_back(str2tag(outer_->name.c_str()));
-        }
-    } else {
-        if (outer_->error_message) {
-            if (c.message_pos < s) {
-                c.message_pos = s;
-                c.message = outer_->error_message();
-            }
-        }
-    }
+      chldsv.s_ = s;
+      chldsv.n_ = len;
+      chldsv.name_ = outer_->name;
 
-    return len;
+      if (!IsPrioritizedChoice::check(*ope_)) {
+        chldsv.choice_count_ = 0;
+        chldsv.choice_ = 0;
+      }
+
+      try {
+        a_val = reduce(chldsv, dt);
+      } catch (const parse_error &e) {
+        if (e.what()) {
+          if (c.message_pos < s) {
+            c.message_pos = s;
+            c.message = e.what();
+          }
+        }
+        len = static_cast<size_t>(-1);
+      }
+    }
+  });
+
+  if (success(len)) {
+    if (!outer_->ignoreSemanticValue) {
+      sv.emplace_back(val);
+      sv.tags.emplace_back(str2tag(outer_->name.c_str()));
+    }
+  } else {
+    if (outer_->error_message) {
+      if (c.message_pos < s) {
+        c.message_pos = s;
+        c.message = outer_->error_message();
+      }
+    }
+  }
+
+  return len;
 }
 
-inline any Holder::reduce(SemanticValues& sv, any& dt) const {
-    if (outer_->action) {
-        return outer_->action(sv, dt);
-    } else if (sv.empty()) {
-        return any();
-    } else {
-        return std::move(sv.front());
-    }
+inline any Holder::reduce(SemanticValues &sv, any &dt) const {
+  if (outer_->action) {
+    return outer_->action(sv, dt);
+  } else if (sv.empty()) {
+    return any();
+  } else {
+    return std::move(sv.front());
+  }
 }
 
-inline const char* Holder::trace_name() const {
-    if (trace_name_.empty()) {
-        trace_name_ = "[" + outer_->name + "]";
-    }
-    return trace_name_.c_str();
+inline const char *Holder::trace_name() const {
+  if (trace_name_.empty()) { trace_name_ = "[" + outer_->name + "]"; }
+  return trace_name_.c_str();
 }
 
-inline size_t Reference::parse_core(
-    const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    if (rule_) {
-        // Reference rule
-        if (rule_->is_macro) {
-            // Macro
-            FindReference vis(c.top_args(), rule_->params);
+inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &sv,
+                                    Context &c, any &dt) const {
+  if (rule_) {
+    // Reference rule
+    if (rule_->is_macro) {
+      // Macro
+      FindReference vis(c.top_args(), rule_->params);
 
-            // Collect arguments
-            std::vector<std::shared_ptr<Ope>> args;
-            for (auto arg: args_) {
-                arg->accept(vis);
-                args.push_back(vis.found_ope);
-            }
+      // Collect arguments
+      std::vector<std::shared_ptr<Ope>> args;
+      for (auto arg : args_) {
+        arg->accept(vis);
+        args.push_back(vis.found_ope);
+      }
 
-            c.push_args(std::move(args));
-            auto se = make_scope_exit([&]() { c.pop_args(); });
-            auto ope = get_core_operator();
-            return ope->parse(s, n, sv, c, dt);
-        } else {
-            // Definition
-            auto ope = get_core_operator();
-            return ope->parse(s, n, sv, c, dt);
-        }
+      c.push_args(std::move(args));
+      auto se = make_scope_exit([&]() { c.pop_args(); });
+      auto ope = get_core_operator();
+      return ope->parse(s, n, sv, c, dt);
     } else {
-        // Reference parameter in macro
-        const auto& args = c.top_args();
-        return args[iarg_]->parse(s, n, sv, c, dt);
+      // Definition
+      auto ope = get_core_operator();
+      return ope->parse(s, n, sv, c, dt);
     }
+  } else {
+    // Reference parameter in macro
+    const auto &args = c.top_args();
+    return args[iarg_]->parse(s, n, sv, c, dt);
+  }
 }
 
 inline std::shared_ptr<Ope> Reference::get_core_operator() const {
-    return rule_->holder_;
+  return rule_->holder_;
 }
 
-inline size_t BackReference::parse_core(const char* s, size_t n, SemanticValues& sv, Context& c, any& dt) const {
-    for (int i = c.capture_scope_stack_size - 1; i >= 0; i--) {
-        const auto& cs = c.capture_scope_stack[i];
-        if (cs.find(name_) != cs.end()) {
-            const auto& lit = cs.at(name_);
-            auto init_is_word = false;
-            auto is_word = false;
-            return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
-        }
+inline size_t BackReference::parse_core(const char *s, size_t n,
+                                        SemanticValues &sv, Context &c,
+                                        any &dt) const {
+  for (int i = c.capture_scope_stack_size - 1; i >= 0; i--) {
+    const auto &cs = c.capture_scope_stack[i];
+    if (cs.find(name_) != cs.end()) {
+      const auto &lit = cs.at(name_);
+      auto init_is_word = false;
+      auto is_word = false;
+      return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
     }
-    throw std::runtime_error("Invalid back reference...");
+  }
+  throw std::runtime_error("Invalid back reference...");
 }
 
-inline void Sequence::accept(Visitor& v) { v.visit(*this); }
-inline void PrioritizedChoice::accept(Visitor& v) { v.visit(*this); }
-inline void ZeroOrMore::accept(Visitor& v) { v.visit(*this); }
-inline void OneOrMore::accept(Visitor& v) { v.visit(*this); }
-inline void Option::accept(Visitor& v) { v.visit(*this); }
-inline void AndPredicate::accept(Visitor& v) { v.visit(*this); }
-inline void NotPredicate::accept(Visitor& v) { v.visit(*this); }
-inline void LiteralString::accept(Visitor& v) { v.visit(*this); }
-inline void CharacterClass::accept(Visitor& v) { v.visit(*this); }
-inline void Character::accept(Visitor& v) { v.visit(*this); }
-inline void AnyCharacter::accept(Visitor& v) { v.visit(*this); }
-inline void CaptureScope::accept(Visitor& v) { v.visit(*this); }
-inline void Capture::accept(Visitor& v) { v.visit(*this); }
-inline void TokenBoundary::accept(Visitor& v) { v.visit(*this); }
-inline void Ignore::accept(Visitor& v) { v.visit(*this); }
-inline void User::accept(Visitor& v) { v.visit(*this); }
-inline void WeakHolder::accept(Visitor& v) { v.visit(*this); }
-inline void Holder::accept(Visitor& v) { v.visit(*this); }
-inline void Reference::accept(Visitor& v) { v.visit(*this); }
-inline void Whitespace::accept(Visitor& v) { v.visit(*this); }
-inline void BackReference::accept(Visitor& v) { v.visit(*this); }
+inline void Sequence::accept(Visitor &v) { v.visit(*this); }
+inline void PrioritizedChoice::accept(Visitor &v) { v.visit(*this); }
+inline void ZeroOrMore::accept(Visitor &v) { v.visit(*this); }
+inline void OneOrMore::accept(Visitor &v) { v.visit(*this); }
+inline void Option::accept(Visitor &v) { v.visit(*this); }
+inline void AndPredicate::accept(Visitor &v) { v.visit(*this); }
+inline void NotPredicate::accept(Visitor &v) { v.visit(*this); }
+inline void LiteralString::accept(Visitor &v) { v.visit(*this); }
+inline void CharacterClass::accept(Visitor &v) { v.visit(*this); }
+inline void Character::accept(Visitor &v) { v.visit(*this); }
+inline void AnyCharacter::accept(Visitor &v) { v.visit(*this); }
+inline void CaptureScope::accept(Visitor &v) { v.visit(*this); }
+inline void Capture::accept(Visitor &v) { v.visit(*this); }
+inline void TokenBoundary::accept(Visitor &v) { v.visit(*this); }
+inline void Ignore::accept(Visitor &v) { v.visit(*this); }
+inline void User::accept(Visitor &v) { v.visit(*this); }
+inline void WeakHolder::accept(Visitor &v) { v.visit(*this); }
+inline void Holder::accept(Visitor &v) { v.visit(*this); }
+inline void Reference::accept(Visitor &v) { v.visit(*this); }
+inline void Whitespace::accept(Visitor &v) { v.visit(*this); }
+inline void BackReference::accept(Visitor &v) { v.visit(*this); }
 
-inline void AssignIDToDefinition::visit(Holder& ope) {
-    auto p = static_cast<void*>(ope.outer_);
-    if (ids.count(p)) {
-        return;
+inline void AssignIDToDefinition::visit(Holder &ope) {
+  auto p = static_cast<void *>(ope.outer_);
+  if (ids.count(p)) { return; }
+  auto id = ids.size();
+  ids[p] = id;
+  ope.outer_->id = id;
+  ope.ope_->accept(*this);
+}
+
+inline void AssignIDToDefinition::visit(Reference &ope) {
+  if (ope.rule_) {
+    for (auto arg : ope.args_) {
+      arg->accept(*this);
     }
-    auto id = ids.size();
-    ids[p] = id;
-    ope.outer_->id = id;
-    ope.ope_->accept(*this);
+    ope.rule_->accept(*this);
+  }
 }
 
-inline void AssignIDToDefinition::visit(Reference& ope) {
+inline void TokenChecker::visit(Reference &ope) {
+  if (ope.is_macro_) {
+    ope.rule_->accept(*this);
+    for (auto arg : ope.args_) {
+      arg->accept(*this);
+    }
+  } else {
+    has_rule_ = true;
+  }
+}
+
+inline void DetectLeftRecursion::visit(Reference &ope) {
+  if (ope.name_ == name_) {
+    error_s = ope.s_;
+  } else if (!refs_.count(ope.name_)) {
+    refs_.insert(ope.name_);
     if (ope.rule_) {
-        for (auto arg: ope.args_) {
-            arg->accept(*this);
-        }
-        ope.rule_->accept(*this);
+      ope.rule_->accept(*this);
+      if (done_ == false) { return; }
     }
+  }
+  done_ = true;
 }
 
-inline void TokenChecker::visit(Reference& ope) {
-    if (ope.is_macro_) {
-        ope.rule_->accept(*this);
-        for (auto arg: ope.args_) {
-            arg->accept(*this);
-        }
-    } else {
-        has_rule_ = true;
-    }
+inline void HasEmptyElement::visit(Reference &ope) {
+  auto it = std::find_if(refs_.begin(), refs_.end(),
+                         [&](const std::pair<const char *, std::string> &ref) {
+                           return ope.name_ == ref.second;
+                         });
+  if (it != refs_.end()) { return; }
+
+  if (ope.rule_) {
+    refs_.emplace_back(ope.s_, ope.name_);
+    ope.rule_->accept(*this);
+    refs_.pop_back();
+  }
 }
 
-inline void DetectLeftRecursion::visit(Reference& ope) {
-    if (ope.name_ == name_) {
-        error_s = ope.s_;
-    } else if (!refs_.count(ope.name_)) {
-        refs_.insert(ope.name_);
-        if (ope.rule_) {
-            ope.rule_->accept(*this);
-            if (done_ == false) {
-                return;
-            }
-        }
-    }
-    done_ = true;
+inline void DetectInfiniteLoop::visit(Reference &ope) {
+  auto it = std::find_if(refs_.begin(), refs_.end(),
+                         [&](const std::pair<const char *, std::string> &ref) {
+                           return ope.name_ == ref.second;
+                         });
+  if (it != refs_.end()) { return; }
+
+  if (ope.rule_) {
+    refs_.emplace_back(ope.s_, ope.name_);
+    ope.rule_->accept(*this);
+    refs_.pop_back();
+  }
 }
 
-inline void HasEmptyElement::visit(Reference& ope) {
-    auto it = std::find_if(refs_.begin(), refs_.end(),
-        [&](const std::pair<const char*, std::string>& ref) {
-            return ope.name_ == ref.second;
-        }
-    );
-    if (it != refs_.end()) {
-        return;
-    }
+inline void ReferenceChecker::visit(Reference &ope) {
+  auto it = std::find(params_.begin(), params_.end(), ope.name_);
+  if (it != params_.end()) { return; }
 
-    if (ope.rule_) {
-        refs_.emplace_back(ope.s_, ope.name_);
-        ope.rule_->accept(*this);
-        refs_.pop_back();
-    }
-}
-
-inline void DetectInfiniteLoop::visit(Reference& ope) {
-    auto it = std::find_if(refs_.begin(), refs_.end(),
-        [&](const std::pair<const char*, std::string>& ref) {
-            return ope.name_ == ref.second;
-        }
-    );
-    if (it != refs_.end()) {
-        return;
-    }
-
-    if (ope.rule_) {
-        refs_.emplace_back(ope.s_, ope.name_);
-        ope.rule_->accept(*this);
-        refs_.pop_back();
-    }
-}
-
-inline void ReferenceChecker::visit(Reference& ope) {
-    auto it = std::find(params_.begin(), params_.end(), ope.name_);
-    if (it != params_.end()) {
-        return;
-    }
-
-    if (!grammar_.count(ope.name_)) {
+  if (!grammar_.count(ope.name_)) {
+    error_s[ope.name_] = ope.s_;
+    error_message[ope.name_] = "'" + ope.name_ + "' is not defined.";
+  } else {
+    const auto &rule = grammar_.at(ope.name_);
+    if (rule.is_macro) {
+      if (!ope.is_macro_ || ope.args_.size() != rule.params.size()) {
         error_s[ope.name_] = ope.s_;
-        error_message[ope.name_] = "'" + ope.name_ + "' is not defined.";
-    } else {
-        const auto& rule = grammar_.at(ope.name_);
-        if (rule.is_macro) {
-            if (!ope.is_macro_ || ope.args_.size() != rule.params.size()) {
-                error_s[ope.name_] = ope.s_;
-                error_message[ope.name_] = "incorrect number of arguments.";
-            }
-        } else if (ope.is_macro_) {
-            error_s[ope.name_] = ope.s_;
-            error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
-        }
+        error_message[ope.name_] = "incorrect number of arguments.";
+      }
+    } else if (ope.is_macro_) {
+      error_s[ope.name_] = ope.s_;
+      error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
     }
+  }
 }
 
-inline void LinkReferences::visit(Reference& ope) {
-    // Check if the reference is a macro parameter
-    auto found_param = false;
-    for (size_t i = 0; i < params_.size(); i++) {
-        const auto& param = params_[i];
-        if (param == ope.name_) {
-            ope.iarg_ = i;
-            found_param = true;
-            break;
-        }
+inline void LinkReferences::visit(Reference &ope) {
+  // Check if the reference is a macro parameter
+  auto found_param = false;
+  for (size_t i = 0; i < params_.size(); i++) {
+    const auto &param = params_[i];
+    if (param == ope.name_) {
+      ope.iarg_ = i;
+      found_param = true;
+      break;
     }
+  }
 
-    // Check if the reference is a definition rule
-    if (!found_param && grammar_.count(ope.name_)) {
-        auto& rule = grammar_.at(ope.name_);
-        ope.rule_ = &rule;
-    }
+  // Check if the reference is a definition rule
+  if (!found_param && grammar_.count(ope.name_)) {
+    auto &rule = grammar_.at(ope.name_);
+    ope.rule_ = &rule;
+  }
 
-    for (auto arg: ope.args_) {
-        arg->accept(*this);
-    }
+  for (auto arg : ope.args_) {
+    arg->accept(*this);
+  }
 }
 
-inline void FindReference::visit(Reference& ope) {
-    for (size_t i = 0; i < args_.size(); i++) {
-        const auto& name = params_[i];
-        if (name == ope.name_) {
-            found_ope = args_[i];
-            return;
-        }
+inline void FindReference::visit(Reference &ope) {
+  for (size_t i = 0; i < args_.size(); i++) {
+    const auto &name = params_[i];
+    if (name == ope.name_) {
+      found_ope = args_[i];
+      return;
     }
-    found_ope = ope.shared_from_this();
+  }
+  found_ope = ope.shared_from_this();
 }
 
 /*-----------------------------------------------------------------------------
@@ -2731,661 +2687,624 @@ inline void FindReference::visit(Reference& ope) {
  *---------------------------------------------------------------------------*/
 
 typedef std::unordered_map<std::string, std::shared_ptr<Ope>> Rules;
-typedef std::function<void (size_t, size_t, const std::string&)> Log;
+typedef std::function<void(size_t, size_t, const std::string &)> Log;
 
-class ParserGenerator
-{
+class ParserGenerator {
 public:
-    static std::shared_ptr<Grammar> parse(
-        const char*  s,
-        size_t       n,
-        const Rules& rules,
-        std::string& start,
-        Log          log)
-    {
-        return get_instance().perform_core(s, n, rules, start, log);
-    }
+  static std::shared_ptr<Grammar> parse(const char *s, size_t n,
+                                        const Rules &rules, std::string &start,
+                                        Log log) {
+    return get_instance().perform_core(s, n, rules, start, log);
+  }
 
-     static std::shared_ptr<Grammar> parse(
-        const char*  s,
-        size_t       n,
-        std::string& start,
-        Log          log)
-    {
-        Rules dummy;
-        return parse(s, n, dummy, start, log);
-    }
+  static std::shared_ptr<Grammar> parse(const char *s, size_t n,
+                                        std::string &start, Log log) {
+    Rules dummy;
+    return parse(s, n, dummy, start, log);
+  }
 
-    // For debuging purpose
-    static Grammar& grammar() {
-        return get_instance().g;
-    }
+  // For debuging purpose
+  static Grammar &grammar() { return get_instance().g; }
 
 private:
-    static ParserGenerator& get_instance() {
-        static ParserGenerator instance;
-        return instance;
+  static ParserGenerator &get_instance() {
+    static ParserGenerator instance;
+    return instance;
+  }
+
+  ParserGenerator() {
+    make_grammar();
+    setup_actions();
+  }
+
+  struct Data {
+    std::shared_ptr<Grammar> grammar;
+    std::string start;
+    const char *start_pos = nullptr;
+    std::vector<std::pair<std::string, const char *>> duplicates;
+
+    Data() : grammar(std::make_shared<Grammar>()) {}
+  };
+
+  void make_grammar() {
+    // Setup PEG syntax parser
+    g["Grammar"] <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
+    g["Definition"] <=
+        cho(seq(g["Ignore"], g["IdentCont"], g["Parameters"], g["LEFTARROW"],
+                g["Expression"]),
+            seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"]));
+
+    g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
+    g["Sequence"] <= zom(g["Prefix"]);
+    g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
+    g["Suffix"] <=
+        seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
+    g["Primary"] <=
+        cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
+                npd(g["LEFTARROW"])),
+            seq(g["Ignore"], g["Identifier"],
+                npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
+            seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+            seq(g["BeginTok"], g["Expression"], g["EndTok"]),
+            seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]),
+            seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
+            g["LiteralI"], g["Literal"], g["NegatedClass"], g["Class"],
+            g["DOT"]);
+
+    g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
+    g["IdentCont"] <= seq(g["IdentStart"], zom(g["IdentRest"]));
+
+    const static std::vector<std::pair<char32_t, char32_t>> range = {
+        {0x0080, 0xFFFF}};
+    g["IdentStart"] <= cho(cls("a-zA-Z_%"), cls(range));
+
+    g["IdentRest"] <= cho(g["IdentStart"], cls("0-9"));
+
+    g["LiteralI"] <=
+        cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), lit("'i"),
+                g["Spacing"]),
+            seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), lit("\"i"),
+                g["Spacing"]));
+
+    g["Literal"] <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))),
+                            cls("'"), g["Spacing"]),
+                        seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))),
+                            cls("\""), g["Spacing"]));
+
+    // NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
+    g["Class"] <= seq(chr('['), npd(chr('^')),
+                      tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'),
+                      g["Spacing"]);
+    g["NegatedClass"] <= seq(lit("[^"),
+                             tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'),
+                             g["Spacing"]);
+
+    g["Range"] <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
+    g["Char"] <= cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
+                     seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
+                     seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
+                     seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
+                     seq(lit("\\u"), cls("0-9a-fA-F"), cls("0-9a-fA-F"),
+                         cls("0-9a-fA-F"), cls("0-9a-fA-F")),
+                     seq(npd(chr('\\')), dot()));
+
+    g["LEFTARROW"] <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
+    ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
+    g["AND"] <= seq(chr('&'), g["Spacing"]);
+    g["NOT"] <= seq(chr('!'), g["Spacing"]);
+    g["QUESTION"] <= seq(chr('?'), g["Spacing"]);
+    g["STAR"] <= seq(chr('*'), g["Spacing"]);
+    g["PLUS"] <= seq(chr('+'), g["Spacing"]);
+    ~g["OPEN"] <= seq(chr('('), g["Spacing"]);
+    ~g["CLOSE"] <= seq(chr(')'), g["Spacing"]);
+    g["DOT"] <= seq(chr('.'), g["Spacing"]);
+
+    ~g["Spacing"] <= zom(cho(g["Space"], g["Comment"]));
+    g["Comment"] <=
+        seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())), g["EndOfLine"]);
+    g["Space"] <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
+    g["EndOfLine"] <= cho(lit("\r\n"), chr('\n'), chr('\r'));
+    g["EndOfFile"] <= npd(dot());
+
+    ~g["BeginTok"] <= seq(chr('<'), g["Spacing"]);
+    ~g["EndTok"] <= seq(chr('>'), g["Spacing"]);
+
+    ~g["BeginCapScope"] <= seq(chr('$'), chr('('), g["Spacing"]);
+    ~g["EndCapScope"] <= seq(chr(')'), g["Spacing"]);
+
+    g["BeginCap"] <= seq(chr('$'), tok(g["IdentCont"]), chr('<'), g["Spacing"]);
+    ~g["EndCap"] <= seq(chr('>'), g["Spacing"]);
+
+    g["BackRef"] <= seq(chr('$'), tok(g["IdentCont"]), g["Spacing"]);
+
+    g["IGNORE"] <= chr('~');
+
+    g["Ignore"] <= opt(g["IGNORE"]);
+    g["Parameters"] <= seq(g["OPEN"], g["Identifier"],
+                           zom(seq(g["COMMA"], g["Identifier"])), g["CLOSE"]);
+    g["Arguments"] <= seq(g["OPEN"], g["Expression"],
+                          zom(seq(g["COMMA"], g["Expression"])), g["CLOSE"]);
+    ~g["COMMA"] <= seq(chr(','), g["Spacing"]);
+
+    // Set definition names
+    for (auto &x : g) {
+      x.second.name = x.first;
     }
+  }
 
-    ParserGenerator() {
-        make_grammar();
-        setup_actions();
-    }
+  void setup_actions() {
+    g["Definition"] = [&](const SemanticValues &sv, any &dt) {
+      auto is_macro = sv.choice() == 0;
+      auto ignore = any_cast<bool>(sv[0]);
+      auto name = any_cast<std::string>(sv[1]);
 
-    struct Data {
-        std::shared_ptr<Grammar>                         grammar;
-        std::string                                      start;
-        const char*                                      start_pos = nullptr;
-        std::vector<std::pair<std::string, const char*>> duplicates;
+      std::vector<std::string> params;
+      std::shared_ptr<Ope> ope;
+      if (is_macro) {
+        params = any_cast<std::vector<std::string>>(sv[2]);
+        ope = any_cast<std::shared_ptr<Ope>>(sv[4]);
+      } else {
+        ope = any_cast<std::shared_ptr<Ope>>(sv[3]);
+      }
 
-        Data(): grammar(std::make_shared<Grammar>()) {}
+      Data &data = *any_cast<Data *>(dt);
+
+      auto &grammar = *data.grammar;
+      if (!grammar.count(name)) {
+        auto &rule = grammar[name];
+        rule <= ope;
+        rule.name = name;
+        rule.ignoreSemanticValue = ignore;
+        rule.is_macro = is_macro;
+        rule.params = params;
+
+        if (data.start.empty()) {
+          data.start = name;
+          data.start_pos = sv.c_str();
+        }
+      } else {
+        data.duplicates.emplace_back(name, sv.c_str());
+      }
     };
 
-    void make_grammar() {
-        // Setup PEG syntax parser
-        g["Grammar"]    <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-        g["Definition"] <= cho(seq(g["Ignore"], g["IdentCont"], g["Parameters"], g["LEFTARROW"], g["Expression"]),
-                               seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"]));
-
-        g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
-        g["Sequence"]   <= zom(g["Prefix"]);
-        g["Prefix"]     <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
-        g["Suffix"]     <= seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
-        g["Primary"]    <= cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"], npd(g["LEFTARROW"])),
-                               seq(g["Ignore"], g["Identifier"], npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
-                               seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                               seq(g["BeginTok"], g["Expression"], g["EndTok"]),
-                               seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]),
-                               seq(g["BeginCap"], g["Expression"], g["EndCap"]),
-                               g["BackRef"], g["LiteralI"], g["Literal"], g["NegatedClass"], g["Class"], g["DOT"]);
-
-        g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
-        g["IdentCont"]  <= seq(g["IdentStart"], zom(g["IdentRest"]));
-
-        const static std::vector<std::pair<char32_t, char32_t>> range = {{ 0x0080, 0xFFFF }};
-        g["IdentStart"] <= cho(cls("a-zA-Z_%"), cls(range));
-
-        g["IdentRest"]  <= cho(g["IdentStart"], cls("0-9"));
-
-        g["LiteralI"]   <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), lit("'i"), g["Spacing"]),
-                               seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), lit("\"i"), g["Spacing"]));
-
-        g["Literal"]    <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), cls("'"), g["Spacing"]),
-                               seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), cls("\""), g["Spacing"]));
-
-        // NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
-        g["Class"]      <= seq(chr('['), npd(chr('^')), tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
-        g["NegatedClass"] <= seq(lit("[^"), tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'), g["Spacing"]);
-
-        g["Range"]      <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-        g["Char"]       <= cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
-                               seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
-                               seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
-                               seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
-                               seq(lit("\\u"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F"), cls("0-9a-fA-F")),
-                               seq(npd(chr('\\')), dot()));
-
-        g["LEFTARROW"]  <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
-        ~g["SLASH"]     <= seq(chr('/'), g["Spacing"]);
-        g["AND"]        <= seq(chr('&'), g["Spacing"]);
-        g["NOT"]        <= seq(chr('!'), g["Spacing"]);
-        g["QUESTION"]   <= seq(chr('?'), g["Spacing"]);
-        g["STAR"]       <= seq(chr('*'), g["Spacing"]);
-        g["PLUS"]       <= seq(chr('+'), g["Spacing"]);
-        ~g["OPEN"]      <= seq(chr('('), g["Spacing"]);
-        ~g["CLOSE"]     <= seq(chr(')'), g["Spacing"]);
-        g["DOT"]        <= seq(chr('.'), g["Spacing"]);
-
-        ~g["Spacing"]   <= zom(cho(g["Space"], g["Comment"]));
-        g["Comment"]    <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())), g["EndOfLine"]);
-        g["Space"]      <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
-        g["EndOfLine"]  <= cho(lit("\r\n"), chr('\n'), chr('\r'));
-        g["EndOfFile"]  <= npd(dot());
-
-        ~g["BeginTok"]  <= seq(chr('<'), g["Spacing"]);
-        ~g["EndTok"]    <= seq(chr('>'), g["Spacing"]);
-
-        ~g["BeginCapScope"] <= seq(chr('$'), chr('('), g["Spacing"]);
-        ~g["EndCapScope"]   <= seq(chr(')'), g["Spacing"]);
-
-        g["BeginCap"]   <= seq(chr('$'), tok(g["IdentCont"]), chr('<'), g["Spacing"]);
-        ~g["EndCap"]    <= seq(chr('>'), g["Spacing"]);
-
-        g["BackRef"]    <= seq(chr('$'), tok(g["IdentCont"]), g["Spacing"]);
-
-        g["IGNORE"]     <= chr('~');
-
-        g["Ignore"]     <= opt(g["IGNORE"]);
-        g["Parameters"] <= seq(g["OPEN"], g["Identifier"], zom(seq(g["COMMA"], g["Identifier"])), g["CLOSE"]);
-        g["Arguments"]  <= seq(g["OPEN"], g["Expression"], zom(seq(g["COMMA"], g["Expression"])), g["CLOSE"]);
-        ~g["COMMA"]     <= seq(chr(','), g["Spacing"]);
-
-
-        // Set definition names
-        for (auto& x: g) {
-            x.second.name = x.first;
+    g["Expression"] = [&](const SemanticValues &sv) {
+      if (sv.size() == 1) {
+        return any_cast<std::shared_ptr<Ope>>(sv[0]);
+      } else {
+        std::vector<std::shared_ptr<Ope>> opes;
+        for (auto i = 0u; i < sv.size(); i++) {
+          opes.emplace_back(any_cast<std::shared_ptr<Ope>>(sv[i]));
         }
+        const std::shared_ptr<Ope> ope =
+            std::make_shared<PrioritizedChoice>(opes);
+        return ope;
+      }
+    };
+
+    g["Sequence"] = [&](const SemanticValues &sv) {
+      if (sv.size() == 1) {
+        return any_cast<std::shared_ptr<Ope>>(sv[0]);
+      } else {
+        std::vector<std::shared_ptr<Ope>> opes;
+        for (const auto &x : sv) {
+          opes.emplace_back(any_cast<std::shared_ptr<Ope>>(x));
+        }
+        const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
+        return ope;
+      }
+    };
+
+    g["Prefix"] = [&](const SemanticValues &sv) {
+      std::shared_ptr<Ope> ope;
+      if (sv.size() == 1) {
+        ope = any_cast<std::shared_ptr<Ope>>(sv[0]);
+      } else {
+        assert(sv.size() == 2);
+        auto tok = any_cast<char>(sv[0]);
+        ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
+        if (tok == '&') {
+          ope = apd(ope);
+        } else { // '!'
+          ope = npd(ope);
+        }
+      }
+      return ope;
+    };
+
+    g["Suffix"] = [&](const SemanticValues &sv) {
+      auto ope = any_cast<std::shared_ptr<Ope>>(sv[0]);
+      if (sv.size() == 1) {
+        return ope;
+      } else {
+        assert(sv.size() == 2);
+        auto tok = any_cast<char>(sv[1]);
+        if (tok == '?') {
+          return opt(ope);
+        } else if (tok == '*') {
+          return zom(ope);
+        } else { // '+'
+          return oom(ope);
+        }
+      }
+    };
+
+    g["Primary"] = [&](const SemanticValues &sv,
+                       any &dt) -> std::shared_ptr<Ope> {
+      Data &data = *any_cast<Data *>(dt);
+
+      switch (sv.choice()) {
+      case 0:   // Macro Reference
+      case 1: { // Reference
+        auto is_macro = sv.choice() == 0;
+        auto ignore = any_cast<bool>(sv[0]);
+        const auto &ident = any_cast<std::string>(sv[1]);
+
+        std::vector<std::shared_ptr<Ope>> args;
+        if (is_macro) {
+          args = any_cast<std::vector<std::shared_ptr<Ope>>>(sv[2]);
+        }
+
+        if (ignore) {
+          return ign(ref(*data.grammar, ident, sv.c_str(), is_macro, args));
+        } else {
+          return ref(*data.grammar, ident, sv.c_str(), is_macro, args);
+        }
+      }
+      case 2: { // (Expression)
+        return any_cast<std::shared_ptr<Ope>>(sv[0]);
+      }
+      case 3: { // TokenBoundary
+        return tok(any_cast<std::shared_ptr<Ope>>(sv[0]));
+      }
+      case 4: { // CaptureScope
+        return csc(any_cast<std::shared_ptr<Ope>>(sv[0]));
+      }
+      case 5: { // Capture
+        const auto &name = any_cast<std::string>(sv[0]);
+        auto ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
+        return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
+          auto &cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
+          cs[name] = std::string(a_s, a_n);
+        });
+      }
+      default: {
+        return any_cast<std::shared_ptr<Ope>>(sv[0]);
+      }
+      }
+    };
+
+    g["IdentCont"] = [](const SemanticValues &sv) {
+      return std::string(sv.c_str(), sv.length());
+    };
+
+    g["LiteralI"] = [](const SemanticValues &sv) {
+      const auto &tok = sv.tokens.front();
+      return liti(resolve_escape_sequence(tok.first, tok.second));
+    };
+    g["Literal"] = [](const SemanticValues &sv) {
+      const auto &tok = sv.tokens.front();
+      return lit(resolve_escape_sequence(tok.first, tok.second));
+    };
+
+    g["Class"] = [](const SemanticValues &sv) {
+      auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
+      return cls(ranges);
+    };
+    g["NegatedClass"] = [](const SemanticValues &sv) {
+      auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
+      return ncls(ranges);
+    };
+    g["Range"] = [](const SemanticValues &sv) {
+      switch (sv.choice()) {
+      case 0: {
+        auto s1 = any_cast<std::string>(sv[0]);
+        auto s2 = any_cast<std::string>(sv[1]);
+        auto cp1 = decode_codepoint(s1.c_str(), s1.length());
+        auto cp2 = decode_codepoint(s2.c_str(), s2.length());
+        return std::make_pair(cp1, cp2);
+      }
+      case 1: {
+        auto s = any_cast<std::string>(sv[0]);
+        auto cp = decode_codepoint(s.c_str(), s.length());
+        return std::make_pair(cp, cp);
+      }
+      }
+      return std::make_pair<char32_t, char32_t>(0, 0);
+    };
+    g["Char"] = [](const SemanticValues &sv) {
+      return resolve_escape_sequence(sv.c_str(), sv.length());
+    };
+
+    g["AND"] = [](const SemanticValues &sv) { return *sv.c_str(); };
+    g["NOT"] = [](const SemanticValues &sv) { return *sv.c_str(); };
+    g["QUESTION"] = [](const SemanticValues &sv) { return *sv.c_str(); };
+    g["STAR"] = [](const SemanticValues &sv) { return *sv.c_str(); };
+    g["PLUS"] = [](const SemanticValues &sv) { return *sv.c_str(); };
+
+    g["DOT"] = [](const SemanticValues & /*sv*/) { return dot(); };
+
+    g["BeginCap"] = [](const SemanticValues &sv) { return sv.token(); };
+
+    g["BackRef"] = [&](const SemanticValues &sv) { return bkr(sv.token()); };
+
+    g["Ignore"] = [](const SemanticValues &sv) { return sv.size() > 0; };
+
+    g["Parameters"] = [](const SemanticValues &sv) {
+      return sv.transform<std::string>();
+    };
+
+    g["Arguments"] = [](const SemanticValues &sv) {
+      return sv.transform<std::shared_ptr<Ope>>();
+    };
+  }
+
+  std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
+                                        const Rules &rules, std::string &start,
+                                        Log log) {
+    Data data;
+    any dt = &data;
+    auto r = g["Grammar"].parse(s, n, dt);
+
+    if (!r.ret) {
+      if (log) {
+        if (r.message_pos) {
+          auto line = line_info(s, r.message_pos);
+          log(line.first, line.second, r.message);
+        } else {
+          auto line = line_info(s, r.error_pos);
+          log(line.first, line.second, "syntax error");
+        }
+      }
+      return nullptr;
     }
 
-    void setup_actions() {
-        g["Definition"] = [&](const SemanticValues& sv, any& dt) {
-            auto is_macro = sv.choice() == 0;
-            auto ignore = any_cast<bool>(sv[0]);
-            auto name = any_cast<std::string>(sv[ 1 ]);
+    auto &grammar = *data.grammar;
 
-            std::vector<std::string> params;
-            std::shared_ptr<Ope> ope;
-            if (is_macro) {
-                params = any_cast<std::vector<std::string>>(sv[2]);
-                ope = any_cast<std::shared_ptr<Ope>>(sv[4]);
-            } else {
-                ope = any_cast<std::shared_ptr<Ope>>(sv[3]);
-            }
-
-            Data& data = *any_cast<Data*>(dt);
-
-            auto& grammar = *data.grammar;
-            if (!grammar.count(name)) {
-                auto& rule = grammar[name];
-                rule <= ope;
-                rule.name = name;
-                rule.ignoreSemanticValue = ignore;
-                rule.is_macro = is_macro;
-                rule.params = params;
-
-                if (data.start.empty()) {
-                    data.start = name;
-                    data.start_pos = sv.c_str();
-                }
-            } else {
-                data.duplicates.emplace_back(name, sv.c_str());
-            }
-        };
-
-        g["Expression"] = [&](const SemanticValues& sv) {
-            if (sv.size() == 1) {
-                return any_cast<std::shared_ptr<Ope>>(sv[0]);
-            } else {
-                std::vector<std::shared_ptr<Ope>> opes;
-                for (auto i = 0u; i < sv.size(); i++) {
-                    opes.emplace_back(any_cast<std::shared_ptr<Ope>>(sv[i]));
-                }
-                const std::shared_ptr<Ope> ope = std::make_shared<PrioritizedChoice>(opes);
-                return ope;
-            }
-        };
-
-        g["Sequence"] = [&](const SemanticValues& sv) {
-            if (sv.size() == 1) {
-                return any_cast<std::shared_ptr<Ope>>(sv[0]);
-            } else {
-                std::vector<std::shared_ptr<Ope>> opes;
-                for (const auto& x: sv) {
-                    opes.emplace_back(any_cast<std::shared_ptr<Ope>>(x));
-                }
-                const std::shared_ptr<Ope> ope = std::make_shared<Sequence>(opes);
-                return ope;
-            }
-        };
-
-        g["Prefix"] = [&](const SemanticValues& sv) {
-            std::shared_ptr<Ope> ope;
-            if (sv.size() == 1) {
-                ope = any_cast<std::shared_ptr<Ope>>(sv[0]);
-            } else {
-                assert(sv.size() == 2);
-                auto tok = any_cast<char>(sv[0]);
-                ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
-                if (tok == '&') {
-                    ope = apd(ope);
-                } else { // '!'
-                    ope = npd(ope);
-                }
-            }
-            return ope;
-        };
-
-        g["Suffix"] = [&](const SemanticValues& sv) {
-            auto ope = any_cast<std::shared_ptr<Ope>>(sv[0]);
-            if (sv.size() == 1) {
-                return ope;
-            } else {
-                assert(sv.size() == 2);
-                auto tok = any_cast<char>(sv[1]);
-                if (tok == '?') {
-                    return opt(ope);
-                } else if (tok == '*') {
-                    return zom(ope);
-                } else { // '+'
-                    return oom(ope);
-                }
-            }
-        };
-
-        g["Primary"] = [&](const SemanticValues& sv, any& dt) -> std::shared_ptr<Ope> {
-            Data& data = *any_cast<Data*>(dt);
-
-            switch (sv.choice()) {
-                case 0:   // Macro Reference
-                case 1: { // Reference
-                    auto is_macro = sv.choice() == 0;
-                    auto ignore = any_cast<bool>(sv[0]);
-                    const auto& ident = any_cast<std::string>(sv[1]);
-
-                    std::vector<std::shared_ptr<Ope>> args;
-                    if (is_macro) {
-                        args = any_cast<std::vector<std::shared_ptr<Ope>>>(sv[2]);
-                    }
-
-                    if (ignore) {
-                        return ign(ref(*data.grammar, ident, sv.c_str(), is_macro, args));
-                    } else {
-                        return ref(*data.grammar, ident, sv.c_str(), is_macro, args);
-                    }
-                }
-                case 2: { // (Expression)
-                    return any_cast<std::shared_ptr<Ope>>(sv[0]);
-                }
-                case 3: { // TokenBoundary
-                    return tok(any_cast<std::shared_ptr<Ope>>(sv[0]));
-                }
-                case 4: { // CaptureScope
-                    return csc(any_cast<std::shared_ptr<Ope>>(sv[0]));
-                }
-                case 5: { // Capture
-                    const auto& name = any_cast<std::string>(sv[0]);
-                    auto ope = any_cast<std::shared_ptr<Ope>>(sv[1]);
-                    return cap(ope, [name](const char* a_s, size_t a_n, Context& c) {
-                        auto& cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
-                        cs[name] = std::string(a_s, a_n);
-                    });
-                }
-                default: {
-                    return any_cast<std::shared_ptr<Ope>>(sv[0]);
-                }
-            }
-        };
-
-        g["IdentCont"] = [](const SemanticValues& sv) {
-            return std::string(sv.c_str(), sv.length());
-        };
-
-        g["LiteralI"] = [](const SemanticValues& sv) {
-            const auto& tok = sv.tokens.front();
-            return liti(resolve_escape_sequence(tok.first, tok.second));
-        };
-        g["Literal"] = [](const SemanticValues& sv) {
-            const auto& tok = sv.tokens.front();
-            return lit(resolve_escape_sequence(tok.first, tok.second));
-        };
-
-        g["Class"] = [](const SemanticValues& sv) {
-            auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
-            return cls(ranges);
-        };
-        g["NegatedClass"] = [](const SemanticValues& sv) {
-            auto ranges = sv.transform<std::pair<char32_t, char32_t>>();
-            return ncls(ranges);
-        };
-        g["Range"] = [](const SemanticValues& sv) {
-            switch (sv.choice()) {
-                case 0: {
-                    auto s1 = any_cast<std::string>(sv[0]);
-                    auto s2 = any_cast<std::string>(sv[1]);
-                    auto cp1 = decode_codepoint(s1.c_str(), s1.length());
-                    auto cp2 = decode_codepoint(s2.c_str(), s2.length());
-                    return std::make_pair(cp1, cp2);
-                }
-                case 1: {
-                    auto s = any_cast<std::string>(sv[0]);
-                    auto cp = decode_codepoint(s.c_str(), s.length());
-                    return std::make_pair(cp, cp);
-                }
-            }
-            return std::make_pair<char32_t, char32_t>(0, 0);
-        };
-        g["Char"] = [](const SemanticValues& sv) {
-            return resolve_escape_sequence(sv.c_str(), sv.length());
-        };
-
-        g["AND"]      = [](const SemanticValues& sv) { return *sv.c_str(); };
-        g["NOT"]      = [](const SemanticValues& sv) { return *sv.c_str(); };
-        g["QUESTION"] = [](const SemanticValues& sv) { return *sv.c_str(); };
-        g["STAR"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
-        g["PLUS"]     = [](const SemanticValues& sv) { return *sv.c_str(); };
-
-        g["DOT"] = [](const SemanticValues& /*sv*/) { return dot(); };
-
-        g["BeginCap"] = [](const SemanticValues& sv) { return sv.token(); };
-
-        g["BackRef"] = [&](const SemanticValues& sv) {
-            return bkr(sv.token());
-        };
-
-        g["Ignore"] = [](const SemanticValues& sv) { return sv.size() > 0; };
-
-        g["Parameters"] = [](const SemanticValues& sv) {
-            return sv.transform<std::string>();
-        };
-
-        g["Arguments"] = [](const SemanticValues& sv) {
-            return sv.transform<std::shared_ptr<Ope>>();
-        };
+    // User provided rules
+    for (const auto &x : rules) {
+      auto name = x.first;
+      bool ignore = false;
+      if (!name.empty() && name[0] == '~') {
+        ignore = true;
+        name.erase(0, 1);
+      }
+      if (!name.empty()) {
+        auto &rule = grammar[name];
+        rule <= x.second;
+        rule.name = name;
+        rule.ignoreSemanticValue = ignore;
+      }
     }
 
-    std::shared_ptr<Grammar> perform_core(
-        const char*  s,
-        size_t       n,
-        const Rules& rules,
-        std::string& start,
-        Log          log)
+    // Check duplicated definitions
+    bool ret = data.duplicates.empty();
+
+    for (const auto &x : data.duplicates) {
+      if (log) {
+        const auto &name = x.first;
+        auto ptr = x.second;
+        auto line = line_info(s, ptr);
+        log(line.first, line.second, "'" + name + "' is already defined.");
+      }
+    }
+
+    // Check missing definitions
+    for (auto &x : grammar) {
+      auto &rule = x.second;
+
+      ReferenceChecker vis(*data.grammar, rule.params);
+      rule.accept(vis);
+      for (const auto &y : vis.error_s) {
+        const auto &name = y.first;
+        const auto ptr = y.second;
+        if (log) {
+          auto line = line_info(s, ptr);
+          log(line.first, line.second, vis.error_message[name]);
+        }
+        ret = false;
+      }
+    }
+
+    if (!ret) { return nullptr; }
+
+    // Link references
+    for (auto &x : grammar) {
+      auto &rule = x.second;
+      LinkReferences vis(*data.grammar, rule.params);
+      rule.accept(vis);
+    }
+
+    // Check left recursion
+    ret = true;
+
+    for (auto &x : grammar) {
+      const auto &name = x.first;
+      auto &rule = x.second;
+
+      DetectLeftRecursion vis(name);
+      rule.accept(vis);
+      if (vis.error_s) {
+        if (log) {
+          auto line = line_info(s, vis.error_s);
+          log(line.first, line.second, "'" + name + "' is left recursive.");
+        }
+        ret = false;
+        ;
+      }
+    }
+
+    if (!ret) { return nullptr; }
+
+    // Set root definition
+    auto &start_rule = (*data.grammar)[data.start];
+
+    // Check infinite loop
     {
-        Data data;
-        any dt = &data;
-        auto r = g["Grammar"].parse(s, n, dt);
-
-        if (!r.ret) {
-            if (log) {
-                if (r.message_pos) {
-                    auto line = line_info(s, r.message_pos);
-                    log(line.first, line.second, r.message);
-                } else {
-                    auto line = line_info(s, r.error_pos);
-                    log(line.first, line.second, "syntax error");
-                }
-            }
-            return nullptr;
+      DetectInfiniteLoop vis(data.start_pos, data.start);
+      start_rule.accept(vis);
+      if (vis.has_error) {
+        if (log) {
+          auto line = line_info(s, vis.error_s);
+          log(line.first, line.second,
+              "infinite loop is detected in '" + vis.error_name + "'.");
         }
-
-        auto& grammar = *data.grammar;
-
-        // User provided rules
-        for (const auto& x: rules) {
-            auto name = x.first;
-            bool ignore = false;
-            if (!name.empty() && name[0] == '~') {
-                ignore = true;
-                name.erase(0, 1);
-            }
-            if (!name.empty()) {
-                auto& rule = grammar[name];
-                rule <= x.second;
-                rule.name = name;
-                rule.ignoreSemanticValue = ignore;
-            }
-        }
-
-        // Check duplicated definitions
-        bool ret = data.duplicates.empty();
-
-        for (const auto& x: data.duplicates) {
-            if (log) {
-                const auto& name = x.first;
-                auto ptr = x.second;
-                auto line = line_info(s, ptr);
-                log(line.first, line.second, "'" + name + "' is already defined.");
-            }
-        }
-
-        // Check missing definitions
-        for (auto& x: grammar) {
-            auto& rule = x.second;
-
-            ReferenceChecker vis(*data.grammar, rule.params);
-            rule.accept(vis);
-            for (const auto& y: vis.error_s) {
-                const auto& name = y.first;
-                const auto ptr = y.second;
-                if (log) {
-                    auto line = line_info(s, ptr);
-                    log(line.first, line.second, vis.error_message[name]);
-                }
-                ret = false;
-            }
-        }
-
-        if (!ret) {
-            return nullptr;
-        }
-
-        // Link references
-        for (auto& x: grammar) {
-            auto& rule = x.second;
-            LinkReferences vis(*data.grammar, rule.params);
-            rule.accept(vis);
-        }
-
-        // Check left recursion
-        ret = true;
-
-        for (auto& x: grammar) {
-            const auto& name = x.first;
-            auto& rule = x.second;
-
-            DetectLeftRecursion vis(name);
-            rule.accept(vis);
-            if (vis.error_s) {
-                if (log) {
-                    auto line = line_info(s, vis.error_s);
-                    log(line.first, line.second, "'" + name + "' is left recursive.");
-                }
-                ret = false;;
-            }
-        }
-
-        if (!ret) {
-            return nullptr;
-        }
-
-        // Set root definition
-        auto& start_rule = (*data.grammar)[data.start];
-
-        // Check infinite loop
-        {
-            DetectInfiniteLoop vis(data.start_pos, data.start);
-            start_rule.accept(vis);
-            if (vis.has_error) {
-                if (log) {
-                    auto line = line_info(s, vis.error_s);
-                    log(line.first, line.second, "infinite loop is detected in '" + vis.error_name + "'.");
-                }
-                return nullptr;
-            }
-        }
-
-        // Automatic whitespace skipping
-        if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
-            for (auto& x: grammar) {
-                auto& rule = x.second;
-                auto ope = rule.get_core_operator();
-                if (IsLiteralToken::check(*ope)) {
-                    rule <= tok(ope);
-                }
-            }
-
-            start_rule.whitespaceOpe = wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
-        }
-
-        // Word expression
-        if (grammar.count(WORD_DEFINITION_NAME)) {
-            start_rule.wordOpe = (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
-        }
-
-        // Set root definition
-        start = data.start;
-
-        return data.grammar;
+        return nullptr;
+      }
     }
 
-    Grammar g;
+    // Automatic whitespace skipping
+    if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
+      for (auto &x : grammar) {
+        auto &rule = x.second;
+        auto ope = rule.get_core_operator();
+        if (IsLiteralToken::check(*ope)) { rule <= tok(ope); }
+      }
+
+      start_rule.whitespaceOpe =
+          wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+    }
+
+    // Word expression
+    if (grammar.count(WORD_DEFINITION_NAME)) {
+      start_rule.wordOpe =
+          (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
+    }
+
+    // Set root definition
+    start = data.start;
+
+    return data.grammar;
+  }
+
+  Grammar g;
 };
 
 /*-----------------------------------------------------------------------------
  *  AST
  *---------------------------------------------------------------------------*/
 
-template <typename Annotation>
-struct AstBase : public Annotation
-{
-    AstBase(const char* a_path, size_t a_line, size_t a_column,
-            const char* a_name, size_t a_position, size_t a_length,
-            size_t a_choice_count, size_t a_choice,
-            const std::vector<std::shared_ptr<AstBase>>& a_nodes)
-        : path(a_path ? a_path : "")
-        , line(a_line)
-        , column(a_column)
-        , name(a_name)
-        , position(a_position)
-        , length(a_length)
-        , choice_count(a_choice_count)
-        , choice(a_choice)
-        , original_name(a_name)
-        , original_choice_count(a_choice_count)
-        , original_choice(a_choice)
-        , tag(str2tag(a_name))
-        , original_tag(tag)
-        , is_token(false)
-        , nodes(a_nodes)
-    {}
+template <typename Annotation> struct AstBase : public Annotation {
+  AstBase(const char *a_path, size_t a_line, size_t a_column,
+          const char *a_name, size_t a_position, size_t a_length,
+          size_t a_choice_count, size_t a_choice,
+          const std::vector<std::shared_ptr<AstBase>> &a_nodes)
+      : path(a_path ? a_path : ""), line(a_line), column(a_column),
+        name(a_name), position(a_position), length(a_length),
+        choice_count(a_choice_count), choice(a_choice), original_name(a_name),
+        original_choice_count(a_choice_count), original_choice(a_choice),
+        tag(str2tag(a_name)), original_tag(tag), is_token(false),
+        nodes(a_nodes) {}
 
-    AstBase(const char* a_path, size_t a_line, size_t a_column,
-            const char* a_name, size_t a_position, size_t a_length,
-            size_t a_choice_count, size_t a_choice,
-            const std::string& a_token)
-        : path(a_path ? a_path : "")
-        , line(a_line)
-        , column(a_column)
-        , name(a_name)
-        , position(a_position)
-        , length(a_length)
-        , choice_count(a_choice_count)
-        , choice(a_choice)
-        , original_name(a_name)
-        , original_choice_count(a_choice_count)
-        , original_choice(a_choice)
-        , tag(str2tag(a_name))
-        , original_tag(tag)
-        , is_token(true)
-        , token(a_token)
-    {}
+  AstBase(const char *a_path, size_t a_line, size_t a_column,
+          const char *a_name, size_t a_position, size_t a_length,
+          size_t a_choice_count, size_t a_choice, const std::string &a_token)
+      : path(a_path ? a_path : ""), line(a_line), column(a_column),
+        name(a_name), position(a_position), length(a_length),
+        choice_count(a_choice_count), choice(a_choice), original_name(a_name),
+        original_choice_count(a_choice_count), original_choice(a_choice),
+        tag(str2tag(a_name)), original_tag(tag), is_token(true),
+        token(a_token) {}
 
-    AstBase(const AstBase& ast, const char* a_original_name,
-            size_t a_position, size_t a_length,
-            size_t a_original_choice_count, size_t a_original_choise)
-        : path(ast.path)
-        , line(ast.line)
-        , column(ast.column)
-        , name(ast.name)
-        , position(a_position)
-        , length(a_length)
-        , choice_count(ast.choice_count)
-        , choice(ast.choice)
-        , original_name(a_original_name)
-        , original_choice_count(a_original_choice_count)
-        , original_choice(a_original_choise)
-        , tag(ast.tag)
-        , original_tag(str2tag(a_original_name))
-        , is_token(ast.is_token)
-        , token(ast.token)
-        , nodes(ast.nodes)
-        , parent(ast.parent)
-    {}
+  AstBase(const AstBase &ast, const char *a_original_name, size_t a_position,
+          size_t a_length, size_t a_original_choice_count,
+          size_t a_original_choise)
+      : path(ast.path), line(ast.line), column(ast.column), name(ast.name),
+        position(a_position), length(a_length), choice_count(ast.choice_count),
+        choice(ast.choice), original_name(a_original_name),
+        original_choice_count(a_original_choice_count),
+        original_choice(a_original_choise), tag(ast.tag),
+        original_tag(str2tag(a_original_name)), is_token(ast.is_token),
+        token(ast.token), nodes(ast.nodes), parent(ast.parent) {}
 
-    const std::string                 path;
-    const size_t                      line = 1;
-    const size_t                      column = 1;
+  const std::string path;
+  const size_t line = 1;
+  const size_t column = 1;
 
-    const std::string                 name;
-    size_t                            position;
-    size_t                            length;
-    const size_t                      choice_count;
-    const size_t                      choice;
-    const std::string                 original_name;
-    const size_t                      original_choice_count;
-    const size_t                      original_choice;
-    const unsigned int                tag;
-    const unsigned int                original_tag;
+  const std::string name;
+  size_t position;
+  size_t length;
+  const size_t choice_count;
+  const size_t choice;
+  const std::string original_name;
+  const size_t original_choice_count;
+  const size_t original_choice;
+  const unsigned int tag;
+  const unsigned int original_tag;
 
-    const bool                        is_token;
-    const std::string                 token;
+  const bool is_token;
+  const std::string token;
 
-    std::vector<std::shared_ptr<AstBase<Annotation>>> nodes;
-    std::weak_ptr<AstBase<Annotation>>                parent;
+  std::vector<std::shared_ptr<AstBase<Annotation>>> nodes;
+  std::weak_ptr<AstBase<Annotation>> parent;
 };
 
 template <typename T>
-void ast_to_s_core(
-    const std::shared_ptr<T>& ptr,
-    std::string& s,
-    int level,
-    std::function<std::string (const T& ast, int level)> fn) {
+void ast_to_s_core(const std::shared_ptr<T> &ptr, std::string &s, int level,
+                   std::function<std::string(const T &ast, int level)> fn) {
 
-    const auto& ast = *ptr;
-    for (auto i = 0; i < level; i++) {
-        s += "  ";
-    }
-    auto name = ast.original_name;
-    if (ast.original_choice_count > 0) {
-        name += "/" + std::to_string(ast.original_choice);
-    }
-    if (ast.name != ast.original_name) {
-        name += "[" + ast.name + "]";
-    }
-    if (ast.is_token) {
-        s += "- " + name + " (" + ast.token + ")\n";
-    } else {
-        s += "+ " + name + "\n";
-    }
-    if (fn) {
-      s += fn(ast, level + 1);
-    }
-    for (auto node : ast.nodes) {
-        ast_to_s_core(node, s, level + 1, fn);
-    }
+  const auto &ast = *ptr;
+  for (auto i = 0; i < level; i++) {
+    s += "  ";
+  }
+  auto name = ast.original_name;
+  if (ast.original_choice_count > 0) {
+    name += "/" + std::to_string(ast.original_choice);
+  }
+  if (ast.name != ast.original_name) { name += "[" + ast.name + "]"; }
+  if (ast.is_token) {
+    s += "- " + name + " (" + ast.token + ")\n";
+  } else {
+    s += "+ " + name + "\n";
+  }
+  if (fn) { s += fn(ast, level + 1); }
+  for (auto node : ast.nodes) {
+    ast_to_s_core(node, s, level + 1, fn);
+  }
 }
 
 template <typename T>
-std::string ast_to_s(
-    const std::shared_ptr<T>& ptr,
-    std::function<std::string (const T& ast, int level)> fn = nullptr) {
+std::string
+ast_to_s(const std::shared_ptr<T> &ptr,
+         std::function<std::string(const T &ast, int level)> fn = nullptr) {
 
-    std::string s;
-    ast_to_s_core(ptr, s, 0, fn);
-    return s;
+  std::string s;
+  ast_to_s_core(ptr, s, 0, fn);
+  return s;
 }
 
-struct AstOptimizer
-{
-    AstOptimizer(bool optimize_nodes, const std::vector<std::string>& filters = {})
-        : optimize_nodes_(optimize_nodes)
-        , filters_(filters) {}
+struct AstOptimizer {
+  AstOptimizer(bool optimize_nodes,
+               const std::vector<std::string> &filters = {})
+      : optimize_nodes_(optimize_nodes), filters_(filters) {}
 
-    template <typename T>
-    std::shared_ptr<T> optimize(std::shared_ptr<T> original, std::shared_ptr<T> parent = nullptr) {
+  template <typename T>
+  std::shared_ptr<T> optimize(std::shared_ptr<T> original,
+                              std::shared_ptr<T> parent = nullptr) {
 
-        auto found = std::find(filters_.begin(), filters_.end(), original->name) != filters_.end();
-        bool opt = optimize_nodes_ ? !found : found;
+    auto found = std::find(filters_.begin(), filters_.end(), original->name) !=
+                 filters_.end();
+    bool opt = optimize_nodes_ ? !found : found;
 
-        if (opt && original->nodes.size() == 1) {
-            auto child = optimize(original->nodes[0], parent);
-            return std::make_shared<T>(
-                *child, original->name.c_str(), original->choice_count,
-                original->position, original->length, original->choice);
-        }
-
-        auto ast = std::make_shared<T>(*original);
-        ast->parent = parent;
-        ast->nodes.clear();
-        for (auto node : original->nodes) {
-            auto child = optimize(node, ast);
-            ast->nodes.push_back(child);
-        }
-        return ast;
+    if (opt && original->nodes.size() == 1) {
+      auto child = optimize(original->nodes[0], parent);
+      return std::make_shared<T>(*child, original->name.c_str(),
+                                 original->choice_count, original->position,
+                                 original->length, original->choice);
     }
 
+    auto ast = std::make_shared<T>(*original);
+    ast->parent = parent;
+    ast->nodes.clear();
+    for (auto node : original->nodes) {
+      auto child = optimize(node, ast);
+      ast->nodes.push_back(child);
+    }
+    return ast;
+  }
+
 private:
-    const bool                     optimize_nodes_;
-    const std::vector<std::string> filters_;
+  const bool optimize_nodes_;
+  const std::vector<std::string> filters_;
 };
 
 struct EmptyType {};
@@ -3395,197 +3314,190 @@ typedef AstBase<EmptyType> Ast;
  *  parser
  *---------------------------------------------------------------------------*/
 
-class parser
-{
+class parser {
 public:
-    parser() = default;
+  parser() = default;
 
-    parser(const char* s, size_t n, const Rules& rules) {
-        load_grammar(s, n, rules);
+  parser(const char *s, size_t n, const Rules &rules) {
+    load_grammar(s, n, rules);
+  }
+
+  parser(const char *s, const Rules &rules) : parser(s, strlen(s), rules) {}
+
+  parser(const char *s, size_t n) : parser(s, n, Rules()) {}
+
+  parser(const char *s) : parser(s, strlen(s), Rules()) {}
+
+  operator bool() { return grammar_ != nullptr; }
+
+  bool load_grammar(const char *s, size_t n, const Rules &rules) {
+    grammar_ = ParserGenerator::parse(s, n, rules, start_, log);
+    return grammar_ != nullptr;
+  }
+
+  bool load_grammar(const char *s, size_t n) {
+    return load_grammar(s, n, Rules());
+  }
+
+  bool load_grammar(const char *s, const Rules &rules) {
+    auto n = strlen(s);
+    return load_grammar(s, n, rules);
+  }
+
+  bool load_grammar(const char *s) {
+    auto n = strlen(s);
+    return load_grammar(s, n);
+  }
+
+  bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
+    if (grammar_ != nullptr) {
+      const auto &rule = (*grammar_)[start_];
+      auto r = rule.parse(s, n, path);
+      output_log(s, n, r);
+      return r.ret && r.len == n;
     }
+    return false;
+  }
 
-    parser(const char* s, const Rules& rules)
-        : parser(s, strlen(s), rules) {}
+  bool parse(const char *s, const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse_n(s, n, path);
+  }
 
-    parser(const char* s, size_t n)
-        : parser(s, n, Rules()) {}
-
-    parser(const char* s)
-        : parser(s, strlen(s), Rules()) {}
-
-    operator bool() {
-        return grammar_ != nullptr;
+  bool parse_n(const char *s, size_t n, any &dt,
+               const char *path = nullptr) const {
+    if (grammar_ != nullptr) {
+      const auto &rule = (*grammar_)[start_];
+      auto r = rule.parse(s, n, dt, path);
+      output_log(s, n, r);
+      return r.ret && r.len == n;
     }
+    return false;
+  }
 
-    bool load_grammar(const char* s, size_t n, const Rules& rules) {
-        grammar_ = ParserGenerator::parse(s, n, rules, start_, log);
-        return grammar_ != nullptr;
+  bool parse(const char *s, any &dt, const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse_n(s, n, dt, path);
+  }
+
+  template <typename T>
+  bool parse_n(const char *s, size_t n, T &val,
+               const char *path = nullptr) const {
+    if (grammar_ != nullptr) {
+      const auto &rule = (*grammar_)[start_];
+      auto r = rule.parse_and_get_value(s, n, val, path);
+      output_log(s, n, r);
+      return r.ret && r.len == n;
     }
+    return false;
+  }
 
-    bool load_grammar(const char* s, size_t n) {
-        return load_grammar(s, n, Rules());
+  template <typename T>
+  bool parse(const char *s, T &val, const char *path = nullptr) const {
+    auto n = strlen(s);
+    return parse_n(s, n, val, path);
+  }
+
+  template <typename T>
+  bool parse_n(const char *s, size_t n, any &dt, T &val,
+               const char *path = nullptr) const {
+    if (grammar_ != nullptr) {
+      const auto &rule = (*grammar_)[start_];
+      auto r = rule.parse_and_get_value(s, n, dt, val, path);
+      output_log(s, n, r);
+      return r.ret && r.len == n;
     }
+    return false;
+  }
 
-    bool load_grammar(const char* s, const Rules& rules) {
-        auto n = strlen(s);
-        return load_grammar(s, n, rules);
+  template <typename T>
+  bool parse(const char *s, any &dt, T &val,
+             const char * /*path*/ = nullptr) const {
+    auto n = strlen(s);
+    return parse_n(s, n, dt, val);
+  }
+
+  Definition &operator[](const char *s) { return (*grammar_)[s]; }
+
+  const Definition &operator[](const char *s) const { return (*grammar_)[s]; }
+
+  std::vector<std::string> get_rule_names() {
+    std::vector<std::string> rules;
+    rules.reserve(grammar_->size());
+    for (auto const &r : *grammar_) {
+      rules.emplace_back(r.first);
     }
+    return rules;
+  }
 
-    bool load_grammar(const char* s) {
-        auto n = strlen(s);
-        return load_grammar(s, n);
+  void enable_packrat_parsing() {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.enablePackratParsing = true;
     }
+  }
 
-    bool parse_n(const char* s, size_t n, const char* path = nullptr) const {
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, n, path);
-            output_log(s, n, r);
-            return r.ret && r.len == n;
-        }
-        return false;
+  template <typename T = Ast> parser &enable_ast() {
+    for (auto &x : *grammar_) {
+      const auto &name = x.first;
+      auto &rule = x.second;
+
+      if (!rule.action) {
+        rule.action = [&](const SemanticValues &sv) {
+          auto line = sv.line_info();
+
+          if (rule.is_token()) {
+            return std::make_shared<T>(
+                sv.path, line.first, line.second, name.c_str(),
+                std::distance(sv.ss, sv.c_str()), sv.length(),
+                sv.choice_count(), sv.choice(), sv.token());
+          }
+
+          auto ast = std::make_shared<T>(
+              sv.path, line.first, line.second, name.c_str(),
+              std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(),
+              sv.choice(), sv.transform<std::shared_ptr<T>>());
+
+          for (auto node : ast->nodes) {
+            node->parent = ast;
+          }
+          return ast;
+        };
+      }
     }
+    return *this;
+  }
 
-    bool parse(const char* s, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse_n(s, n, path);
+  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.tracer_enter = tracer_enter;
+      rule.tracer_leave = tracer_leave;
     }
+  }
 
-    bool parse_n(const char* s, size_t n, any& dt, const char* path = nullptr) const {
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse(s, n, dt, path);
-            output_log(s, n, r);
-            return r.ret && r.len == n;
-        }
-        return false;
-    }
-
-    bool parse(const char* s, any& dt, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse_n(s, n, dt, path);
-    }
-
-    template <typename T>
-    bool parse_n(const char* s, size_t n, T& val, const char* path = nullptr) const {
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_and_get_value(s, n, val, path);
-            output_log(s, n, r);
-            return r.ret && r.len == n;
-        }
-        return false;
-    }
-
-    template <typename T>
-    bool parse(const char* s, T& val, const char* path = nullptr) const {
-        auto n = strlen(s);
-        return parse_n(s, n, val, path);
-    }
-
-    template <typename T>
-    bool parse_n(const char* s, size_t n, any& dt, T& val, const char* path = nullptr) const {
-        if (grammar_ != nullptr) {
-            const auto& rule = (*grammar_)[start_];
-            auto r = rule.parse_and_get_value(s, n, dt, val, path);
-            output_log(s, n, r);
-            return r.ret && r.len == n;
-        }
-        return false;
-    }
-
-    template <typename T>
-    bool parse(const char* s, any& dt, T& val, const char* /*path*/ = nullptr) const {
-        auto n = strlen(s);
-        return parse_n(s, n, dt, val);
-    }
-
-    Definition& operator[](const char* s) {
-        return (*grammar_)[s];
-    }
-
-    const Definition& operator[](const char* s) const {
-        return (*grammar_)[s];
-    }
-
-    std::vector<std::string> get_rule_names(){
-        std::vector<std::string> rules;
-        rules.reserve(grammar_->size());
-        for (auto const& r : *grammar_) {
-            rules.emplace_back(r.first);
-        }
-        return rules;
-    }
-
-    void enable_packrat_parsing() {
-        if (grammar_ != nullptr) {
-            auto& rule = (*grammar_)[start_];
-            rule.enablePackratParsing = true;
-        }
-    }
-
-    template <typename T = Ast>
-    parser& enable_ast() {
-        for (auto& x: *grammar_) {
-            const auto& name = x.first;
-            auto& rule = x.second;
-
-            if (!rule.action) {
-                rule.action = [&](const SemanticValues& sv) {
-                    auto line = sv.line_info();
-
-                    if (rule.is_token()) {
-                        return std::make_shared<T>(
-                            sv.path, line.first, line.second,
-                            name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
-                            sv.token());
-                    }
-
-                    auto ast = std::make_shared<T>(
-                        sv.path, line.first, line.second,
-                        name.c_str(), std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(), sv.choice(),
-                        sv.transform<std::shared_ptr<T>>());
-
-                    for (auto node: ast->nodes) {
-                        node->parent = ast;
-                    }
-                    return ast;
-                };
-            }
-        }
-        return *this;
-    }
-
-    void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
-        if (grammar_ != nullptr) {
-            auto& rule = (*grammar_)[start_];
-            rule.tracer_enter = tracer_enter;
-            rule.tracer_leave = tracer_leave;
-        }
-    }
-
-    Log log;
+  Log log;
 
 private:
-    void output_log(const char* s, size_t n, const Definition::Result& r) const {
-        if (log) {
-            if (!r.ret) {
-                if (r.message_pos) {
-                    auto line = line_info(s, r.message_pos);
-                    log(line.first, line.second, r.message);
-                } else {
-                    auto line = line_info(s, r.error_pos);
-                    log(line.first, line.second, "syntax error");
-                }
-            } else if (r.len != n) {
-                auto line = line_info(s, s + r.len);
-                log(line.first, line.second, "syntax error");
-            }
+  void output_log(const char *s, size_t n, const Definition::Result &r) const {
+    if (log) {
+      if (!r.ret) {
+        if (r.message_pos) {
+          auto line = line_info(s, r.message_pos);
+          log(line.first, line.second, r.message);
+        } else {
+          auto line = line_info(s, r.error_pos);
+          log(line.first, line.second, "syntax error");
         }
+      } else if (r.len != n) {
+        auto line = line_info(s, s + r.len);
+        log(line.first, line.second, "syntax error");
+      }
     }
+  }
 
-    std::shared_ptr<Grammar> grammar_;
-    std::string              start_;
+  std::shared_ptr<Grammar> grammar_;
+  std::string start_;
 };
 
 } // namespace peg
