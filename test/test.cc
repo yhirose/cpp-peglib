@@ -201,6 +201,66 @@ TEST_CASE("String capture test", "[general]")
 
 using namespace peg;
 
+TEST_CASE("Precedence climbing", "[precedence]")
+{
+    // Create a PEG parser
+    parser parser(R"(
+        # Grammar for simple calculator...
+        START            <-  _ EXPRESSION
+        EXPRESSION       <-  ATOM (OPERATOR ATOM)* {
+                               precedence
+                                 L + -
+                                 L * /
+                             }
+        ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
+        OPERATOR         <-  T([-+/*])
+        NUMBER           <-  T('-'? [0-9]+)
+		~_               <-  [ \t]*
+		T(S)             <-  < S > _
+	)");
+
+    // Setup actions
+    auto reduce = [](const SemanticValues& sv) -> long {
+        auto result = any_cast<long>(sv[0]);
+        for (auto i = 1u; i < sv.size(); i += 2) {
+            auto num = any_cast<long>(sv[i + 1]);
+            auto ope = any_cast<char>(sv[i]);
+            switch (ope) {
+                case '+': result += num; break;
+                case '-': result -= num; break;
+                case '*': result *= num; break;
+                case '/': result /= num; break;
+            }
+        }
+        return result;
+    };
+
+    parser["EXPRESSION"] = reduce;
+    parser["OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
+    parser["NUMBER"]     = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+    {
+        auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
+        long val = 0;
+        ret = parser.parse(expr, val);
+
+        REQUIRE(ret == true);
+        REQUIRE(val == -3);
+    }
+
+    {
+      auto expr = "-1+-2--3"; // -1 + -2 - -3 = 0
+      long val = 0;
+      ret = parser.parse(expr, val);
+
+      REQUIRE(ret == true);
+      REQUIRE(val == 0);
+    }
+}
+
 TEST_CASE("String capture test2", "[general]")
 {
     std::vector<std::string> tags;
