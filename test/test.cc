@@ -220,11 +220,11 @@ TEST_CASE("Precedence climbing", "[precedence]")
 	)");
 
     // Setup actions
-    auto reduce = [](const SemanticValues& sv) -> long {
+    parser["EXPRESSION"] = [](const SemanticValues& sv) -> long {
         auto result = any_cast<long>(sv[0]);
-        for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = any_cast<long>(sv[i + 1]);
-            auto ope = any_cast<char>(sv[i]);
+        if (sv.size() > 1) {
+            auto ope = any_cast<char>(sv[1]);
+            auto num = any_cast<long>(sv[2]);
             switch (ope) {
                 case '+': result += num; break;
                 case '-': result -= num; break;
@@ -234,10 +234,8 @@ TEST_CASE("Precedence climbing", "[precedence]")
         }
         return result;
     };
-
-    parser["EXPRESSION"] = reduce;
-    parser["OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
-    parser["NUMBER"]     = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+    parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
+    parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
 
     bool ret = parser;
     REQUIRE(ret == true);

@@ -42,23 +42,16 @@ using namespace std;
 
 int main(void) {
     // (2) Make a parser
-    auto grammar = R"(
+    parser parser(R"(
         # Grammar for Calculator...
         Additive    <- Multitive '+' Additive / Multitive
         Multitive   <- Primary '*' Multitive / Primary
         Primary     <- '(' Additive ')' / Number
         Number      <- < [0-9]+ >
         %whitespace <- [ \t]*
-    )";
+    )");
 
-    parser parser;
-
-    parser.log = [](size_t line, size_t col, const string& msg) {
-        cerr << line << ":" << col << ": " << msg << "\n";
-    };
-
-    auto ok = parser.load_grammar(grammar);
-    assert(ok);
+    assert((bool)parser == true);
 
     // (3) Setup actions
     parser["Additive"] = [](const SemanticValues& sv) {
@@ -91,6 +84,28 @@ int main(void) {
 
     assert(val == 9);
 }
+```
+
+To show syntax errors in grammar text:
+
+```cpp
+auto grammar = R"(
+    # Grammar for Calculator...
+    Additive    <- Multitive '+' Additive / Multitive
+    Multitive   <- Primary '*' Multitive / Primary
+    Primary     <- '(' Additive ')' / Number
+    Number      <- < [0-9]+ >
+    %whitespace <- [ \t]*
+)";
+
+parser parser;
+
+parser.log = [](size_t line, size_t col, const string& msg) {
+    cerr << line << ":" << col << ": " << msg << "\n";
+};
+
+auto ok = parser.load_grammar(grammar);
+assert(ok);
 ```
 
 There are four semantic actions available:
@@ -324,6 +339,46 @@ Number     ← T([0-9]+)
 # Macro
 List(I, D) ← I (D I)*
 T(x)       ← < x > _
+```
+
+Parsing expressions by precedence climbing altorithm
+----------------------------------------------------
+
+*cpp-peglib* supports [operator-precedence parsering](https://en.wikipedia.org/wiki/Operator-precedence_parser) by [**precedence climbing algorithm**](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
+
+```cpp
+  parser parser(R"(
+      EXPRESSION  <- ATOM (OPERATOR ATOM)* {
+                       precedence
+                         L - +
+                         L / *
+                     }
+      ATOM        <- NUMBER / '(' EXPRESSION ')'
+      OPERATOR    <- < [-+/*] >
+      NUMBER      <- < '-'? [0-9]+ >
+      %whitespace <- [ \t\r\n]*
+  )");
+
+  parser["EXPRESSION"] = [](const SemanticValues& sv) -> long {
+      auto result = any_cast<long>(sv[0]);
+      if (sv.size() > 1) {
+          auto ope = any_cast<char>(sv[1]);
+          auto num = any_cast<long>(sv[2]);
+          switch (ope) {
+              case '+': result += num; break;
+              case '-': result -= num; break;
+              case '*': result *= num; break;
+              case '/': result /= num; break;
+          }
+      }
+      return result;
+  };
+  parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
+  parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+
+  long val;
+  parser.parse(" -1 + (1 + 2) * 3 - -1", val);
+  assert(val == 9);
 ```
 
 AST generation
