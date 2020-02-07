@@ -119,7 +119,7 @@ template <typename T> T &any_cast(any &val) {
   return p->value_;
 }
 
-template <> any &any_cast<any>(any &val) { return val; }
+template <> inline any &any_cast<any>(any &val) { return val; }
 
 template <typename T> const T &any_cast(const any &val) {
   assert(val.content_);
@@ -129,7 +129,7 @@ template <typename T> const T &any_cast(const any &val) {
   return p->value_;
 }
 
-template <> const any &any_cast<any>(const any &val) { return val; }
+template <> inline const any &any_cast<any>(const any &val) { return val; }
 #endif
 
 /*-----------------------------------------------------------------------------
