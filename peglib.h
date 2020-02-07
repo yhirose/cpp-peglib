@@ -707,8 +707,7 @@ private:
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn,
-                   R (F::*)(const SemanticValues &sv, any &dt) const) {
+  Fty make_adaptor(F fn, R (F::*)(const SemanticValues &sv, any &dt) const) {
     return TypeAdaptor_csv_dt<R>(fn);
   }
 
@@ -1536,8 +1535,8 @@ public:
 
   PrecedenceClimbing(const std::shared_ptr<Ope> &atom,
                      const std::shared_ptr<Ope> &binop, const BinOpeInfo &info,
-                     const Action &action)
-      : atom_(atom), binop_(binop), info_(info), action_(action) {}
+                     const Definition &rule)
+      : atom_(atom), binop_(binop), info_(info), rule_(rule) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
                     any &dt) const override {
@@ -1549,11 +1548,13 @@ public:
   std::shared_ptr<Ope> atom_;
   std::shared_ptr<Ope> binop_;
   BinOpeInfo info_;
-  const Action &action_;
+  const Definition &rule_;
 
 private:
   size_t parse_expression(const char *s, size_t n, SemanticValues &sv,
                           Context &c, any &dt, size_t min_prec) const;
+
+  Definition &get_reference_for_binop(Context &c) const;
 };
 
 /*
@@ -1660,8 +1661,8 @@ inline std::shared_ptr<Ope> bkr(const std::string &name) {
 inline std::shared_ptr<Ope> pre(const std::shared_ptr<Ope> &atom,
                                 const std::shared_ptr<Ope> &binop,
                                 const PrecedenceClimbing::BinOpeInfo &info,
-                                const Action &action) {
-  return std::make_shared<PrecedenceClimbing>(atom, binop, info, action);
+                                const Definition &rule) {
+  return std::make_shared<PrecedenceClimbing>(atom, binop, info, rule);
 }
 
 /*
@@ -2281,6 +2282,8 @@ public:
   }
 
   std::string name;
+  const char *s = nullptr;
+  ;
   size_t id = 0;
   Action action;
   std::function<void(const char *s, size_t n, any &dt)> enter;
@@ -2584,6 +2587,18 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
   throw std::runtime_error("Invalid back reference...");
 }
 
+inline Definition& PrecedenceClimbing::get_reference_for_binop(Context &c) const {
+  if (rule_.is_macro) {
+    // Reference parameter in macro
+    const auto &args = c.top_args();
+    auto iarg = dynamic_cast<Reference &>(*binop_).iarg_;
+    auto arg = args[iarg];
+    return *dynamic_cast<Reference &>(*arg).rule_;
+  }
+
+  return *dynamic_cast<Reference &>(*binop_).rule_;
+}
+
 inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
                                                    SemanticValues &sv,
                                                    Context &c, any &dt,
@@ -2592,10 +2607,11 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   if (fail(len)) { return len; }
 
   std::string tok;
-  auto &rule = dynamic_cast<Reference &>(*binop_).rule_;
-  auto action = rule->action;
+  //auto &rule = dynamic_cast<Reference &>(*binop_).rule_;
+  auto &rule = get_reference_for_binop(c);
+  auto action = rule.action;
 
-  rule->action = [&](SemanticValues &sv, any &dt) -> any {
+  rule.action = [&](SemanticValues &sv, any &dt) -> any {
     tok = sv.token();
     if (action) {
       return action(sv, dt);
@@ -2604,7 +2620,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     }
     return any();
   };
-  auto action_se = make_scope_exit([&]() { rule->action = action; });
+  auto action_se = make_scope_exit([&]() { rule.action = action; });
 
   auto save_error_pos = c.error_pos;
 
@@ -2651,10 +2667,10 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     i += chl;
 
     any val;
-    if (action_) {
+    if (rule_.action) {
       sv.s_ = s;
       sv.n_ = i;
-      val = action_(sv, dt);
+      val = rule_.action(sv, dt);
     } else if (!sv.empty()) {
       val = sv[0];
     }
@@ -3018,6 +3034,7 @@ private:
         auto &rule = grammar[name];
         rule <= ope;
         rule.name = name;
+        rule.s = sv.c_str();
         rule.ignoreSemanticValue = ignore;
         rule.is_macro = is_macro;
         rule.params = params;
@@ -3227,6 +3244,45 @@ private:
     g["PrecedenceAssoc"] = [](const SemanticValues &sv) { return sv.token(); };
   }
 
+  bool apply_precedence_instruction(Definition &rule,
+                                    const PrecedenceClimbing::BinOpeInfo &info,
+                                    const char *s, Log log) {
+    try {
+      auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
+      auto atom = seq.opes_[0];
+      auto &seq1 = dynamic_cast<Sequence &>(
+          *dynamic_cast<ZeroOrMore &>(*seq.opes_[1]).ope_);
+      auto binop = seq1.opes_[0];
+      auto atom1 = seq1.opes_[1];
+
+      auto atom_name = dynamic_cast<Reference &>(*atom).name_;
+      auto binop_name = dynamic_cast<Reference &>(*binop).name_;
+      auto atom1_name = dynamic_cast<Reference &>(*atom1).name_;
+
+      if (atom_name != atom1_name || atom_name == binop_name) {
+        if (log) {
+          auto line = line_info(s, rule.s);
+          log(line.first, line.second,
+              "'precedence' instruction cannt be applied to '" + rule.name +
+                  "'.");
+        }
+        return false;
+      }
+
+      rule.holder_->ope_ = pre(atom, binop, info, rule);
+      rule.disable_action = true;
+    } catch (...) {
+      if (log) {
+        auto line = line_info(s, rule.s);
+        log(line.first, line.second,
+            "'precedence' instruction cannt be applied to '" + rule.name +
+                "'.");
+      }
+      return false;
+    }
+    return true;
+  }
+
   std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
                                         Log log) {
@@ -3318,7 +3374,6 @@ private:
           log(line.first, line.second, "'" + name + "' is left recursive.");
         }
         ret = false;
-        ;
       }
     }
 
@@ -3363,26 +3418,15 @@ private:
     for (const auto &item : data.instructions) {
       const auto &name = item.first;
       const auto &instruction = item.second;
+      auto &rule = grammar[name];
 
       if (instruction.type == "precedence") {
-        auto &rule = grammar[name];
-
-        auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
-        auto &atom = seq.opes_[0];
-        auto &seq1 = dynamic_cast<Sequence &>(
-            *dynamic_cast<ZeroOrMore &>(*seq.opes_[1]).ope_);
-        auto &binop = seq1.opes_[0];
-        auto &atom1 = seq1.opes_[1];
-
-        if (atom != atom1) {
-          // TODO: check
-        }
-
         const auto &info =
             any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
 
-        rule.holder_->ope_ = pre(atom, binop, info, rule.action);
-        rule.disable_action = true;
+        if (!apply_precedence_instruction(rule, info, s, log)) {
+          return nullptr;
+        }
       }
     }
 

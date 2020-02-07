@@ -100,9 +100,7 @@ TEST_CASE("Not infinite 3", "[infinite loop]")
 
 TEST_CASE("Precedence climbing", "[precedence]")
 {
-    // Create a PEG parser
     parser parser(R"(
-        # Grammar for simple calculator...
         START            <-  _ EXPRESSION
         EXPRESSION       <-  ATOM (OPERATOR ATOM)* {
                                precedence
@@ -156,8 +154,122 @@ TEST_CASE("Precedence climbing", "[precedence]")
     }
 }
 
-TEST_CASE("Packrat parser test with %whitespace%", "[packrat]")
+TEST_CASE("Precedence climbing with macro", "[precedence]")
 {
+    // Create a PEG parser
+    parser parser(R"(
+        EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
+        PRECEDENCE_PARSING(A, O) <-  A (O A)* {
+                                       precedence
+                                         L + - 
+                                         L * /
+                                     }
+        ATOM                     <-  NUMBER / '(' EXPRESSION ')'
+        OPERATOR                 <-  < [-+/*] >
+        NUMBER                   <-  < '-'? [0-9]+ >
+        %whitespace              <-  [ \t]*
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == true);
+
+    // Setup actions
+    parser["PRECEDENCE_PARSING"] = [](const SemanticValues& sv) -> long {
+        auto result = any_cast<long>(sv[0]);
+        if (sv.size() > 1) {
+            auto ope = any_cast<char>(sv[1]);
+            auto num = any_cast<long>(sv[2]);
+            switch (ope) {
+                case '+': result += num; break;
+                case '-': result -= num; break;
+                case '*': result *= num; break;
+                case '/': result /= num; break;
+            }
+        }
+        return result;
+    };
+    parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
+    parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+
+    {
+        auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
+        long val = 0;
+        ret = parser.parse(expr, val);
+
+        REQUIRE(ret == true);
+        REQUIRE(val == -3);
+    }
+
+    {
+      auto expr = "-1+-2--3"; // -1 + -2 - -3 = 0
+      long val = 0;
+      ret = parser.parse(expr, val);
+
+      REQUIRE(ret == true);
+      REQUIRE(val == 0);
+    }
+}
+
+TEST_CASE("Precedence climbing error1", "[precedence]")
+{
+    parser parser(R"(
+        START            <-  _ EXPRESSION
+        EXPRESSION       <-  ATOM (OPERATOR ATOM1)* {
+                               precedence
+                                 L + -
+                                 L * /
+                             }
+        ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
+        ATOM1            <-  NUMBER / T('(') EXPRESSION T(')')
+        OPERATOR         <-  T([-+/*])
+        NUMBER           <-  T('-'? [0-9]+)
+		~_               <-  [ \t]*
+		T(S)             <-  < S > _
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Precedence climbing error2", "[precedence]")
+{
+    parser parser(R"(
+        START            <-  _ EXPRESSION
+        EXPRESSION       <-  ATOM OPERATOR ATOM {
+                               precedence
+                                 L + -
+                                 L * /
+                             }
+        ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
+        OPERATOR         <-  T([-+/*])
+        NUMBER           <-  T('-'? [0-9]+)
+		~_               <-  [ \t]*
+		T(S)             <-  < S > _
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Precedence climbing error3", "[precedence]") {
+    parser parser(R"(
+        EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
+        PRECEDENCE_PARSING(A, O) <-  A (O A)+ {
+                                       precedence
+                                         L + - 
+                                         L * /
+                                     }
+        ATOM                     <-  NUMBER / '(' EXPRESSION ')'
+        OPERATOR                 <-  < [-+/*] >
+        NUMBER                   <-  < '-'? [0-9]+ >
+        %whitespace              <-  [ \t]*
+	)");
+
+    bool ret = parser;
+    REQUIRE(ret == false);
+}
+
+TEST_CASE("Packrat parser test with %whitespace%", "[packrat]") {
     peg::parser parser(R"(
         ROOT         <-  'a'
         %whitespace  <-  SPACE*

@@ -347,39 +347,53 @@ Parsing expressions by precedence climbing altorithm
 *cpp-peglib* supports [operator-precedence parsering](https://en.wikipedia.org/wiki/Operator-precedence_parser) by [**precedence climbing algorithm**](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
 
 ```cpp
-  parser parser(R"(
-      EXPRESSION  <- ATOM (OPERATOR ATOM)* {
-                       precedence
-                         L - +
-                         L / *
-                     }
-      ATOM        <- NUMBER / '(' EXPRESSION ')'
-      OPERATOR    <- < [-+/*] >
-      NUMBER      <- < '-'? [0-9]+ >
-      %whitespace <- [ \t\r\n]*
-  )");
+parser parser(R"(
+    EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
+    PRECEDENCE_PARSING(A, O) <-  A (O A)* {
+                                   precedence
+                                     L + - 
+                                     L * /
+                                 }
+    ATOM                     <-  NUMBER / '(' EXPRESSION ')'
+    OPERATOR                 <-  < [-+/*] >
+    NUMBER                   <-  < '-'? [0-9]+ >
+    %whitespace              <-  [ \t]*
+)");
 
-  parser["EXPRESSION"] = [](const SemanticValues& sv) -> long {
-      auto result = any_cast<long>(sv[0]);
-      if (sv.size() > 1) {
-          auto ope = any_cast<char>(sv[1]);
-          auto num = any_cast<long>(sv[2]);
-          switch (ope) {
-              case '+': result += num; break;
-              case '-': result -= num; break;
-              case '*': result *= num; break;
-              case '/': result /= num; break;
-          }
-      }
-      return result;
-  };
-  parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
-  parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+parser["PRECEDENCE_PARSING"] = [](const SemanticValues& sv) -> long {
+    auto result = any_cast<long>(sv[0]);
+    if (sv.size() > 1) {
+        auto ope = any_cast<char>(sv[1]);
+        auto num = any_cast<long>(sv[2]);
+        switch (ope) {
+            case '+': result += num; break;
+            case '-': result -= num; break;
+            case '*': result *= num; break;
+            case '/': result /= num; break;
+        }
+    }
+    return result;
+};
+parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
+parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
 
-  long val;
-  parser.parse(" -1 + (1 + 2) * 3 - -1", val);
-  assert(val == 9);
+long val;
+parser.parse(" -1 + (1 + 2) * 3 - -1", val);
+assert(val == 9);
 ```
+
+*precedence* instruction can be applied only to the following 'list' style rule.
+
+```
+R <- A (B A)* {
+  precedence
+    L - +
+    L / *
+    R ^
+}
+```
+
+*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator tokens follow. The first entry has the highest order.
 
 AST generation
 --------------
