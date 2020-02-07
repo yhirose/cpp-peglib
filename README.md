@@ -22,7 +22,9 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name` (Backreference operator)
   * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
 
-This library also supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
+This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
+
+*Parsing expressions by [Precedence climbing](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)* algorithm is also supported.
 
   IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
@@ -341,23 +343,23 @@ List(I, D) ← I (D I)*
 T(x)       ← < x > _
 ```
 
-Parsing expressions by precedence climbing altorithm
+Parsing expressions by Precedence climbing altorithm
 ----------------------------------------------------
-
-*cpp-peglib* supports [operator-precedence parsering](https://en.wikipedia.org/wiki/Operator-precedence_parser) by [**precedence climbing algorithm**](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
 
 ```cpp
 parser parser(R"(
     EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
-    PRECEDENCE_PARSING(A, O) <-  A (O A)* {
-                                   precedence
-                                     L + - 
-                                     L * /
-                                 }
     ATOM                     <-  NUMBER / '(' EXPRESSION ')'
     OPERATOR                 <-  < [-+/*] >
     NUMBER                   <-  < '-'? [0-9]+ >
     %whitespace              <-  [ \t]*
+
+    # Parsing expressions by Precedence climbing altorithm
+    PRECEDENCE_PARSING(A, O) <-  A (O A)* {
+                                   precedence
+                                     L + -
+                                     L * /
+                                 }
 )");
 
 parser["PRECEDENCE_PARSING"] = [](const SemanticValues& sv) -> long {
@@ -385,7 +387,7 @@ assert(val == 9);
 *precedence* instruction can be applied only to the following 'list' style rule.
 
 ```
-R <- A (B A)* {
+Rule <- Atom (Operator Atom)* {
   precedence
     L - +
     L / *
@@ -393,7 +395,7 @@ R <- A (B A)* {
 }
 ```
 
-*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator tokens follow. The first entry has the highest order.
+*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator tokens follow. The first entry has the highest order level.
 
 AST generation
 --------------
@@ -591,6 +593,8 @@ Sample codes
   * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
   * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
   * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
+  * [Calculator (parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc4.cc)
+  * [Calculator (AST version and parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc5.cc)
   * [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
   * [A tiny PL/0 JIT compiler in less than 700 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
 
@@ -598,11 +602,6 @@ PEG debug
 ---------
 
 A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug) for the detail. You can see a parse result of PL/0 code [here](https://mqnc.github.io/pegdebug/example/output.html).
-
-TODO
-----
-
-  * Advanced Unicode support ([Unicode regular expressoin](http://www.unicode.org/reports/tr18/))
 
 License
 -------
