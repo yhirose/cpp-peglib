@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(..)
-add_executable(test-main test.cc)
+add_executable(test-main test-main.cc test1.cc test2.cc test3.cc)
 target_link_libraries(test-main ${add_link_deps})
 
 add_test(TestMain test-main)

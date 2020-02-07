@@ -17,3 +17,9 @@ target_link_libraries(calc2 ${add_link_deps})
 
 add_executable(calc3 calc3.cc)
 target_link_libraries(calc3 ${add_link_deps})
+
+add_executable(calc4 calc4.cc)
+target_link_libraries(calc4 ${add_link_deps})
+
+add_executable(calc5 calc5.cc)
+target_link_libraries(calc5 ${add_link_deps})

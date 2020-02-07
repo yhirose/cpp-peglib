@@ -119,7 +119,7 @@ template <typename T> T &any_cast(any &val) {
   return p->value_;
 }
 
-template <> any &any_cast<any>(any &val) { return val; }
+template <> inline any &any_cast<any>(any &val) { return val; }
 
 template <typename T> const T &any_cast(const any &val) {
   assert(val.content_);
@@ -129,7 +129,7 @@ template <typename T> const T &any_cast(const any &val) {
   return p->value_;
 }
 
-template <> const any &any_cast<any>(const any &val) { return val; }
+template <> inline const any &any_cast<any>(const any &val) { return val; }
 #endif
 
 /*-----------------------------------------------------------------------------
@@ -532,6 +532,7 @@ private:
   friend class Sequence;
   friend class PrioritizedChoice;
   friend class Holder;
+  friend class PrecedenceClimbing;
 
   const char *s_ = nullptr;
   size_t n_ = 0;
@@ -671,63 +672,63 @@ private:
   typedef std::function<any(SemanticValues &sv, any &dt)> Fty;
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv) const) {
+  Fty make_adaptor(F fn, R (F::*)(SemanticValues &sv) const) {
     return TypeAdaptor_sv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv) const) {
+  Fty make_adaptor(F fn, R (F::*)(const SemanticValues &sv) const) {
     return TypeAdaptor_csv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv)) {
+  Fty make_adaptor(F fn, R (F::*)(SemanticValues &sv)) {
     return TypeAdaptor_sv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv)) {
+  Fty make_adaptor(F fn, R (F::*)(const SemanticValues &sv)) {
     return TypeAdaptor_csv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (*/*mf*/)(SemanticValues &sv)) {
+  Fty make_adaptor(F fn, R (*)(SemanticValues &sv)) {
     return TypeAdaptor_sv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (*/*mf*/)(const SemanticValues &sv)) {
+  Fty make_adaptor(F fn, R (*)(const SemanticValues &sv)) {
     return TypeAdaptor_csv<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv, any &dt) const) {
+  Fty make_adaptor(F fn, R (F::*)(SemanticValues &sv, any &dt) const) {
     return TypeAdaptor_sv_dt<R>(fn);
   }
 
   template <typename F, typename R>
   Fty make_adaptor(F fn,
-                   R (F::* /*mf*/)(const SemanticValues &sv, any &dt) const) {
+                   R (F::*)(const SemanticValues &sv, any &dt) const) {
     return TypeAdaptor_csv_dt<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(SemanticValues &sv, any &dt)) {
+  Fty make_adaptor(F fn, R (F::*)(SemanticValues &sv, any &dt)) {
     return TypeAdaptor_sv_dt<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (F::* /*mf*/)(const SemanticValues &sv, any &dt)) {
+  Fty make_adaptor(F fn, R (F::*)(const SemanticValues &sv, any &dt)) {
     return TypeAdaptor_csv_dt<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (*/*mf*/)(SemanticValues &sv, any &dt)) {
+  Fty make_adaptor(F fn, R (*)(SemanticValues &sv, any &dt)) {
     return TypeAdaptor_sv_dt<R>(fn);
   }
 
   template <typename F, typename R>
-  Fty make_adaptor(F fn, R (*/*mf*/)(const SemanticValues &sv, any &dt)) {
+  Fty make_adaptor(F fn, R (*)(const SemanticValues &sv, any &dt)) {
     return TypeAdaptor_csv_dt<R>(fn);
   }
 
@@ -1529,6 +1530,32 @@ public:
   std::string name_;
 };
 
+class PrecedenceClimbing : public Ope {
+public:
+  using BinOpeInfo = std::map<std::string, std::pair<size_t, char>>;
+
+  PrecedenceClimbing(const std::shared_ptr<Ope> &atom,
+                     const std::shared_ptr<Ope> &binop, const BinOpeInfo &info,
+                     const Action &action)
+      : atom_(atom), binop_(binop), info_(info), action_(action) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override {
+    return parse_expression(s, n, sv, c, dt, 0);
+  }
+
+  void accept(Visitor &v) override;
+
+  std::shared_ptr<Ope> atom_;
+  std::shared_ptr<Ope> binop_;
+  BinOpeInfo info_;
+  const Action &action_;
+
+private:
+  size_t parse_expression(const char *s, size_t n, SemanticValues &sv,
+                          Context &c, any &dt, size_t min_prec) const;
+};
+
 /*
  * Factories
  */
@@ -1630,6 +1657,13 @@ inline std::shared_ptr<Ope> bkr(const std::string &name) {
   return std::make_shared<BackReference>(name);
 }
 
+inline std::shared_ptr<Ope> pre(const std::shared_ptr<Ope> &atom,
+                                const std::shared_ptr<Ope> &binop,
+                                const PrecedenceClimbing::BinOpeInfo &info,
+                                const Action &action) {
+  return std::make_shared<PrecedenceClimbing>(atom, binop, info, action);
+}
+
 /*
  * Visitor
  */
@@ -1656,6 +1690,7 @@ struct Ope::Visitor {
   virtual void visit(Reference & /*ope*/) {}
   virtual void visit(Whitespace & /*ope*/) {}
   virtual void visit(BackReference & /*ope*/) {}
+  virtual void visit(PrecedenceClimbing & /*ope*/) {}
 };
 
 struct IsReference : public Ope::Visitor {
@@ -1685,6 +1720,7 @@ struct TraceOpeName : public Ope::Visitor {
   void visit(Reference &ope) override { name = "Reference"; }
   void visit(Whitespace &ope) override { name = "Whitespace"; }
   void visit(BackReference &ope) override { name = "BackReference"; }
+  void visit(PrecedenceClimbing &ope) override { name = "PrecedenceClimbing"; }
 
   const char *name = nullptr;
 };
@@ -1758,6 +1794,7 @@ struct TokenChecker : public Ope::Visitor {
   void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   static bool is_token(Ope &ope) {
     if (IsLiteralToken::check(ope)) { return true; }
@@ -1829,6 +1866,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference & /*ope*/) override { done_ = true; }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   const char *error_s = nullptr;
 
@@ -1878,6 +1916,7 @@ struct HasEmptyElement : public Ope::Visitor {
   void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   bool is_empty = false;
   const char *error_s = nullptr;
@@ -1938,6 +1977,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
   void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   bool has_error = false;
   const char *error_s = nullptr;
@@ -1975,6 +2015,7 @@ struct ReferenceChecker : public Ope::Visitor {
   void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   std::unordered_map<std::string, const char *> error_s;
   std::unordered_map<std::string, std::string> error_message;
@@ -2011,6 +2052,7 @@ struct LinkReferences : public Ope::Visitor {
   void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
 private:
   Grammar &grammar_;
@@ -2088,6 +2130,10 @@ struct FindReference : public Ope::Visitor {
   void visit(Whitespace &ope) override {
     ope.ope_->accept(*this);
     found_ope = wsp(found_ope);
+  }
+  void visit(PrecedenceClimbing &ope) override {
+    ope.atom_->accept(*this);
+    found_ope = csc(found_ope);
   }
 
   std::shared_ptr<Ope> found_ope;
@@ -2250,9 +2296,11 @@ public:
   std::vector<std::string> params;
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
+  bool disable_action = false;
 
 private:
   friend class Reference;
+  friend class ParserGenerator;
 
   Definition &operator=(const Definition &rhs);
   Definition &operator=(Definition &&rhs);
@@ -2471,7 +2519,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
 }
 
 inline any Holder::reduce(SemanticValues &sv, any &dt) const {
-  if (outer_->action) {
+  if (outer_->action && !outer_->disable_action) {
     return outer_->action(sv, dt);
   } else if (sv.empty()) {
     return any();
@@ -2523,7 +2571,8 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
 inline size_t BackReference::parse_core(const char *s, size_t n,
                                         SemanticValues &sv, Context &c,
                                         any &dt) const {
-  for (int i = c.capture_scope_stack_size - 1; i >= 0; i--) {
+  auto size = static_cast<int>(c.capture_scope_stack_size);
+  for (auto i = size - 1; i >= 0; i--) {
     const auto &cs = c.capture_scope_stack[i];
     if (cs.find(name_) != cs.end()) {
       const auto &lit = cs.at(name_);
@@ -2533,6 +2582,87 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     }
   }
   throw std::runtime_error("Invalid back reference...");
+}
+
+inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
+                                                   SemanticValues &sv,
+                                                   Context &c, any &dt,
+                                                   size_t min_prec) const {
+  auto len = atom_->parse(s, n, sv, c, dt);
+  if (fail(len)) { return len; }
+
+  std::string tok;
+  auto &rule = dynamic_cast<Reference &>(*binop_).rule_;
+  auto action = rule->action;
+
+  rule->action = [&](SemanticValues &sv, any &dt) -> any {
+    tok = sv.token();
+    if (action) {
+      return action(sv, dt);
+    } else if (!sv.empty()) {
+      return sv[0];
+    }
+    return any();
+  };
+  auto action_se = make_scope_exit([&]() { rule->action = action; });
+
+  auto save_error_pos = c.error_pos;
+
+  auto i = len;
+  while (i < n) {
+    std::vector<any> save_values(sv.begin(), sv.end());
+    auto save_tokens = sv.tokens;
+
+    auto chv = c.push();
+    auto chl = binop_->parse(s + i, n - i, chv, c, dt);
+    c.pop();
+
+    if (fail(chl)) {
+      c.error_pos = save_error_pos;
+      break;
+    }
+
+    auto it = info_.find(tok);
+    if (it == info_.end()) { break; }
+
+    auto level = std::get<0>(it->second);
+    auto assoc = std::get<1>(it->second);
+
+    if (level < min_prec) { break; }
+
+    sv.emplace_back(std::move(chv[0]));
+    i += chl;
+
+    auto next_min_prec = level;
+    if (assoc == 'L') { next_min_prec = level + 1; }
+
+    chv = c.push();
+    chl = parse_expression(s + i, n - i, chv, c, dt, next_min_prec);
+    c.pop();
+
+    if (fail(chl)) {
+      sv.assign(save_values.begin(), save_values.end());
+      sv.tokens = save_tokens;
+      c.error_pos = save_error_pos;
+      break;
+    }
+
+    sv.emplace_back(std::move(chv[0]));
+    i += chl;
+
+    any val;
+    if (action_) {
+      sv.s_ = s;
+      sv.n_ = i;
+      val = action_(sv, dt);
+    } else if (!sv.empty()) {
+      val = sv[0];
+    }
+    sv.clear();
+    sv.emplace_back(std::move(val));
+  }
+
+  return i;
 }
 
 inline void Sequence::accept(Visitor &v) { v.visit(*this); }
@@ -2556,6 +2686,7 @@ inline void Holder::accept(Visitor &v) { v.visit(*this); }
 inline void Reference::accept(Visitor &v) { v.visit(*this); }
 inline void Whitespace::accept(Visitor &v) { v.visit(*this); }
 inline void BackReference::accept(Visitor &v) { v.visit(*this); }
+inline void PrecedenceClimbing::accept(Visitor &v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder &ope) {
   auto p = static_cast<void *>(ope.outer_);
@@ -2717,11 +2848,17 @@ private:
     setup_actions();
   }
 
+  struct Instruction {
+    std::string type;
+    any data;
+  };
+
   struct Data {
     std::shared_ptr<Grammar> grammar;
     std::string start;
     const char *start_pos = nullptr;
     std::vector<std::pair<std::string, const char *>> duplicates;
+    std::map<std::string, Instruction> instructions;
 
     Data() : grammar(std::make_shared<Grammar>()) {}
   };
@@ -2731,9 +2868,9 @@ private:
     g["Grammar"] <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
     g["Definition"] <=
         cho(seq(g["Ignore"], g["IdentCont"], g["Parameters"], g["LEFTARROW"],
-                g["Expression"]),
-            seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"]));
-
+                g["Expression"], opt(g["Instruction"])),
+            seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"],
+                opt(g["Instruction"])));
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
     g["Sequence"] <= zom(g["Prefix"]);
     g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
@@ -2826,6 +2963,27 @@ private:
                           zom(seq(g["COMMA"], g["Expression"])), g["CLOSE"]);
     ~g["COMMA"] <= seq(chr(','), g["Spacing"]);
 
+    // Instruction grammars
+    g["Instruction"] <=
+        seq(g["BeginBlacket"], cho(g["PrecedenceClimbing"]), g["EndBlacket"]);
+
+    ~g["SpacesZom"] <= zom(g["Space"]);
+    ~g["SpacesOom"] <= oom(g["Space"]);
+    ~g["BeginBlacket"] <= seq(chr('{'), g["Spacing"]);
+    ~g["EndBlacket"] <= seq(chr('}'), g["Spacing"]);
+
+    // PrecedenceClimbing instruction
+    g["PrecedenceClimbing"] <=
+        seq(lit("precedence"), g["SpacesZom"], g["PrecedenceInfo"],
+            zom(seq(g["SpacesOom"], g["PrecedenceInfo"])), g["SpacesZom"]);
+    g["PrecedenceInfo"] <=
+        seq(g["PrecedenceAssoc"],
+            oom(seq(ign(g["SpacesOom"]), g["PrecedenceOpe"])));
+    g["PrecedenceOpe"] <=
+        tok(oom(
+            seq(npd(cho(g["PrecedenceAssoc"], g["Space"], chr('}'))), dot())));
+    g["PrecedenceAssoc"] <= cls("LR");
+
     // Set definition names
     for (auto &x : g) {
       x.second.name = x.first;
@@ -2834,6 +2992,8 @@ private:
 
   void setup_actions() {
     g["Definition"] = [&](const SemanticValues &sv, any &dt) {
+      Data &data = *any_cast<Data *>(dt);
+
       auto is_macro = sv.choice() == 0;
       auto ignore = any_cast<bool>(sv[0]);
       auto name = any_cast<std::string>(sv[1]);
@@ -2843,11 +3003,15 @@ private:
       if (is_macro) {
         params = any_cast<std::vector<std::string>>(sv[2]);
         ope = any_cast<std::shared_ptr<Ope>>(sv[4]);
+        if (sv.size() == 6) {
+          data.instructions[name] = any_cast<Instruction>(sv[5]);
+        }
       } else {
         ope = any_cast<std::shared_ptr<Ope>>(sv[3]);
+        if (sv.size() == 5) {
+          data.instructions[name] = any_cast<Instruction>(sv[4]);
+        }
       }
-
-      Data &data = *any_cast<Data *>(dt);
 
       auto &grammar = *data.grammar;
       if (!grammar.count(name)) {
@@ -2928,8 +3092,7 @@ private:
       }
     };
 
-    g["Primary"] = [&](const SemanticValues &sv,
-                       any &dt) -> std::shared_ptr<Ope> {
+    g["Primary"] = [&](const SemanticValues &sv, any &dt) {
       Data &data = *any_cast<Data *>(dt);
 
       switch (sv.choice()) {
@@ -2944,10 +3107,13 @@ private:
           args = any_cast<std::vector<std::shared_ptr<Ope>>>(sv[2]);
         }
 
+        std::shared_ptr<Ope> ope =
+            ref(*data.grammar, ident, sv.c_str(), is_macro, args);
+
         if (ignore) {
-          return ign(ref(*data.grammar, ident, sv.c_str(), is_macro, args));
+          return ign(ope);
         } else {
-          return ref(*data.grammar, ident, sv.c_str(), is_macro, args);
+          return ope;
         }
       }
       case 2: { // (Expression)
@@ -3036,6 +3202,29 @@ private:
     g["Arguments"] = [](const SemanticValues &sv) {
       return sv.transform<std::shared_ptr<Ope>>();
     };
+
+    g["PrecedenceClimbing"] = [](const SemanticValues &sv) {
+      PrecedenceClimbing::BinOpeInfo binOpeInfo;
+      size_t level = 1;
+      for (auto v : sv) {
+        auto tokens = any_cast<std::vector<std::string>>(v);
+        auto assoc = tokens[0][0];
+        for (size_t i = 1; i < tokens.size(); i++) {
+          const auto &tok = tokens[i];
+          binOpeInfo[tok] = std::make_pair(level, assoc);
+        }
+        level++;
+      }
+      Instruction instruction;
+      instruction.type = "precedence";
+      instruction.data = binOpeInfo;
+      return instruction;
+    };
+    g["PrecedenceInfo"] = [](const SemanticValues &sv) {
+      return sv.transform<std::string>();
+    };
+    g["PrecedenceOpe"] = [](const SemanticValues &sv) { return sv.token(); };
+    g["PrecedenceAssoc"] = [](const SemanticValues &sv) { return sv.token(); };
   }
 
   std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
@@ -3170,6 +3359,33 @@ private:
           (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
     }
 
+    // Apply instructions
+    for (const auto &item : data.instructions) {
+      const auto &name = item.first;
+      const auto &instruction = item.second;
+
+      if (instruction.type == "precedence") {
+        auto &rule = grammar[name];
+
+        auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
+        auto &atom = seq.opes_[0];
+        auto &seq1 = dynamic_cast<Sequence &>(
+            *dynamic_cast<ZeroOrMore &>(*seq.opes_[1]).ope_);
+        auto &binop = seq1.opes_[0];
+        auto &atom1 = seq1.opes_[1];
+
+        if (atom != atom1) {
+          // TODO: check
+        }
+
+        const auto &info =
+            any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
+
+        rule.holder_->ope_ = pre(atom, binop, info, rule.action);
+        rule.disable_action = true;
+      }
+    }
+
     // Set root definition
     start = data.start;
 
@@ -3241,7 +3457,6 @@ template <typename Annotation> struct AstBase : public Annotation {
 template <typename T>
 void ast_to_s_core(const std::shared_ptr<T> &ptr, std::string &s, int level,
                    std::function<std::string(const T &ast, int level)> fn) {
-
   const auto &ast = *ptr;
   for (auto i = 0; i < level; i++) {
     s += "  ";
@@ -3266,7 +3481,6 @@ template <typename T>
 std::string
 ast_to_s(const std::shared_ptr<T> &ptr,
          std::function<std::string(const T &ast, int level)> fn = nullptr) {
-
   std::string s;
   ast_to_s_core(ptr, s, 0, fn);
   return s;
@@ -3280,7 +3494,6 @@ struct AstOptimizer {
   template <typename T>
   std::shared_ptr<T> optimize(std::shared_ptr<T> original,
                               std::shared_ptr<T> parent = nullptr) {
-
     auto found = std::find(filters_.begin(), filters_.end(), original->name) !=
                  filters_.end();
     bool opt = optimize_nodes_ ? !found : found;
@@ -3504,4 +3717,4 @@ private:
 
 #endif
 
-// vim: et ts=4 sw=4 cin cino={1s ff=unix
+// vim: et ts=2 sw=2 cin cino={1s ff=unix

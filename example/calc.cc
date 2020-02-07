@@ -1,64 +1,51 @@
-//
-//  calc.cc
-//
-//  Copyright (c) 2015 Yuji Hirose. All rights reserved.
-//  MIT License
-//
-
 #include <peglib.h>
+#include <assert.h>
 #include <iostream>
-#include <cstdlib>
 
 using namespace peg;
+using namespace std;
 
-int main(int argc, const char** argv)
-{
-    if (argc < 2 || std::string("--help") == argv[1]) {
-        std::cout << "usage: calc [formula]" << std::endl;
-        return 1;
-    }
-
-    auto reduce = [](const SemanticValues& sv) -> long {
-        auto result = any_cast<long>(sv[0]);
-        for (auto i = 1u; i < sv.size(); i += 2) {
-            auto num = any_cast<long>(sv[i + 1]);
-            auto ope = any_cast<char>(sv[i]);
-            switch (ope) {
-                case '+': result += num; break;
-                case '-': result -= num; break;
-                case '*': result *= num; break;
-                case '/': result /= num; break;
-            }
-        }
-        return result;
-    };
-
+int main(void) {
+    // (2) Make a parser
     parser parser(R"(
-        EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
-        TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
-        FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _
-        TERM_OPERATOR    <-  < [-+] > _
-        FACTOR_OPERATOR  <-  < [/*] > _
-        NUMBER           <-  < [0-9]+ > _
-        ~_               <-  [ \t\r\n]*
+        # Grammar for Calculator...
+        Additive    <- Multitive '+' Additive / Multitive
+        Multitive   <- Primary '*' Multitive / Primary
+        Primary     <- '(' Additive ')' / Number
+        Number      <- < [0-9]+ >
+        %whitespace <- [ \t]*
     )");
 
-    parser["EXPRESSION"]      = reduce;
-    parser["TERM"]            = reduce;
-    parser["TERM_OPERATOR"]   = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
-    parser["FACTOR_OPERATOR"] = [](const SemanticValues& sv) { return static_cast<char>(*sv.c_str()); };
-    parser["NUMBER"]          = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+    assert((bool)parser == true);
 
-    auto expr = argv[1];
-    long val = 0;
-    if (parser.parse(expr, val)) {
-        std::cout << expr << " = " << val << std::endl;
-        return 0;
-    }
+    // (3) Setup actions
+    parser["Additive"] = [](const SemanticValues& sv) {
+        switch (sv.choice()) {
+        case 0:  // "Multitive '+' Additive"
+            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
+        default: // "Multitive"
+            return any_cast<int>(sv[0]);
+        }
+    };
 
-    std::cout << "syntax error..." << std::endl;
+    parser["Multitive"] = [](const SemanticValues& sv) {
+        switch (sv.choice()) {
+        case 0:  // "Primary '*' Multitive"
+            return any_cast<int>(sv[0]) * any_cast<int>(sv[1]);
+        default: // "Primary"
+            return any_cast<int>(sv[0]);
+        }
+    };
 
-    return -1;
+    parser["Number"] = [](const SemanticValues& sv) {
+        return stoi(sv.token(), nullptr, 10);
+    };
+
+    // (4) Parse
+    parser.enable_packrat_parsing(); // Enable packrat parsing.
+
+    int val;
+    parser.parse(" (1 + 2) * 3 ", val);
+
+    assert(val == 9);
 }
-
-// vim: et ts=4 sw=4 cin cino={1s ff=unix
