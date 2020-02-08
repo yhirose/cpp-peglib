@@ -158,23 +158,23 @@ TEST_CASE("Precedence climbing with macro", "[precedence]")
 {
     // Create a PEG parser
     parser parser(R"(
-        EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
-        PRECEDENCE_PARSING(A, O) <-  A (O A)* {
-                                       precedence
-                                         L + - 
-                                         L * /
-                                     }
-        ATOM                     <-  NUMBER / '(' EXPRESSION ')'
-        OPERATOR                 <-  < [-+/*] >
-        NUMBER                   <-  < '-'? [0-9]+ >
-        %whitespace              <-  [ \t]*
+        EXPRESSION             <-  INFIX_EXPRESSION(ATOM, OPERATOR)
+        INFIX_EXPRESSION(A, O) <-  A (O A)* {
+                                     precedence
+                                       L + -
+                                       L * /
+                                   }
+        ATOM                   <-  NUMBER / '(' EXPRESSION ')'
+        OPERATOR               <-  < [-+/*] >
+        NUMBER                 <-  < '-'? [0-9]+ >
+        %whitespace            <-  [ \t]*
 	)");
 
     bool ret = parser;
     REQUIRE(ret == true);
 
     // Setup actions
-    parser["PRECEDENCE_PARSING"] = [](const SemanticValues& sv) -> long {
+    parser["INFIX_EXPRESSION"] = [](const SemanticValues& sv) -> long {
         auto result = any_cast<long>(sv[0]);
         if (sv.size() > 1) {
             auto ope = any_cast<char>(sv[1]);
@@ -256,7 +256,7 @@ TEST_CASE("Precedence climbing error3", "[precedence]") {
         EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
         PRECEDENCE_PARSING(A, O) <-  A (O A)+ {
                                        precedence
-                                         L + - 
+                                         L + -
                                          L * /
                                      }
         ATOM                     <-  NUMBER / '(' EXPRESSION ')'

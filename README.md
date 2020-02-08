@@ -24,7 +24,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
-*Parsing expressions by [Precedence climbing](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)* algorithm is also supported.
+*Parsing infix expression by [Precedence climbing](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)* algorithm is also supported.
 
   IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
@@ -343,26 +343,25 @@ List(I, D) ← I (D I)*
 T(x)       ← < x > _
 ```
 
-Parsing expressions by Precedence climbing altorithm
-----------------------------------------------------
+Parsing infix expression by Precedence climbing
+-----------------------------------------------
 
 ```cpp
 parser parser(R"(
-    EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
+    EXPRESSION               <-  INFIX_EXPRESSION(ATOM, OPERATOR)
     ATOM                     <-  NUMBER / '(' EXPRESSION ')'
     OPERATOR                 <-  < [-+/*] >
     NUMBER                   <-  < '-'? [0-9]+ >
     %whitespace              <-  [ \t]*
 
-    # Parsing expressions by Precedence climbing altorithm
-    PRECEDENCE_PARSING(A, O) <-  A (O A)* {
-                                   precedence
-                                     L + -
-                                     L * /
-                                 }
+    INFIX_EXPRESSION(A, O) <-  A (O A)* {
+      precedence
+        L + -
+        L * /
+    }
 )");
 
-parser["PRECEDENCE_PARSING"] = [](const SemanticValues& sv) -> long {
+parser["INFIX_EXPRESSION"] = [](const SemanticValues& sv) -> long {
     auto result = any_cast<long>(sv[0]);
     if (sv.size() > 1) {
         auto ope = any_cast<char>(sv[1]);
