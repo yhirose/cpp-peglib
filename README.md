@@ -21,10 +21,9 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name<` ... `>` (Named capture operator)
   * `$name` (Backreference operator)
   * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
+  * `{ precedence L - + L / * }` (Parsing infix expression)
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
-
-*Parsing infix expression by [Precedence climbing](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)* algorithm is also supported.
 
   IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
@@ -346,6 +345,8 @@ T(x)       ← < x > _
 Parsing infix expression by Precedence climbing
 -----------------------------------------------
 
+Regarding the *precedence climbing algorithm*, please see [this article](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing).
+
 ```cpp
 parser parser(R"(
     EXPRESSION               <-  INFIX_EXPRESSION(ATOM, OPERATOR)
@@ -354,6 +355,7 @@ parser parser(R"(
     NUMBER                   <-  < '-'? [0-9]+ >
     %whitespace              <-  [ \t]*
 
+    # Declare order of precedence
     INFIX_EXPRESSION(A, O) <-  A (O A)* {
       precedence
         L + -
