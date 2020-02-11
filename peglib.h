@@ -403,6 +403,60 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
 }
 
 /*-----------------------------------------------------------------------------
+ *  Trie
+ *---------------------------------------------------------------------------*/
+
+class Trie {
+public:
+  Trie() = default;
+  Trie(const Trie &) = default;
+
+  Trie(const std::vector<std::string> &items) {
+    for (const auto &item : items) {
+      for (size_t len = 1; len <= item.size(); len++) {
+        auto last = len == item.size();
+        std::string s(item.c_str(), len);
+        auto it = dic_.find(s);
+        if (it == dic_.end()) {
+          dic_.emplace(s, Info{last, last});
+        } else if (last) {
+          it->second.match = true;
+        } else {
+          it->second.done = false;
+        }
+      }
+    }
+  }
+
+  size_t match(const char *text, size_t text_len) const {
+    size_t match_len = 0;
+    {
+      auto done = false;
+      size_t len = 1;
+      while (!done) {
+        std::string s(text, len);
+        auto it = dic_.find(s);
+        if (it == dic_.end()) {
+          done = true;
+        } else {
+          if (it->second.match) { match_len = len; }
+          if (it->second.done) { done = true; }
+        }
+        len += 1;
+      }
+    }
+    return match_len;
+  }
+
+private:
+  struct Info {
+    bool done;
+    bool match;
+  };
+  std::unordered_map<std::string, Info> dic_;
+};
+
+/*-----------------------------------------------------------------------------
  *  PEG
  *---------------------------------------------------------------------------*/
 
@@ -1236,6 +1290,18 @@ public:
   std::shared_ptr<Ope> ope_;
 };
 
+class Dictionary : public Ope, public std::enable_shared_from_this<Dictionary> {
+public:
+  Dictionary(const std::vector<std::string> &v) : trie_(v) {}
+
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
+                    any &dt) const override;
+
+  void accept(Visitor &v) override;
+
+  Trie trie_;
+};
+
 class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
@@ -1589,6 +1655,10 @@ inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope> &ope) {
   return std::make_shared<NotPredicate>(ope);
 }
 
+inline std::shared_ptr<Ope> dic(const std::vector<std::string> &v) {
+  return std::make_shared<Dictionary>(v);
+}
+
 inline std::shared_ptr<Ope> lit(const std::string &s) {
   return std::make_shared<LiteralString>(s, false);
 }
@@ -1677,6 +1747,7 @@ struct Ope::Visitor {
   virtual void visit(Option & /*ope*/) {}
   virtual void visit(AndPredicate & /*ope*/) {}
   virtual void visit(NotPredicate & /*ope*/) {}
+  virtual void visit(Dictionary & /*ope*/) {}
   virtual void visit(LiteralString & /*ope*/) {}
   virtual void visit(CharacterClass & /*ope*/) {}
   virtual void visit(Character & /*ope*/) {}
@@ -1707,6 +1778,7 @@ struct TraceOpeName : public Ope::Visitor {
   void visit(Option &ope) override { name = "Option"; }
   void visit(AndPredicate &ope) override { name = "AndPredicate"; }
   void visit(NotPredicate &ope) override { name = "NotPredicate"; }
+  void visit(Dictionary &ope) override { name = "Dictionary"; }
   void visit(LiteralString &ope) override { name = "LiteralString"; }
   void visit(CharacterClass &ope) override { name = "CharacterClass"; }
   void visit(Character &ope) override { name = "Character"; }
@@ -1762,6 +1834,7 @@ struct IsLiteralToken : public Ope::Visitor {
     result_ = true;
   }
 
+  void visit(Dictionary & /*ope*/) override { result_ = true; }
   void visit(LiteralString & /*ope*/) override { result_ = true; }
 
   static bool check(Ope &ope) {
@@ -1853,6 +1926,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
     ope.ope_->accept(*this);
     done_ = false;
   }
+  void visit(Dictionary &ope) override { done_ = true; }
   void visit(LiteralString &ope) override { done_ = !ope.lit_.empty(); }
   void visit(CharacterClass & /*ope*/) override { done_ = true; }
   void visit(Character & /*ope*/) override { done_ = true; }
@@ -2101,6 +2175,7 @@ struct FindReference : public Ope::Visitor {
     ope.ope_->accept(*this);
     found_ope = npd(found_ope);
   }
+  void visit(Dictionary &ope) override { found_ope = ope.shared_from_this(); }
   void visit(LiteralString &ope) override {
     found_ope = ope.shared_from_this();
   }
@@ -2427,6 +2502,15 @@ inline size_t Ope::parse(const char *s, size_t n, SemanticValues &sv,
   return parse_core(s, n, sv, c, dt);
 }
 
+inline size_t Dictionary::parse_core(const char *s, size_t n,
+                                     SemanticValues &sv, Context &c,
+                                     any &dt) const {
+  auto len = trie_.match(s, n);
+  if (len > 0) { return len; }
+  c.set_error_pos(s);
+  return static_cast<size_t>(-1);
+}
+
 inline size_t LiteralString::parse_core(const char *s, size_t n,
                                         SemanticValues &sv, Context &c,
                                         any &dt) const {
@@ -2587,7 +2671,8 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
   throw std::runtime_error("Invalid back reference...");
 }
 
-inline Definition& PrecedenceClimbing::get_reference_for_binop(Context &c) const {
+inline Definition &
+PrecedenceClimbing::get_reference_for_binop(Context &c) const {
   if (rule_.is_macro) {
     // Reference parameter in macro
     const auto &args = c.top_args();
@@ -2607,7 +2692,6 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   if (fail(len)) { return len; }
 
   std::string tok;
-  //auto &rule = dynamic_cast<Reference &>(*binop_).rule_;
   auto &rule = get_reference_for_binop(c);
   auto action = rule.action;
 
@@ -2688,6 +2772,7 @@ inline void OneOrMore::accept(Visitor &v) { v.visit(*this); }
 inline void Option::accept(Visitor &v) { v.visit(*this); }
 inline void AndPredicate::accept(Visitor &v) { v.visit(*this); }
 inline void NotPredicate::accept(Visitor &v) { v.visit(*this); }
+inline void Dictionary::accept(Visitor &v) { v.visit(*this); }
 inline void LiteralString::accept(Visitor &v) { v.visit(*this); }
 inline void CharacterClass::accept(Visitor &v) { v.visit(*this); }
 inline void Character::accept(Visitor &v) { v.visit(*this); }
@@ -2901,8 +2986,8 @@ private:
             seq(g["BeginTok"], g["Expression"], g["EndTok"]),
             seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]),
             seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
-            g["LiteralI"], g["Literal"], g["NegatedClass"], g["Class"],
-            g["DOT"]);
+            g["LiteralI"], g["Dictionary"], g["Literal"], g["NegatedClass"],
+            g["Class"], g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
     g["IdentCont"] <= seq(g["IdentStart"], zom(g["IdentRest"]));
@@ -2913,16 +2998,20 @@ private:
 
     g["IdentRest"] <= cho(g["IdentStart"], cls("0-9"));
 
+    g["Dictionary"] <= seq(g["LiteralD"], oom(seq(g["PIPE"], g["LiteralD"])));
+
+    auto lit_ope = cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))),
+                           cls("'"), g["Spacing"]),
+                       seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))),
+                           cls("\""), g["Spacing"]));
+    g["Literal"] <= lit_ope;
+    g["LiteralD"] <= lit_ope;
+
     g["LiteralI"] <=
         cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), lit("'i"),
                 g["Spacing"]),
             seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), lit("\"i"),
                 g["Spacing"]));
-
-    g["Literal"] <= cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))),
-                            cls("'"), g["Spacing"]),
-                        seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))),
-                            cls("\""), g["Spacing"]));
 
     // NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
     g["Class"] <= seq(chr('['), npd(chr('^')),
@@ -2943,6 +3032,7 @@ private:
 
     g["LEFTARROW"] <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
     ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
+    ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
     g["NOT"] <= seq(chr('!'), g["Spacing"]);
     g["QUESTION"] <= seq(chr('?'), g["Spacing"]);
@@ -3160,13 +3250,22 @@ private:
       return std::string(sv.c_str(), sv.length());
     };
 
+    g["Dictionary"] = [](const SemanticValues &sv) {
+      auto items = sv.transform<std::string>();
+      return dic(items);
+    };
+
+    g["Literal"] = [](const SemanticValues &sv) {
+      const auto &tok = sv.tokens.front();
+      return lit(resolve_escape_sequence(tok.first, tok.second));
+    };
     g["LiteralI"] = [](const SemanticValues &sv) {
       const auto &tok = sv.tokens.front();
       return liti(resolve_escape_sequence(tok.first, tok.second));
     };
-    g["Literal"] = [](const SemanticValues &sv) {
-      const auto &tok = sv.tokens.front();
-      return lit(resolve_escape_sequence(tok.first, tok.second));
+    g["LiteralD"] = [](const SemanticValues &sv) {
+      auto &tok = sv.tokens.front();
+      return resolve_escape_sequence(tok.first, tok.second);
     };
 
     g["Class"] = [](const SemanticValues &sv) {
