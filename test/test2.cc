@@ -878,4 +878,28 @@ TEST_CASE("Line information test", "[line information]")
     REQUIRE(locations[6] == std::make_pair<size_t, size_t>(3, 1));
 }
 
+TEST_CASE("Dictionary", "[dic]")
+{
+    parser parser(R"(
+        START <- 'This month is ' MONTH '.'
+        MONTH <- 'Jan' | 'January' | 'Feb' | 'February'
+	)");
+
+    REQUIRE(parser.parse("This month is Jan."));
+    REQUIRE(parser.parse("This month is January."));
+    REQUIRE_FALSE(parser.parse("This month is Jannuary."));
+    REQUIRE_FALSE(parser.parse("This month is ."));
+}
+
+TEST_CASE("Dictionary invalid", "[dic]")
+{
+    parser parser(R"(
+        START <- 'This month is ' MONTH '.'
+        MONTH <- 'Jan' | 'January' | [a-z]+ | 'Feb' | 'February'
+	)");
+
+    bool ret = parser;
+    REQUIRE_FALSE(ret);
+}
+
 // vim: et ts=4 sw=4 cin cino={1s ff=unix

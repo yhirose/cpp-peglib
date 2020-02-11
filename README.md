@@ -20,6 +20,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `$name(` ... `)` (Capture scope operator)
   * `$name<` ... `>` (Named capture operator)
   * `$name` (Backreference operator)
+  * `|` (Dictionary operator)
   * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
   * `{ precedence L - + L / * }` (Parsing infix expression)
 
@@ -320,6 +321,16 @@ parser.parse("This is <b>a <u>test</b> text</u>."); // NG
 parser.parse("This is <b>a <u>test text</b>.");     // NG
 ```
 
+Dictionary
+----------
+
+`|` operator allows us to make a word dictionary for fast lookup by using Trie structure internally. We don't have to worry about the order of words.
+
+```peg
+START <- 'This month is ' MONTH '.'
+MONTH <- 'Jan' | 'January' | 'Feb' | 'February' | '...'
+```
+
 Parameterized Rule or Macro
 ---------------------------
 
@@ -464,6 +475,8 @@ The following are available operators:
 | csc      | Capture scope                   |
 | cap      | Capture                         |
 | bkr      | Back reference                  |
+| dic      | Dictionary                      |
+| pre      | Infix expression                |
 | usr      | User defined parser             |
 
 Adjust definitions
