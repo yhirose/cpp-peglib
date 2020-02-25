@@ -433,7 +433,7 @@ public:
     {
       auto done = false;
       size_t len = 1;
-      while (!done) {
+      while (!done && len <= text_len) {
         std::string s(text, len);
         auto it = dic_.find(s);
         if (it == dic_.end()) {
