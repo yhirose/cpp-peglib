@@ -1026,20 +1026,20 @@ public:
       i += len;
     }
     if (!chldsv.empty()) {
-      for (size_t i = 0; i < chldsv.size(); i++) {
-        sv.emplace_back(std::move(chldsv[i]));
+      for (size_t j = 0; j < chldsv.size(); j++) {
+        sv.emplace_back(std::move(chldsv[j]));
       }
     }
     if (!chldsv.tags.empty()) {
-      for (size_t i = 0; i < chldsv.tags.size(); i++) {
-        sv.tags.emplace_back(std::move(chldsv.tags[i]));
+      for (size_t j = 0; j < chldsv.tags.size(); j++) {
+        sv.tags.emplace_back(std::move(chldsv.tags[j]));
       }
     }
     sv.s_ = chldsv.c_str();
     sv.n_ = chldsv.length();
     if (!chldsv.tokens.empty()) {
-      for (size_t i = 0; i < chldsv.tokens.size(); i++) {
-        sv.tokens.emplace_back(std::move(chldsv.tokens[i]));
+      for (size_t j = 0; j < chldsv.tokens.size(); j++) {
+        sv.tokens.emplace_back(std::move(chldsv.tokens[j]));
       }
     }
     return i;
@@ -1239,8 +1239,8 @@ class AndPredicate : public Ope {
 public:
   AndPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any &dt) const override {
     auto &chldsv = c.push();
     c.push_capture_scope();
     auto se = make_scope_exit([&]() {
@@ -1265,8 +1265,8 @@ class NotPredicate : public Ope {
 public:
   NotPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any &dt) const override {
     auto save_error_pos = c.error_pos;
     auto &chldsv = c.push();
     c.push_capture_scope();
@@ -1347,8 +1347,8 @@ public:
     assert(!ranges_.empty());
   }
 
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any & /*dt*/) const override {
     if (n < 1) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1386,8 +1386,8 @@ class Character : public Ope, public std::enable_shared_from_this<Character> {
 public:
   Character(char ch) : ch_(ch) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any & /*dt*/) const override {
     if (n < 1 || s[0] != ch_) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1403,8 +1403,8 @@ public:
 class AnyCharacter : public Ope,
                      public std::enable_shared_from_this<AnyCharacter> {
 public:
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any & /*dt*/) const override {
     auto len = codepoint_length(s, n);
     if (len < 1) {
       c.set_error_pos(s);
@@ -1471,8 +1471,8 @@ class Ignore : public Ope {
 public:
   Ignore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues & /*sv*/,
+                    Context &c, any &dt) const override {
     const auto &rule = *ope_;
     auto &chldsv = c.push();
     auto se = make_scope_exit([&]() { c.pop(); });
@@ -1491,8 +1491,8 @@ typedef std::function<size_t(const char *s, size_t n, SemanticValues &sv,
 class User : public Ope {
 public:
   User(Parser fn) : fn_(fn) {}
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues &sv,
+                    Context & /*c*/, any &dt) const override {
     assert(fn_);
     return fn_(s, n, sv, dt);
   }
@@ -1766,34 +1766,38 @@ struct Ope::Visitor {
 };
 
 struct IsReference : public Ope::Visitor {
-  void visit(Reference &ope) override { is_reference = true; }
+  void visit(Reference & /*ope*/) override { is_reference = true; }
   bool is_reference = false;
 };
 
 struct TraceOpeName : public Ope::Visitor {
-  void visit(Sequence &ope) override { name = "Sequence"; }
-  void visit(PrioritizedChoice &ope) override { name = "PrioritizedChoice"; }
-  void visit(ZeroOrMore &ope) override { name = "ZeroOrMore"; }
-  void visit(OneOrMore &ope) override { name = "OneOrMore"; }
-  void visit(Option &ope) override { name = "Option"; }
-  void visit(AndPredicate &ope) override { name = "AndPredicate"; }
-  void visit(NotPredicate &ope) override { name = "NotPredicate"; }
-  void visit(Dictionary &ope) override { name = "Dictionary"; }
-  void visit(LiteralString &ope) override { name = "LiteralString"; }
-  void visit(CharacterClass &ope) override { name = "CharacterClass"; }
-  void visit(Character &ope) override { name = "Character"; }
-  void visit(AnyCharacter &ope) override { name = "AnyCharacter"; }
-  void visit(CaptureScope &ope) override { name = "CaptureScope"; }
-  void visit(Capture &ope) override { name = "Capture"; }
-  void visit(TokenBoundary &ope) override { name = "TokenBoundary"; }
-  void visit(Ignore &ope) override { name = "Ignore"; }
-  void visit(User &ope) override { name = "User"; }
-  void visit(WeakHolder &ope) override { name = "WeakHolder"; }
+  void visit(Sequence & /*ope*/) override { name = "Sequence"; }
+  void visit(PrioritizedChoice & /*ope*/) override {
+    name = "PrioritizedChoice";
+  }
+  void visit(ZeroOrMore & /*ope*/) override { name = "ZeroOrMore"; }
+  void visit(OneOrMore & /*ope*/) override { name = "OneOrMore"; }
+  void visit(Option & /*ope*/) override { name = "Option"; }
+  void visit(AndPredicate & /*ope*/) override { name = "AndPredicate"; }
+  void visit(NotPredicate & /*ope*/) override { name = "NotPredicate"; }
+  void visit(Dictionary & /*ope*/) override { name = "Dictionary"; }
+  void visit(LiteralString & /*ope*/) override { name = "LiteralString"; }
+  void visit(CharacterClass & /*ope*/) override { name = "CharacterClass"; }
+  void visit(Character & /*ope*/) override { name = "Character"; }
+  void visit(AnyCharacter & /*ope*/) override { name = "AnyCharacter"; }
+  void visit(CaptureScope & /*ope*/) override { name = "CaptureScope"; }
+  void visit(Capture & /*ope*/) override { name = "Capture"; }
+  void visit(TokenBoundary & /*ope*/) override { name = "TokenBoundary"; }
+  void visit(Ignore & /*ope*/) override { name = "Ignore"; }
+  void visit(User & /*ope*/) override { name = "User"; }
+  void visit(WeakHolder & /*ope*/) override { name = "WeakHolder"; }
   void visit(Holder &ope) override { name = ope.trace_name(); }
-  void visit(Reference &ope) override { name = "Reference"; }
-  void visit(Whitespace &ope) override { name = "Whitespace"; }
-  void visit(BackReference &ope) override { name = "BackReference"; }
-  void visit(PrecedenceClimbing &ope) override { name = "PrecedenceClimbing"; }
+  void visit(Reference & /*ope*/) override { name = "Reference"; }
+  void visit(Whitespace & /*ope*/) override { name = "Whitespace"; }
+  void visit(BackReference & /*ope*/) override { name = "BackReference"; }
+  void visit(PrecedenceClimbing & /*ope*/) override {
+    name = "PrecedenceClimbing";
+  }
 
   const char *name = nullptr;
 };
@@ -1926,7 +1930,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
     ope.ope_->accept(*this);
     done_ = false;
   }
-  void visit(Dictionary &ope) override { done_ = true; }
+  void visit(Dictionary & /*ope*/) override { done_ = true; }
   void visit(LiteralString &ope) override { done_ = !ope.lit_.empty(); }
   void visit(CharacterClass & /*ope*/) override { done_ = true; }
   void visit(Character & /*ope*/) override { done_ = true; }
@@ -2357,8 +2361,8 @@ public:
   }
 
   std::string name;
-  const char *s = nullptr;
-  ;
+  const char *s_ = nullptr;
+
   size_t id = 0;
   Action action;
   std::function<void(const char *s, size_t n, any &dt)> enter;
@@ -2503,8 +2507,8 @@ inline size_t Ope::parse(const char *s, size_t n, SemanticValues &sv,
 }
 
 inline size_t Dictionary::parse_core(const char *s, size_t n,
-                                     SemanticValues &sv, Context &c,
-                                     any &dt) const {
+                                     SemanticValues & /*sv*/, Context &c,
+                                     any & /*dt*/) const {
   auto len = trie_.match(s, n);
   if (len > 0) { return len; }
   c.set_error_pos(s);
@@ -2660,7 +2664,8 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
                                         any &dt) const {
   auto size = static_cast<int>(c.capture_scope_stack_size);
   for (auto i = size - 1; i >= 0; i--) {
-    const auto &cs = c.capture_scope_stack[i];
+    auto index = static_cast<size_t>(i);
+    const auto &cs = c.capture_scope_stack[index];
     if (cs.find(name_) != cs.end()) {
       const auto &lit = cs.at(name_);
       auto init_is_word = false;
@@ -2695,12 +2700,12 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   auto &rule = get_reference_for_binop(c);
   auto action = rule.action;
 
-  rule.action = [&](SemanticValues &sv, any &dt) -> any {
-    tok = sv.token();
+  rule.action = [&](SemanticValues &sv2, any &dt2) -> any {
+    tok = sv2.token();
     if (action) {
-      return action(sv, dt);
-    } else if (!sv.empty()) {
-      return sv[0];
+      return action(sv2, dt2);
+    } else if (!sv2.empty()) {
+      return sv2[0];
     }
     return any();
   };
@@ -3124,7 +3129,7 @@ private:
         auto &rule = grammar[name];
         rule <= ope;
         rule.name = name;
-        rule.s = sv.c_str();
+        rule.s_ = sv.c_str();
         rule.ignoreSemanticValue = ignore;
         rule.is_macro = is_macro;
         rule.params = params;
@@ -3360,7 +3365,7 @@ private:
 
       if (atom_name != atom1_name || atom_name == binop_name) {
         if (log) {
-          auto line = line_info(s, rule.s);
+          auto line = line_info(s, rule.s_);
           log(line.first, line.second,
               "'precedence' instruction cannt be applied to '" + rule.name +
                   "'.");
@@ -3372,7 +3377,7 @@ private:
       rule.disable_action = true;
     } catch (...) {
       if (log) {
-        auto line = line_info(s, rule.s);
+        auto line = line_info(s, rule.s_);
         log(line.first, line.second,
             "'precedence' instruction cannt be applied to '" + rule.name +
                 "'.");
