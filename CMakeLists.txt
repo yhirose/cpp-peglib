@@ -39,3 +39,5 @@ enable_testing()
 add_subdirectory(test)
 add_subdirectory(example)
 add_subdirectory(lint)
+
+install(FILES peglib.h DESTINATION include)
