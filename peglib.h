@@ -3035,7 +3035,7 @@ private:
                          cls("0-9a-fA-F"), cls("0-9a-fA-F")),
                      seq(npd(chr('\\')), dot()));
 
-    g["LEFTARROW"] <= seq(cho(lit("<-"), lit(u8"←")), g["Spacing"]);
+    g["LEFTARROW"] <= seq(cho(lit("<-"), lit(reinterpret_cast<const char*>(u8"←"))), g["Spacing"]);
     ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
     ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
