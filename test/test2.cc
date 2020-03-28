@@ -476,6 +476,66 @@ TEST_CASE("Backreference with Option test", "[backreference]")
     REQUIRE_THROWS_AS(parser.parse("branchthatiswron_branchthatiscorrect"), std::runtime_error);
 }
 
+TEST_CASE("Repetition {0}", "[repetition]")
+{
+    parser parser(R"(
+        START <- '(' DIGIT{3} ') ' DIGIT{3} '-' DIGIT{4}
+        DIGIT <- [0-9]
+    )");
+    REQUIRE(parser.parse("(123) 456-7890"));
+    REQUIRE(!parser.parse("(12a) 456-7890"));
+    REQUIRE(!parser.parse("(123) 45-7890"));
+    REQUIRE(!parser.parse("(123) 45-7a90"));
+}
+
+TEST_CASE("Repetition {2,4}", "[repetition]")
+{
+    parser parser(R"(
+        START <- DIGIT{2,4}
+        DIGIT <- [0-9]
+    )");
+    REQUIRE(!parser.parse("1"));
+    REQUIRE(parser.parse("12"));
+    REQUIRE(parser.parse("123"));
+    REQUIRE(parser.parse("1234"));
+    REQUIRE(!parser.parse("12345"));
+}
+
+TEST_CASE("Repetition {2,1}", "[repetition]")
+{
+    parser parser(R"(
+        START <- DIGIT{2,1} # invalid range
+        DIGIT <- [0-9]
+    )");
+    REQUIRE(!parser.parse("1"));
+    REQUIRE(parser.parse("12"));
+    REQUIRE(!parser.parse("123"));
+}
+
+TEST_CASE("Repetition {2,}", "[repetition]")
+{
+    parser parser(R"(
+        START <- DIGIT{2,}
+        DIGIT <- [0-9]
+    )");
+    REQUIRE(!parser.parse("1"));
+    REQUIRE(parser.parse("12"));
+    REQUIRE(parser.parse("123"));
+    REQUIRE(parser.parse("1234"));
+}
+
+TEST_CASE("Repetition {,2}", "[repetition]")
+{
+    parser parser(R"(
+        START <- DIGIT{,2}
+        DIGIT <- [0-9]
+    )");
+    REQUIRE(parser.parse("1"));
+    REQUIRE(parser.parse("12"));
+    REQUIRE(!parser.parse("123"));
+    REQUIRE(!parser.parse("1234"));
+}
+
 TEST_CASE("Left recursive test", "[left recursive]")
 {
     parser parser(R"(

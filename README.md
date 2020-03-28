@@ -12,6 +12,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 
   * `'...'i` (Case-insensitive literal operator)
   * `[^...]` (Negated character class operator)
+  * `{2,5}` (Regex-like repetition operator)
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)
   * `\x20` (Hex number char)

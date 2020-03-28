@@ -29,6 +29,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1107,15 +1108,31 @@ public:
   std::vector<std::shared_ptr<Ope>> opes_;
 };
 
-class ZeroOrMore : public Ope {
+class Repetition : public Ope {
 public:
-  ZeroOrMore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
+  Repetition(const std::shared_ptr<Ope> &ope, size_t min, size_t max)
+      : ope_(ope), min_(min), max_(max) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
                     any &dt) const override {
-    auto save_error_pos = c.error_pos;
+    size_t count = 0;
     size_t i = 0;
-    while (n - i > 0) {
+    while (count < min_) {
+      c.push_capture_scope();
+      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
+      const auto &rule = *ope_;
+      auto len = rule.parse(s + i, n - i, sv, c, dt);
+      if (success(len)) {
+        c.shift_capture_values();
+      } else {
+        return static_cast<size_t>(-1);
+      }
+      i += len;
+      count++;
+    }
+
+    auto save_error_pos = c.error_pos;
+    while (n - i > 0 && count < max_) {
       c.push_capture_scope();
       auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
       auto save_sv_size = sv.size();
@@ -1138,101 +1155,34 @@ public:
         break;
       }
       i += len;
+      count++;
     }
     return i;
   }
 
   void accept(Visitor &v) override;
 
-  std::shared_ptr<Ope> ope_;
-};
-
-class OneOrMore : public Ope {
-public:
-  OneOrMore(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
-
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
-    size_t len = 0;
-    {
-      c.push_capture_scope();
-      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
-      const auto &rule = *ope_;
-      len = rule.parse(s, n, sv, c, dt);
-      if (success(len)) {
-        c.shift_capture_values();
-      } else {
-        return static_cast<size_t>(-1);
-      }
-    }
-    auto save_error_pos = c.error_pos;
-    auto i = len;
-    while (n - i > 0) {
-      c.push_capture_scope();
-      auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
-      auto save_sv_size = sv.size();
-      auto save_tok_size = sv.tokens.size();
-      const auto &rule = *ope_;
-      len = rule.parse(s + i, n - i, sv, c, dt);
-      if (success(len)) {
-        c.shift_capture_values();
-      } else {
-        if (sv.size() != save_sv_size) {
-          sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-          sv.tags.erase(sv.tags.begin() +
-                        static_cast<std::ptrdiff_t>(save_sv_size));
-        }
-        if (sv.tokens.size() != save_tok_size) {
-          sv.tokens.erase(sv.tokens.begin() +
-                          static_cast<std::ptrdiff_t>(save_tok_size));
-        }
-        c.error_pos = save_error_pos;
-        break;
-      }
-      i += len;
-    }
-    return i;
+  bool is_zom() const {
+    return min_ == 0 && max_ == std::numeric_limits<size_t>::max();
   }
 
-  void accept(Visitor &v) override;
-
-  std::shared_ptr<Ope> ope_;
-};
-
-class Option : public Ope {
-public:
-  Option(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
-
-  size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
-                    any &dt) const override {
-    auto save_error_pos = c.error_pos;
-    auto save_sv_size = sv.size();
-    auto save_tok_size = sv.tokens.size();
-    c.push_capture_scope();
-    auto se = make_scope_exit([&]() { c.pop_capture_scope(); });
-    const auto &rule = *ope_;
-    auto len = rule.parse(s, n, sv, c, dt);
-    if (success(len)) {
-      c.shift_capture_values();
-      return len;
-    } else {
-      if (sv.size() != save_sv_size) {
-        sv.erase(sv.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-        sv.tags.erase(sv.tags.begin() +
-                      static_cast<std::ptrdiff_t>(save_sv_size));
-      }
-      if (sv.tokens.size() != save_tok_size) {
-        sv.tokens.erase(sv.tokens.begin() +
-                        static_cast<std::ptrdiff_t>(save_tok_size));
-      }
-      c.error_pos = save_error_pos;
-      return 0;
-    }
+  static std::shared_ptr<Repetition> zom(const std::shared_ptr<Ope> &ope) {
+    return std::make_shared<Repetition>(ope, 0,
+                                        std::numeric_limits<size_t>::max());
   }
 
-  void accept(Visitor &v) override;
+  static std::shared_ptr<Repetition> oom(const std::shared_ptr<Ope> &ope) {
+    return std::make_shared<Repetition>(ope, 1,
+                                        std::numeric_limits<size_t>::max());
+  }
+
+  static std::shared_ptr<Repetition> opt(const std::shared_ptr<Ope> &ope) {
+    return std::make_shared<Repetition>(ope, 0, 1);
+  }
 
   std::shared_ptr<Ope> ope_;
+  size_t min_;
+  size_t max_;
 };
 
 class AndPredicate : public Ope {
@@ -1636,15 +1586,20 @@ template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
 }
 
 inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope> &ope) {
-  return std::make_shared<ZeroOrMore>(ope);
+  return Repetition::zom(ope);
 }
 
 inline std::shared_ptr<Ope> oom(const std::shared_ptr<Ope> &ope) {
-  return std::make_shared<OneOrMore>(ope);
+  return Repetition::oom(ope);
 }
 
 inline std::shared_ptr<Ope> opt(const std::shared_ptr<Ope> &ope) {
-  return std::make_shared<Option>(ope);
+  return Repetition::opt(ope);
+}
+
+inline std::shared_ptr<Ope> rep(const std::shared_ptr<Ope> &ope, size_t min,
+                                size_t max) {
+  return std::make_shared<Repetition>(ope, min, max);
 }
 
 inline std::shared_ptr<Ope> apd(const std::shared_ptr<Ope> &ope) {
@@ -1742,9 +1697,7 @@ struct Ope::Visitor {
   virtual ~Visitor() {}
   virtual void visit(Sequence & /*ope*/) {}
   virtual void visit(PrioritizedChoice & /*ope*/) {}
-  virtual void visit(ZeroOrMore & /*ope*/) {}
-  virtual void visit(OneOrMore & /*ope*/) {}
-  virtual void visit(Option & /*ope*/) {}
+  virtual void visit(Repetition & /*ope*/) {}
   virtual void visit(AndPredicate & /*ope*/) {}
   virtual void visit(NotPredicate & /*ope*/) {}
   virtual void visit(Dictionary & /*ope*/) {}
@@ -1775,9 +1728,7 @@ struct TraceOpeName : public Ope::Visitor {
   void visit(PrioritizedChoice & /*ope*/) override {
     name = "PrioritizedChoice";
   }
-  void visit(ZeroOrMore & /*ope*/) override { name = "ZeroOrMore"; }
-  void visit(OneOrMore & /*ope*/) override { name = "OneOrMore"; }
-  void visit(Option & /*ope*/) override { name = "Option"; }
+  void visit(Repetition & /*ope*/) override { name = "Repetition"; }
   void visit(AndPredicate & /*ope*/) override { name = "AndPredicate"; }
   void visit(NotPredicate & /*ope*/) override { name = "NotPredicate"; }
   void visit(Dictionary & /*ope*/) override { name = "Dictionary"; }
@@ -1813,9 +1764,7 @@ struct AssignIDToDefinition : public Ope::Visitor {
       op->accept(*this);
     }
   }
-  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
   void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -1862,9 +1811,7 @@ struct TokenChecker : public Ope::Visitor {
       op->accept(*this);
     }
   }
-  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
   void visit(Capture &ope) override { ope.ope_->accept(*this); }
   void visit(TokenBoundary & /*ope*/) override { has_token_boundary_ = true; }
@@ -1910,17 +1857,9 @@ struct DetectLeftRecursion : public Ope::Visitor {
       }
     }
   }
-  void visit(ZeroOrMore &ope) override {
+  void visit(Repetition &ope) override {
     ope.ope_->accept(*this);
-    done_ = false;
-  }
-  void visit(OneOrMore &ope) override {
-    ope.ope_->accept(*this);
-    done_ = true;
-  }
-  void visit(Option &ope) override {
-    ope.ope_->accept(*this);
-    done_ = false;
+    done_ = ope.min_ > 0;
   }
   void visit(AndPredicate &ope) override {
     ope.ope_->accept(*this);
@@ -1982,9 +1921,13 @@ struct HasEmptyElement : public Ope::Visitor {
       if (is_empty) { return; }
     }
   }
-  void visit(ZeroOrMore & /*ope*/) override { set_error(); }
-  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(Option & /*ope*/) override { set_error(); }
+  void visit(Repetition &ope) override {
+    if (ope.min_ == 0) {
+      set_error();
+    } else {
+      ope.ope_->accept(*this);
+    }
+  }
   void visit(AndPredicate & /*ope*/) override { set_error(); }
   void visit(NotPredicate & /*ope*/) override { set_error(); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -2027,25 +1970,19 @@ struct DetectInfiniteLoop : public Ope::Visitor {
       if (has_error) { return; }
     }
   }
-  void visit(ZeroOrMore &ope) override {
-    HasEmptyElement vis(refs_);
-    ope.ope_->accept(vis);
-    if (vis.is_empty) {
-      has_error = true;
-      error_s = vis.error_s;
-      error_name = vis.error_name;
+  void visit(Repetition &ope) override {
+    if (ope.max_ == std::numeric_limits<size_t>::max()) {
+      HasEmptyElement vis(refs_);
+      ope.ope_->accept(vis);
+      if (vis.is_empty) {
+        has_error = true;
+        error_s = vis.error_s;
+        error_name = vis.error_name;
+      }
+    } else {
+      ope.ope_->accept(*this);
     }
   }
-  void visit(OneOrMore &ope) override {
-    HasEmptyElement vis(refs_);
-    ope.ope_->accept(vis);
-    if (vis.is_empty) {
-      has_error = true;
-      error_s = vis.error_s;
-      error_name = vis.error_name;
-    }
-  }
-  void visit(Option &ope) override { ope.ope_->accept(*this); }
   void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -2081,9 +2018,7 @@ struct ReferenceChecker : public Ope::Visitor {
       op->accept(*this);
     }
   }
-  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
   void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -2118,9 +2053,7 @@ struct LinkReferences : public Ope::Visitor {
       op->accept(*this);
     }
   }
-  void visit(ZeroOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(OneOrMore &ope) override { ope.ope_->accept(*this); }
-  void visit(Option &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
   void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -2159,17 +2092,9 @@ struct FindReference : public Ope::Visitor {
     }
     found_ope = std::make_shared<PrioritizedChoice>(opes);
   }
-  void visit(ZeroOrMore &ope) override {
+  void visit(Repetition &ope) override {
     ope.ope_->accept(*this);
-    found_ope = zom(found_ope);
-  }
-  void visit(OneOrMore &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = oom(found_ope);
-  }
-  void visit(Option &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = opt(found_ope);
+    found_ope = rep(found_ope, ope.min_, ope.max_);
   }
   void visit(AndPredicate &ope) override {
     ope.ope_->accept(*this);
@@ -2772,9 +2697,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
 inline void Sequence::accept(Visitor &v) { v.visit(*this); }
 inline void PrioritizedChoice::accept(Visitor &v) { v.visit(*this); }
-inline void ZeroOrMore::accept(Visitor &v) { v.visit(*this); }
-inline void OneOrMore::accept(Visitor &v) { v.visit(*this); }
-inline void Option::accept(Visitor &v) { v.visit(*this); }
+inline void Repetition::accept(Visitor &v) { v.visit(*this); }
 inline void AndPredicate::accept(Visitor &v) { v.visit(*this); }
 inline void NotPredicate::accept(Visitor &v) { v.visit(*this); }
 inline void Dictionary::accept(Visitor &v) { v.visit(*this); }
@@ -2980,8 +2903,8 @@ private:
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
     g["Sequence"] <= zom(g["Prefix"]);
     g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
-    g["Suffix"] <=
-        seq(g["Primary"], opt(cho(g["QUESTION"], g["STAR"], g["PLUS"])));
+    g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
+    g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
     g["Primary"] <=
         cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
                 npd(g["LEFTARROW"])),
@@ -3035,7 +2958,16 @@ private:
                          cls("0-9a-fA-F"), cls("0-9a-fA-F")),
                      seq(npd(chr('\\')), dot()));
 
-    g["LEFTARROW"] <= seq(cho(lit("<-"), lit(reinterpret_cast<const char*>(u8"←"))), g["Spacing"]);
+    g["Repetition"] <=
+        seq(g["BeginBlacket"], g["RepetitionRange"], g["EndBlacket"]);
+    g["RepetitionRange"] <= cho(seq(g["Number"], g["COMMA"], g["Number"]),
+                                seq(g["Number"], g["COMMA"]), g["Number"],
+                                seq(g["COMMA"], g["Number"]));
+    g["Number"] <= seq(oom(cls("0-9")), g["Spacing"]);
+
+    g["LEFTARROW"] <=
+        seq(cho(lit("<-"), lit(reinterpret_cast<const char *>(u8"←"))),
+            g["Spacing"]);
     ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
     ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
@@ -3187,21 +3119,68 @@ private:
       return ope;
     };
 
+    struct Loop {
+      enum class Type { opt = 0, zom, oom, rep };
+      Type type;
+      std::pair<size_t, size_t> range;
+    };
+
     g["Suffix"] = [&](const SemanticValues &sv) {
       auto ope = any_cast<std::shared_ptr<Ope>>(sv[0]);
       if (sv.size() == 1) {
         return ope;
       } else {
         assert(sv.size() == 2);
-        auto tok = any_cast<char>(sv[1]);
-        if (tok == '?') {
-          return opt(ope);
-        } else if (tok == '*') {
-          return zom(ope);
-        } else { // '+'
-          return oom(ope);
+        auto loop = any_cast<Loop>(sv[1]);
+        switch (loop.type) {
+        case Loop::Type::opt: return opt(ope);
+        case Loop::Type::zom: return zom(ope);
+        case Loop::Type::oom: return oom(ope);
+        case Loop::Type::rep: // Regex-like repetition
+          return rep(ope, loop.range.first, loop.range.second);
         }
       }
+    };
+
+    g["Loop"] = [&](const SemanticValues &sv) {
+      std::pair<size_t, size_t> dummy;
+      switch (sv.choice()) {
+      case 0: // Option
+        return Loop{Loop::Type::opt, std::pair<size_t, size_t>()};
+      case 1: // Zero or More
+        return Loop{Loop::Type::zom, std::pair<size_t, size_t>()};
+      case 2: // One or More
+        return Loop{Loop::Type::oom, std::pair<size_t, size_t>()};
+      default: // Regex-like repetition
+        return Loop{Loop::Type::rep,
+                    any_cast<std::pair<size_t, size_t>>(sv[0])};
+      }
+    };
+
+    g["RepetitionRange"] = [&](const SemanticValues &sv) {
+      switch (sv.choice()) {
+      case 0: { // Number COMMA Number
+        auto min = any_cast<size_t>(sv[0]);
+        auto max = any_cast<size_t>(sv[1]);
+        return std::make_pair(min, max);
+      }
+      case 1: // Number COMMA
+        return std::make_pair(any_cast<size_t>(sv[0]),
+                              std::numeric_limits<size_t>::max());
+      case 2: { // Number
+        auto n = any_cast<size_t>(sv[0]);
+        return std::make_pair(n, n);
+      }
+      default: // COMMA Number
+        return std::make_pair(std::numeric_limits<size_t>::min(),
+                              any_cast<size_t>(sv[0]));
+      }
+    };
+    g["Number"] = [&](const SemanticValues &sv) {
+      std::stringstream ss(sv.str());
+      size_t n;
+      ss >> n;
+      return n;
     };
 
     g["Primary"] = [&](const SemanticValues &sv, any &dt) {
@@ -3354,8 +3333,8 @@ private:
     try {
       auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
       auto atom = seq.opes_[0];
-      auto &seq1 = dynamic_cast<Sequence &>(
-          *dynamic_cast<ZeroOrMore &>(*seq.opes_[1]).ope_);
+      auto &rep = dynamic_cast<Repetition &>(*seq.opes_[1]);
+      auto &seq1 = dynamic_cast<Sequence &>(*rep.ope_);
       auto binop = seq1.opes_[0];
       auto atom1 = seq1.opes_[1];
 
@@ -3363,7 +3342,7 @@ private:
       auto binop_name = dynamic_cast<Reference &>(*binop).name_;
       auto atom1_name = dynamic_cast<Reference &>(*atom1).name_;
 
-      if (atom_name != atom1_name || atom_name == binop_name) {
+      if (!rep.is_zom() || atom_name != atom1_name || atom_name == binop_name) {
         if (log) {
           auto line = line_info(s, rule.s_);
           log(line.first, line.second,

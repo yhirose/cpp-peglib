@@ -71,8 +71,16 @@ TEST_CASE("PEG Suffix", "[peg]")
     REQUIRE(exact(g, "Suffix", "aaa? ") == true);
     REQUIRE(exact(g, "Suffix", "aaa* ") == true);
     REQUIRE(exact(g, "Suffix", "aaa+ ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa{} ") == false);
+    REQUIRE(exact(g, "Suffix", "aaa{10} ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa{10,} ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa{10,100} ") == true);
+    REQUIRE(exact(g, "Suffix", "aaa{,100} ") == true);
     REQUIRE(exact(g, "Suffix", ". + ") == true);
+    REQUIRE(exact(g, "Suffix", ". {10} ") == true);
     REQUIRE(exact(g, "Suffix", "?") == false);
+    REQUIRE(exact(g, "Suffix", "+") == false);
+    REQUIRE(exact(g, "Suffix", "{10}") == false);
     REQUIRE(exact(g, "Suffix", "") == false);
     REQUIRE(exact(g, "Suffix", " a") == false);
 }
