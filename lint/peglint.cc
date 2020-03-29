@@ -11,7 +11,7 @@
 
 using namespace std;
 
-bool read_file(const char* path, vector<char>& buff)
+inline bool read_file(const char* path, vector<char>& buff)
 {
     ifstream ifs(path, ios::in | ios::binary);
     if (ifs.fail()) {
@@ -128,13 +128,13 @@ int main(int argc, const char** argv)
                 const peg::any& /*dt*/,
                 size_t len) {
                 auto pos = static_cast<size_t>(s - c.s);
-                if (len != -1) {
+                if (len != static_cast<size_t>(-1)) {
                     pos += len;
                 }
                 string indent;
                 auto level = c.trace_ids.size() - 1;
                 while (level--) { indent += "│"; }
-                auto ret = len != -1 ? "└o " : "└x ";
+                auto ret = len != static_cast<size_t>(-1) ? "└o " : "└x ";
                 std::stringstream choice;
                 if (sv.choice_count() > 0) {
                     choice << " " << sv.choice() << "/" << sv.choice_count();

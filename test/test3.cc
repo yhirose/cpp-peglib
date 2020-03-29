@@ -3,13 +3,13 @@
 
 using namespace peg;
 
-bool exact(Grammar& g, const char* d, const char* s) {
+inline bool exact(Grammar& g, const char* d, const char* s) {
     auto n = strlen(s);
     auto r = g[d].parse(s, n);
     return r.ret && r.len == n;
 }
 
-Grammar& make_peg_grammar() {
+inline Grammar& make_peg_grammar() {
     return ParserGenerator::grammar();
 }
 

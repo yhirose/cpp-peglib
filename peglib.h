@@ -3143,7 +3143,6 @@ private:
     };
 
     g["Loop"] = [&](const SemanticValues &sv) {
-      std::pair<size_t, size_t> dummy;
       switch (sv.choice()) {
       case 0: // Option
         return Loop{Loop::Type::opt, std::pair<size_t, size_t>()};

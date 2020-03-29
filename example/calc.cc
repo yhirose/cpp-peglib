@@ -16,7 +16,7 @@ int main(void) {
         %whitespace <- [ \t]*
     )");
 
-    assert((bool)parser == true);
+    assert(static_cast<bool>(parser) == true);
 
     // (3) Setup actions
     parser["Additive"] = [](const SemanticValues& sv) {
