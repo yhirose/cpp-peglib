@@ -3136,10 +3136,8 @@ private:
         case Loop::Type::opt: return opt(ope);
         case Loop::Type::zom: return zom(ope);
         case Loop::Type::oom: return oom(ope);
-        case Loop::Type::rep: // Regex-like repetition
+        default: // Regex-like repetition
           return rep(ope, loop.range.first, loop.range.second);
-        default:
-          throw std::runtime_error("Unhandled enum constant");
         }
       }
     };
