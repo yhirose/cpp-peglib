@@ -1,4 +1,6 @@
 
+set commentstring=#\ %s
+
 syn match pegBoth /=/
 syn match pegM2U /->/
 syn match pegU2M /<-/
