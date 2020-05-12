@@ -3527,9 +3527,10 @@ private:
 
 template <typename Annotation> struct AstBase : public Annotation {
   AstBase(const char *a_path, size_t a_line, size_t a_column,
-          const char *a_name, size_t a_position, size_t a_length,
-          size_t a_choice_count, size_t a_choice,
-          const std::vector<std::shared_ptr<AstBase>> &a_nodes)
+          const char *a_name,
+          const std::vector<std::shared_ptr<AstBase>> &a_nodes,
+          size_t a_position = 0, size_t a_length = 0, size_t a_choice_count = 0,
+          size_t a_choice = 0)
       : path(a_path ? a_path : ""), line(a_line), column(a_column),
         name(a_name), position(a_position), length(a_length),
         choice_count(a_choice_count), choice(a_choice), original_name(a_name),
@@ -3538,8 +3539,8 @@ template <typename Annotation> struct AstBase : public Annotation {
         nodes(a_nodes) {}
 
   AstBase(const char *a_path, size_t a_line, size_t a_column,
-          const char *a_name, size_t a_position, size_t a_length,
-          size_t a_choice_count, size_t a_choice, const std::string &a_token)
+          const char *a_name, const std::string &a_token, size_t a_position = 0,
+          size_t a_length = 0, size_t a_choice_count = 0, size_t a_choice = 0)
       : path(a_path ? a_path : ""), line(a_line), column(a_column),
         name(a_name), position(a_position), length(a_length),
         choice_count(a_choice_count), choice(a_choice), original_name(a_name),
@@ -3547,9 +3548,9 @@ template <typename Annotation> struct AstBase : public Annotation {
         tag(str2tag(a_name)), original_tag(tag), is_token(true),
         token(a_token) {}
 
-  AstBase(const AstBase &ast, const char *a_original_name, size_t a_position,
-          size_t a_length, size_t a_original_choice_count,
-          size_t a_original_choise)
+  AstBase(const AstBase &ast, const char *a_original_name,
+          size_t a_position = 0, size_t a_length = 0,
+          size_t a_original_choice_count = 0, size_t a_original_choise = 0)
       : path(ast.path), line(ast.line), column(ast.column), name(ast.name),
         position(a_position), length(a_length), choice_count(ast.choice_count),
         choice(ast.choice), original_name(a_original_name),
@@ -3787,15 +3788,16 @@ public:
 
           if (rule.is_token()) {
             return std::make_shared<T>(
-                sv.path, line.first, line.second, name.c_str(),
+                sv.path, line.first, line.second, name.c_str(), sv.token(),
                 std::distance(sv.ss, sv.c_str()), sv.length(),
-                sv.choice_count(), sv.choice(), sv.token());
+                sv.choice_count(), sv.choice());
           }
 
           auto ast = std::make_shared<T>(
               sv.path, line.first, line.second, name.c_str(),
+              sv.transform<std::shared_ptr<T>>(),
               std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(),
-              sv.choice(), sv.transform<std::shared_ptr<T>>());
+              sv.choice());
 
           for (auto node : ast->nodes) {
             node->parent = ast;
