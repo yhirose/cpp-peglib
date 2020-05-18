@@ -928,13 +928,13 @@ public:
       auto &sv = *value_stack[value_stack_size];
       if (!sv.empty()) {
         sv.clear();
-        sv.tags.clear();
+        if (!sv.tags.empty()) { sv.tags.clear(); }
       }
       sv.s_ = nullptr;
       sv.n_ = 0;
       sv.choice_count_ = 0;
       sv.choice_ = 0;
-      sv.tokens.clear();
+      if (!sv.tokens.empty()) { sv.tokens.clear(); }
     }
 
     auto &sv = *value_stack[value_stack_size++];
@@ -962,7 +962,7 @@ public:
       capture_scope_stack.emplace_back(std::map<std::string, std::string>());
     } else {
       auto &cs = capture_scope_stack[capture_scope_stack_size];
-      cs.clear();
+      if (!cs.empty()) { cs.clear(); }
     }
     capture_scope_stack_size++;
   }
@@ -1070,8 +1070,7 @@ public:
         c.pop();
         c.pop_capture_scope();
       });
-      const auto &rule = *ope;
-      auto len = rule.parse(s, n, chldsv, c, dt);
+      auto len = ope->parse(s, n, chldsv, c, dt);
       if (success(len)) {
         if (!chldsv.empty()) {
           for (size_t i = 0; i < chldsv.size(); i++) {
@@ -1224,8 +1223,7 @@ public:
       c.pop();
       c.pop_capture_scope();
     });
-    const auto &rule = *ope_;
-    auto len = rule.parse(s, n, chldsv, c, dt);
+    auto len = ope_->parse(s, n, chldsv, c, dt);
     if (success(len)) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1255,7 +1253,11 @@ public:
 class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
-  LiteralString(const std::string &s, bool ignore_case)
+  LiteralString(std::string &&s, bool ignore_case)
+      : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
+        is_word_(false) {}
+
+  LiteralString(const std::string& s, bool ignore_case)
       : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
         is_word_(false) {}
 
@@ -1614,11 +1616,11 @@ inline std::shared_ptr<Ope> dic(const std::vector<std::string> &v) {
   return std::make_shared<Dictionary>(v);
 }
 
-inline std::shared_ptr<Ope> lit(const std::string &s) {
+inline std::shared_ptr<Ope> lit(std::string &&s) {
   return std::make_shared<LiteralString>(s, false);
 }
 
-inline std::shared_ptr<Ope> liti(const std::string &s) {
+inline std::shared_ptr<Ope> liti(std::string &&s) {
   return std::make_shared<LiteralString>(s, true);
 }
 
@@ -2378,8 +2380,8 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &sv,
   }
 
   if (is_word) {
-    auto ope = std::make_shared<NotPredicate>(c.wordOpe);
-    auto len = ope->parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
+    NotPredicate ope(c.wordOpe);
+    auto len = ope.parse(s + i, n - i, dummy_sv, dummy_c, dummy_dt);
     if (fail(len)) { return static_cast<size_t>(-1); }
     i += len;
   }
@@ -2452,10 +2454,9 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         any &dt) const {
   c.in_token = true;
   auto se = make_scope_exit([&]() { c.in_token = false; });
-  const auto &rule = *ope_;
-  auto len = rule.parse(s, n, sv, c, dt);
+  auto len = ope_->parse(s, n, sv, c, dt);
   if (success(len)) {
-    sv.tokens.push_back(std::make_pair(s, len));
+    sv.tokens.emplace_back(std::make_pair(s, len));
 
     if (c.whitespaceOpe) {
       auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
@@ -2519,7 +2520,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
 
   if (success(len)) {
     if (!outer_->ignoreSemanticValue) {
-      sv.emplace_back(val);
+      sv.emplace_back(std::move(val));
       sv.tags.emplace_back(str2tag(outer_->name.c_str()));
     }
   } else {
@@ -2561,7 +2562,7 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &sv,
       std::vector<std::shared_ptr<Ope>> args;
       for (auto arg : args_) {
         arg->accept(vis);
-        args.push_back(vis.found_ope);
+        args.emplace_back(std::move(vis.found_ope));
       }
 
       c.push_args(std::move(args));
