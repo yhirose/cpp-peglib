@@ -626,6 +626,11 @@ TEST_CASE("Semantic predicate test", "[predicate]")
     REQUIRE(parser.parse("100", val));
     REQUIRE(val == 100);
 
+    parser.log = [](size_t line, size_t col, const std::string& msg) {
+        REQUIRE(line == 1);
+        REQUIRE(col == 1);
+        REQUIRE(msg == "value error!!");
+    };
     REQUIRE(!parser.parse("200", val));
 }
 
