@@ -22,9 +22,20 @@ inline bool read_file(const char *path, vector<char> &buff) {
   return true;
 }
 
+inline vector<string> split(const string &s, char delim) {
+  vector<string> elems;
+  stringstream ss(s);
+  string elem;
+  while (getline(ss, elem, delim)) {
+    elems.push_back(elem);
+  }
+  return elems;
+}
+
 int main(int argc, const char **argv) {
   auto opt_ast = false;
   auto opt_optimize_ast_nodes = false;
+  vector<string> optimize_ast_nodes_filters;
   auto opt_help = false;
   auto opt_source = false;
   vector<char> source;
@@ -38,9 +49,13 @@ int main(int argc, const char **argv) {
       opt_help = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
-    } else if (string("--optimize_ast_nodes") == arg ||
-               string("--opt") == arg) {
+    } else if (string("--opt") == arg) {
       opt_optimize_ast_nodes = true;
+    } else if (string("--filters") == arg) {
+      if (argi < argc) {
+        std::string s = argv[argi++];
+        optimize_ast_nodes_filters = split(s, ',');
+      }
     } else if (string("--source") == arg) {
       opt_source = true;
       if (argi < argc) {
@@ -55,9 +70,16 @@ int main(int argc, const char **argv) {
   }
 
   if (path_list.empty() || opt_help) {
-    cerr << "usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source "
-            "text] [--trace] [grammar file path] [source file path]"
-         << endl;
+    cerr << "usage: grammar_file_path [source_file_path]" << endl
+         << endl
+         << "  options:" << endl
+         << "    --ast: show AST tree" << endl
+         << "    --opt: optimaze AST nodes" << endl
+         << "    --filters definition_names: comma delimitted definition names "
+            "for optimazation"
+         << endl
+         << "    --source: source text" << endl
+         << "    --trace: show trace messages" << endl;
     return 1;
   }
 
@@ -142,7 +164,12 @@ int main(int argc, const char **argv) {
     std::shared_ptr<peg::Ast> ast;
     if (!parser.parse_n(source.data(), source.size(), ast)) { return -1; }
 
-    ast = peg::AstOptimizer(opt_optimize_ast_nodes).optimize(ast);
+    std::cout << "filters..." << std::endl;
+    for (auto name : optimize_ast_nodes_filters) {
+      std::cout << name << std::endl;
+    }
+    ast = peg::AstOptimizer(opt_optimize_ast_nodes, optimize_ast_nodes_filters)
+              .optimize(ast);
     std::cout << peg::ast_to_s(ast);
 
   } else {

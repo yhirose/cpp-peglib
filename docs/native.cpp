@@ -1,12 +1,12 @@
-#include <emscripten/bind.h>
 #include "../peglib.h"
 #include <cstdio>
+#include <emscripten/bind.h>
 #include <functional>
 #include <iomanip>
 #include <sstream>
 
 // https://stackoverflow.com/questions/7724448/simple-json-string-escape-for-c/33799784#33799784
-std::string escape_json(const std::string& s) {
+std::string escape_json(const std::string &s) {
   std::ostringstream o;
   for (auto c : s) {
     if (c == '"' || c == '\\' || ('\x00' <= c && c <= '\x1f')) {
@@ -18,12 +18,11 @@ std::string escape_json(const std::string& s) {
   return o.str();
 }
 
-std::function<void(size_t, size_t, const std::string&)> makeJSONFormatter(std::string& json, bool& init) {
+std::function<void(size_t, size_t, const std::string &)>
+makeJSONFormatter(std::string &json, bool &init) {
   init = true;
-  return [&](size_t ln, size_t col, const std::string& msg) mutable {
-    if (!init) {
-      json += ",";
-    }
+  return [&](size_t ln, size_t col, const std::string &msg) mutable {
+    if (!init) { json += ","; }
     json += "{";
     json += R"("ln":)" + std::to_string(ln) + ",";
     json += R"("col":)" + std::to_string(col) + ",";
@@ -34,7 +33,8 @@ std::function<void(size_t, size_t, const std::string&)> makeJSONFormatter(std::s
   };
 }
 
-bool parse_grammar(const std::string& text, peg::parser& peg, std::string& json) {
+bool parse_grammar(const std::string &text, peg::parser &peg,
+                   std::string &json) {
   bool init;
   peg.log = makeJSONFormatter(json, init);
   json += "[";
@@ -43,8 +43,8 @@ bool parse_grammar(const std::string& text, peg::parser& peg, std::string& json)
   return ret;
 }
 
-bool parse_code(const std::string& text, peg::parser& peg, std::string& json,
-                std::shared_ptr<peg::Ast>& ast) {
+bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
+                std::shared_ptr<peg::Ast> &ast) {
   peg.enable_ast();
   bool init;
   peg.log = makeJSONFormatter(json, init);
@@ -54,7 +54,20 @@ bool parse_code(const std::string& text, peg::parser& peg, std::string& json,
   return ret;
 }
 
-std::string lint(const std::string& grammarText, const std::string& codeText) {
+inline std::vector<std::string> splitFiltersText(const std::string &s) {
+  std::vector<std::string> elems;
+  std::stringstream ss(s);
+  std::string elem;
+  while (getline(ss, elem, ',')) {
+    if (!elem.empty()) {
+      elems.push_back(elem);
+    }
+  }
+  return elems;
+}
+
+std::string lint(const std::string &grammarText, const std::string &codeText,
+                 bool optimize, const std::string &filtersText) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -67,8 +80,9 @@ std::string lint(const std::string& grammarText, const std::string& codeText) {
     std::shared_ptr<peg::Ast> ast;
     if (parse_code(codeText, peg, codeResult, ast)) {
       astResult = escape_json(peg::ast_to_s(ast));
-      astResultOptimized =
-          escape_json(peg::ast_to_s(peg::AstOptimizer(true).optimize(ast)));
+      auto filters = splitFiltersText(filtersText);
+      astResultOptimized = escape_json(
+          peg::ast_to_s(peg::AstOptimizer(optimize, filters).optimize(ast)));
     }
   }
 

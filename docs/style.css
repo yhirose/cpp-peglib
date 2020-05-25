@@ -65,4 +65,6 @@ body {
 .editor-info li {
   cursor: pointer;
 }
-
+.editor-sub-header {
+  padding: 4px 8px;
+}

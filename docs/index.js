@@ -27,6 +27,9 @@ codeAstOptimized.setOptions({
 })
 codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
 
+$('#optimize').prop('checked', localStorage.getItem('optimize') == 'true');
+$('#filters').val(localStorage.getItem('filters'));
+
 function generateErrorListHTML(errors) {
   let html = '<ul>';
 
@@ -48,8 +51,14 @@ function parse() {
   const $codeInfo = $('#code-info');
   const codeText = code.getValue();
 
+  const optimize = $('#optimize').prop('checked');
+  const filters = $('#filters').val();
+  console.log(optimize, filters);
+
   localStorage.setItem('grammarText', grammarText);
   localStorage.setItem('codeText', codeText);
+  localStorage.setItem('optimize', optimize);
+  localStorage.setItem('filters', filters);
 
   $grammarInfo.html('');
   $grammarValidation.hide();
@@ -62,7 +71,7 @@ function parse() {
    return;
   }
 
-  const data = JSON.parse(Module.lint(grammarText, codeText));
+  const data = JSON.parse(Module.lint(grammarText, codeText, optimize, filters));
 
   const isValid = data.grammar.length === 0;
   if (isValid) {
@@ -104,6 +113,10 @@ function makeOnClickInInfo(editor) {
 };
 $('#grammar-info').on('click', 'li', makeOnClickInInfo(grammar));
 $('#code-info').on('click', 'li', makeOnClickInInfo(code));
+
+// Event handing in the AST optimazation
+$('#optimize').on('click', setupTimer);
+$('#filters').on('keyup', setupTimer);
 
 // Show page
 $('#main').css({
