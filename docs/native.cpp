@@ -54,7 +54,7 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
   return ret;
 }
 
-inline std::vector<std::string> splitFiltersText(const std::string &s) {
+inline std::vector<std::string> splitRulesText(const std::string &s) {
   std::vector<std::string> elems;
   std::stringstream ss(s);
   std::string elem;
@@ -67,7 +67,7 @@ inline std::vector<std::string> splitFiltersText(const std::string &s) {
 }
 
 std::string lint(const std::string &grammarText, const std::string &codeText,
-                 bool optimize, const std::string &filtersText) {
+                 bool opt_mode, const std::string &opt_rules_text) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -80,9 +80,9 @@ std::string lint(const std::string &grammarText, const std::string &codeText,
     std::shared_ptr<peg::Ast> ast;
     if (parse_code(codeText, peg, codeResult, ast)) {
       astResult = escape_json(peg::ast_to_s(ast));
-      auto filters = splitFiltersText(filtersText);
+      auto rules = splitRulesText(opt_rules_text);
       astResultOptimized = escape_json(
-          peg::ast_to_s(peg::AstOptimizer(optimize, filters).optimize(ast)));
+          peg::ast_to_s(peg::AstOptimizer(opt_mode, rules).optimize(ast)));
     }
   }
 

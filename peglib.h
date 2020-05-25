@@ -3615,16 +3615,16 @@ ast_to_s(const std::shared_ptr<T> &ptr,
 }
 
 struct AstOptimizer {
-  AstOptimizer(bool optimize_nodes,
-               const std::vector<std::string> &filters = {})
-      : optimize_nodes_(optimize_nodes), filters_(filters) {}
+  AstOptimizer(bool mode,
+               const std::vector<std::string> &rules = {})
+      : mode_(mode), rules_(rules) {}
 
   template <typename T>
   std::shared_ptr<T> optimize(std::shared_ptr<T> original,
                               std::shared_ptr<T> parent = nullptr) {
-    auto found = std::find(filters_.begin(), filters_.end(), original->name) !=
-                 filters_.end();
-    bool opt = optimize_nodes_ ? !found : found;
+    auto found = std::find(rules_.begin(), rules_.end(), original->name) !=
+                 rules_.end();
+    bool opt = mode_ ? !found : found;
 
     if (opt && original->nodes.size() == 1) {
       auto child = optimize(original->nodes[0], parent);
@@ -3644,8 +3644,8 @@ struct AstOptimizer {
   }
 
 private:
-  const bool optimize_nodes_;
-  const std::vector<std::string> filters_;
+  const bool mode_;
+  const std::vector<std::string> rules_;
 };
 
 struct EmptyType {};

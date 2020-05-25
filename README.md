@@ -422,10 +422,12 @@ parser.enable_ast();
 
 shared_ptr<peg::Ast> ast;
 if (parser.parse("...", ast)) {
-    cout << peg::ast_to_s(ast);
+  cout << peg::ast_to_s(ast);
 
-    ast = peg::AstOptimizer(true).optimize(ast);
-    cout << peg::ast_to_s(ast);
+  std::vector<std::string> exceptions = { "defenition1", "defenition2 };
+  ast = peg::AstOptimizer(true, exceptions).optimize(ast);
+
+  cout << peg::ast_to_s(ast);
 }
 ```
 
@@ -529,7 +531,15 @@ peglint - PEG syntax lint utility
 > cmake ..
 > make
 > ./peglint
-usage: peglint [--ast] [--optimize_ast_nodes|--opt] [--source text] [--trace] [grammar file path] [source file path]
+usage: grammar_file_path [source_file_path]
+
+  options:
+    --ast: show AST tree
+    --opt: optimaze all AST nodes except nodes selected with --opt-rules
+    --opt-only: optimaze only AST nodes selected with --opt-rules
+    --opt-rules rules: comma delimitted definition rules for optimazation
+    --source: source text
+    --trace: show trace messages
 ```
 
 ### Lint grammar

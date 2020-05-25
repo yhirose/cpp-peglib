@@ -34,8 +34,9 @@ inline vector<string> split(const string &s, char delim) {
 
 int main(int argc, const char **argv) {
   auto opt_ast = false;
-  auto opt_optimize_ast_nodes = false;
-  vector<string> optimize_ast_nodes_filters;
+  auto opt_optimize = false;
+  auto opt_mode = true;
+  vector<string> opt_rules;
   auto opt_help = false;
   auto opt_source = false;
   vector<char> source;
@@ -49,12 +50,16 @@ int main(int argc, const char **argv) {
       opt_help = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
-    } else if (string("--opt") == arg) {
-      opt_optimize_ast_nodes = true;
-    } else if (string("--filters") == arg) {
+    } else if (string("--opt-all") == arg) {
+      opt_optimize = true;
+      opt_mode = true;
+    } else if (string("--opt-only") == arg) {
+      opt_optimize = true;
+      opt_mode = false;
+    } else if (string("--opt-rules") == arg) {
       if (argi < argc) {
         std::string s = argv[argi++];
-        optimize_ast_nodes_filters = split(s, ',');
+        opt_rules = split(s, ',');
       }
     } else if (string("--source") == arg) {
       opt_source = true;
@@ -73,12 +78,16 @@ int main(int argc, const char **argv) {
     cerr << "usage: grammar_file_path [source_file_path]" << endl
          << endl
          << "  options:" << endl
-         << "    --ast: show AST tree" << endl
-         << "    --opt: optimaze AST nodes" << endl
-         << "    --filters definition_names: comma delimitted definition names "
-            "for optimazation"
-         << endl
          << "    --source: source text" << endl
+         << "    --ast: show AST tree" << endl
+         << "    --opt-all: optimaze all AST nodes except nodes selected with "
+            "--opt-rules"
+         << endl
+         << "    --opt-only: optimaze only AST nodes selected with --opt-rules"
+         << endl
+         << "    --opt-rules rules: CSV definition rules to adjust AST "
+            "optimazation"
+         << endl
          << "    --trace: show trace messages" << endl;
     return 1;
   }
@@ -164,12 +173,10 @@ int main(int argc, const char **argv) {
     std::shared_ptr<peg::Ast> ast;
     if (!parser.parse_n(source.data(), source.size(), ast)) { return -1; }
 
-    std::cout << "filters..." << std::endl;
-    for (auto name : optimize_ast_nodes_filters) {
-      std::cout << name << std::endl;
+    if (opt_optimize) {
+      ast = peg::AstOptimizer(opt_mode, opt_rules).optimize(ast);
     }
-    ast = peg::AstOptimizer(opt_optimize_ast_nodes, optimize_ast_nodes_filters)
-              .optimize(ast);
+
     std::cout << peg::ast_to_s(ast);
 
   } else {
