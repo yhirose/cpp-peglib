@@ -50,7 +50,7 @@ int main(int argc, const char **argv) {
       opt_help = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
-    } else if (string("--opt-all") == arg) {
+    } else if (string("--opt") == arg || string("--opt-all") == arg) {
       opt_optimize = true;
       opt_mode = true;
     } else if (string("--opt-only") == arg) {
@@ -80,7 +80,8 @@ int main(int argc, const char **argv) {
          << "  options:" << endl
          << "    --source: source text" << endl
          << "    --ast: show AST tree" << endl
-         << "    --opt-all: optimaze all AST nodes except nodes selected with "
+         << "    --opt, --opt-all: optimaze all AST nodes except nodes "
+            "selected with "
             "--opt-rules"
          << endl
          << "    --opt-only: optimaze only AST nodes selected with --opt-rules"

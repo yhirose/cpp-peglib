@@ -535,7 +535,7 @@ usage: grammar_file_path [source_file_path]
 
   options:
     --ast: show AST tree
-    --opt: optimaze all AST nodes except nodes selected with --opt-rules
+    --opt, --opt-all: optimaze all AST nodes except nodes selected with --opt-rules
     --opt-only: optimaze only AST nodes selected with --opt-rules
     --opt-rules rules: comma delimitted definition rules for optimazation
     --source: source text
@@ -610,6 +610,30 @@ Number      <- < [0-9]+ >
   + Additive[Multitive]
     - Primary[Number] (2)
     - Multitive[Number] (3)
+```
+
+```
+> peglint --ast --opt --opt-rules "Primary" --source "1 + 2 * 3" a.peg
++ Additive/0
+  + Multitive/1[Primary]
+    - Number (1)
+  + Additive/1[Multitive]
+    + Primary/1
+      - Number (2)
+    + Multitive/1[Primary]
+      - Number (3)
+```
+
+```
+> peglint --ast --opt-only --opt-rules "Primary" --source "1 + 2 * 3" a.peg
++ Additive/0
+  + Multitive/1
+    - Primary/1[Number] (1)
+  + Additive/1
+    + Multitive/0
+      - Primary/1[Number] (2)
+      + Multitive/1
+        - Primary/1[Number] (3)
 ```
 
 Sample codes
