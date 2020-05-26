@@ -27,7 +27,7 @@ codeAstOptimized.setOptions({
 })
 codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
 
-$('#opt_mode').val(localStorage.getItem('optimazationMode'));
+$('#opt_mode').val(localStorage.getItem('optimazationMode') || 'all');
 $('#opt_rules').val(localStorage.getItem('optimazationRules'));
 
 function generateErrorListHTML(errors) {
