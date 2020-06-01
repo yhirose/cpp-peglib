@@ -841,7 +841,7 @@ public:
   std::vector<std::shared_ptr<SemanticValues>> value_stack;
   size_t value_stack_size = 0;
 
-  std::vector<Definition*> rule_stack;
+  std::vector<Definition *> rule_stack;
   std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
 
   bool in_token = false;
@@ -1259,7 +1259,7 @@ public:
       : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
         is_word_(false) {}
 
-  LiteralString(const std::string& s, bool ignore_case)
+  LiteralString(const std::string &s, bool ignore_case)
       : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
         is_word_(false) {}
 
@@ -1934,6 +1934,9 @@ struct HasEmptyElement : public Ope::Visitor {
   }
   void visit(AndPredicate & /*ope*/) override { set_error(); }
   void visit(NotPredicate & /*ope*/) override { set_error(); }
+  void visit(LiteralString &ope) override {
+    if (ope.lit_.empty()) { set_error(); }
+  }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
   void visit(Capture &ope) override { ope.ope_->accept(*this); }
   void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
@@ -3626,15 +3629,14 @@ ast_to_s(const std::shared_ptr<T> &ptr,
 }
 
 struct AstOptimizer {
-  AstOptimizer(bool mode,
-               const std::vector<std::string> &rules = {})
+  AstOptimizer(bool mode, const std::vector<std::string> &rules = {})
       : mode_(mode), rules_(rules) {}
 
   template <typename T>
   std::shared_ptr<T> optimize(std::shared_ptr<T> original,
                               std::shared_ptr<T> parent = nullptr) {
-    auto found = std::find(rules_.begin(), rules_.end(), original->name) !=
-                 rules_.end();
+    auto found =
+        std::find(rules_.begin(), rules_.end(), original->name) != rules_.end();
     bool opt = mode_ ? !found : found;
 
     if (opt && original->nodes.size() == 1) {

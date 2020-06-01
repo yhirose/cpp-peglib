@@ -59,6 +59,25 @@ TEST_CASE("Infinite loop 5", "[infinite loop]")
     REQUIRE(!pg);
 }
 
+TEST_CASE("Infinite loop 6", "[infinite loop]")
+{
+    parser pg(R"(
+        S <- ''*
+    )");
+
+    REQUIRE(!pg);
+}
+
+TEST_CASE("Infinite loop 7", "[infinite loop]")
+{
+    parser pg(R"(
+        S <- A*
+        A <- ''
+    )");
+
+    REQUIRE(!pg);
+}
+
 TEST_CASE("Not infinite 1", "[infinite loop]")
 {
     parser pg(R"(
