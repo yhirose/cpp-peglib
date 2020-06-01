@@ -840,6 +840,8 @@ public:
 
   std::vector<std::shared_ptr<SemanticValues>> value_stack;
   size_t value_stack_size = 0;
+
+  std::vector<Definition*> rule_stack;
   std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
 
   bool in_token = false;
@@ -2475,7 +2477,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
 
   // Macro reference
   // TODO: need packrat support
-  if (outer_->is_macro) { return ope_->parse(s, n, sv, c, dt); }
+  if (outer_->is_macro) {
+    c.rule_stack.push_back(outer_);
+    auto len = ope_->parse(s, n, sv, c, dt);
+    c.rule_stack.pop_back();
+    return len;
+  }
 
   size_t len;
   any val;
@@ -2491,7 +2498,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
 
     auto &chldsv = c.push();
 
+    c.rule_stack.push_back(outer_);
     len = ope_->parse(s, n, chldsv, c, dt);
+    c.rule_stack.pop_back();
 
     // Invoke action
     if (success(len)) {
@@ -2556,7 +2565,7 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &sv,
     // Reference rule
     if (rule_->is_macro) {
       // Macro
-      FindReference vis(c.top_args(), rule_->params);
+      FindReference vis(c.top_args(), c.rule_stack.back()->params);
 
       // Collect arguments
       std::vector<std::shared_ptr<Ope>> args;
@@ -2571,6 +2580,8 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &sv,
       return ope->parse(s, n, sv, c, dt);
     } else {
       // Definition
+      c.push_args(std::vector<std::shared_ptr<Ope>>());
+      auto se = make_scope_exit([&]() { c.pop_args(); });
       auto ope = get_core_operator();
       return ope->parse(s, n, sv, c, dt);
     }

@@ -903,20 +903,40 @@ TEST_CASE("Macro token check test", "[macro]")
     REQUIRE(parser["T"].is_token() == true);
 }
 
-TEST_CASE("Macro rule-parameter collision", "[macro]")
-{
-    parser parser(R"(
+TEST_CASE("Macro passes an arg to another macro", "[macro]") {
+  parser parser(R"(
         A    <- B(C)
         B(D) <- D
         C    <- 'c'
         D    <- 'd'
 	)");
 
-    REQUIRE(parser.parse("c"));
+  REQUIRE(parser.parse("c"));
 }
 
-TEST_CASE("Line information test", "[line information]")
+TEST_CASE("Nested macro call", "[macro]") {
+  parser parser(R"(
+        A    <- B(T)
+        B(X) <- C(X)
+        C(Y) <- Y
+        T    <- 'val'
+	)");
+
+  REQUIRE(parser.parse("val"));
+}
+
+TEST_CASE("Nested macro call2", "[macro]")
 {
+    parser parser(R"(
+        START           <- A('TestVal1', 'TestVal2')+
+        A(Aarg1, Aarg2) <- B(Aarg1) '#End'
+        B(Barg1)        <- '#' Barg1
+	)");
+
+    REQUIRE(parser.parse("#TestVal1#End"));
+}
+
+TEST_CASE("Line information test", "[line information]") {
     parser parser(R"(
         S    <- _ (WORD _)+
         WORD <- [A-Za-z]+
