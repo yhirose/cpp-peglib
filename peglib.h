@@ -553,10 +553,13 @@ struct SemanticValues : protected std::vector<any> {
 
   // Transform the semantic value vector to another vector
   template <typename T>
-  auto transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const
-      -> vector<T> {
-    return this->transform(beg, end,
-                           [](const any &v) { return any_cast<T>(v); });
+  std::vector<T> transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const {
+    std::vector<T> r;
+    end = (std::min)(end, size());
+    for (size_t i = beg; i < end; i++) {
+      r.emplace_back(any_cast<T>((*this)[i]));
+    }
+    return r;
   }
 
   using std::vector<any>::iterator;
@@ -594,27 +597,6 @@ private:
   size_t choice_count_ = 0;
   size_t choice_ = 0;
   std::string name_;
-
-  template <typename F>
-  auto transform(F f) const
-      -> vector<typename std::remove_const<decltype(f(any()))>::type> {
-    vector<typename std::remove_const<decltype(f(any()))>::type> r;
-    for (const auto &v : *this) {
-      r.emplace_back(f(v));
-    }
-    return r;
-  }
-
-  template <typename F>
-  auto transform(size_t beg, size_t end, F f) const
-      -> vector<typename std::remove_const<decltype(f(any()))>::type> {
-    vector<typename std::remove_const<decltype(f(any()))>::type> r;
-    end = (std::min)(end, size());
-    for (size_t i = beg; i < end; i++) {
-      r.emplace_back(f((*this)[i]));
-    }
-    return r;
-  }
 };
 
 /*
