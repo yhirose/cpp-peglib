@@ -133,6 +133,8 @@ TEST_CASE("Precedence climbing", "[precedence]")
 		T(S)             <-  < S > _
 	)");
 
+    parser.enable_packrat_parsing();
+
     // Setup actions
     parser["EXPRESSION"] = [](const SemanticValues& sv) -> long {
         auto result = any_cast<long>(sv[0]);
@@ -188,6 +190,8 @@ TEST_CASE("Precedence climbing with macro", "[precedence]")
         NUMBER                 <-  < '-'? [0-9]+ >
         %whitespace            <-  [ \t]*
 	)");
+
+    parser.enable_packrat_parsing();
 
     bool ret = parser;
     REQUIRE(ret == true);
