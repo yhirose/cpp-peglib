@@ -553,7 +553,8 @@ struct SemanticValues : protected std::vector<any> {
 
   // Transform the semantic value vector to another vector
   template <typename T>
-  std::vector<T> transform(size_t beg = 0, size_t end = static_cast<size_t>(-1)) const {
+  std::vector<T> transform(size_t beg = 0,
+                           size_t end = static_cast<size_t>(-1)) const {
     std::vector<T> r;
     end = (std::min)(end, size());
     for (size_t i = beg; i < end; i++) {
@@ -3646,6 +3647,32 @@ private:
 struct EmptyType {};
 typedef AstBase<EmptyType> Ast;
 
+template <typename T = Ast>
+void add_ast_action(const char *name, Definition &rule) {
+  if (!rule.action) {
+    rule.action = [&](const SemanticValues &sv) {
+      auto line = sv.line_info();
+
+      if (rule.is_token()) {
+        return std::make_shared<T>(sv.path, line.first, line.second,
+                                   name, sv.token(),
+                                   std::distance(sv.ss, sv.c_str()),
+                                   sv.length(), sv.choice_count(), sv.choice());
+      }
+
+      auto ast = std::make_shared<T>(
+          sv.path, line.first, line.second, name,
+          sv.transform<std::shared_ptr<T>>(), std::distance(sv.ss, sv.c_str()),
+          sv.length(), sv.choice_count(), sv.choice());
+
+      for (auto node : ast->nodes) {
+        node->parent = ast;
+      }
+      return ast;
+    };
+  }
+}
+
 /*-----------------------------------------------------------------------------
  *  parser
  *---------------------------------------------------------------------------*/
@@ -3775,32 +3802,7 @@ public:
 
   template <typename T = Ast> parser &enable_ast() {
     for (auto &x : *grammar_) {
-      const auto &name = x.first;
-      auto &rule = x.second;
-
-      if (!rule.action) {
-        rule.action = [&](const SemanticValues &sv) {
-          auto line = sv.line_info();
-
-          if (rule.is_token()) {
-            return std::make_shared<T>(
-                sv.path, line.first, line.second, name.c_str(), sv.token(),
-                std::distance(sv.ss, sv.c_str()), sv.length(),
-                sv.choice_count(), sv.choice());
-          }
-
-          auto ast = std::make_shared<T>(
-              sv.path, line.first, line.second, name.c_str(),
-              sv.transform<std::shared_ptr<T>>(),
-              std::distance(sv.ss, sv.c_str()), sv.length(), sv.choice_count(),
-              sv.choice());
-
-          for (auto node : ast->nodes) {
-            node->parent = ast;
-          }
-          return ast;
-        };
-      }
+      add_ast_action(x.first.c_str(), x.second);
     }
     return *this;
   }
