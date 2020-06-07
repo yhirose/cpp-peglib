@@ -3648,29 +3648,27 @@ struct EmptyType {};
 typedef AstBase<EmptyType> Ast;
 
 template <typename T = Ast>
-void add_ast_action(const char *name, Definition &rule) {
-  if (!rule.action) {
-    rule.action = [&](const SemanticValues &sv) {
-      auto line = sv.line_info();
+void add_ast_action(Definition &rule, const std::string &name) {
+  rule.action = [&](const SemanticValues &sv) {
+    auto line = sv.line_info();
 
-      if (rule.is_token()) {
-        return std::make_shared<T>(sv.path, line.first, line.second,
-                                   name, sv.token(),
-                                   std::distance(sv.ss, sv.c_str()),
-                                   sv.length(), sv.choice_count(), sv.choice());
-      }
+    if (rule.is_token()) {
+      return std::make_shared<T>(sv.path, line.first, line.second,
+                                 name.c_str(), sv.token(),
+                                 std::distance(sv.ss, sv.c_str()),
+                                 sv.length(), sv.choice_count(), sv.choice());
+    }
 
-      auto ast = std::make_shared<T>(
-          sv.path, line.first, line.second, name,
-          sv.transform<std::shared_ptr<T>>(), std::distance(sv.ss, sv.c_str()),
-          sv.length(), sv.choice_count(), sv.choice());
+    auto ast = std::make_shared<T>(
+        sv.path, line.first, line.second, name.c_str(),
+        sv.transform<std::shared_ptr<T>>(), std::distance(sv.ss, sv.c_str()),
+        sv.length(), sv.choice_count(), sv.choice());
 
-      for (auto node : ast->nodes) {
-        node->parent = ast;
-      }
-      return ast;
-    };
-  }
+    for (auto node : ast->nodes) {
+      node->parent = ast;
+    }
+    return ast;
+  };
 }
 
 /*-----------------------------------------------------------------------------
@@ -3802,7 +3800,11 @@ public:
 
   template <typename T = Ast> parser &enable_ast() {
     for (auto &x : *grammar_) {
-      add_ast_action(x.first.c_str(), x.second);
+      const auto &name = x.first;
+      auto &rule = x.second;
+      if (!rule.action) {
+        add_ast_action(rule, name);
+      }
     }
     return *this;
   }
