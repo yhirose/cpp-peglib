@@ -675,6 +675,46 @@ TEST_CASE("Calculator test with AST", "[general]")
     REQUIRE(val == -3);
 }
 
+TEST_CASE("Calculator test with combinators and AST", "[general]") {
+  // Construct grammer
+  AST_DEFINITIONS(EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER);
+
+  EXPRESSION <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
+  TERM <= seq(FACTOR, zom(seq(FACTOR_OPERATOR, FACTOR)));
+  FACTOR <= cho(NUMBER, seq(chr('('), EXPRESSION, chr(')')));
+  TERM_OPERATOR <= cls("+-");
+  FACTOR_OPERATOR <= cls("*/");
+  NUMBER <= oom(cls("0-9"));
+
+  std::function<long(const Ast &)> eval = [&](const Ast &ast) {
+    if (ast.name == "NUMBER") {
+      return stol(ast.token);
+    } else {
+      const auto &nodes = ast.nodes;
+      auto result = eval(*nodes[0]);
+      for (auto i = 1u; i < nodes.size(); i += 2) {
+        auto num = eval(*nodes[i + 1]);
+        auto ope = nodes[i]->token[0];
+        switch (ope) {
+        case '+': result += num; break;
+        case '-': result -= num; break;
+        case '*': result *= num; break;
+        case '/': result /= num; break;
+        }
+      }
+      return result;
+    }
+  };
+
+  std::shared_ptr<Ast> ast;
+  auto r = EXPRESSION.parse_and_get_value("1+2*3*(4-5+6)/7-8", ast);
+  ast = AstOptimizer(true).optimize(ast);
+  auto val = eval(*ast);
+
+  REQUIRE(r.ret == true);
+  REQUIRE(val == -3);
+}
+
 TEST_CASE("Ignore semantic value test", "[general]")
 {
     parser parser(R"(
