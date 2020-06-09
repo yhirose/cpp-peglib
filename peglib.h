@@ -1762,6 +1762,7 @@ struct AssignIDToDefinition : public Ope::Visitor {
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override;
 
   std::unordered_map<void *, size_t> ids;
 };
@@ -2731,6 +2732,11 @@ inline void AssignIDToDefinition::visit(Reference &ope) {
     }
     ope.rule_->accept(*this);
   }
+}
+
+inline void AssignIDToDefinition::visit(PrecedenceClimbing &ope) {
+  ope.atom_->accept(*this);
+  ope.binop_->accept(*this);
 }
 
 inline void TokenChecker::visit(WeakHolder & /*ope*/) { has_rule_ = true; }

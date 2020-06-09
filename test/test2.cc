@@ -325,6 +325,24 @@ TEST_CASE("Packrat parser test with macro", "[packrat]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("Packrat parser test with precedence expression parser", "[packrat]") {
+  peg::parser parser(R"(
+    Expression  <- Atom (Operator Atom)* { precedence L + - L * / }
+    Atom        <- _? Number _?
+    Number      <- [0-9]+
+    Operator    <- '+' / '-' / '*' / '/'
+    _           <- ' '+
+  )");
+
+  bool ret = parser;
+  REQUIRE(ret == true);
+
+  parser.enable_packrat_parsing();
+
+  ret = parser.parse(" 1 + 2 * 3 ");
+  REQUIRE(ret == true);
+}
+
 TEST_CASE("Backreference test", "[backreference]")
 {
     parser parser(R"(
