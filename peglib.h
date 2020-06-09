@@ -1239,11 +1239,11 @@ class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
   LiteralString(std::string &&s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
+      : lit_(s), ignore_case_(ignore_case),
         is_word_(false) {}
 
   LiteralString(const std::string &s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), init_is_word_(false),
+      : lit_(s), ignore_case_(ignore_case),
         is_word_(false) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
@@ -1253,7 +1253,7 @@ public:
 
   std::string lit_;
   bool ignore_case_;
-  mutable bool init_is_word_;
+  mutable std::once_flag init_is_word_;
   mutable bool is_word_;
 };
 
@@ -2342,7 +2342,7 @@ private:
 
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &sv,
                             Context &c, any &dt, const std::string &lit,
-                            bool &init_is_word, bool &is_word,
+                            std::once_flag &init_is_word, bool &is_word,
                             bool ignore_case) {
   size_t i = 0;
   for (; i < lit.size(); i++) {
@@ -2359,14 +2359,13 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &sv,
   static SemanticValues dummy_sv;
   static any dummy_dt;
 
-  if (!init_is_word) { // TODO: Protect with mutex
+  std::call_once(init_is_word, [&]() {
     if (c.wordOpe) {
       auto len =
           c.wordOpe->parse(lit.data(), lit.size(), dummy_sv, dummy_c, dummy_dt);
       is_word = success(len);
     }
-    init_is_word = true;
-  }
+  });
 
   if (is_word) {
     NotPredicate ope(c.wordOpe);
@@ -2463,7 +2462,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &sv,
   }
 
   // Macro reference
-  // TODO: need packrat support
   if (outer_->is_macro) {
     c.rule_stack.push_back(outer_);
     auto len = ope_->parse(s, n, sv, c, dt);
@@ -2592,7 +2590,7 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     const auto &cs = c.capture_scope_stack[index];
     if (cs.find(name_) != cs.end()) {
       const auto &lit = cs.at(name_);
-      auto init_is_word = false;
+      std::once_flag init_is_word;
       auto is_word = false;
       return parse_literal(s, n, sv, c, dt, lit, init_is_word, is_word, false);
     }
