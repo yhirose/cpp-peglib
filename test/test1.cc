@@ -387,6 +387,24 @@ TEST_CASE("Skip token test2", "[general]")
     REQUIRE(ret == true);
 }
 
+TEST_CASE("Custom AST test", "[general]")
+{
+	struct CustomType {};
+	using CustomAst = AstBase<CustomType>;
+	
+    parser parser(R"(
+        ROOT <- _ TEXT*
+        TEXT <- [a-zA-Z]+ _
+        _ <- [ \t\r\n]*
+    )");
+
+    parser.enable_ast<CustomAst>();
+    std::shared_ptr<CustomAst> ast;
+    bool ret = parser.parse("a b c", ast);
+    REQUIRE(ret == true);
+    REQUIRE(ast->nodes.size() == 4);
+}
+
 TEST_CASE("Backtracking test", "[general]")
 {
     parser parser(R"(
