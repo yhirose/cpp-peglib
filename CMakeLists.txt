@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.1.0)
 project("cpp-peglib")
 
-find_package(Threads)
 # Check if a supported compiler is used to setup the C++ standard to use:
 get_property(known_features GLOBAL PROPERTY CMAKE_CXX_KNOWN_FEATURES)
 list(FIND known_features "cxx_std_17" found)
@@ -30,6 +29,9 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 elseif(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /wd4503 /wd4512 /utf-8")
 endif()
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(add_link_deps Threads::Threads)
