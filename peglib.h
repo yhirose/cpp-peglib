@@ -1706,6 +1706,7 @@ struct Ope::Visitor {
 };
 
 struct IsReference : public Ope::Visitor {
+  using Ope::Visitor::visit;
   void visit(Reference & /*ope*/) override { is_reference = true; }
   bool is_reference = false;
 };
@@ -1741,6 +1742,8 @@ struct TraceOpeName : public Ope::Visitor {
 };
 
 struct AssignIDToDefinition : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -1768,6 +1771,8 @@ struct AssignIDToDefinition : public Ope::Visitor {
 };
 
 struct IsLiteralToken : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(PrioritizedChoice &ope) override {
     for (auto op : ope.opes_) {
       if (!IsLiteralToken::check(*op)) { return; }
@@ -1789,6 +1794,8 @@ private:
 };
 
 struct TokenChecker : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -1883,6 +1890,8 @@ private:
 };
 
 struct HasEmptyElement : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   HasEmptyElement(std::list<std::pair<const char *, std::string>> &refs)
       : refs_(refs) {}
 
@@ -1945,6 +1954,8 @@ private:
 };
 
 struct DetectInfiniteLoop : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   DetectInfiniteLoop(const char *s, const std::string &name) {
     refs_.emplace_back(s, name);
   }
@@ -1995,6 +2006,8 @@ private:
 };
 
 struct ReferenceChecker : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   ReferenceChecker(const Grammar &grammar,
                    const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
@@ -2031,6 +2044,8 @@ private:
 };
 
 struct LinkReferences : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   LinkReferences(Grammar &grammar, const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
@@ -2063,6 +2078,8 @@ private:
 };
 
 struct FindReference : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   FindReference(const std::vector<std::shared_ptr<Ope>> &args,
                 const std::vector<std::string> &params)
       : args_(args), params_(params) {}
@@ -2140,6 +2157,8 @@ private:
 };
 
 struct IsPrioritizedChoice : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(PrioritizedChoice & /*ope*/) override { result_ = true; }
 
   static bool check(Ope &ope) {
