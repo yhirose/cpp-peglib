@@ -1,9 +1,8 @@
 
 set commentstring=#\ %s
 
-syn match pegBoth /=/
-syn match pegM2U /->/
-syn match pegU2M /<-/
+syn match pegAssign /<-/
+syn match pegAssign2 /←/
 
 syn match pegName /\v[a-zA-Z_][a-zA-Z0-9_]*/
 
@@ -15,9 +14,8 @@ syn region pegClass start=/\v\[/ skip=/\v\\./ end=/\v]/
 
 "syn match pegOperator /\(*\|?\|+\|!\|\.\|\~\)/
 
-hi def link pegBoth Statement
-hi def link pegM2U Statement
-hi def link pegU2M Statement
+hi def link pegAssign Statement
+hi def link pegAssign2 Statement
 
 hi def link pegName Identifier
 
