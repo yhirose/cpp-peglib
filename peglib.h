@@ -1239,12 +1239,10 @@ class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
   LiteralString(std::string &&s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case),
-        is_word_(false) {}
+      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
 
   LiteralString(const std::string &s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case),
-        is_word_(false) {}
+      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &sv, Context &c,
                     any &dt) const override;
@@ -3437,6 +3435,21 @@ private:
         log(line.first, line.second, "'" + name + "' is already defined.");
       }
     }
+
+    // Check if the start rule has ignore operator
+    {
+      auto &rule = grammar[data.start];
+      if (rule.ignoreSemanticValue) {
+        if (log) {
+          auto line = line_info(s, rule.s_);
+          log(line.first, line.second,
+              "Ignore operator cannot be applied to '" + rule.name + "'.");
+        }
+        ret = false;
+      }
+    }
+
+    if (!ret) { return nullptr; }
 
     // Check missing definitions
     for (auto &x : grammar) {
