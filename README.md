@@ -177,20 +177,18 @@ struct SemanticValues : protected std::vector<any>
 The following example uses `<` ... ` >` operator, which is *token boundary* operator.
 
 ```cpp
-auto syntax = R"(
+peg::parser parser(R"(
     ROOT  <- _ TOKEN (',' _ TOKEN)*
     TOKEN <- < [a-z0-9]+ > _
     _     <- [ \t\r\n]*
-)";
+)");
 
-peg pg(syntax);
-
-pg["TOKEN"] = [](const SemanticValues& sv) {
+parser["TOKEN"] = [](const SemanticValues& sv) {
     // 'token' doesn't include trailing whitespaces
     auto token = sv.token();
 };
 
-auto ret = pg.parse(" token1, token2 ");
+auto ret = parser.parse(" token1, token2 ");
 ```
 
 We can ignore unnecessary semantic values from the list by using `~` operator.
