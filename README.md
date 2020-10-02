@@ -1,10 +1,13 @@
 cpp-peglib
 ==========
 
+[![](https://github.com/yhirose/cpp-peglib/workflows/CMake/badge.svg)](https://github.com/yhirose/cpp-peglib/actions)
 [![Build Status](https://travis-ci.org/yhirose/cpp-peglib.svg?branch=master)](https://travis-ci.org/yhirose/cpp-peglib)
 [![Bulid Status](https://ci.appveyor.com/api/projects/status/github/yhirose/cpp-peglib?branch=master&svg=true)](https://ci.appveyor.com/project/yhirose/cpp-peglib)
 
-C++11 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library. You can start using it right away just by including `peglib.h` in your project.
+C++17 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library. You can start using it right away just by including `peglib.h` in your project.
+
+Since this library only supports C++17 compilers, please make sure that compiler the option `-std=c++17` is enabled. (`/std:c++17 /Zc:__cplusplus` for MSVC)
 
 You can also try the online version, PEG Playground at https://yhirose.github.io/cpp-peglib.
 
@@ -44,8 +47,8 @@ using namespace peg;
 using namespace std;
 
 int main(void) {
-    // (2) Make a parser
-    parser parser(R"(
+  // (2) Make a parser
+  parser parser(R"(
         # Grammar for Calculator...
         Additive    <- Multitive '+' Additive / Multitive
         Multitive   <- Primary '*' Multitive / Primary
@@ -54,38 +57,38 @@ int main(void) {
         %whitespace <- [ \t]*
     )");
 
-    assert((bool)parser == true);
+  assert(static_cast<bool>(parser) == true);
 
-    // (3) Setup actions
-    parser["Additive"] = [](const SemanticValues& sv) {
-        switch (sv.choice()) {
-        case 0:  // "Multitive '+' Additive"
-            return any_cast<int>(sv[0]) + any_cast<int>(sv[1]);
-        default: // "Multitive"
-            return any_cast<int>(sv[0]);
-        }
-    };
+  // (3) Setup actions
+  parser["Additive"] = [](const SemanticValues &vs) {
+    switch (vs.choice()) {
+    case 0: // "Multitive '+' Additive"
+      return any_cast<int>(vs[0]) + any_cast<int>(vs[1]);
+    default: // "Multitive"
+      return any_cast<int>(vs[0]);
+    }
+  };
 
-    parser["Multitive"] = [](const SemanticValues& sv) {
-        switch (sv.choice()) {
-        case 0:  // "Primary '*' Multitive"
-            return any_cast<int>(sv[0]) * any_cast<int>(sv[1]);
-        default: // "Primary"
-            return any_cast<int>(sv[0]);
-        }
-    };
+  parser["Multitive"] = [](const SemanticValues &vs) {
+    switch (vs.choice()) {
+    case 0: // "Primary '*' Multitive"
+      return any_cast<int>(vs[0]) * any_cast<int>(vs[1]);
+    default: // "Primary"
+      return any_cast<int>(vs[0]);
+    }
+  };
 
-    parser["Number"] = [](const SemanticValues& sv) {
-        return stoi(sv.token(), nullptr, 10);
-    };
+  parser["Number"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<int>();
+  };
 
-    // (4) Parse
-    parser.enable_packrat_parsing(); // Enable packrat parsing.
+  // (4) Parse
+  parser.enable_packrat_parsing(); // Enable packrat parsing.
 
-    int val;
-    parser.parse(" (1 + 2) * 3 ", val);
+  int val;
+  parser.parse(" (1 + 2) * 3 ", val);
 
-    assert(val == 9);
+  assert(val == 9);
 }
 ```
 
@@ -104,7 +107,7 @@ auto grammar = R"(
 parser parser;
 
 parser.log = [](size_t line, size_t col, const string& msg) {
-    cerr << line << ":" << col << ": " << msg << "\n";
+  cerr << line << ":" << col << ": " << msg << "\n";
 };
 
 auto ok = parser.load_grammar(grammar);
@@ -114,10 +117,10 @@ assert(ok);
 There are four semantic actions available:
 
 ```cpp
-[](const SemanticValues& sv, any& dt)
-[](const SemanticValues& sv)
-[](SemanticValues& sv, any& dt)
-[](SemanticValues& sv)
+[](const SemanticValues& vs, any& dt)
+[](const SemanticValues& vs)
+[](SemanticValues& vs, any& dt)
+[](SemanticValues& vs)
 ```
 
 `SemanticValues` value contains the following information:
@@ -129,48 +132,36 @@ There are four semantic actions available:
 
 `any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
 
-`peg::any` is a simpler implementatin of std::any. If the compiler in use supports C++17, by default `peg::any` is defined as an alias to `std::any`.
-
-To force using the simpler `any` implementation that comes with `cpp-peglib`, define `PEGLIB_USE_STD_ANY` as 0 before including `peglib.h`:
-```cpp
-#define PEGLIB_USE_STD_ANY 0
-#include <peglib.h>
-[...]
-```
-
-A semantic action can return a value of arbitrary data type, which will be wrapped by `peg::any`. If a user returns nothing in a semantic action, the first semantic value in the `const SemanticValues& sv` argument will be returned. (Yacc parser has the same behavior.)
+A semantic action can return a value of arbitrary data type, which will be wrapped by `peg::any`. If a user returns nothing in a semantic action, the first semantic value in the `const SemanticValues& vs` argument will be returned. (Yacc parser has the same behavior.)
 
 Here shows the `SemanticValues` structure:
 
 ```cpp
 struct SemanticValues : protected std::vector<any>
 {
-    // Input text
-    const char* path;
-    const char* ss;
+  // Input text
+  const char* path;
+  const char* ss;
 
-    // Matched string
-    std::string str() const;    // Matched string
-    const char* c_str() const;  // Matched string start
-    size_t      length() const; // Matched string length
+  // Matched string
+  std::string_view sv() const { return sv_; }
 
-    // Line number and column at which the matched string is
-    std::pair<size_t, size_t> line_info() const;
+  // Line number and column at which the matched string is
+  std::pair<size_t, size_t> line_info() const;
 
-    // Tokens
-    std::vector<
-        std::pair<
-            const char*, // Token start
-            size_t>>     // Token length
-        tokens;
+  // Tokens
+  std::vector<std::string_view> tokens;
+  std::string_view token(size_t id = 0) const;
 
-    std::string token(size_t id = 0) const;
+  // Token conversion
+  std::string token_to_string(size_t id = 0) const;
+  template <typename T> T token_to_number() const;
 
-    // Choice number (0 based index)
-    size_t      choice() const;
+  // Choice number (0 based index)
+  size_t choice() const;
 
-    // Transform the semantic value vector to another vector
-    template <typename T> vector<T> transform(size_t beg = 0, size_t end = -1) const;
+  // Transform the semantic value vector to another vector
+  template <typename T> vector<T> transform(size_t beg = 0, size_t end = -1) const;
 }
 ```
 
@@ -178,14 +169,14 @@ The following example uses `<` ... ` >` operator, which is *token boundary* oper
 
 ```cpp
 peg::parser parser(R"(
-    ROOT  <- _ TOKEN (',' _ TOKEN)*
-    TOKEN <- < [a-z0-9]+ > _
-    _     <- [ \t\r\n]*
+  ROOT  <- _ TOKEN (',' _ TOKEN)*
+  TOKEN <- < [a-z0-9]+ > _
+  _     <- [ \t\r\n]*
 )");
 
-parser["TOKEN"] = [](const SemanticValues& sv) {
-    // 'token' doesn't include trailing whitespaces
-    auto token = sv.token();
+parser["TOKEN"] = [](const SemanticValues& vs) {
+  // 'token' doesn't include trailing whitespaces
+  auto token = vs.token();
 };
 
 auto ret = parser.parse(" token1, token2 ");
@@ -195,13 +186,13 @@ We can ignore unnecessary semantic values from the list by using `~` operator.
 
 ```cpp
 peg::parser parser(R"(
-    ROOT  <-  _ ITEM (',' _ ITEM _)*
-    ITEM  <-  ([a-z])+
-    ~_    <-  [ \t]*
+  ROOT  <-  _ ITEM (',' _ ITEM _)*
+  ITEM  <-  ([a-z])+
+  ~_    <-  [ \t]*
 )");
 
-parser["ROOT"] = [&](const SemanticValues& sv) {
-    assert(sv.size() == 2); // should be 2 instead of 5.
+parser["ROOT"] = [&](const SemanticValues& vs) {
+  assert(vs.size() == 2); // should be 2 instead of 5.
 };
 
 auto ret = parser.parse(" item1, item2 ");
@@ -211,9 +202,9 @@ The following grammar is same as the above.
 
 ```cpp
 peg::parser parser(R"(
-    ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*
-    ITEM  <-  ([a-z])+
-    _     <-  [ \t]*
+  ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*
+  ITEM  <-  ([a-z])+
+  _     <-  [ \t]*
 )");
 ```
 
@@ -222,12 +213,12 @@ peg::parser parser(R"(
 ```cpp
 peg::parser parser("NUMBER  <-  [0-9]+");
 
-parser["NUMBER"] = [](const SemanticValues& sv) {
-    auto val = stol(sv.str(), nullptr, 10);
-    if (val != 100) {
-        throw peg::parse_error("value error!!");
-    }
-    return val;
+parser["NUMBER"] = [](const SemanticValues& vs) {
+  auto val = vs.token_to_number<long>();
+  if (val != 100) {
+    throw peg::parse_error("value error!!");
+  }
+  return val;
 };
 
 long val;
@@ -243,15 +234,15 @@ assert(ret == false);
 
 ```cpp
 parser["RULE"].enter = [](const char* s, size_t n, any& dt) {
-    std::cout << "enter" << std::endl;
+  std::cout << "enter" << std::endl;
 };
 
-parser["RULE"] = [](const SemanticValues& sv, any& dt) {
-    std::cout << "action!" << std::endl;
+parser["RULE"] = [](const SemanticValues& vs, any& dt) {
+  std::cout << "action!" << std::endl;
 };
 
 parser["RULE"].leave = [](const char* s, size_t n, size_t matchlen, any& value, any& dt) {
-    std::cout << "leave" << std::endl;
+  std::cout << "leave" << std::endl;
 };
 ```
 
@@ -291,9 +282,9 @@ Word expression
 
 ```cpp
 peg::parser parser(R"(
-    ROOT         <-  'hello' 'world'
-    %whitespace  <-  [ \t\r\n]*
-    %word        <-  [a-z]+
+  ROOT         <-  'hello' 'world'
+  %whitespace  <-  [ \t\r\n]*
+  %word        <-  [a-z]+
 )");
 
 parser.parse("hello world"); // OK
@@ -305,14 +296,14 @@ Capture/Backreference
 
 ```cpp
 peg::parser parser(R"(
-    ROOT      <- CONTENT
-    CONTENT   <- (ELEMENT / TEXT)*
-    ELEMENT   <- $(STAG CONTENT ETAG)
-    STAG      <- '<' $tag< TAG_NAME > '>'
-    ETAG      <- '</' $tag '>'
-    TAG_NAME  <- 'b' / 'u'
-    TEXT      <- TEXT_DATA
-    TEXT_DATA <- ![<] .
+  ROOT      <- CONTENT
+  CONTENT   <- (ELEMENT / TEXT)*
+  ELEMENT   <- $(STAG CONTENT ETAG)
+  STAG      <- '<' $tag< TAG_NAME > '>'
+  ETAG      <- '</' $tag '>'
+  TAG_NAME  <- 'b' / 'u'
+  TEXT      <- TEXT_DATA
+  TEXT_DATA <- ![<] .
 )");
 
 parser.parse("This is <b>a <u>test</u> text</b>."); // OK
@@ -359,36 +350,36 @@ Regarding the *precedence climbing algorithm*, please see [this article](https:/
 
 ```cpp
 parser parser(R"(
-    EXPRESSION               <-  INFIX_EXPRESSION(ATOM, OPERATOR)
-    ATOM                     <-  NUMBER / '(' EXPRESSION ')'
-    OPERATOR                 <-  < [-+/*] >
-    NUMBER                   <-  < '-'? [0-9]+ >
-    %whitespace              <-  [ \t]*
+  EXPRESSION             <-  INFIX_EXPRESSION(ATOM, OPERATOR)
+  ATOM                   <-  NUMBER / '(' EXPRESSION ')'
+  OPERATOR               <-  < [-+/*] >
+  NUMBER                 <-  < '-'? [0-9]+ >
+  %whitespace            <-  [ \t]*
 
-    # Declare order of precedence
-    INFIX_EXPRESSION(A, O) <-  A (O A)* {
-      precedence
-        L + -
-        L * /
-    }
+  # Declare order of precedence
+  INFIX_EXPRESSION(A, O) <-  A (O A)* {
+    precedence
+      L + -
+      L * /
+  }
 )");
 
-parser["INFIX_EXPRESSION"] = [](const SemanticValues& sv) -> long {
-    auto result = any_cast<long>(sv[0]);
-    if (sv.size() > 1) {
-        auto ope = any_cast<char>(sv[1]);
-        auto num = any_cast<long>(sv[2]);
-        switch (ope) {
-            case '+': result += num; break;
-            case '-': result -= num; break;
-            case '*': result *= num; break;
-            case '/': result /= num; break;
-        }
+parser["INFIX_EXPRESSION"] = [](const SemanticValues& vs) -> long {
+  auto result = any_cast<long>(vs[0]);
+  if (vs.size() > 1) {
+    auto ope = any_cast<char>(vs[1]);
+    auto num = any_cast<long>(vs[2]);
+    switch (ope) {
+      case '+': result += num; break;
+      case '-': result -= num; break;
+      case '*': result *= num; break;
+      case '/': result /= num; break;
     }
-    return result;
+  }
+  return result;
 };
-parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
-parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+parser["OPERATOR"] = [](const SemanticValues& vs) { return *vs.sv(); };
+parser["NUMBER"] = [](const SemanticValues& vs) { return vs.token_to_number<long>(); };
 
 long val;
 parser.parse(" -1 + (1 + 2) * 3 - -1", val);
@@ -446,8 +437,8 @@ vector<string> tags;
 
 Definition ROOT, TAG_NAME, _;
 ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
-TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& sv) {
-                tags.push_back(sv.str());
+TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& vs) {
+              tags.push_back(vs.str());
             };
 _        <= zom(cls(" \t"));
 
@@ -487,24 +478,24 @@ It's possible to add/override definitions.
 
 ```cpp
 auto syntax = R"(
-    ROOT <- _ 'Hello' _ NAME '!' _
+  ROOT <- _ 'Hello' _ NAME '!' _
 )";
 
 Rules additional_rules = {
-    {
-        "NAME", usr([](const char* s, size_t n, SemanticValues& sv, any& dt) -> size_t {
-            static vector<string> names = { "PEG", "BNF" };
-            for (const auto& name: names) {
-                if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
-                    return name.size(); // processed length
-                }
-            }
-            return -1; // parse error
-        })
-    },
-    {
-        "~_", zom(cls(" \t\r\n"))
-    }
+  {
+    "NAME", usr([](const char* s, size_t n, SemanticValues& vs, any& dt) -> size_t {
+      static vector<string> names = { "PEG", "BNF" };
+      for (const auto& name: names) {
+        if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
+          return name.size(); // processed length
+        }
+      }
+      return -1; // parse error
+    })
+  },
+  {
+    "~_", zom(cls(" \t\r\n"))
+  }
 };
 
 auto g = parser(syntax, additional_rules);

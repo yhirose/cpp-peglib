@@ -1,12 +1,12 @@
-#include <peglib.h>
 #include <assert.h>
 #include <iostream>
+#include <peglib.h>
 
 using namespace peg;
 using namespace std;
 
 int main(void) {
-    parser parser(R"(
+  parser parser(R"(
         EXPRESSION  <- ATOM (OPERATOR ATOM)* {
                          precedence
                            L - +
@@ -18,25 +18,25 @@ int main(void) {
         %whitespace <- [ \t\r\n]*
     )");
 
-    parser["EXPRESSION"] = [](const SemanticValues& sv) -> long {
-        auto result = any_cast<long>(sv[0]);
-        if (sv.size() > 1) {
-            auto ope = any_cast<char>(sv[1]);
-            auto num = any_cast<long>(sv[2]);
-            switch (ope) {
-                case '+': result += num; break;
-                case '-': result -= num; break;
-                case '*': result *= num; break;
-                case '/': result /= num; break;
-            }
-        }
-        return result;
-    };
-    parser["OPERATOR"] = [](const SemanticValues& sv) { return *sv.c_str(); };
-    parser["NUMBER"] = [](const SemanticValues& sv) { return atol(sv.c_str()); };
+  parser["EXPRESSION"] = [](const SemanticValues &vs) {
+    auto result = any_cast<long>(vs[0]);
+    if (vs.size() > 1) {
+      auto ope = any_cast<char>(vs[1]);
+      auto num = any_cast<long>(vs[2]);
+      switch (ope) {
+      case '+': result += num; break;
+      case '-': result -= num; break;
+      case '*': result *= num; break;
+      case '/': result /= num; break;
+      }
+    }
+    return result;
+  };
+  parser["OPERATOR"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) { return atol(vs.sv().data()); };
 
-    long val;
-    parser.parse(" -1 + (1 + 2) * 3 - -1", val);
+  long val;
+  parser.parse(" -1 + (1 + 2) * 3 - -1", val);
 
-    assert(val == 9);
+  assert(val == 9);
 }
