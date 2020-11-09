@@ -3,6 +3,93 @@
 
 using namespace peg;
 
+TEST_CASE("Token boundary 1", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- 'a' 'b' 'c'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 2", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- < 'a' 'b' 'c' >
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(!pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 3", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- < 'a' B 'c' >
+        B           <- 'b'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(!pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 4", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- < A 'b' 'c' >
+        A           <- 'a'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(!pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 5", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- A < 'b' C >
+        A           <- 'a'
+        C           <- 'c'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(!pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 6", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- < A > B C
+        A           <- 'a'
+        B           <- 'b'
+        C           <- 'c'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(pg.parse(" a  b  c "));
+}
+
+TEST_CASE("Token boundary 7", "[token boundary]")
+{
+    parser pg(R"(
+        ROOT        <- TOP
+        TOP         <- < A B C >
+        A           <- 'a'
+        B           <- 'b'
+        C           <- 'c'
+        %whitespace <- [ \t\r\n]*
+    )");
+
+    REQUIRE(!pg.parse(" a  b  c "));
+}
+
 TEST_CASE("Infinite loop 1", "[infinite loop]")
 {
     parser pg(R"(

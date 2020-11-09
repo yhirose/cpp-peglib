@@ -827,7 +827,7 @@ public:
   std::vector<Definition *> rule_stack;
   std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
 
-  bool in_token = false;
+  size_t in_token_boundary_count = 0;
 
   std::shared_ptr<Ope> whitespaceOpe;
   bool in_whitespace = false;
@@ -2392,7 +2392,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &sv,
   }
 
   // Skip whiltespace
-  if (!c.in_token) {
+  if (!c.in_token_boundary_count) {
     if (c.whitespaceOpe) {
       auto len = c.whitespaceOpe->parse(s + i, n - i, sv, c, dt);
       if (fail(len)) { return static_cast<size_t>(-1); }
@@ -2457,16 +2457,22 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         SemanticValues &sv, Context &c,
                                         any &dt) const {
-  c.in_token = true;
-  auto se = make_scope_exit([&]() { c.in_token = false; });
-  auto len = ope_->parse(s, n, sv, c, dt);
+  size_t len;
+  {
+    c.in_token_boundary_count++;
+    auto se = make_scope_exit([&]() { c.in_token_boundary_count--; });
+    len = ope_->parse(s, n, sv, c, dt);
+  }
+
   if (success(len)) {
     sv.tokens.emplace_back(std::make_pair(s, len));
 
-    if (c.whitespaceOpe) {
-      auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
-      if (fail(l)) { return static_cast<size_t>(-1); }
-      len += l;
+    if (!c.in_token_boundary_count) {
+      if (c.whitespaceOpe) {
+        auto l = c.whitespaceOpe->parse(s + len, n - len, sv, c, dt);
+        if (fail(l)) { return static_cast<size_t>(-1); }
+        len += l;
+      }
     }
   }
   return len;
