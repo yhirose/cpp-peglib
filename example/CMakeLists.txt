@@ -1,13 +1,9 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1)
 project(example)
 
 include_directories(..)
 
-if(MSVC)
-  add_compile_options(${cxx11_options} /W3)
-else()
-  add_compile_options(${cxx11_options})
-endif()
+set(CMAKE_CXX_STANDARD 17)
 
 add_executable(calc calc.cc)
 target_link_libraries(calc ${add_link_deps})

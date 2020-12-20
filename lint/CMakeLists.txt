@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1)
 project(peglint)
-include_directories(..)
-add_definitions("-std=c++11")
-add_executable(peglint peglint.cc)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_link_libraries(peglint ${add_link_deps})
-endif()
+include_directories(..)
+
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(peglint peglint.cc)
+target_link_libraries(peglint ${add_link_deps})

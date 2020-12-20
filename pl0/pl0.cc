@@ -182,11 +182,11 @@ struct SymbolTable {
     // _)?
     const auto& nodes = ast->nodes;
     for (auto i = 0u; i < nodes.size(); i += 2) {
-      const auto& ident = nodes[i + 0]->token;
+      const auto& ident = nodes[i + 0]->token_to_string();
       if (scope->has_symbol(ident)) {
         throw_runtime_error(nodes[i], "'" + ident + "' is already defined...");
       }
-      auto number = stoi(nodes[i + 1]->token);
+      auto number = nodes[i + 1]->token_to_number<int>();
       scope->constants.emplace(ident, number);
     }
   }
@@ -196,7 +196,7 @@ struct SymbolTable {
     // var <- ('VAR' __ ident(',' _ ident)* ';' _) ?
     const auto& nodes = ast->nodes;
     for (auto i = 0u; i < nodes.size(); i += 1) {
-      const auto& ident = nodes[i]->token;
+      const auto& ident = nodes[i]->token_to_string();
       if (scope->has_symbol(ident)) {
         throw_runtime_error(nodes[i], "'" + ident + "' is already defined...");
       }
@@ -209,7 +209,7 @@ struct SymbolTable {
     // procedure <- ('PROCEDURE' __ ident ';' _ block ';' _)*
     const auto& nodes = ast->nodes;
     for (auto i = 0u; i < nodes.size(); i += 2) {
-      const auto& ident = nodes[i + 0]->token;
+      const auto& ident = nodes[i + 0]->token_to_string();
       auto block = nodes[i + 1];
       scope->procedures[ident] = block;
       build_on_ast(block, scope);
@@ -219,7 +219,7 @@ struct SymbolTable {
   static void assignment(const shared_ptr<AstPL0> ast,
                          shared_ptr<SymbolScope> scope) {
     // assignment <- ident ':=' _ expression
-    const auto& ident = ast->nodes[0]->token;
+    const auto& ident = ast->nodes[0]->token_to_string();
     if (scope->has_constant(ident)) {
       throw_runtime_error(ast->nodes[0],
                           "cannot modify constant value '" + ident + "'...");
@@ -238,7 +238,7 @@ struct SymbolTable {
   static void call(const shared_ptr<AstPL0> ast,
                    shared_ptr<SymbolScope> scope) {
     // call <- 'CALL' __ ident
-    const auto& ident = ast->nodes[0]->token;
+    const auto& ident = ast->nodes[0]->token_to_string();
     if (!scope->has_procedure(ident)) {
       throw_runtime_error(ast->nodes[0],
                           "undefined procedure '" + ident + "'...");
@@ -256,7 +256,7 @@ struct SymbolTable {
 
   static void ident(const shared_ptr<AstPL0> ast,
                     shared_ptr<SymbolScope> scope) {
-    const auto& ident = ast->token;
+    const auto& ident = ast->token_to_string();
     if (!scope->has_symbol(ident)) {
       throw_runtime_error(ast, "undefined variable '" + ident + "'...");
     }
@@ -360,13 +360,13 @@ struct Interpreter {
   static void exec_assignment(const shared_ptr<AstPL0> ast,
                               shared_ptr<Environment> env) {
     // assignment <- ident ':=' _ expression
-    env->set_variable(ast->nodes[0]->token, eval(ast->nodes[1], env));
+    env->set_variable(ast->nodes[0]->token_to_string(), eval(ast->nodes[1], env));
   }
 
   static void exec_call(const shared_ptr<AstPL0> ast,
                         shared_ptr<Environment> env) {
     // call <- 'CALL' __ ident
-    exec_block(env->get_procedure(ast->nodes[0]->token), env);
+    exec_block(env->get_procedure(ast->nodes[0]->token_to_string()), env);
   }
 
   static void exec_statements(const shared_ptr<AstPL0> ast,
@@ -406,7 +406,7 @@ struct Interpreter {
     // in <- ('in' __ / 'read' __ / '?' _) ident
     int val;
     cin >> val;
-    env->set_variable(ast->nodes[0]->token, val);
+    env->set_variable(ast->nodes[0]->token_to_string(), val);
   }
 
   static bool eval_condition(const shared_ptr<AstPL0> ast,
@@ -434,7 +434,7 @@ struct Interpreter {
     // compare <- expression compare_op expression
     const auto& nodes = ast->nodes;
     auto lval = eval_expression(nodes[0], env);
-    auto op = peg::str2tag(nodes[1]->token.c_str());
+    auto op = peg::str2tag(nodes[1]->token_to_string().c_str());
     auto rval = eval_expression(nodes[2], env);
     switch (op) {
       case "="_:
@@ -473,11 +473,11 @@ struct Interpreter {
                              shared_ptr<Environment> env) {
     // expression <- sign term (term_op term)*
     const auto& nodes = ast->nodes;
-    auto sign = nodes[0]->token;
+    auto sign = nodes[0]->token_to_string();
     auto sign_val = (sign.empty() || sign == "+") ? 1 : -1;
     auto val = eval(nodes[1], env) * sign_val;
     for (auto i = 2u; i < nodes.size(); i += 2) {
-      auto ope = nodes[i + 0]->token[0];
+      auto ope = nodes[i + 0]->token_to_string()[0];
       auto rval = eval(nodes[i + 1], env);
       switch (ope) {
         case '+':
@@ -497,7 +497,7 @@ struct Interpreter {
     const auto& nodes = ast->nodes;
     auto val = eval(nodes[0], env);
     for (auto i = 1u; i < nodes.size(); i += 2) {
-      auto ope = nodes[i + 0]->token[0];
+      auto ope = nodes[i + 0]->token_to_string()[0];
       auto rval = eval(nodes[i + 1], env);
       switch (ope) {
         case '*':
@@ -516,12 +516,12 @@ struct Interpreter {
 
   static int eval_ident(const shared_ptr<AstPL0> ast,
                         shared_ptr<Environment> env) {
-    return env->get_value(ast, ast->token);
+    return env->get_value(ast, ast->token_to_string());
   }
 
   static int eval_number(const shared_ptr<AstPL0> ast,
                          shared_ptr<Environment> env) {
-    return stol(ast->token);
+    return stol(ast->token_to_string());
   }
 };
 
@@ -653,8 +653,8 @@ struct LLVM {
 
   void compile_const(const shared_ptr<AstPL0> ast) {
     for (auto i = 0u; i < ast->nodes.size(); i += 2) {
-      auto ident = ast->nodes[i]->token;
-      auto number = stoi(ast->nodes[i + 1]->token);
+      auto ident = ast->nodes[i]->token_to_string();
+      auto number = stoi(ast->nodes[i + 1]->token_to_string());
 
       auto alloca =
           builder_.CreateAlloca(builder_.getInt32Ty(), nullptr, ident);
@@ -664,14 +664,14 @@ struct LLVM {
 
   void compile_var(const shared_ptr<AstPL0> ast) {
     for (const auto node : ast->nodes) {
-      auto ident = node->token;
+      auto ident = node->token_to_string();
       builder_.CreateAlloca(builder_.getInt32Ty(), nullptr, ident);
     }
   }
 
   void compile_procedure(const shared_ptr<AstPL0> ast) {
     for (auto i = 0u; i < ast->nodes.size(); i += 2) {
-      auto ident = ast->nodes[i]->token;
+      auto ident = ast->nodes[i]->token_to_string();
       auto block = ast->nodes[i + 1];
 
       std::vector<Type*> pt(block->scope->free_variables.size(),
@@ -712,7 +712,7 @@ struct LLVM {
   }
 
   void compile_assignment(const shared_ptr<AstPL0> ast) {
-    auto ident = ast->nodes[0]->token;
+    auto ident = ast->nodes[0]->token_to_string();
 
     auto fn = builder_.GetInsertBlock()->getParent();
     auto tbl = fn->getValueSymbolTable();
@@ -726,7 +726,7 @@ struct LLVM {
   }
 
   void compile_call(const shared_ptr<AstPL0> ast) {
-    auto ident = ast->nodes[0]->token;
+    auto ident = ast->nodes[0]->token_to_string();
 
     auto scope = get_closest_scope(ast);
     auto block = scope->get_procedure(ident);
@@ -805,7 +805,7 @@ struct LLVM {
     auto lhs = compile_expression(ast->nodes[0]);
     auto rhs = compile_expression(ast->nodes[2]);
 
-    const auto& ope = ast->nodes[1]->token;
+    const auto& ope = ast->nodes[1]->token_to_string();
     switch (ope[0]) {
       case '=':
         return builder_.CreateICmpEQ(lhs, rhs, "icmpeq");
@@ -836,7 +836,7 @@ struct LLVM {
   Value* compile_expression(const shared_ptr<AstPL0> ast) {
     const auto& nodes = ast->nodes;
 
-    auto sign = nodes[0]->token;
+    auto sign = nodes[0]->token_to_string();
     auto negative = !(sign.empty() || sign == "+");
 
     auto val = compile_term(nodes[1]);
@@ -845,7 +845,7 @@ struct LLVM {
     }
 
     for (auto i = 2u; i < nodes.size(); i += 2) {
-      auto ope = nodes[i + 0]->token[0];
+      auto ope = nodes[i + 0]->token_to_string()[0];
       auto rval = compile_term(nodes[i + 1]);
       switch (ope) {
         case '+':
@@ -863,7 +863,7 @@ struct LLVM {
     const auto& nodes = ast->nodes;
     auto val = compile_factor(nodes[0]);
     for (auto i = 1u; i < nodes.size(); i += 2) {
-      auto ope = nodes[i + 0]->token[0];
+      auto ope = nodes[i + 0]->token_to_string()[0];
       auto rval = compile_switch_value(nodes[i + 1]);
       switch (ope) {
         case '*':
@@ -889,7 +889,7 @@ struct LLVM {
   }
 
   Value* compile_ident(const shared_ptr<AstPL0> ast) {
-    auto ident = ast->token;
+    auto ident = ast->token_to_string();
 
     auto fn = builder_.GetInsertBlock()->getParent();
     auto tbl = fn->getValueSymbolTable();
@@ -903,7 +903,7 @@ struct LLVM {
 
   Value* compile_number(const shared_ptr<AstPL0> ast) {
     return ConstantInt::getIntegerValue(builder_.getInt32Ty(),
-                                        APInt(32, ast->token, 10));
+                                        APInt(32, ast->token_to_string(), 10));
   }
 };
 
