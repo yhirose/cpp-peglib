@@ -901,7 +901,6 @@ public:
       count++;
     }
 
-    auto save_error_pos = c.error_pos;
     while (n - i > 0 && count < max_) {
       c.push_capture_scope();
       auto se = scope_exit([&]() { c.pop_capture_scope(); });
@@ -921,7 +920,6 @@ public:
           vs.tokens.erase(vs.tokens.begin() +
                           static_cast<std::ptrdiff_t>(save_tok_size));
         }
-        c.error_pos = save_error_pos;
         break;
       }
       i += len;
@@ -987,7 +985,6 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto save_error_pos = c.error_pos;
     auto &chldsv = c.push();
     c.push_capture_scope();
     auto se = scope_exit([&]() {
@@ -999,7 +996,6 @@ public:
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
     } else {
-      c.error_pos = save_error_pos;
       return 0;
     }
   }
@@ -2104,6 +2100,11 @@ private:
                 enablePackratParsing, tracer_enter, tracer_leave);
 
     auto len = ope->parse(s, n, vs, cxt, dt);
+    if (success(len)) {
+      cxt.error_pos = nullptr;
+      cxt.message_pos = nullptr;
+      cxt.message.clear();
+    }
     return Result{success(len), len, cxt.error_pos, cxt.message_pos,
                   cxt.message};
   }
@@ -2417,8 +2418,6 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   };
   auto action_se = scope_exit([&]() { rule.action = std::move(action); });
 
-  auto save_error_pos = c.error_pos;
-
   auto i = len;
   while (i < n) {
     std::vector<std::any> save_values(vs.begin(), vs.end());
@@ -2428,10 +2427,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     auto chl = binop_->parse(s + i, n - i, chv, c, dt);
     c.pop();
 
-    if (fail(chl)) {
-      c.error_pos = save_error_pos;
-      break;
-    }
+    if (fail(chl)) { break; }
 
     auto it = info_.find(tok);
     if (it == info_.end()) { break; }
@@ -2454,7 +2450,6 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (fail(chl)) {
       vs.assign(save_values.begin(), save_values.end());
       vs.tokens = save_tokens;
-      c.error_pos = save_error_pos;
       break;
     }
 
