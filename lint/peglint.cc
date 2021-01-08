@@ -162,7 +162,7 @@ int main(int argc, const char **argv) {
           if (!sv.tokens.empty()) {
             token += " '";
             token += sv.tokens[0];
-            token +=+ "'";
+            token += "'";
           }
           std::cout << "L " << pos << "\t" << indent << ret << name << " #"
                     << c.trace_ids.back() << choice.str() << token << std::endl;
