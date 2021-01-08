@@ -901,6 +901,7 @@ public:
       count++;
     }
 
+    auto save_error_pos = c.error_pos;
     while (n - i > 0 && count < max_) {
       c.push_capture_scope();
       auto se = scope_exit([&]() { c.pop_capture_scope(); });
@@ -920,6 +921,7 @@ public:
           vs.tokens.erase(vs.tokens.begin() +
                           static_cast<std::ptrdiff_t>(save_tok_size));
         }
+        c.error_pos = save_error_pos;
         break;
       }
       i += len;
