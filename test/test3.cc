@@ -42,6 +42,11 @@ TEST_CASE("PEG Expression", "[peg]")
     REQUIRE(exact(g, "Expression", "") == true);
     REQUIRE(exact(g, "Expression", " ") == false);
     REQUIRE(exact(g, "Expression", " a b ") == false);
+
+    // NOTE: The followings are actually allowed in the original Ford's paper...
+    REQUIRE(exact(g, "Expression", "a//b ") == true);
+    REQUIRE(exact(g, "Expression", "a // b ") == true);
+    REQUIRE(exact(g, "Expression", "a / / b ") == true);
 }
 
 TEST_CASE("PEG Sequence", "[peg]")

@@ -159,6 +159,14 @@ TEST_CASE("Infinite loop 7", "[infinite loop]") {
   REQUIRE(!pg);
 }
 
+TEST_CASE("Infinite loop 8", "[infinite loop]") {
+    parser pg(R"(
+        ROOT <- ('A' /)*
+    )");
+
+    REQUIRE(!pg);
+}
+
 TEST_CASE("Not infinite 1", "[infinite loop]") {
   parser pg(R"(
         Numbers <- Number* EOF

@@ -2872,7 +2872,9 @@ private:
     };
 
     g["Sequence"] = [&](const SemanticValues &vs) {
-      if (vs.size() == 1) {
+      if (vs.empty()) {
+        return npd(dot());
+      } else if (vs.size() == 1) {
         return std::any_cast<std::shared_ptr<Ope>>(vs[0]);
       } else {
         std::vector<std::shared_ptr<Ope>> opes;
