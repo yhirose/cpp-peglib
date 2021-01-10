@@ -604,6 +604,7 @@ public:
   std::vector<size_t> source_line_index;
 
   const char *error_pos = nullptr;
+  std::vector<const char *> expected_tokens;
   const char *message_pos = nullptr;
   std::string message; // TODO: should be `int`.
 
@@ -751,9 +752,7 @@ public:
     }
   }
 
-  void set_error_pos(const char *a_s) {
-    if (error_pos < a_s) error_pos = a_s;
-  }
+  void set_error_pos(const char *a_s, const char *literal = nullptr);
 
   void trace_enter(const char *name, const char *a_s, size_t n,
                    SemanticValues &vs, std::any &dt) const;
@@ -1601,6 +1600,22 @@ private:
   bool has_rule_ = false;
 };
 
+struct FindLiteralToken : public Ope::Visitor {
+  void visit(LiteralString &ope) override { token_ = ope.lit_.c_str(); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+
+  static const char *token(Ope &ope) {
+    FindLiteralToken vis;
+    ope.accept(vis);
+    return vis.token_;
+  }
+
+private:
+  const char *token_ = nullptr;
+};
+
 struct DetectLeftRecursion : public Ope::Visitor {
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
@@ -1946,6 +1961,7 @@ public:
     bool ret;
     size_t len;
     const char *error_pos;
+    const std::vector<const char *> expected_tokens;
     const char *message_pos;
     const std::string message;
   };
@@ -2100,13 +2116,9 @@ private:
                 enablePackratParsing, tracer_enter, tracer_leave);
 
     auto len = ope->parse(s, n, vs, cxt, dt);
-    if (success(len)) {
-      cxt.error_pos = nullptr;
-      cxt.message_pos = nullptr;
-      cxt.message.clear();
-    }
-    return Result{success(len), len, cxt.error_pos, cxt.message_pos,
-                  cxt.message};
+    return Result{success(len),    len,
+                  cxt.error_pos,   cxt.expected_tokens,
+                  cxt.message_pos, cxt.message};
   }
 
   std::shared_ptr<Holder> holder_;
@@ -2129,7 +2141,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   for (; i < lit.size(); i++) {
     if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i]))
                                : (s[i] != lit[i]))) {
-      c.set_error_pos(s);
+      c.set_error_pos(s, lit.c_str());
       return static_cast<size_t>(-1);
     }
   }
@@ -2165,6 +2177,25 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   return i;
+}
+
+inline void Context::set_error_pos(const char *a_s, const char *literal) {
+  if (error_pos <= a_s) {
+    if (error_pos < a_s) {
+      error_pos = a_s;
+      expected_tokens.clear();
+    }
+    if (literal) {
+      expected_tokens.push_back(literal);
+    } else if (!rule_stack.empty()) {
+      auto rule = rule_stack.back();
+      auto ope = rule->get_core_operator();
+      if (auto token = FindLiteralToken::token(*ope);
+          token && token[0] != '\0') {
+        expected_tokens.push_back(token);
+      }
+    }
+  }
 }
 
 inline void Context::trace_enter(const char *name, const char *a_s, size_t n,
@@ -2525,6 +2556,15 @@ inline void TokenChecker::visit(Reference &ope) {
     }
   } else {
     has_rule_ = true;
+  }
+}
+
+inline void FindLiteralToken::visit(Reference &ope) {
+  if (ope.is_macro_) {
+    ope.rule_->accept(*this);
+    for (auto arg : ope.args_) {
+      arg->accept(*this);
+    }
   }
 }
 
@@ -3764,19 +3804,61 @@ public:
 private:
   void output_log(const char *s, size_t n, const Definition::Result &r) const {
     if (log) {
-      if (!r.ret) {
+      if (!r.ret || r.len != n) {
         if (r.message_pos) {
           auto line = line_info(s, r.message_pos);
           log(line.first, line.second, r.message);
         } else {
           auto line = line_info(s, r.error_pos);
-          log(line.first, line.second, "syntax error");
+
+          std::string message;
+          if (r.expected_tokens.empty()) {
+            message = "syntax error.";
+          } else {
+            message = "syntax error";
+
+            if (auto token = heuristic_error_token(s, n, r.error_pos);
+                !token.empty()) {
+              message += ", unexpected '";
+              message += token;
+              message += "'";
+            }
+
+            size_t i = 0;
+            while (i < r.expected_tokens.size()) {
+              message += (i == 0 ? ", expecting '" : ", '");
+              message += r.expected_tokens[r.expected_tokens.size() - i - 1];
+              message += "'";
+              i++;
+            }
+            message += ".";
+          }
+
+          log(line.first, line.second, message);
         }
-      } else if (r.len != n) {
-        auto line = line_info(s, s + r.len);
-        log(line.first, line.second, "syntax error");
       }
     }
+  }
+
+  std::string heuristic_error_token(const char *s, size_t n,
+                                    const char *error_pos) const {
+    auto len = n - std::distance(s, error_pos);
+    if (len) {
+      size_t i = 0;
+      int c = error_pos[i++];
+      if (std::ispunct(c)) {
+        while (i < len && std::ispunct(error_pos[i])) {
+          i++;
+        }
+      } else {
+        while (i < len && !std::ispunct(error_pos[i]) &&
+               !std::isspace(error_pos[i])) {
+          i++;
+        }
+      }
+      return std::string(error_pos, std::min<size_t>(i, 8));
+    }
+    return std::string();
   }
 
   std::shared_ptr<Grammar> grammar_;
