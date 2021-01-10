@@ -604,7 +604,7 @@ public:
   std::vector<size_t> source_line_index;
 
   const char *error_pos = nullptr;
-  std::vector<const char *> expected_tokens;
+  std::vector<std::pair<const char *, bool>> expected_tokens;
   const char *message_pos = nullptr;
   std::string message; // TODO: should be `int`.
 
@@ -1961,7 +1961,7 @@ public:
     bool ret;
     size_t len;
     const char *error_pos;
-    const std::vector<const char *> expected_tokens;
+    const std::vector<std::pair<const char *, bool>> expected_tokens;
     const char *message_pos;
     const std::string message;
   };
@@ -2186,13 +2186,15 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
       expected_tokens.clear();
     }
     if (literal) {
-      expected_tokens.push_back(literal);
+      expected_tokens.push_back(std::make_pair(literal, true));
     } else if (!rule_stack.empty()) {
       auto rule = rule_stack.back();
       auto ope = rule->get_core_operator();
       if (auto token = FindLiteralToken::token(*ope);
           token && token[0] != '\0') {
-        expected_tokens.push_back(token);
+        expected_tokens.push_back(std::make_pair(token, true));
+      } else {
+        expected_tokens.push_back(std::make_pair(rule->name.c_str(), false));
       }
     }
   }
@@ -3826,9 +3828,23 @@ private:
 
             size_t i = 0;
             while (i < r.expected_tokens.size()) {
-              message += (i == 0 ? ", expecting '" : ", '");
-              message += r.expected_tokens[r.expected_tokens.size() - i - 1];
-              message += "'";
+              auto [token, is_literal] =
+                  r.expected_tokens[r.expected_tokens.size() - i - 1];
+
+              // Skip rules start with '_'
+              if (!is_literal && token[0] != '_') {
+                message += (i == 0 ? ", expecting " : ", ");
+                if (is_literal) {
+                  message += "'";
+                  message += token;
+                  message += "'";
+                } else {
+                  message += "<";
+                  message += token;
+                  message += ">";
+                }
+              }
+
               i++;
             }
             message += ".";
