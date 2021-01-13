@@ -300,5 +300,3 @@ TEST_CASE("PEG EndOfFile", "[peg]")
     REQUIRE(exact(g, "EndOfFile", "") == true);
     REQUIRE(exact(g, "EndOfFile", " ") == false);
 }
-
-// vim: et ts=4 sw=4 cin cino={1s ff=unix

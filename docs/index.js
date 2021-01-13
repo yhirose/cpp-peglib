@@ -30,11 +30,20 @@ codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
 $('#opt_mode').val(localStorage.getItem('optimazationMode') || 'all');
 $('#opt_rules').val(localStorage.getItem('optimazationRules'));
 
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function generateErrorListHTML(errors) {
   let html = '<ul>';
 
   html += $.map(errors, function (x) {
-    return '<li data-ln="' + x.ln + '" data-col="' + x.col + '"><span>' + x.ln + ':' + x.col + '</span> <span>' + x.msg + '</span></li>';
+    return '<li data-ln="' + x.ln + '" data-col="' + x.col + '"><span>' + x.ln + ':' + x.col + '</span> <span>' + escapeHtml(x.msg) + '</span></li>';
   }).join('');
 
   html += '<ul>';

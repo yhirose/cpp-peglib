@@ -934,5 +934,3 @@ TEST_CASE("Negated Class test", "[general]") {
   REQUIRE_FALSE(parser.parse("ABCZ_"));
   REQUIRE_FALSE(parser.parse(""));
 }
-
-// vim: et ts=4 sw=4 cin cino={1s ff=unix

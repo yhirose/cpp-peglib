@@ -1,5 +1,6 @@
 ﻿#include "catch.hh"
 #include <peglib.h>
+#include <sstream>
 
 using namespace peg;
 
@@ -217,6 +218,8 @@ TEST_CASE("Precedence climbing", "[precedence]") {
 		~_               <-  [ \t]*
 		T(S)             <-  < S > _
 	)");
+
+  REQUIRE(!!parser); // OK
 
   parser.enable_packrat_parsing();
 
@@ -1072,4 +1075,143 @@ TEST_CASE("Dictionary invalid", "[dic]") {
   REQUIRE_FALSE(ret);
 }
 
-// vim: et ts=4 sw=4 cin cino={1s ff=unix
+TEST_CASE("Error recovery 1", "[error]") {
+  parser pg(R"(
+    START      <- __? SECTION*
+
+    SECTION    <- HEADER __ ENTRIES __?
+
+    HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'
+
+    CATEGORY   <- < [-_a-zA-Z0-9 ]+ > _
+    ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
+    ATTRIBUTE  <- < [-_a-zA-Z0-9]+ > _
+
+    ENTRIES    <- (ENTRY (__ ENTRY)*)?
+
+    ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)*
+                / PHRASE ('|' _ PHRASE)
+                / %recover_to(__ / HEADER)
+
+    ONE_WAY    <- PHRASE '=' _
+    PHRASE     <- WORD (' ' WORD)* _
+    WORD       <- < (![ \t\r\n=|[#] .)+ >
+
+    ~__        <- _ (comment? nl _)+
+    ~_         <- [ \t]*
+
+    comment    <- ('#' (!nl .)*)
+    nl         <- '\r'? '\n'
+  )");
+
+  REQUIRE(!!pg); // OK
+
+  std::vector<std::string> errors{
+    R"(2:6: syntax error, unexpected '|', expecting <WORD>.)",
+    R"(4:4: syntax error, unexpected '\n', expecting <WORD>.)",
+    R"(8:4: syntax error, unexpected '\n', expecting <WORD>.)"
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    REQUIRE(ss.str() == errors[i++]);
+  };
+
+  pg.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  REQUIRE_FALSE(pg.parse(R"([Section1]
+aaa || bbb
+ccc = ddd
+eee
+
+[Section2]
+
+fff
+
+ggg hhh | iii
+
+  )", ast));
+
+  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+
+  REQUIRE(ast_to_s(ast) ==
+R"(+ START
+  + SECTION
+    - HEADER/0[CATEGORY] (Section1)
+    + ENTRIES
+      + ENTRY/2
+      + ENTRY/0
+        - ONE_WAY/0[WORD] (ccc)
+        - PHRASE/0[WORD] (ddd)
+      + ENTRY/2
+  + SECTION
+    - HEADER/0[CATEGORY] (Section2)
+    + ENTRIES
+      + ENTRY/2
+      + ENTRY/1
+        + PHRASE
+          - WORD (ggg)
+          - WORD (hhh)
+        - PHRASE/0[WORD] (iii)
+)");
+}
+
+TEST_CASE("Error recovery 2", "[error]") {
+  parser pg(R"(
+    START <- ENTRY ((',' ENTRY) / %recover_to(',' / Space))* (_ / %recover_to('!.'))
+    ENTRY <- '[' ITEM (',' ITEM)* ']'
+    ITEM  <- WORD / NUM / %recover_to(',' / ']')
+    NUM   <- [0-9]+ ![a-z]
+    WORD  <- '"' [a-z]+ '"'
+
+    ~_    <- Space+
+    Space <- [ \n]
+  )");
+
+  REQUIRE(!!pg); // OK
+
+  std::vector<std::string> errors{
+    R"(1:6: syntax error, unexpected '],['.)",
+    R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
+    R"(1:24: syntax error, unexpected ',"', expecting <WORD>.)",
+    R"(1:31: syntax error, unexpected 'ccc', expecting <NUM>.)",
+    R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
+    R"(1:55: syntax error, unexpected '],[', expecting <WORD>.)",
+    R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
+    R"(1:56: syntax error, unexpected ',[', expecting <Space>.)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    REQUIRE(ss.str() == errors[i++]);
+  };
+
+  pg.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  REQUIRE_FALSE(pg.parse(R"([000]],[111],[222z,"aaa,"bbb",ccc"],[ddd",444,555,"eee],[
+  )", ast));
+
+  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+
+  REQUIRE(ast_to_s(ast) ==
+R"(+ START
+  - ENTRY/0[NUM] (000)
+  - ENTRY/0[NUM] (111)
+  + ENTRY
+    + ITEM/2
+    + ITEM/2
+    - ITEM/0[WORD] ("bbb")
+    + ITEM/2
+  + ENTRY
+    + ITEM/2
+    - ITEM/1[NUM] (444)
+    - ITEM/1[NUM] (555)
+    + ITEM/2
+)");
+}

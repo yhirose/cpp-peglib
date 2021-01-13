@@ -129,7 +129,7 @@ int main(int argc, const char **argv) {
   if (opt_trace) {
     size_t prev_pos = 0;
     parser.enable_trace(
-        [&](const char *name, const char *s, size_t /*n*/,
+        [&](const peg::Ope &ope, const char *s, size_t /*n*/,
             const peg::SemanticValues & /*sv*/, const peg::Context &c,
             const std::any & /*dt*/) {
           auto pos = static_cast<size_t>(s - c.s);
@@ -139,11 +139,18 @@ int main(int argc, const char **argv) {
           while (level--) {
             indent += "│";
           }
+          std::string name;
+          {
+            name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
+
+            auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
+            if (lit) { name += " '" + lit->lit_ + "'"; }
+          }
           std::cout << "E " << pos << backtrack << "\t" << indent << "┌" << name
                     << " #" << c.trace_ids.back() << std::endl;
           prev_pos = static_cast<size_t>(pos);
         },
-        [&](const char *name, const char *s, size_t /*n*/,
+        [&](const peg::Ope &ope, const char *s, size_t /*n*/,
             const peg::SemanticValues &sv, const peg::Context &c,
             const std::any & /*dt*/, size_t len) {
           auto pos = static_cast<size_t>(s - c.s);
@@ -154,18 +161,24 @@ int main(int argc, const char **argv) {
             indent += "│";
           }
           auto ret = len != static_cast<size_t>(-1) ? "└o " : "└x ";
+          auto name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
           std::stringstream choice;
           if (sv.choice_count() > 0) {
             choice << " " << sv.choice() << "/" << sv.choice_count();
           }
           std::string token;
           if (!sv.tokens.empty()) {
-            token += " '";
+            token += ", token '";
             token += sv.tokens[0];
             token += "'";
           }
+          std::string matched;
+          if (peg::success(len) &&
+              peg::TokenChecker::is_token(const_cast<peg::Ope &>(ope))) {
+            matched = ", match '" + peg::escape_characters(s, len) + "'";
+          }
           std::cout << "L " << pos << "\t" << indent << ret << name << " #"
-                    << c.trace_ids.back() << choice.str() << token << std::endl;
+                    << c.trace_ids.back() << choice.str() << token << matched << std::endl;
         });
   }
 
@@ -173,19 +186,19 @@ int main(int argc, const char **argv) {
     parser.enable_ast();
 
     std::shared_ptr<peg::Ast> ast;
-    if (!parser.parse_n(source.data(), source.size(), ast)) { return -1; }
+    auto ret = parser.parse_n(source.data(), source.size(), ast);
 
-    if (opt_optimize) {
-      ast = peg::AstOptimizer(opt_mode, opt_rules).optimize(ast);
+    if (ast) {
+      if (opt_optimize) {
+        ast = peg::AstOptimizer(opt_mode, opt_rules).optimize(ast);
+      }
+      std::cout << peg::ast_to_s(ast);
     }
 
-    std::cout << peg::ast_to_s(ast);
-
+    if (!ret) { return -1; }
   } else {
     if (!parser.parse_n(source.data(), source.size())) { return -1; }
   }
 
   return 0;
 }
-
-// vim: et ts=4 sw=4 cin cino={1s ff=unix
