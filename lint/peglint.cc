@@ -144,7 +144,7 @@ int main(int argc, const char **argv) {
             name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
 
             auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
-            if (lit) { name += " '" + lit->lit_ + "'"; }
+            if (lit) { name += " '" + peg::escape_characters(lit->lit_) + "'"; }
           }
           std::cout << "E " << pos << backtrack << "\t" << indent << "┌" << name
                     << " #" << c.trace_ids.back() << std::endl;

@@ -201,6 +201,10 @@ inline std::string escape_characters(const char *s, size_t n) {
   return str;
 }
 
+inline std::string escape_characters(std::string_view sv) {
+  return escape_characters(sv.data(), sv.size());
+}
+
 /*-----------------------------------------------------------------------------
  *  resolve_escape_sequence
  *---------------------------------------------------------------------------*/
@@ -685,11 +689,7 @@ private:
     if (len) {
       size_t i = 0;
       int c = error_pos[i++];
-      if (std::ispunct(c)) {
-        while (i < len && std::ispunct(error_pos[i])) {
-          i++;
-        }
-      } else {
+      if (!std::ispunct(c) && !std::isspace(c)) {
         while (i < len && !std::ispunct(error_pos[i]) &&
                !std::isspace(error_pos[i])) {
           i++;
@@ -2121,7 +2121,6 @@ private:
 static const char *WHITESPACE_DEFINITION_NAME = "%whitespace";
 static const char *WORD_DEFINITION_NAME = "%word";
 static const char *RECOVER_DEFINITION_NAME = "%recover";
-static const char *RECOVER_TO_DEFINITION_NAME = "%recover_to";
 
 /*
  * Definition
@@ -3213,8 +3212,6 @@ private:
         auto ope = ref(*data.grammar, ident, vs.sv().data(), is_macro, args);
         if (ident == RECOVER_DEFINITION_NAME) {
           ope = rec(ope);
-        } else if (ident == RECOVER_TO_DEFINITION_NAME) {
-          ope = rec(ope);
         }
 
         if (ignore) {
@@ -3396,17 +3393,6 @@ private:
         auto &rule = grammar[RECOVER_DEFINITION_NAME];
         rule <= ref(grammar, "x", "", false, {});
         rule.name = RECOVER_DEFINITION_NAME;
-        rule.s_ = "[native]";
-        rule.ignoreSemanticValue = true;
-        rule.is_macro = true;
-        rule.params = {"x"};
-      }
-
-      // `%recover_to`
-      {
-        auto &rule = grammar[RECOVER_TO_DEFINITION_NAME];
-        rule <= oom(seq(npd(ref(grammar, "x", "", false, {})), dot()));
-        rule.name = RECOVER_TO_DEFINITION_NAME;
         rule.s_ = "[native]";
         rule.ignoreSemanticValue = true;
         rule.is_macro = true;

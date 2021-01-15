@@ -1083,19 +1083,19 @@ TEST_CASE("Error recovery 1", "[error]") {
 
     HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'
 
-    CATEGORY   <- < [-_a-zA-Z0-9 ]+ > _
+    CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
     ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
-    ATTRIBUTE  <- < [-_a-zA-Z0-9]+ > _
+    ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
 
     ENTRIES    <- (ENTRY (__ ENTRY)*)?
 
-    ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)*
-                / PHRASE ('|' _ PHRASE)
-                / %recover_to(__ / HEADER)
+    ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
+                / PHRASE ('|' _ PHRASE)+ !'='
+                / %recover((!(__ / HEADER) .)+)
 
     ONE_WAY    <- PHRASE '=' _
     PHRASE     <- WORD (' ' WORD)* _
-    WORD       <- < (![ \t\r\n=|[#] .)+ >
+    WORD       <- < (![ \t\r\n=|[\]#] .)+ >
 
     ~__        <- _ (comment? nl _)+
     ~_         <- [ \t]*
@@ -1107,9 +1107,10 @@ TEST_CASE("Error recovery 1", "[error]") {
   REQUIRE(!!pg); // OK
 
   std::vector<std::string> errors{
-    R"(2:6: syntax error, unexpected '|', expecting <WORD>.)",
-    R"(4:4: syntax error, unexpected '\n', expecting <WORD>.)",
-    R"(8:4: syntax error, unexpected '\n', expecting <WORD>.)"
+    R"(3:6: syntax error, unexpected '|', expecting <WORD>.)",
+    R"(7:4: syntax error, unexpected '\n', expecting <WORD>.)",
+    R"(10:1: syntax error, unexpected '[', expecting <WORD>.)",
+    R"(18:17: syntax error, unexpected '=', expecting <ENTRY>, <WORD>.)",
   };
 
   size_t i = 0;
@@ -1122,16 +1123,27 @@ TEST_CASE("Error recovery 1", "[error]") {
   pg.enable_ast();
 
   std::shared_ptr<Ast> ast;
-  REQUIRE_FALSE(pg.parse(R"([Section1]
+  REQUIRE_FALSE(pg.parse(R"([Section 1]
+111 = 222 | 333
 aaa || bbb
 ccc = ddd
+
+[Section 2]
 eee
+fff | ggg
 
-[Section2]
+[Section 3
+hhh | iii
 
-fff
+[Section 日本語]
+ppp | qqq
 
-ggg hhh | iii
+[Section 4]
+jjj | kkk
+lll = mmm | nnn = ooo
+
+[Section 5]
+rrr | sss
 
   )", ast));
 
@@ -1140,30 +1152,54 @@ ggg hhh | iii
   REQUIRE(ast_to_s(ast) ==
 R"(+ START
   + SECTION
-    - HEADER/0[CATEGORY] (Section1)
+    - HEADER/0[CATEGORY] (Section 1)
     + ENTRIES
+      + ENTRY/0
+        - ONE_WAY/0[WORD] (111)
+        - PHRASE/0[WORD] (222)
+        - PHRASE/0[WORD] (333)
       + ENTRY/2
       + ENTRY/0
         - ONE_WAY/0[WORD] (ccc)
         - PHRASE/0[WORD] (ddd)
-      + ENTRY/2
   + SECTION
-    - HEADER/0[CATEGORY] (Section2)
+    - HEADER/0[CATEGORY] (Section 2)
     + ENTRIES
       + ENTRY/2
       + ENTRY/1
-        + PHRASE
-          - WORD (ggg)
-          - WORD (hhh)
+        - PHRASE/0[WORD] (fff)
+        - PHRASE/0[WORD] (ggg)
+      + ENTRY/2
+      + ENTRY/1
+        - PHRASE/0[WORD] (hhh)
         - PHRASE/0[WORD] (iii)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 日本語)
+    + ENTRIES
+      + ENTRY/1
+        - PHRASE/0[WORD] (ppp)
+        - PHRASE/0[WORD] (qqq)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 4)
+    + ENTRIES
+      + ENTRY/1
+        - PHRASE/0[WORD] (jjj)
+        - PHRASE/0[WORD] (kkk)
+      + ENTRY/2
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 5)
+    + ENTRIES
+      + ENTRY/1
+        - PHRASE/0[WORD] (rrr)
+        - PHRASE/0[WORD] (sss)
 )");
 }
 
 TEST_CASE("Error recovery 2", "[error]") {
   parser pg(R"(
-    START <- ENTRY ((',' ENTRY) / %recover_to(',' / Space))* (_ / %recover_to('!.'))
+    START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover((!'!.' .)+))
     ENTRY <- '[' ITEM (',' ITEM)* ']'
-    ITEM  <- WORD / NUM / %recover_to(',' / ']')
+    ITEM  <- WORD / NUM / %recover((!(',' / ']') .)+)
     NUM   <- [0-9]+ ![a-z]
     WORD  <- '"' [a-z]+ '"'
 
@@ -1174,14 +1210,14 @@ TEST_CASE("Error recovery 2", "[error]") {
   REQUIRE(!!pg); // OK
 
   std::vector<std::string> errors{
-    R"(1:6: syntax error, unexpected '],['.)",
+    R"(1:6: syntax error, unexpected ']'.)",
     R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
-    R"(1:24: syntax error, unexpected ',"', expecting <WORD>.)",
+    R"(1:24: syntax error, unexpected ',', expecting <WORD>.)",
     R"(1:31: syntax error, unexpected 'ccc', expecting <NUM>.)",
     R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
-    R"(1:55: syntax error, unexpected '],[', expecting <WORD>.)",
+    R"(1:55: syntax error, unexpected ']', expecting <WORD>.)",
     R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
-    R"(1:56: syntax error, unexpected ',[', expecting <Space>.)",
+    R"(1:56: syntax error, unexpected ',', expecting <Space>.)",
   };
 
   size_t i = 0;
