@@ -2963,13 +2963,16 @@ private:
                              g["Spacing"]);
 
     g["Range"] <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
-    g["Char"] <= cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
-                     seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
-                     seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
-                     seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
-                     seq(lit("\\u"), cls("0-9a-fA-F"), cls("0-9a-fA-F"),
-                         cls("0-9a-fA-F"), cls("0-9a-fA-F")),
-                     seq(npd(chr('\\')), dot()));
+    g["Char"] <=
+        cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
+            seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
+            seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
+            seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
+            seq(lit("\\u"),
+                cho(seq(cho(seq(chr('0'), cls("0-9a-fA-F")), lit("10")),
+                        rep(cls("0-9a-fA-F"), 4, 4)),
+                    rep(cls("0-9a-fA-F"), 4, 5))),
+            seq(npd(chr('\\')), dot()));
 
     g["Repetition"] <=
         seq(g["BeginBlacket"], g["RepetitionRange"], g["EndBlacket"]);
@@ -3210,9 +3213,7 @@ private:
         }
 
         auto ope = ref(*data.grammar, ident, vs.sv().data(), is_macro, args);
-        if (ident == RECOVER_DEFINITION_NAME) {
-          ope = rec(ope);
-        }
+        if (ident == RECOVER_DEFINITION_NAME) { ope = rec(ope); }
 
         if (ignore) {
           return ign(ope);
