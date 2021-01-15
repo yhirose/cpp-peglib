@@ -3105,7 +3105,7 @@ private:
 
     g["Sequence"] = [&](const SemanticValues &vs) {
       if (vs.empty()) {
-        return lit("");
+        return npd(lit(""));
       } else if (vs.size() == 1) {
         return std::any_cast<std::shared_ptr<Ope>>(vs[0]);
       } else {

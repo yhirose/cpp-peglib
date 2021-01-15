@@ -86,12 +86,13 @@ function parse() {
   if (isValid) {
     $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
 
+    codeAst.insert(data.ast);
+    codeAstOptimized.insert(data.astOptimized);
+    $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
+
     const isValid = data.code.length === 0;
-    if (isValid) {
-      codeAst.insert(data.ast);
-      codeAstOptimized.insert(data.astOptimized);
-      $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
-    } else {
+
+    if (!isValid) {
       const html = generateErrorListHTML(data.code);
       $codeInfo.html(html);
       $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();

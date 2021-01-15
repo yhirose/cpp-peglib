@@ -43,7 +43,7 @@ bool parse_grammar(const std::string &text, peg::parser &peg,
   return ret;
 }
 
-bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
+void parse_code(const std::string &text, peg::parser &peg, std::string &json,
                 std::shared_ptr<peg::Ast> &ast) {
   peg.enable_ast();
   bool init;
@@ -51,7 +51,6 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
   json += "[";
   auto ret = peg.parse_n(text.data(), text.size(), ast);
   json += "]";
-  return ret;
 }
 
 inline std::vector<std::string> splitRulesText(const std::string &s) {
@@ -78,7 +77,8 @@ std::string lint(const std::string &grammarText, const std::string &codeText,
 
   if (ret && peg) {
     std::shared_ptr<peg::Ast> ast;
-    if (parse_code(codeText, peg, codeResult, ast)) {
+    parse_code(codeText, peg, codeResult, ast);
+    if (ast) {
       astResult = escape_json(peg::ast_to_s(ast));
       auto rules = splitRulesText(opt_rules_text);
       astResultOptimized = escape_json(
