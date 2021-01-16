@@ -2922,7 +2922,8 @@ private:
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
     g["Sequence"] <= zom(g["Prefix"]);
     g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["SuffixWithLabel"]);
-    g["SuffixWithLabel"] <= seq(g["Suffix"], opt(seq(g["HAT"], g["Identifier"])));
+    g["SuffixWithLabel"] <=
+        seq(g["Suffix"], opt(seq(g["HAT"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
     g["Primary"] <=
@@ -3033,10 +3034,7 @@ private:
     // Instruction grammars
     g["Instruction"] <=
         seq(g["BeginBlacket"],
-            cho(
-              cho(g["PrecedenceClimbing"]),
-              cho(g["ErrorMessage"])
-            ),
+            cho(cho(g["PrecedenceClimbing"]), cho(g["ErrorMessage"])),
             g["EndBlacket"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
@@ -3057,9 +3055,8 @@ private:
     g["PrecedenceAssoc"] <= cls("LR");
 
     // Error message instruction
-    g["ErrorMessage"] <= seq(lit("message"), g["SpacesOom"],
-        g["LiteralD"],
-        g["SpacesZom"]);
+    g["ErrorMessage"] <=
+        seq(lit("message"), g["SpacesOom"], g["LiteralD"], g["SpacesZom"]);
 
     // Set definition names
     for (auto &x : g) {
@@ -3164,7 +3161,8 @@ private:
         auto &data = *std::any_cast<Data *>(dt);
         const auto &ident = std::any_cast<std::string>(vs[1]);
         auto label = ref(*data.grammar, ident, vs.sv().data(), false, {});
-        auto recovery = rec(ref(*data.grammar, RECOVER_DEFINITION_NAME, vs.sv().data(), true, {label}));
+        auto recovery = rec(ref(*data.grammar, RECOVER_DEFINITION_NAME,
+                                vs.sv().data(), true, {label}));
         return cho(ope, recovery);
       }
     };
@@ -3372,7 +3370,6 @@ private:
     };
     g["PrecedenceOpe"] = [](const SemanticValues &vs) { return vs.token(); };
     g["PrecedenceAssoc"] = [](const SemanticValues &vs) { return vs.token(); };
-
 
     g["ErrorMessage"] = [](const SemanticValues &vs) {
       Instruction instruction;
