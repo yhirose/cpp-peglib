@@ -32,7 +32,7 @@ usage: grammar_file_path [source_file_path]
 A <- 'hello' ^ 'world'
 
 > peglint a.peg
-a.peg:1:14: syntax error
+a.peg:1:16: syntax error
 ```
 
 ```

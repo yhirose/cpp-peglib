@@ -10,7 +10,7 @@ Since this library only supports C++17 compilers, please make sure that compiler
 
 You can also try the online version, PEG Playground at https://yhirose.github.io/cpp-peglib.
 
-The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf). *cpp-peglib* also supports the following additional syntax for now:
+The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bran Ford. *cpp-peglib* also supports the following additional syntax for now:
 
   * `'...'i` (Case-insensitive literal operator)
   * `[^...]` (Negated character class operator)
@@ -49,13 +49,13 @@ using namespace std;
 int main(void) {
   // (2) Make a parser
   parser parser(R"(
-        # Grammar for Calculator...
-        Additive    <- Multitive '+' Additive / Multitive
-        Multitive   <- Primary '*' Multitive / Primary
-        Primary     <- '(' Additive ')' / Number
-        Number      <- < [0-9]+ >
-        %whitespace <- [ \t]*
-    )");
+    # Grammar for Calculator...
+    Additive    <- Multitive '+' Additive / Multitive
+    Multitive   <- Primary '*' Multitive / Primary
+    Primary     <- '(' Additive ')' / Number
+    Number      <- < [0-9]+ >
+    %whitespace <- [ \t]*
+  )");
 
   assert(static_cast<bool>(parser) == true);
 
@@ -96,12 +96,12 @@ To show syntax errors in grammar text:
 
 ```cpp
 auto grammar = R"(
-    # Grammar for Calculator...
-    Additive    <- Multitive '+' Additive / Multitive
-    Multitive   <- Primary '*' Multitive / Primary
-    Primary     <- '(' Additive ')' / Number
-    Number      <- < [0-9]+ >
-    %whitespace <- [ \t]*
+  # Grammar for Calculator...
+  Additive    <- Multitive '+' Additive / Multitive
+  Multitive   <- Primary '*' Multitive / Primary
+  Primary     <- '(' Additive ')' / Number
+  Number      <- < [0-9]+ >
+  %whitespace <- [ \t]*
 )";
 
 parser parser;
@@ -508,6 +508,73 @@ Unicode support
 
 cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`.
 
+Error report and recovery
+-------------------------
+
+cpp-peglib supports the furthest failure error posision report as descrived in the Bryan Ford original document.
+
+For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be assosiated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
+
+Here is an example of Java-like grammar:
+
+```peg
+Prog        ← 'public' 'class' NAME '{' 'public' 'static' 'void' 'main' '(' 'String' '[' ']' NAME ')' BlockStmt '}'
+BlockStmt   ← '{' (!'}' Stmt^stmtb)* '}'^rcblk # Annotated with `stmtb` and `rcblk`
+Stmt        ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt
+IfStmt      ← 'if' '(' Exp ')' Stmt ('else' Stmt)?
+WhileStmt   ← 'while' '(' Exp^condw ')' Stmt # Annotated with `condw`
+DecStmt     ← 'int' NAME ('=' Exp)? ';'
+AssignStmt  ← NAME '=' Exp ';'^semia # Annotated with `semi`
+PrintStmt   ← 'System.out.println' '(' Exp ')' ';'
+Exp         ← RelExp ('==' RelExp)*
+RelExp      ← AddExp ('<' AddExp)*
+AddExp      ← MulExp (('+' / '-') MulExp)*
+MulExp      ← AtomExp (('*' / '/') AtomExp)*
+AtomExp     ← '(' Exp ')' / NUMBER / NAME
+
+NUMBER      ← < [0-9]+ >
+NAME        ← < [a-zA-Z_][a-zA-Z_0-9]* >
+
+%whitespace ← [ \t\n]*
+%word       ← NAME
+
+# Recovery operator labels
+rcblk       ← SkipToRCUR { message "missing end of block." }
+semia       ← '' { message "missing simicolon in assignment." }
+stmtb       ← (!(Stmt / 'else' / '}') .)* { message "invalid statement" }
+condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
+
+# Recovery expressions
+SkipToRCUR  ← (!'}' ('{' SkipToRCUR / .))* '}'
+```
+
+For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is assosiated with a custom message "missing simicolon in assignment.".
+
+Here is the result:
+
+```java
+public class Example {
+  public static void main(String[] args) {
+    int n = 5;
+    int f = 1;
+    while( < n) {
+      f = f * n;
+      n = n - 1
+    };
+    System.out.println(f);
+  }
+}
+```
+
+```
+> peglint sample_java.peg sample.java
+sample.java:5:12: syntax error, unexpected '<', expecting <NAME>, <NUMBER>, <WhileStmt>.
+sample.java:8:5: missing simicolon in assignment.
+sample.java:8:6: invalid statement
+```
+
+As you can see, it can now show more than one error, and provide more meaningfull error messages than the default messages.
+
 peglint - PEG syntax lint utility
 ---------------------------------
 
@@ -523,44 +590,28 @@ peglint - PEG syntax lint utility
 usage: grammar_file_path [source_file_path]
 
   options:
+    --source: source text
     --ast: show AST tree
     --opt, --opt-all: optimaze all AST nodes except nodes selected with --opt-rules
     --opt-only: optimaze only AST nodes selected with --opt-rules
-    --opt-rules rules: comma delimitted definition rules for optimazation
-    --source: source text
+    --opt-rules rules: CSV definition rules to adjust AST optimazation
     --trace: show trace messages
 ```
 
-### Lint grammar
+### Grammar check
 
 ```
 > cat a.peg
-A <- 'hello' ^ 'world'
+Additive    <- Multitive '+' Additive / Multitive
+Multitive   <- Primary '*' Multitive / Primary
+Primary     <- '(' Additive ')' / Number
+%whitespace <- [ \t\r\n]*
 
 > peglint a.peg
-a.peg:1:14: syntax error
+[commendline]:3:35: 'Number' is not defined.
 ```
 
-```
-> cat a.peg
-A <- B
-
-> peglint a.peg
-a.peg:1:6: 'B' is not defined.
-```
-
-```
-> cat a.peg
-A <- B / C
-B <- 'b'
-C <- A
-
-> peglint a.peg
-a.peg:1:10: 'C' is left recursive.
-a.peg:3:6: 'A' is left recursive.
-```
-
-### Lint source text
+### Source check
 
 ```
 > cat a.peg
@@ -573,6 +624,8 @@ Number      <- < [0-9]+ >
 > peglint --source "1 + a * 3" a.peg
 [commendline]:1:3: syntax error
 ```
+
+### AST
 
 ```
 > cat a.txt
@@ -591,6 +644,8 @@ Number      <- < [0-9]+ >
         + Primary
           - Number (3)
 ```
+
+### AST optimazation
 
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
@@ -633,15 +688,9 @@ Sample codes
   * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
   * [Calculator (parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc4.cc)
   * [Calculator (AST version and parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc5.cc)
-  * [Monkey language](https://github.com/yhirose/monkey-cpp) described in [Writing An Interpreter In Go](https://interpreterbook.com/).
   * [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc)
   * [A tiny PL/0 JIT compiler in less than 700 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
   * [A Programming Language just for writing Fizz Buzz program. :)](https://github.com/yhirose/fizzbuzzlang)
-
-PEG debug
----------
-
-A debug viewer for Parsing Expression Grammars using cpp-peglib by [mqnc](https://github.com/mqnc). Please see [his gihub project page](https://github.com/mqnc/pegdebug) for the detail. You can see a parse result of PL/0 code [here](https://mqnc.github.io/pegdebug/example/output.html).
 
 License
 -------
