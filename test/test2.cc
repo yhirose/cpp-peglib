@@ -1251,3 +1251,137 @@ R"(+ START
     + ITEM/2
 )");
 }
+
+TEST_CASE("Error recovery Java", "[error]") {
+  parser pg(R"(
+Prog       ← PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR
+BlockStmt  ← LCUR (Stmt)* RCUR^rcblk
+Stmt       ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt
+IfStmt     ← IF LPAR Exp RPAR Stmt (ELSE Stmt)?
+WhileStmt  ← WHILE LPAR Exp RPAR Stmt
+DecStmt    ← INT NAME (ASSIGN Exp)? SEMI
+AssignStmt ← NAME ASSIGN Exp SEMI^semia
+PrintStmt  ← PRINTLN LPAR Exp RPAR SEMI
+Exp        ← RelExp (EQ RelExp)*
+RelExp     ← AddExp (LT AddExp)*
+AddExp     ← MulExp ((PLUS / MINUS) MulExp)*
+MulExp     ← AtomExp ((TIMES / DIV) AtomExp)*
+AtomExp    ← LPAR Exp RPAR / NUMBER / NAME
+
+NUMBER     ← < [0-9]+ >
+NAME       ← < [a-zA-Z_][a-zA-Z_0-9]* >
+
+~LPAR       ← '('
+~RPAR       ← ')'
+~LCUR       ← '{'
+~RCUR       ← '}'
+~LBRA       ← '['
+~RBRA       ← ']'
+~SEMI       ← ';'
+
+~EQ         ← '=='
+~LT         ← '<'
+~ASSIGN     ← '='
+
+~IF         ← 'if'
+~ELSE       ← 'else'
+~WHILE      ← 'while'
+
+PLUS       ← '+'
+MINUS      ← '-'
+TIMES      ← '*'
+DIV        ← '/'
+
+CLASS      ← 'class'
+PUBLIC     ← 'public'
+STATIC     ← 'static'
+
+VOID       ← 'void'
+INT        ← 'int'
+
+MAIN       ← 'main'
+STRING     ← 'String'
+PRINTLN    ← 'System.out.println'
+
+%whitespace ← [ \t\n]*
+%word       ← NAME
+
+# Throw operator labels
+rcblk      ← SkipToRCUR { message "missing end of block." }
+semia      ← '' { message "missing simicolon in assignment." }
+
+# Recovery expressions
+SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
+  )");
+
+  REQUIRE(!!pg); // OK
+
+  std::vector<std::string> errors{
+    R"(8:5: missing simicolon in assignment.)",
+    R"(8:6: missing end of block.)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    REQUIRE(ss.str() == errors[i++]);
+  };
+
+  pg.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  REQUIRE_FALSE(pg.parse(R"(public class Example {
+  public static void main(String[] args) {
+    int n = 5;
+    int f = 1;
+    while(0 < n) {
+      f = f * n;
+      n = n - 1
+    };
+    System.out.println(f);
+  }
+}
+  )", ast));
+
+  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+
+  REQUIRE(ast_to_s(ast) ==
+R"(+ Prog
+  - PUBLIC (public)
+  - CLASS (class)
+  - NAME (Example)
+  - PUBLIC (public)
+  - STATIC (static)
+  - VOID (void)
+  - MAIN (main)
+  - STRING (String)
+  - NAME (args)
+  + BlockStmt
+    + Stmt/3[DecStmt]
+      - INT (int)
+      - NAME (n)
+      - Exp/0[NUMBER] (5)
+    + Stmt/3[DecStmt]
+      - INT (int)
+      - NAME (f)
+      - Exp/0[NUMBER] (1)
+    + Stmt/1[WhileStmt]
+      + Exp/0[RelExp]
+        - AddExp/0[NUMBER] (0)
+        - AddExp/0[NAME] (n)
+      + Stmt/5[BlockStmt]
+        + Stmt/4[AssignStmt]
+          - NAME (f)
+          + Exp/0[MulExp]
+            - AtomExp/2[NAME] (f)
+            - TIMES (*)
+            - AtomExp/2[NAME] (n)
+        + Stmt/4[AssignStmt]
+          - NAME (n)
+          + Exp/0[AddExp]
+            - MulExp/0[NAME] (n)
+            - MINUS (-)
+            - MulExp/0[NUMBER] (1)
+)");
+}

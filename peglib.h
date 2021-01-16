@@ -2918,7 +2918,8 @@ private:
                 opt(g["Instruction"])));
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
     g["Sequence"] <= zom(g["Prefix"]);
-    g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["Suffix"]);
+    g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["SuffixWithLabel"]);
+    g["SuffixWithLabel"] <= seq(g["Suffix"], opt(seq(g["HAT"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
     g["Primary"] <=
@@ -2991,6 +2992,7 @@ private:
     ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
     g["NOT"] <= seq(chr('!'), g["Spacing"]);
+    ~g["HAT"] <= seq(chr('^'), g["Spacing"]);
     g["QUESTION"] <= seq(chr('?'), g["Spacing"]);
     g["STAR"] <= seq(chr('*'), g["Spacing"]);
     g["PLUS"] <= seq(chr('+'), g["Spacing"]);
@@ -3064,7 +3066,7 @@ private:
 
   void setup_actions() {
     g["Definition"] = [&](const SemanticValues &vs, std::any &dt) {
-      Data &data = *std::any_cast<Data *>(dt);
+      auto &data = *std::any_cast<Data *>(dt);
 
       auto is_macro = vs.choice() == 0;
       auto ignore = std::any_cast<bool>(vs[0]);
@@ -3150,6 +3152,20 @@ private:
       return ope;
     };
 
+    g["SuffixWithLabel"] = [&](const SemanticValues &vs, std::any &dt) {
+      auto ope = std::any_cast<std::shared_ptr<Ope>>(vs[0]);
+      if (vs.size() == 1) {
+        return ope;
+      } else {
+        assert(vs.size() == 2);
+        auto &data = *std::any_cast<Data *>(dt);
+        const auto &ident = std::any_cast<std::string>(vs[1]);
+        auto label = ref(*data.grammar, ident, vs.sv().data(), false, {});
+        auto recovery = rec(ref(*data.grammar, RECOVER_DEFINITION_NAME, vs.sv().data(), true, {label}));
+        return cho(ope, recovery);
+      }
+    };
+
     struct Loop {
       enum class Type { opt = 0, zom, oom, rep };
       Type type;
@@ -3211,7 +3227,7 @@ private:
     };
 
     g["Primary"] = [&](const SemanticValues &vs, std::any &dt) {
-      Data &data = *std::any_cast<Data *>(dt);
+      auto &data = *std::any_cast<Data *>(dt);
 
       switch (vs.choice()) {
       case 0:   // Macro Reference
