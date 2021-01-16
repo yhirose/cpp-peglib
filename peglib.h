@@ -2251,7 +2251,6 @@ public:
   std::function<void(const char *s, size_t n, size_t matchlen, std::any &value,
                      std::any &dt)>
       leave;
-  std::function<std::string()> error_message;
   bool ignoreSemanticValue = false;
   std::shared_ptr<Ope> whitespaceOpe;
   std::shared_ptr<Ope> wordOpe;
@@ -2261,6 +2260,8 @@ public:
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
   bool disable_action = false;
+
+  std::string error_message;
 
 private:
   friend class Reference;
@@ -2505,13 +2506,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       vs.emplace_back(std::move(val));
       vs.tags.emplace_back(str2tag(outer_->name));
     }
-  } else {
-    if (outer_->error_message) {
-      if (c.error_info.message_pos < s) {
-        c.error_info.message_pos = s;
-        c.error_info.message = outer_->error_message();
-      }
-    }
   }
 
   return len;
@@ -2688,7 +2682,16 @@ inline size_t Recovery::parse_core(const char *s, size_t n, SemanticValues &vs,
 
   if (success(len)) {
     c.recovered = true;
-    if (c.log) { c.error_info.output_log(c.log, c.s, c.l); }
+    if (c.log) {
+      auto label = dynamic_cast<Reference *>(rule.args_[0].get());
+      if (label) {
+        if (!label->rule_->error_message.empty()) {
+          c.error_info.message_pos = c.error_info.error_pos;
+          c.error_info.message = label->rule_->error_message;
+        }
+      }
+      c.error_info.output_log(c.log, c.s, c.l);
+    }
   }
   c.error_info.clear();
 
@@ -3024,7 +3027,12 @@ private:
 
     // Instruction grammars
     g["Instruction"] <=
-        seq(g["BeginBlacket"], cho(g["PrecedenceClimbing"]), g["EndBlacket"]);
+        seq(g["BeginBlacket"],
+            cho(
+              cho(g["PrecedenceClimbing"]),
+              cho(g["ErrorMessage"])
+            ),
+            g["EndBlacket"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
     ~g["SpacesOom"] <= oom(g["Space"]);
@@ -3033,7 +3041,7 @@ private:
 
     // PrecedenceClimbing instruction
     g["PrecedenceClimbing"] <=
-        seq(lit("precedence"), g["SpacesZom"], g["PrecedenceInfo"],
+        seq(lit("precedence"), g["SpacesOom"], g["PrecedenceInfo"],
             zom(seq(g["SpacesOom"], g["PrecedenceInfo"])), g["SpacesZom"]);
     g["PrecedenceInfo"] <=
         seq(g["PrecedenceAssoc"],
@@ -3042,6 +3050,11 @@ private:
         tok(oom(
             seq(npd(cho(g["PrecedenceAssoc"], g["Space"], chr('}'))), dot())));
     g["PrecedenceAssoc"] <= cls("LR");
+
+    // Error message instruction
+    g["ErrorMessage"] <= seq(lit("message"), g["SpacesOom"],
+        g["LiteralD"],
+        g["SpacesZom"]);
 
     // Set definition names
     for (auto &x : g) {
@@ -3340,6 +3353,14 @@ private:
     };
     g["PrecedenceOpe"] = [](const SemanticValues &vs) { return vs.token(); };
     g["PrecedenceAssoc"] = [](const SemanticValues &vs) { return vs.token(); };
+
+
+    g["ErrorMessage"] = [](const SemanticValues &vs) {
+      Instruction instruction;
+      instruction.type = "message";
+      instruction.data = std::any_cast<std::string>(vs[0]);
+      return instruction;
+    };
   }
 
   bool apply_precedence_instruction(Definition &rule,
@@ -3554,6 +3575,8 @@ private:
         if (!apply_precedence_instruction(rule, info, s, log)) {
           return nullptr;
         }
+      } else if (instruction.type == "message") {
+        rule.error_message = std::any_cast<std::string>(instruction.data);
       }
     }
 
