@@ -2822,6 +2822,9 @@ inline void ReferenceChecker::visit(Reference &ope) {
       error_s[ope.name_] = ope.s_;
       error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
     }
+    for (auto arg : ope.args_) {
+      arg->accept(*this);
+    }
   }
 }
 
