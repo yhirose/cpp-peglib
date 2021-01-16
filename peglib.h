@@ -2872,12 +2872,12 @@ class ParserGenerator {
 public:
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        const Log &log) {
+                                        Log log) {
     return get_instance().perform_core(s, n, rules, start, log);
   }
 
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
-                                        std::string &start, const Log &log) {
+                                        std::string &start, Log log) {
     Rules dummy;
     return parse(s, n, dummy, start, log);
   }
@@ -3381,7 +3381,7 @@ private:
 
   bool apply_precedence_instruction(Definition &rule,
                                     const PrecedenceClimbing::BinOpeInfo &info,
-                                    const char *s, const Log &log) {
+                                    const char *s, Log log) {
     try {
       auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
       auto atom = seq.opes_[0];
@@ -3420,7 +3420,7 @@ private:
 
   std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        const Log &log) {
+                                        Log log) {
     Data data;
     auto &grammar = *data.grammar;
 
@@ -3439,7 +3439,7 @@ private:
     }
 
     std::any dt = &data;
-    auto r = g["Grammar"].parse(s, n, dt);
+    auto r = g["Grammar"].parse(s, n, dt, nullptr, log);
 
     if (!r.ret) {
       if (log) {
