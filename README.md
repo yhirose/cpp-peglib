@@ -27,6 +27,9 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `|` (Dictionary operator)
   * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
   * `{ precedence L - + L / * }` (Parsing infix expression)
+  * `%recovery(` ... `)` (Error recovery operator)
+  * `exp^label` (Syntax sugar for `(exp / %recover(label))`)
+  * `label { message "..." }` (Error message instruction)
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
@@ -514,6 +517,8 @@ Error report and recovery
 cpp-peglib supports the furthest failure error posision report as descrived in the Bryan Ford original document.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be assosiated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
+
+The custom message supports `%t` which is a place holder for the unexpected token.
 
 Here is an example of Java-like grammar:
 

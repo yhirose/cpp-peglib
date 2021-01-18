@@ -634,22 +634,29 @@ struct ErrorInfo {
   void output_log(const Log &log, const char *s, size_t n) const {
     if (message_pos) {
       auto line = line_info(s, message_pos);
-      log(line.first, line.second, message);
+      std::string msg;
+      if (auto unexpected_token = heuristic_error_token(log, s, n, message_pos);
+          !unexpected_token.empty()) {
+        msg = replace_all(message, "%t", unexpected_token);
+      } else {
+        msg = message;
+      }
+      log(line.first, line.second, msg);
     } else if (error_pos) {
       auto line = line_info(s, error_pos);
 
-      std::string message;
+      std::string msg;
       if (expected_tokens.empty()) {
-        message = "syntax error.";
+        msg = "syntax error.";
       } else {
-        message = "syntax error";
+        msg = "syntax error";
 
         // unexpected token
         if (auto unexpected_token = heuristic_error_token(log, s, n, error_pos);
             !unexpected_token.empty()) {
-          message += ", unexpected '";
-          message += unexpected_token;
-          message += "'";
+          msg += ", unexpected '";
+          msg += unexpected_token;
+          msg += "'";
         }
 
         auto first_item = true;
@@ -660,25 +667,25 @@ struct ErrorInfo {
 
           // Skip rules start with '_'
           if (!is_literal && token[0] != '_') {
-            message += (first_item ? ", expecting " : ", ");
+            msg += (first_item ? ", expecting " : ", ");
             if (is_literal) {
-              message += "'";
-              message += token;
-              message += "'";
+              msg += "'";
+              msg += token;
+              msg += "'";
             } else {
-              message += "<";
-              message += token;
-              message += ">";
+              msg += "<";
+              msg += token;
+              msg += ">";
             }
             first_item = false;
           }
 
           i++;
         }
-        message += ".";
+        msg += ".";
       }
 
-      log(line.first, line.second, message);
+      log(line.first, line.second, msg);
     }
   }
 
@@ -698,6 +705,16 @@ private:
       return escape_characters(error_pos, std::min<size_t>(i, 8));
     }
     return std::string();
+  }
+
+  std::string replace_all(std::string str, const std::string &from,
+                          const std::string &to) const {
+    size_t pos = 0;
+    while ((pos = str.find(from, pos)) != std::string::npos) {
+      str.replace(pos, from.length(), to);
+      pos += to.length();
+    }
+    return str;
   }
 };
 
