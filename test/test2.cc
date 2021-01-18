@@ -168,6 +168,43 @@ TEST_CASE("Infinite loop 8", "[infinite loop]") {
     REQUIRE(!pg);
 }
 
+TEST_CASE("Infinite 9", "[infinite loop]") {
+  parser pg(R"(
+START      <- __? SECTION*
+
+SECTION    <- HEADER __ ENTRIES __?
+
+HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'^header
+
+CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
+ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
+ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
+
+ENTRIES    <- (ENTRY (__ ENTRY)*)?
+
+ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
+            / PHRASE ('|' _ PHRASE)+ !'='
+            / %recover(entry)
+
+ONE_WAY    <- PHRASE '=' _
+PHRASE     <- WORD (' ' WORD)* _
+WORD       <- < (![ \t\r\n=|[\]#] .)+ >
+
+~__        <- _ (comment? nl _)+
+~_         <- [ \t]*
+
+comment    <- ('#' (!nl .)*)
+nl         <- '\r'? '\n'
+
+header <- (!__ .)* { message "invalid section header, missing ']'." }
+
+# The `(!(__ / HEADER) )+` should be `(!(__ / HEADER) .)+`
+entry  <- (!(__ / HEADER) )+ { message "invalid token '%t', expecting another phrase." }
+  )");
+
+    REQUIRE(!pg);
+}
+
 TEST_CASE("Not infinite 1", "[infinite loop]") {
   parser pg(R"(
         Numbers <- Number* EOF
@@ -1077,40 +1114,43 @@ TEST_CASE("Dictionary invalid", "[dic]") {
 
 TEST_CASE("Error recovery 1", "[error]") {
   parser pg(R"(
-    START      <- __? SECTION*
+START      <- __? SECTION*
 
-    SECTION    <- HEADER __ ENTRIES __?
+SECTION    <- HEADER __ ENTRIES __?
 
-    HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'
+HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'^header
 
-    CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
-    ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
-    ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
+CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
+ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
+ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
 
-    ENTRIES    <- (ENTRY (__ ENTRY)*)?
+ENTRIES    <- (ENTRY (__ ENTRY)*)?
 
-    ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
-                / PHRASE ('|' _ PHRASE)+ !'='
-                / %recover((!(__ / HEADER) .)+)
+ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
+            / PHRASE ('|' _ PHRASE)+ !'='
+            / %recover(entry)
 
-    ONE_WAY    <- PHRASE '=' _
-    PHRASE     <- WORD (' ' WORD)* _
-    WORD       <- < (![ \t\r\n=|[\]#] .)+ >
+ONE_WAY    <- PHRASE '=' _
+PHRASE     <- WORD (' ' WORD)* _
+WORD       <- < (![ \t\r\n=|[\]#] .)+ >
 
-    ~__        <- _ (comment? nl _)+
-    ~_         <- [ \t]*
+~__        <- _ (comment? nl _)+
+~_         <- [ \t]*
 
-    comment    <- ('#' (!nl .)*)
-    nl         <- '\r'? '\n'
+comment    <- ('#' (!nl .)*)
+nl         <- '\r'? '\n'
+
+header <- (!__ .)* { message "invalid section header, missing ']'." }
+entry  <- (!(__ / HEADER) .)+ { message "invalid token '%t', expecting another phrase." }
   )");
 
   REQUIRE(!!pg); // OK
 
   std::vector<std::string> errors{
-    R"(3:6: syntax error, unexpected '|', expecting <WORD>.)",
-    R"(7:4: syntax error, unexpected '\n', expecting <WORD>.)",
-    R"(10:1: syntax error, unexpected '[', expecting <WORD>.)",
-    R"(18:17: syntax error, unexpected '=', expecting <ENTRY>, <WORD>.)",
+    R"(3:6: invalid token '|', expecting another phrase.)",
+    R"(7:4: invalid token '\n', expecting another phrase.)",
+    R"(10:11: invalid section header, missing ']'.)",
+    R"(18:17: invalid token '=', expecting another phrase.)",
   };
 
   size_t i = 0;
@@ -1169,7 +1209,9 @@ R"(+ START
       + ENTRY/1
         - PHRASE/0[WORD] (fff)
         - PHRASE/0[WORD] (ggg)
-      + ENTRY/2
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 3)
+    + ENTRIES
       + ENTRY/1
         - PHRASE/0[WORD] (hhh)
         - PHRASE/0[WORD] (iii)
