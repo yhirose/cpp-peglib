@@ -3518,7 +3518,7 @@ private:
     for (auto &x : grammar) {
       auto &rule = x.second;
 
-      ReferenceChecker vis(*data.grammar, rule.params);
+      ReferenceChecker vis(grammar, rule.params);
       rule.accept(vis);
       for (const auto &y : vis.error_s) {
         const auto &name = y.first;
@@ -3536,7 +3536,7 @@ private:
     // Link references
     for (auto &x : grammar) {
       auto &rule = x.second;
-      LinkReferences vis(*data.grammar, rule.params);
+      LinkReferences vis(grammar, rule.params);
       rule.accept(vis);
     }
 
@@ -3561,12 +3561,12 @@ private:
     if (!ret) { return nullptr; }
 
     // Set root definition
-    auto &start_rule = (*data.grammar)[data.start];
+    auto &start_rule = grammar[data.start];
 
     // Check infinite loop
-    {
-      DetectInfiniteLoop vis(data.start_pos, data.start);
-      start_rule.accept(vis);
+    for (auto &[name, rule] : grammar) {
+      DetectInfiniteLoop vis(rule.s_, name);
+      rule.accept(vis);
       if (vis.has_error) {
         if (log) {
           auto line = line_info(s, vis.error_s);
@@ -3586,13 +3586,12 @@ private:
       }
 
       start_rule.whitespaceOpe =
-          wsp((*data.grammar)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+          wsp(grammar[WHITESPACE_DEFINITION_NAME].get_core_operator());
     }
 
     // Word expression
     if (grammar.count(WORD_DEFINITION_NAME)) {
-      start_rule.wordOpe =
-          (*data.grammar)[WORD_DEFINITION_NAME].get_core_operator();
+      start_rule.wordOpe = grammar[WORD_DEFINITION_NAME].get_core_operator();
     }
 
     // Apply instructions
