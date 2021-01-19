@@ -635,7 +635,7 @@ struct ErrorInfo {
     if (message_pos) {
       auto line = line_info(s, message_pos);
       std::string msg;
-      if (auto unexpected_token = heuristic_error_token(log, s, n, message_pos);
+      if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
           !unexpected_token.empty()) {
         msg = replace_all(message, "%t", unexpected_token);
       } else {
@@ -652,7 +652,7 @@ struct ErrorInfo {
         msg = "syntax error";
 
         // unexpected token
-        if (auto unexpected_token = heuristic_error_token(log, s, n, error_pos);
+        if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
             !unexpected_token.empty()) {
           msg += ", unexpected '";
           msg += unexpected_token;
@@ -690,7 +690,7 @@ struct ErrorInfo {
   }
 
 private:
-  std::string heuristic_error_token(const Log &log, const char *s, size_t n,
+  std::string heuristic_error_token(const char *s, size_t n,
                                     const char *error_pos) const {
     auto len = n - std::distance(s, error_pos);
     if (len) {
@@ -2684,8 +2684,8 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   return i;
 }
 
-inline size_t Recovery::parse_core(const char *s, size_t n, SemanticValues &vs,
-                                   Context &c, std::any &dt) const {
+inline size_t Recovery::parse_core(const char *s, size_t n, SemanticValues &/*vs*/,
+                                   Context &c, std::any &/*dt*/) const {
   auto save_log = c.log;
   c.log = nullptr;
 
