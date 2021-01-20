@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -472,10 +473,17 @@ struct SemanticValues : protected std::vector<std::any> {
   }
 
   template <typename T> T token_to_number() const {
-    auto sv = token();
     T n = 0;
-    std::from_chars(sv.data(), sv.data() + sv.size(), n);
-    return n;
+    if constexpr (std::is_floating_point<T>::value) {
+      // TODO: The following code should be removed eventually.
+      std::istringstream ss(token_to_string());
+      ss >> n;
+      return n;
+    } else {
+      auto sv = token();
+      std::from_chars(sv.data(), sv.data() + sv.size(), n);
+      return n;
+    }
   }
 
   // Transform the semantic value vector to another vector
@@ -2684,8 +2692,9 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   return i;
 }
 
-inline size_t Recovery::parse_core(const char *s, size_t n, SemanticValues &/*vs*/,
-                                   Context &c, std::any &/*dt*/) const {
+inline size_t Recovery::parse_core(const char *s, size_t n,
+                                   SemanticValues & /*vs*/, Context &c,
+                                   std::any & /*dt*/) const {
   auto save_log = c.log;
   c.log = nullptr;
 
@@ -3683,10 +3692,17 @@ template <typename Annotation> struct AstBase : public Annotation {
   }
 
   template <typename T> T token_to_number() const {
-    assert(is_token);
     T n = 0;
-    std::from_chars(token.data(), token.data() + token.size(), n);
-    return n;
+    if constexpr (std::is_floating_point<T>::value) {
+      // TODO: The following code should be removed eventually.
+      std::istringstream ss(token_to_string());
+      ss >> n;
+      return n;
+    } else {
+      assert(is_token);
+      std::from_chars(token.data(), token.data() + token.size(), n);
+      return n;
+    }
   }
 };
 
