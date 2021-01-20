@@ -934,3 +934,20 @@ TEST_CASE("Negated Class test", "[general]") {
   REQUIRE_FALSE(parser.parse("ABCZ_"));
   REQUIRE_FALSE(parser.parse(""));
 }
+
+TEST_CASE("`token_to_number<float>` test", "[general]") {
+  parser parser(R"(
+    S <- '1.1'
+  )");
+  parser.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  auto ret = parser.parse("1.1", ast);
+
+  REQUIRE(ret == true);
+  REQUIRE(ast->is_token == true);
+  REQUIRE(ast->token == "1.1");
+  REQUIRE(ast->token_to_number<float>() == 1.1f);
+  REQUIRE(ast->nodes.empty());
+}
+
