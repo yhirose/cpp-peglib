@@ -523,8 +523,9 @@ The custom message supports `%t` which is a place holder for the unexpected toke
 Here is an example of Java-like grammar:
 
 ```peg
+# java.peg
 Prog        ← 'public' 'class' NAME '{' 'public' 'static' 'void' 'main' '(' 'String' '[' ']' NAME ')' BlockStmt '}'
-BlockStmt   ← '{' (!'}' Stmt^stmtb)* '}'^rcblk # Annotated with `stmtb` and `rcblk`
+BlockStmt   ← '{' (!'}' Stmt^stmtb)* '}' # Annotated with `stmtb`
 Stmt        ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt
 IfStmt      ← 'if' '(' Exp ')' Stmt ('else' Stmt)?
 WhileStmt   ← 'while' '(' Exp^condw ')' Stmt # Annotated with `condw`
@@ -544,13 +545,9 @@ NAME        ← < [a-zA-Z_][a-zA-Z_0-9]* >
 %word       ← NAME
 
 # Recovery operator labels
-rcblk       ← SkipToRCUR { message "missing end of block." }
 semia       ← '' { message "missing simicolon in assignment." }
 stmtb       ← (!(Stmt / 'else' / '}') .)* { message "invalid statement" }
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
-
-# Recovery expressions
-SkipToRCUR  ← (!'}' ('{' SkipToRCUR / .))* '}'
 ```
 
 For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is assosiated with a custom message "missing simicolon in assignment.".
@@ -558,6 +555,7 @@ For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%r
 Here is the result:
 
 ```java
+> cat sample.java
 public class Example {
   public static void main(String[] args) {
     int n = 5;
@@ -569,10 +567,8 @@ public class Example {
     System.out.println(f);
   }
 }
-```
 
-```
-> peglint sample_java.peg sample.java
+> peglint java.peg sample.java
 sample.java:5:12: syntax error, unexpected '<', expecting <NAME>, <NUMBER>, <WhileStmt>.
 sample.java:8:5: missing simicolon in assignment.
 sample.java:8:6: invalid statement
