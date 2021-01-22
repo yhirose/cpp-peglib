@@ -1,7 +1,7 @@
 //
 //  peglint.cc
 //
-//  Copyright (c) 2015 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2021 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -35,7 +35,7 @@ inline vector<string> split(const string &s, char delim) {
 int main(int argc, const char **argv) {
   auto opt_ast = false;
   auto opt_optimize = false;
-  vector<string> opt_rules;
+  auto opt_mode = true;
   auto opt_help = false;
   auto opt_source = false;
   vector<char> source;
@@ -49,8 +49,12 @@ int main(int argc, const char **argv) {
       opt_help = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
-    } else if (string("--opt") == arg) {
+    } else if (string("--opt") == arg || string("--opt-all") == arg) {
       opt_optimize = true;
+      opt_mode = true;
+    } else if (string("--opt-only") == arg) {
+      opt_optimize = true;
+      opt_mode = false;
     } else if (string("--source") == arg) {
       opt_source = true;
       if (argi < argc) {
@@ -65,21 +69,16 @@ int main(int argc, const char **argv) {
   }
 
   if (path_list.empty() || opt_help) {
-    cerr << "usage: grammar_file_path [source_file_path]" << endl
-         << endl
-         << "  options:" << endl
-         << "    --source: source text" << endl
-         << "    --ast: show AST tree" << endl
-         << "    --opt, --opt-all: optimaze all AST nodes except nodes "
-            "selected with "
-            "--opt-rules"
-         << endl
-         << "    --opt-only: optimaze only AST nodes selected with --opt-rules"
-         << endl
-         << "    --opt-rules rules: CSV definition rules to adjust AST "
-            "optimazation"
-         << endl
-         << "    --trace: show trace messages" << endl;
+    cerr << R"(usage: grammar_file_path [source_file_path]
+
+  options:
+    --source: source text
+    --ast: show AST tree
+    --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
+    --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
+    --trace: show trace messages
+)";
+
     return 1;
   }
 
@@ -180,7 +179,7 @@ int main(int argc, const char **argv) {
 
     if (ast) {
       if (opt_optimize) {
-        ast = parser.optimize_ast(ast);
+        ast = parser.optimize_ast(ast, opt_mode);
       }
       std::cout << peg::ast_to_s(ast);
     }

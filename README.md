@@ -598,9 +598,8 @@ usage: grammar_file_path [source_file_path]
   options:
     --source: source text
     --ast: show AST tree
-    --opt, --opt-all: optimaze all AST nodes except nodes selected with --opt-rules
-    --opt-only: optimaze only AST nodes selected with --opt-rules
-    --opt-rules rules: CSV definition rules to adjust AST optimazation
+    --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
+    --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
     --trace: show trace messages
 ```
 
@@ -662,8 +661,17 @@ Number      <- < [0-9]+ >
     - Multitive[Number] (3)
 ```
 
+### Adjust AST optimazation with `no_ast_opt` instruction
+
 ```
-> peglint --ast --opt --opt-rules "Primary" --source "1 + 2 * 3" a.peg
+> cat a.peg
+Additive    <- Multitive '+' Additive / Multitive
+Multitive   <- Primary '*' Multitive / Primary
+Primary     <- '(' Additive ')' / Number          { no_ast_opt }
+Number      <- < [0-9]+ >
+%whitespace <- [ \t\r\n]*
+
+> peglint --ast --opt --source "1 + 2 * 3" a.peg
 + Additive/0
   + Multitive/1[Primary]
     - Number (1)
@@ -672,10 +680,8 @@ Number      <- < [0-9]+ >
       - Number (2)
     + Multitive/1[Primary]
       - Number (3)
-```
 
-```
-> peglint --ast --opt-only --opt-rules "Primary" --source "1 + 2 * 3" a.peg
+> peglint --ast --opt-only --source "1 + 2 * 3" a.peg
 + Additive/0
   + Multitive/1
     - Primary/1[Number] (1)
