@@ -3955,11 +3955,12 @@ public:
     load_grammar(s, n, rules);
   }
 
-  parser(const char *s, const Rules &rules) : parser(s, strlen(s), rules) {}
+  parser(std::string_view sv, const Rules &rules)
+      : parser(sv.data(), sv.size(), rules) {}
 
   parser(const char *s, size_t n) : parser(s, n, Rules()) {}
 
-  parser(const char *s) : parser(s, strlen(s), Rules()) {}
+  parser(std::string_view sv) : parser(sv.data(), sv.size(), Rules()) {}
 
   operator bool() { return grammar_ != nullptr; }
 
@@ -3972,14 +3973,12 @@ public:
     return load_grammar(s, n, Rules());
   }
 
-  bool load_grammar(const char *s, const Rules &rules) {
-    auto n = strlen(s);
-    return load_grammar(s, n, rules);
+  bool load_grammar(std::string_view sv, const Rules &rules) {
+    return load_grammar(sv.data(), sv.size(), rules);
   }
 
-  bool load_grammar(const char *s) {
-    auto n = strlen(s);
-    return load_grammar(s, n);
+  bool load_grammar(std::string_view sv) {
+    return load_grammar(sv.data(), sv.size());
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
@@ -3990,9 +3989,8 @@ public:
     return false;
   }
 
-  bool parse(const char *s, const char *path = nullptr) const {
-    auto n = strlen(s);
-    return parse_n(s, n, path);
+  bool parse(std::string_view sv, const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), path);
   }
 
   bool parse_n(const char *s, size_t n, std::any &dt,
@@ -4004,9 +4002,9 @@ public:
     return false;
   }
 
-  bool parse(const char *s, std::any &dt, const char *path = nullptr) const {
-    auto n = strlen(s);
-    return parse_n(s, n, dt, path);
+  bool parse(std::string_view sv, std::any &dt,
+             const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), dt, path);
   }
 
   template <typename T>
@@ -4020,9 +4018,8 @@ public:
   }
 
   template <typename T>
-  bool parse(const char *s, T &val, const char *path = nullptr) const {
-    auto n = strlen(s);
-    return parse_n(s, n, val, path);
+  bool parse(std::string_view sv, T &val, const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), val, path);
   }
 
   template <typename T>
@@ -4077,7 +4074,9 @@ public:
     return *this;
   }
 
-  template <typename T> std::shared_ptr<T> optimize_ast(std::shared_ptr<T> ast, bool opt_mode = true) const {
+  template <typename T>
+  std::shared_ptr<T> optimize_ast(std::shared_ptr<T> ast,
+                                  bool opt_mode = true) const {
     return AstOptimizer(opt_mode, get_no_ast_opt_rules()).optimize(ast);
   }
 
