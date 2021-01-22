@@ -54,7 +54,7 @@ int main(int argc, const char **argv) {
   auto expr = argv[1];
   std::shared_ptr<Ast> ast;
   if (parser.parse(expr, ast)) {
-    ast = AstOptimizer(true).optimize(ast);
+    ast = parser.optimize_ast(ast);
     std::cout << ast_to_s(ast);
     std::cout << expr << " = " << eval(*ast) << std::endl;
     return 0;

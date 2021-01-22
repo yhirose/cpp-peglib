@@ -657,7 +657,7 @@ TEST_CASE("Calculator test with AST", "[general]") {
 
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse("1+2*3*(4-5+6)/7-8", ast);
-  ast = AstOptimizer(true).optimize(ast);
+  ast = parser.optimize_ast(ast);
   auto val = eval(*ast);
 
   REQUIRE(ret == true);

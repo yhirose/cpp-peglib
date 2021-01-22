@@ -2287,6 +2287,7 @@ public:
   bool disable_action = false;
 
   std::string error_message;
+  bool no_ast_opt = false;
 
 private:
   friend class Reference;
@@ -3058,10 +3059,10 @@ private:
     ~g["COMMA"] <= seq(chr(','), g["Spacing"]);
 
     // Instruction grammars
-    g["Instruction"] <=
-        seq(g["BeginBlacket"],
-            cho(cho(g["PrecedenceClimbing"]), cho(g["ErrorMessage"])),
-            g["EndBlacket"]);
+    g["Instruction"] <= seq(g["BeginBlacket"],
+                            cho(cho(g["PrecedenceClimbing"]),
+                                cho(g["ErrorMessage"]), cho(g["NoAstOpt"])),
+                            g["EndBlacket"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
     ~g["SpacesOom"] <= oom(g["Space"]);
@@ -3083,6 +3084,9 @@ private:
     // Error message instruction
     g["ErrorMessage"] <=
         seq(lit("message"), g["SpacesOom"], g["LiteralD"], g["SpacesZom"]);
+
+    // No Ast node optimazation instruction
+    g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
 
     // Set definition names
     for (auto &x : g) {
@@ -3403,6 +3407,12 @@ private:
       instruction.data = std::any_cast<std::string>(vs[0]);
       return instruction;
     };
+
+    g["NoAstOpt"] = [](const SemanticValues & /*vs*/) {
+      Instruction instruction;
+      instruction.type = "no_ast_opt";
+      return instruction;
+    };
   }
 
   bool apply_precedence_instruction(Definition &rule,
@@ -3618,6 +3628,8 @@ private:
         }
       } else if (instruction.type == "message") {
         rule.error_message = std::any_cast<std::string>(instruction.data);
+      } else if (instruction.type == "no_ast_opt") {
+        rule.no_ast_opt = true;
       }
     }
 
@@ -4035,11 +4047,10 @@ public:
 
   const Definition &operator[](const char *s) const { return (*grammar_)[s]; }
 
-  std::vector<std::string> get_rule_names() {
+  std::vector<std::string> get_rule_names() const {
     std::vector<std::string> rules;
-    rules.reserve(grammar_->size());
-    for (auto const &r : *grammar_) {
-      rules.emplace_back(r.first);
+    for (auto &[name, _] : *grammar_) {
+      rules.push_back(name);
     }
     return rules;
   }
@@ -4051,20 +4062,23 @@ public:
     }
   }
 
-  template <typename T = Ast> parser &enable_ast() {
-    for (auto &x : *grammar_) {
-      auto &rule = x.second;
-      if (!rule.action) { add_ast_action<T>(rule); }
-    }
-    return *this;
-  }
-
   void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.tracer_enter = tracer_enter;
       rule.tracer_leave = tracer_leave;
     }
+  }
+
+  template <typename T = Ast> parser &enable_ast() {
+    for (auto &[_, rule] : *grammar_) {
+      if (!rule.action) { add_ast_action<T>(rule); }
+    }
+    return *this;
+  }
+
+  template <typename T> std::shared_ptr<T> optimize_ast(std::shared_ptr<T> ast, bool opt_mode = true) const {
+    return AstOptimizer(opt_mode, get_no_ast_opt_rules()).optimize(ast);
   }
 
   Log log;
@@ -4075,6 +4089,14 @@ private:
     auto ret = r.ret && r.len == n;
     if (log && !ret) { r.error_info.output_log(log, s, n); }
     return ret && !r.recovered;
+  }
+
+  std::vector<std::string> get_no_ast_opt_rules() const {
+    std::vector<std::string> rules;
+    for (auto &[name, rule] : *grammar_) {
+      if (rule.no_ast_opt) { rules.push_back(name); }
+    }
+    return rules;
   }
 
   std::shared_ptr<Grammar> grammar_;

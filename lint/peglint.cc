@@ -35,7 +35,6 @@ inline vector<string> split(const string &s, char delim) {
 int main(int argc, const char **argv) {
   auto opt_ast = false;
   auto opt_optimize = false;
-  auto opt_mode = true;
   vector<string> opt_rules;
   auto opt_help = false;
   auto opt_source = false;
@@ -50,17 +49,8 @@ int main(int argc, const char **argv) {
       opt_help = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
-    } else if (string("--opt") == arg || string("--opt-all") == arg) {
+    } else if (string("--opt") == arg) {
       opt_optimize = true;
-      opt_mode = true;
-    } else if (string("--opt-only") == arg) {
-      opt_optimize = true;
-      opt_mode = false;
-    } else if (string("--opt-rules") == arg) {
-      if (argi < argc) {
-        std::string s = argv[argi++];
-        opt_rules = split(s, ',');
-      }
     } else if (string("--source") == arg) {
       opt_source = true;
       if (argi < argc) {
@@ -190,7 +180,7 @@ int main(int argc, const char **argv) {
 
     if (ast) {
       if (opt_optimize) {
-        ast = peg::AstOptimizer(opt_mode, opt_rules).optimize(ast);
+        ast = parser.optimize_ast(ast);
       }
       std::cout << peg::ast_to_s(ast);
     }

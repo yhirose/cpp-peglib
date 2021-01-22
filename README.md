@@ -408,7 +408,12 @@ AST generation
 *cpp-peglib* is able to generate an AST (Abstract Syntax Tree) when parsing. `enable_ast` method on `peg::parser` class enables the feature.
 
 ```
-peg::parser parser("...");
+peg::parser parser(R"(
+  ...
+  defenition1 <- ... { no_ast_opt }
+  defenition2 <- ... { no_ast_opt }
+  ...
+)");
 
 parser.enable_ast();
 
@@ -416,14 +421,14 @@ shared_ptr<peg::Ast> ast;
 if (parser.parse("...", ast)) {
   cout << peg::ast_to_s(ast);
 
-  std::vector<std::string> exceptions = { "defenition1", "defenition2 };
-  ast = peg::AstOptimizer(true, exceptions).optimize(ast);
-
+  ast = parser.optimize_ast(ast);
   cout << peg::ast_to_s(ast);
 }
 ```
 
-`peg::AstOptimizer` removes redundant nodes to make a AST simpler. You can make your own AST optimizers to fit your needs.
+`optimize_ast` removes redundant nodes to make a AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used.
+
+It internally calls `peg::AstOptimizer` to do the job. You can make your own AST optimizers to fit your needs.
 
 See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc).
 

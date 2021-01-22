@@ -1124,7 +1124,7 @@ CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
 ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
 ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
 
-ENTRIES    <- (ENTRY (__ ENTRY)*)?
+ENTRIES    <- (ENTRY (__ ENTRY)*)? { no_ast_opt }
 
 ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
             / PHRASE ('|' _ PHRASE)+ !'='
@@ -1187,7 +1187,7 @@ rrr | sss
 
   )", ast));
 
-  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+  ast = pg.optimize_ast(ast);
 
   REQUIRE(ast_to_s(ast) ==
 R"(+ START
@@ -1275,7 +1275,7 @@ TEST_CASE("Error recovery 2", "[error]") {
   REQUIRE_FALSE(pg.parse(R"([000]],[111],[222z,"aaa,"bbb",ccc"],[ddd",444,555,"eee],[
   )", ast));
 
-  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+  ast = pg.optimize_ast(ast);
 
   REQUIRE(ast_to_s(ast) ==
 R"(+ START
@@ -1386,7 +1386,7 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
 }
   )", ast));
 
-  ast = peg::AstOptimizer(true, {"ENTRIES"}).optimize(ast);
+  ast = pg.optimize_ast(ast);
 
   REQUIRE(ast_to_s(ast) ==
 R"(+ Prog

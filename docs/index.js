@@ -28,7 +28,6 @@ codeAstOptimized.setOptions({
 codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
 
 $('#opt_mode').val(localStorage.getItem('optimazationMode') || 'all');
-$('#opt_rules').val(localStorage.getItem('optimazationRules'));
 
 function escapeHtml(unsafe) {
   return unsafe
@@ -61,12 +60,10 @@ function parse() {
   const codeText = code.getValue();
 
   const optimazationMode = $('#opt_mode').val();
-  const optimazationRules = $('#opt_rules').val();
 
   localStorage.setItem('grammarText', grammarText);
   localStorage.setItem('codeText', codeText);
   localStorage.setItem('optimazationMode', optimazationMode);
-  localStorage.setItem('optimazationRules', optimazationRules);
 
   $grammarInfo.html('');
   $grammarValidation.hide();
@@ -80,7 +77,7 @@ function parse() {
   }
 
   const mode = optimazationMode == 'all';
-  const data = JSON.parse(Module.lint(grammarText, codeText, mode, optimazationRules));
+  const data = JSON.parse(Module.lint(grammarText, codeText, mode));
 
   const isValid = data.grammar.length === 0;
   if (isValid) {
@@ -126,7 +123,6 @@ $('#code-info').on('click', 'li', makeOnClickInInfo(code));
 
 // Event handing in the AST optimazation
 $('#opt_mode').on('change', setupTimer);
-$('#opt_rules').on('keyup', setupTimer);
 
 // Show page
 $('#main').css({
