@@ -33,6 +33,7 @@ inline vector<string> split(const string &s, char delim) {
 }
 
 int main(int argc, const char **argv) {
+  auto opt_packrat = false;
   auto opt_ast = false;
   auto opt_optimize = false;
   auto opt_mode = true;
@@ -47,6 +48,8 @@ int main(int argc, const char **argv) {
     auto arg = argv[argi++];
     if (string("--help") == arg) {
       opt_help = true;
+    } else if (string("--packrat") == arg) {
+      opt_packrat = true;
     } else if (string("--ast") == arg) {
       opt_ast = true;
     } else if (string("--opt") == arg || string("--opt-all") == arg) {
@@ -73,6 +76,7 @@ int main(int argc, const char **argv) {
 
   options:
     --source: source text
+    --packrat: enable packrat memoise
     --ast: show AST tree
     --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
@@ -114,6 +118,10 @@ int main(int argc, const char **argv) {
   parser.log = [&](size_t ln, size_t col, const string &msg) {
     cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
   };
+
+  if (opt_packrat) {
+    parser.enable_packrat_parsing();
+  }
 
   if (opt_trace) {
     size_t prev_pos = 0;

@@ -597,6 +597,7 @@ usage: grammar_file_path [source_file_path]
 
   options:
     --source: source text
+    --packrat: enable packrat memoise
     --ast: show AST tree
     --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
