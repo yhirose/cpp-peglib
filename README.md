@@ -455,29 +455,19 @@ auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
 The following are available operators:
 
-| Operator |     Description                 |
-| :------- | :------------------------------ |
-| seq      | Sequence                        |
-| cho      | Prioritized Choice              |
-| zom      | Zero or More                    |
-| oom      | One or More                     |
-| opt      | Optional                        |
-| apd      | And predicate                   |
-| npd      | Not predicate                   |
-| lit      | Literal string                  |
-| liti     | Case-insensitive Literal string |
-| cls      | Character class                 |
-| ncls     | Negated Character class         |
-| chr      | Character                       |
-| dot      | Any character                   |
-| tok      | Token boundary                  |
-| ign      | Ignore semantic value           |
-| csc      | Capture scope                   |
-| cap      | Capture                         |
-| bkr      | Back reference                  |
-| dic      | Dictionary                      |
-| pre      | Infix expression                |
-| usr      | User defined parser             |
+| Operator |     Description                 | Operator |     Description      |
+| :------- | :------------------------------ | :------- | :------------------- |
+| seq      | Sequence                        | cho      | Prioritized Choice   |
+| zom      | Zero or More                    | oom      | One or More          |
+| opt      | Optional                        | apd      | And predicate        |
+| npd      | Not predicate                   | lit      | Literal string       |
+| liti     | Case-insensitive Literal string | cls      | Character class      |
+| ncls     | Negated Character class         | chr      | Character            |
+| dot      | Any character                   | tok      | Token boundary       |
+| ign      | Ignore semantic value           | csc      | Capture scope        |
+| cap      | Capture                         | bkr      | Back reference       |
+| dic      | Dictionary                      | pre      | Infix expression     |
+| rec      | Infix expression                | usr      | User defined parser  |
 
 Adjust definitions
 ------------------
