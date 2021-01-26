@@ -767,6 +767,8 @@ public:
   std::vector<std::map<std::string_view, std::string>> capture_scope_stack;
   size_t capture_scope_stack_size = 0;
 
+  std::vector<bool> cut_stack;
+
   const size_t def_count;
   const bool enablePackratParsing;
   std::vector<bool> cache_registered;
@@ -971,24 +973,33 @@ public:
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
-  PrioritizedChoice(const Args &... args)
-      : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
+  PrioritizedChoice(bool for_label, const Args &... args)
+      : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
+        for_label_(for_label) {}
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
       : opes_(opes) {}
   PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
+    size_t len = static_cast<size_t>(-1);
+
+    if (!for_label_) { c.cut_stack.push_back(false); }
+
     size_t id = 0;
     for (const auto &ope : opes_) {
+      if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
+
       auto &chldsv = c.push();
       c.push_capture_scope();
+
       auto se = scope_exit([&]() {
         c.pop();
         c.pop_capture_scope();
       });
 
-      auto len = ope->parse(s, n, chldsv, c, dt);
+      len = ope->parse(s, n, chldsv, c, dt);
+
       if (success(len)) {
         if (!chldsv.empty()) {
           for (size_t i = 0; i < chldsv.size(); i++) {
@@ -1008,14 +1019,18 @@ public:
             vs.tokens.emplace_back(std::move(chldsv.tokens[i]));
           }
         }
-
         c.shift_capture_values();
-        return len;
+        break;
+      } else if (!c.cut_stack.empty() && c.cut_stack.back()) {
+        break;
       }
 
       id++;
     }
-    return static_cast<size_t>(-1);
+
+    if (!for_label_) { c.cut_stack.pop_back(); }
+
+    return len;
   }
 
   void accept(Visitor &v) override;
@@ -1023,6 +1038,7 @@ public:
   size_t size() const { return opes_.size(); }
 
   std::vector<std::shared_ptr<Ope>> opes_;
+  bool for_label_ = false;
 };
 
 class Repetition : public Ope {
@@ -1501,6 +1517,17 @@ public:
   std::shared_ptr<Ope> ope_;
 };
 
+class Cut : public Ope, public std::enable_shared_from_this<Cut> {
+public:
+  size_t parse_core(const char * /*s*/, size_t /*n*/, SemanticValues & /*vs*/,
+                    Context &c, std::any & /*dt*/) const override {
+    c.cut_stack.back() = true;
+    return 0;
+  }
+
+  void accept(Visitor &v) override;
+};
+
 /*
  * Factories
  */
@@ -1510,7 +1537,12 @@ template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
 
 template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
   return std::make_shared<PrioritizedChoice>(
-      static_cast<std::shared_ptr<Ope>>(args)...);
+      false, static_cast<std::shared_ptr<Ope>>(args)...);
+}
+
+template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&... args) {
+  return std::make_shared<PrioritizedChoice>(
+      true, static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
 inline std::shared_ptr<Ope> zom(const std::shared_ptr<Ope> &ope) {
@@ -1623,6 +1655,8 @@ inline std::shared_ptr<Ope> rec(const std::shared_ptr<Ope> &ope) {
   return std::make_shared<Recovery>(ope);
 }
 
+inline std::shared_ptr<Ope> cut() { return std::make_shared<Cut>(); }
+
 /*
  * Visitor
  */
@@ -1650,6 +1684,7 @@ struct Ope::Visitor {
   virtual void visit(BackReference &) {}
   virtual void visit(PrecedenceClimbing &) {}
   virtual void visit(Recovery &) {}
+  virtual void visit(Cut &) {}
 };
 
 struct IsReference : public Ope::Visitor {
@@ -1688,6 +1723,7 @@ struct TraceOpeName : public Ope::Visitor {
   void visit(BackReference &) override { name_ = "BackReference"; }
   void visit(PrecedenceClimbing &) override { name_ = "PrecedenceClimbing"; }
   void visit(Recovery &) override { name_ = "Recovery"; }
+  void visit(Cut &) override { name_ = "Cut"; }
 
   static std::string get(Ope &ope) {
     TraceOpeName vis;
@@ -1853,6 +1889,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
   void visit(BackReference &) override { done_ = true; }
   void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(Cut &) override { done_ = true; }
 
   const char *error_s = nullptr;
 
@@ -2119,6 +2156,7 @@ struct FindReference : public Ope::Visitor {
     ope.ope_->accept(*this);
     found_ope = rec(found_ope);
   }
+  void visit(Cut &ope) override { found_ope = ope.shared_from_this(); }
 
   std::shared_ptr<Ope> found_ope;
 
@@ -2516,10 +2554,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       try {
         a_val = reduce(chldsv, dt);
       } catch (const parse_error &e) {
-        if (e.what()) {
-          if (c.error_info.message_pos < s) {
-            c.error_info.message_pos = s;
-            c.error_info.message = e.what();
+        if (c.log) {
+          if (e.what()) {
+            if (c.error_info.message_pos < s) {
+              c.error_info.message_pos = s;
+              c.error_info.message = e.what();
+            }
           }
         }
         len = static_cast<size_t>(-1);
@@ -2696,31 +2736,49 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 inline size_t Recovery::parse_core(const char *s, size_t n,
                                    SemanticValues & /*vs*/, Context &c,
                                    std::any & /*dt*/) const {
-  auto save_log = c.log;
-  c.log = nullptr;
-
   const auto &rule = dynamic_cast<Reference &>(*ope_);
 
-  SemanticValues dummy_vs;
-  std::any dummy_dt;
-  auto len = rule.parse(s, n, dummy_vs, c, dummy_dt);
+  // Custom error message
+  if (c.log) {
+    auto label = dynamic_cast<Reference *>(rule.args_[0].get());
+    if (label) {
+      if (!label->rule_->error_message.empty()) {
+        c.error_info.message_pos = c.error_info.error_pos;
+        c.error_info.message = label->rule_->error_message;
+      }
+    }
+  }
 
-  c.log = save_log;
+  // Recovery
+  size_t len = static_cast<size_t>(-1);
+  {
+    auto save_log = c.log;
+    c.log = nullptr;
+    auto se = scope_exit([&]() { c.log = save_log; });
+
+    SemanticValues dummy_vs;
+    std::any dummy_dt;
+
+    len = rule.parse(s, n, dummy_vs, c, dummy_dt);
+  }
 
   if (success(len)) {
     c.recovered = true;
+
     if (c.log) {
-      auto label = dynamic_cast<Reference *>(rule.args_[0].get());
-      if (label) {
-        if (!label->rule_->error_message.empty()) {
-          c.error_info.message_pos = c.error_info.error_pos;
-          c.error_info.message = label->rule_->error_message;
-        }
-      }
       c.error_info.output_log(c.log, c.s, c.l);
+      c.error_info.clear();
     }
   }
-  c.error_info.clear();
+
+  // Cut
+  if (!c.cut_stack.empty()) {
+    c.cut_stack.back() = true;
+
+    if (c.cut_stack.size() == 1) {
+      // TODO: Remove unneeded entries in packrat memoise table
+    }
+  }
 
   return len;
 }
@@ -2747,6 +2805,7 @@ inline void Whitespace::accept(Visitor &v) { v.visit(*this); }
 inline void BackReference::accept(Visitor &v) { v.visit(*this); }
 inline void PrecedenceClimbing::accept(Visitor &v) { v.visit(*this); }
 inline void Recovery::accept(Visitor &v) { v.visit(*this); }
+inline void Cut::accept(Visitor &v) { v.visit(*this); }
 
 inline void AssignIDToDefinition::visit(Holder &ope) {
   auto p = static_cast<void *>(ope.outer_);
@@ -2947,10 +3006,10 @@ private:
             seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"],
                 opt(g["Instruction"])));
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
-    g["Sequence"] <= zom(g["Prefix"]);
+    g["Sequence"] <= zom(cho(g["CUT"], g["Prefix"]));
     g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["SuffixWithLabel"]);
     g["SuffixWithLabel"] <=
-        seq(g["Suffix"], opt(seq(g["HAT"], g["Identifier"])));
+        seq(g["Suffix"], opt(seq(g["LABEL"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
     g["Primary"] <=
@@ -3023,13 +3082,15 @@ private:
     ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
     g["NOT"] <= seq(chr('!'), g["Spacing"]);
-    ~g["HAT"] <= seq(chr('^'), g["Spacing"]);
     g["QUESTION"] <= seq(chr('?'), g["Spacing"]);
     g["STAR"] <= seq(chr('*'), g["Spacing"]);
     g["PLUS"] <= seq(chr('+'), g["Spacing"]);
     ~g["OPEN"] <= seq(chr('('), g["Spacing"]);
     ~g["CLOSE"] <= seq(chr(')'), g["Spacing"]);
     g["DOT"] <= seq(chr('.'), g["Spacing"]);
+
+    g["CUT"] <= seq(lit(u8"↑"), g["Spacing"]);
+    ~g["LABEL"] <= seq(cho(chr('^'), lit(u8"⇑")), g["Spacing"]);
 
     ~g["Spacing"] <= zom(cho(g["Space"], g["Comment"]));
     g["Comment"] <=
@@ -3193,7 +3254,7 @@ private:
         auto label = ref(*data.grammar, ident, vs.sv().data(), false, {});
         auto recovery = rec(ref(*data.grammar, RECOVER_DEFINITION_NAME,
                                 vs.sv().data(), true, {label}));
-        return cho(ope, recovery);
+        return cho4label_(ope, recovery);
       }
     };
 
@@ -3362,6 +3423,8 @@ private:
     g["PLUS"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
 
     g["DOT"] = [](const SemanticValues & /*vs*/) { return dot(); };
+
+    g["CUT"] = [](const SemanticValues & /*vs*/) { return cut(); };
 
     g["BeginCap"] = [](const SemanticValues &vs) { return vs.token(); };
 
