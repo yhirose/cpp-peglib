@@ -1239,7 +1239,7 @@ R"(+ START
 
 TEST_CASE("Error recovery 2", "[error]") {
   parser pg(R"(
-    START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover((!'!.' .)+))
+    START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover(.*))
     ENTRY <- '[' ITEM (',' ITEM)* ']'
     ITEM  <- WORD / NUM / %recover((!(',' / ']') .)+)
     NUM   <- [0-9]+ ![a-z]
@@ -1259,7 +1259,7 @@ TEST_CASE("Error recovery 2", "[error]") {
     R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
     R"(1:55: syntax error, unexpected ']', expecting <WORD>.)",
     R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
-    R"(1:56: syntax error, unexpected ',', expecting <Space>.)",
+    R"(2:3: syntax error.)",
   };
 
   size_t i = 0;
