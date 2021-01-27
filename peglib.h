@@ -184,6 +184,10 @@ inline std::u32string decode(const char *s8, size_t l) {
   return out;
 }
 
+template <typename T> const char *u8(const T *s) {
+  return reinterpret_cast<const char *>(s);
+}
+
 /*-----------------------------------------------------------------------------
  *  escape_characters
  *---------------------------------------------------------------------------*/
@@ -3075,9 +3079,7 @@ private:
                                 seq(g["COMMA"], g["Number"]));
     g["Number"] <= seq(oom(cls("0-9")), g["Spacing"]);
 
-    g["LEFTARROW"] <=
-        seq(cho(lit("<-"), lit(reinterpret_cast<const char *>(u8"←"))),
-            g["Spacing"]);
+    g["LEFTARROW"] <= seq(cho(lit("<-"), lit(u8(u8"←"))), g["Spacing"]);
     ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
     ~g["PIPE"] <= seq(chr('|'), g["Spacing"]);
     g["AND"] <= seq(chr('&'), g["Spacing"]);
@@ -3089,8 +3091,8 @@ private:
     ~g["CLOSE"] <= seq(chr(')'), g["Spacing"]);
     g["DOT"] <= seq(chr('.'), g["Spacing"]);
 
-    g["CUT"] <= seq(lit(u8"↑"), g["Spacing"]);
-    ~g["LABEL"] <= seq(cho(chr('^'), lit(u8"⇑")), g["Spacing"]);
+    g["CUT"] <= seq(lit(u8(u8"↑")), g["Spacing"]);
+    ~g["LABEL"] <= seq(cho(chr('^'), lit(u8(u8"⇑"))), g["Spacing"]);
 
     ~g["Spacing"] <= zom(cho(g["Space"], g["Comment"]));
     g["Comment"] <=
