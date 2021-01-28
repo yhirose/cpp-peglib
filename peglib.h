@@ -11,7 +11,6 @@
 #include <any>
 #include <cassert>
 #include <cctype>
-#include <charconv>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -478,16 +477,10 @@ struct SemanticValues : protected std::vector<std::any> {
 
   template <typename T> T token_to_number() const {
     T n = 0;
-    if constexpr (std::is_floating_point<T>::value) {
-      // TODO: The following code should be removed eventually.
-      std::istringstream ss(token_to_string());
-      ss >> n;
-      return n;
-    } else {
-      auto sv = token();
-      std::from_chars(sv.data(), sv.data() + sv.size(), n);
-      return n;
-    }
+    // TODO: The following code should be removed eventually.
+    std::istringstream ss(token_to_string());
+    ss >> n;
+    return n;
   }
 
   // Transform the semantic value vector to another vector
@@ -3770,16 +3763,10 @@ template <typename Annotation> struct AstBase : public Annotation {
 
   template <typename T> T token_to_number() const {
     T n = 0;
-    if constexpr (std::is_floating_point<T>::value) {
-      // TODO: The following code should be removed eventually.
-      std::istringstream ss(token_to_string());
-      ss >> n;
-      return n;
-    } else {
-      assert(is_token);
-      std::from_chars(token.data(), token.data() + token.size(), n);
-      return n;
-    }
+    // TODO: The following code should be removed eventually.
+    std::istringstream ss(token_to_string());
+    ss >> n;
+    return n;
   }
 };
 
