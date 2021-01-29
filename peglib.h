@@ -326,6 +326,24 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
 }
 
 /*-----------------------------------------------------------------------------
+ *  token_to_number_ - This function should be removed eventually
+ *---------------------------------------------------------------------------*/
+
+template <typename T> T token_to_number_(std::string_view sv) {
+  T n = 0;
+#if __has_include(<charconv>)
+  if constexpr (!std::is_floating_point<T>::value) {
+    std::from_chars(sv.data(), sv.data() + sv.size(), n);
+    return n;
+  }
+#endif
+  auto s = std::string(sv);
+  std::istringstream ss(s);
+  ss >> n;
+  return n;
+}
+
+/*-----------------------------------------------------------------------------
  *  Trie
  *---------------------------------------------------------------------------*/
 
@@ -479,23 +497,7 @@ struct SemanticValues : protected std::vector<std::any> {
   }
 
   template <typename T> T token_to_number() const {
-    T n = 0;
-#if __has_include(<charconv>)
-    if constexpr (std::is_floating_point<T>::value) {
-      // TODO: The following code should be removed eventually.
-      std::istringstream ss(token_to_string());
-      ss >> n;
-      return n;
-    } else {
-      auto sv = token();
-      std::from_chars(sv.data(), sv.data() + sv.size(), n);
-      return n;
-    }
-#else
-    std::istringstream ss(token_to_string());
-    ss >> n;
-    return n;
-#endif
+    return token_to_number_<T>(token());
   }
 
   // Transform the semantic value vector to another vector
@@ -549,7 +551,7 @@ private:
 /*
  * Semantic action
  */
-template <typename F, typename... Args> std::any call(F fn, Args &&... args) {
+template <typename F, typename... Args> std::any call(F fn, Args &&...args) {
   using R = decltype(fn(std::forward<Args>(args)...));
   if constexpr (std::is_void<R>::value) {
     fn(std::forward<Args>(args)...);
@@ -942,7 +944,7 @@ public:
 class Sequence : public Ope {
 public:
   template <typename... Args>
-  Sequence(const Args &... args)
+  Sequence(const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
   Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
@@ -985,7 +987,7 @@ public:
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
-  PrioritizedChoice(bool for_label, const Args &... args)
+  PrioritizedChoice(bool for_label, const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
         for_label_(for_label) {}
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
@@ -1543,16 +1545,16 @@ public:
 /*
  * Factories
  */
-template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> seq(Args &&...args) {
   return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> cho(Args &&...args) {
   return std::make_shared<PrioritizedChoice>(
       false, static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&...args) {
   return std::make_shared<PrioritizedChoice>(
       true, static_cast<std::shared_ptr<Ope>>(args)...);
 }
@@ -3777,23 +3779,7 @@ template <typename Annotation> struct AstBase : public Annotation {
   }
 
   template <typename T> T token_to_number() const {
-    T n = 0;
-#if __has_include(<charconv>)
-    if constexpr (std::is_floating_point<T>::value) {
-      // TODO: The following code should be removed eventually.
-      std::istringstream ss(token_to_string());
-      ss >> n;
-      return n;
-    } else {
-      assert(is_token);
-      std::from_chars(token.data(), token.data() + token.size(), n);
-      return n;
-    }
-#else
-    std::istringstream ss(token_to_string());
-    ss >> n;
-    return n;
-#endif
+    return token_to_number_<T>(token);
   }
 };
 
