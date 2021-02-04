@@ -1141,16 +1141,16 @@ comment    <- ('#' (!nl .)*)
 nl         <- '\r'? '\n'
 
 header <- (!__ .)* { message "invalid section header, missing ']'." }
-entry  <- (!(__ / HEADER) .)+ { message "invalid token '%t', expecting another phrase." }
+entry  <- (!(__ / HEADER) .)+ { message "invalid entry." }
   )");
 
   REQUIRE(!!pg); // OK
 
   std::vector<std::string> errors{
-    R"(3:6: invalid token '|', expecting another phrase.)",
-    R"(7:4: invalid token '\n', expecting another phrase.)",
+    R"(3:1: invalid entry.)",
+    R"(7:1: invalid entry.)",
     R"(10:11: invalid section header, missing ']'.)",
-    R"(18:17: invalid token '=', expecting another phrase.)",
+    R"(18:1: invalid entry.)",
   };
 
   size_t i = 0;
@@ -1291,6 +1291,217 @@ R"(+ START
     - ITEM/1[NUM] (444)
     - ITEM/1[NUM] (555)
     + ITEM/2
+)");
+}
+
+TEST_CASE("Error recovery 3", "[error]") {
+  parser pg(R"~(
+# Grammar
+START      <- __? SECTION*
+
+SECTION    <- HEADER __ ENTRIES __?
+
+HEADER     <- '['^missing_bracket _ CATEGORY (':' _  ATTRIBUTES)? ']'^missing_bracket ___
+
+CATEGORY   <- < (&[-_a-zA-Z0-9\u0080-\uFFFF ] (![\u0080-\uFFFF])^vernacular_char .)+ > _
+ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
+ATTRIBUTE  <- < [-_a-zA-Z0-9]+ > _
+
+ENTRIES    <- (ENTRY (__ ENTRY)*)? { no_ast_opt }
+
+ENTRY      <- ONE_WAY PHRASE^expect_phrase (or _ PHRASE^expect_phrase)* ___
+            / PHRASE (or^missing_or _ PHRASE^expect_phrase) (or _ PHRASE^expect_phrase)* ___ { no_ast_opt }
+
+ONE_WAY    <- PHRASE assign _
+PHRASE     <- WORD (' ' WORD)* _ { no_ast_opt }
+WORD       <- < (![ \t\r\n=|[\]#] (![*?] / %recover(wildcard)) .)+ >
+
+~assign    <- '=' ____
+~or        <- '|' (!'|')^duplicate_or ____
+
+~_         <- [ \t]*
+~__        <- _ (comment? nl _)+
+~___       <- (!operators)^invalid_ope
+~____      <- (!operators)^invalid_ope_comb
+
+operators  <- [|=]+
+comment    <- ('#' (!nl .)*)
+nl         <- '\r'? '\n'
+
+# Recovery
+duplicate_or     <- skip_puncs { message "Duplicate OR operator (|)" }
+missing_or       <- '' { message "Missing OR operator (|)" }
+missing_bracket  <- skip_puncs { message "Missing opening/closing square bracket" }
+expect_phrase    <- skip { message "Expect phrase" }
+invalid_ope_comb <- skip_puncs { message "Use of invalid operator combination" }
+invalid_ope      <- skip { message "Use of invalid operator" }
+wildcard         <- '' { message "Wildcard characters (%c) should not be used" }
+vernacular_char  <- '' { message "Section name %c must be in English" }
+
+skip             <- (!(__) .)*
+skip_puncs       <- [|=]* _
+  )~");
+
+  REQUIRE(!!pg); // OK
+
+  std::vector<std::string> errors{
+    R"(3:7: Wildcard characters (*) should not be used)",
+    R"(4:6: Wildcard characters (?) should not be used)",
+    R"(5:6: Duplicate OR operator (|))",
+    R"(9:4: Missing OR operator (|))",
+    R"(11:16: Expect phrase)",
+    R"(13:11: Missing opening/closing square bracket)",
+    R"(16:10: Section name 日 must be in English)",
+    R"(16:11: Section name 本 must be in English)",
+    R"(16:12: Section name 語 must be in English)",
+    R"(16:13: Section name で must be in English)",
+    R"(16:14: Section name す must be in English)",
+    R"(21:17: Use of invalid operator)",
+    R"(24:10: Use of invalid operator combination)",
+    R"(26:10: Missing OR operator (|))",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    REQUIRE(ss.str() == errors[i++]);
+  };
+
+  pg.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  REQUIRE_FALSE(pg.parse(R"([Section 1]
+111 = 222 | 333
+AAA BB* | CCC
+AAA B?B | CCC
+aaa || bbb
+ccc = ddd
+
+[Section 2]
+eee
+fff | ggg
+fff | ggg 111 |
+
+[Section 3
+hhh | iii
+
+[Section 日本語です]
+ppp | qqq
+
+[Section 4]
+jjj | kkk
+lll = mmm | nnn = ooo
+
+[Section 5]
+ppp qqq |= rrr
+
+Section 6]
+sss | ttt
+  )", ast));
+
+  ast = pg.optimize_ast(ast);
+
+  REQUIRE(ast_to_s(ast) ==
+R"(+ START
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 1)
+    + ENTRIES
+      + ENTRY/0
+        + ONE_WAY/0[PHRASE]
+          - WORD (111)
+        + PHRASE
+          - WORD (222)
+        + PHRASE
+          - WORD (333)
+      + ENTRY/1
+        + PHRASE
+          - WORD (AAA)
+          - WORD (BB*)
+        + PHRASE
+          - WORD (CCC)
+      + ENTRY/1
+        + PHRASE
+          - WORD (AAA)
+          - WORD (B?B)
+        + PHRASE
+          - WORD (CCC)
+      + ENTRY/1
+        + PHRASE
+          - WORD (aaa)
+        + PHRASE
+          - WORD (bbb)
+      + ENTRY/0
+        + ONE_WAY/0[PHRASE]
+          - WORD (ccc)
+        + PHRASE
+          - WORD (ddd)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 2)
+    + ENTRIES
+      + ENTRY/1
+        + PHRASE
+          - WORD (eee)
+      + ENTRY/1
+        + PHRASE
+          - WORD (fff)
+        + PHRASE
+          - WORD (ggg)
+      + ENTRY/1
+        + PHRASE
+          - WORD (fff)
+        + PHRASE
+          - WORD (ggg)
+          - WORD (111)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 3)
+    + ENTRIES
+      + ENTRY/1
+        + PHRASE
+          - WORD (hhh)
+        + PHRASE
+          - WORD (iii)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 日本語です)
+    + ENTRIES
+      + ENTRY/1
+        + PHRASE
+          - WORD (ppp)
+        + PHRASE
+          - WORD (qqq)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 4)
+    + ENTRIES
+      + ENTRY/1
+        + PHRASE
+          - WORD (jjj)
+        + PHRASE
+          - WORD (kkk)
+      + ENTRY/0
+        + ONE_WAY/0[PHRASE]
+          - WORD (lll)
+        + PHRASE
+          - WORD (mmm)
+        + PHRASE
+          - WORD (nnn)
+  + SECTION
+    - HEADER/0[CATEGORY] (Section 5)
+    + ENTRIES
+      + ENTRY/1
+        + PHRASE
+          - WORD (ppp)
+          - WORD (qqq)
+        + PHRASE
+          - WORD (rrr)
+      + ENTRY/1
+        + PHRASE
+          - WORD (Section)
+          - WORD (6)
+      + ENTRY/1
+        + PHRASE
+          - WORD (sss)
+        + PHRASE
+          - WORD (ttt)
 )");
 }
 

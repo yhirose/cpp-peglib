@@ -61,6 +61,7 @@ body {
   height: 160px;
   border: 1px solid lightgray;
   padding: 8px;
+  overflow-y: auto;
 }
 .editor-info li {
   cursor: pointer;

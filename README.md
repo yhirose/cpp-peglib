@@ -526,7 +526,7 @@ cpp-peglib supports the furthest failure error posision report as descrived in t
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be assosiated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
-The custom message supports `%t` which is a place holder for the unexpected token.
+The custom message supports `%t` which is a place holder for the unexpected token, and `%c` for the unexpected Unicode char.
 
 Here is an example of Java-like grammar:
 

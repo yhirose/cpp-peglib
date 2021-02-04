@@ -87,6 +87,14 @@ inline size_t codepoint_length(const char *s8, size_t l) {
   return 0;
 }
 
+inline size_t codepoint_count(const char *s8, size_t l) {
+  size_t count = 0;
+  for (size_t i = 0; i < l; i += codepoint_length(s8 + i, l - i)) {
+    count++;
+  }
+  return count;
+}
+
 inline size_t encode_codepoint(char32_t cp, char *buff) {
   if (cp < 0x0080) {
     buff[0] = static_cast<char>(cp & 0x7F);
@@ -161,16 +169,16 @@ inline bool decode_codepoint(const char *s8, size_t l, size_t &bytes,
   return false;
 }
 
-inline size_t decode_codepoint(const char *s8, size_t l, char32_t &out) {
+inline size_t decode_codepoint(const char *s8, size_t l, char32_t &cp) {
   size_t bytes;
-  if (decode_codepoint(s8, l, bytes, out)) { return bytes; }
+  if (decode_codepoint(s8, l, bytes, cp)) { return bytes; }
   return 0;
 }
 
 inline char32_t decode_codepoint(const char *s8, size_t l) {
-  char32_t out = 0;
-  decode_codepoint(s8, l, out);
-  return out;
+  char32_t cp = 0;
+  decode_codepoint(s8, l, cp);
+  return cp;
 }
 
 inline std::u32string decode(const char *s8, size_t l) {
@@ -418,7 +426,7 @@ inline std::pair<size_t, size_t> line_info(const char *start, const char *cur) {
     p++;
   }
 
-  auto col = p - col_ptr + 1;
+  auto col = codepoint_count(col_ptr, p - col_ptr) + 1;
 
   return std::pair(no, col);
 }
@@ -551,7 +559,7 @@ private:
 /*
  * Semantic action
  */
-template <typename F, typename... Args> std::any call(F fn, Args &&...args) {
+template <typename F, typename... Args> std::any call(F fn, Args &&... args) {
   using R = decltype(fn(std::forward<Args>(args)...));
   if constexpr (std::is_void<R>::value) {
     fn(std::forward<Args>(args)...);
@@ -638,6 +646,7 @@ struct ErrorInfo {
   std::vector<std::pair<const char *, bool>> expected_tokens;
   const char *message_pos = nullptr;
   std::string message;
+  mutable const char *last_output_pos = nullptr;
 
   void clear() {
     error_pos = nullptr;
@@ -655,59 +664,71 @@ struct ErrorInfo {
 
   void output_log(const Log &log, const char *s, size_t n) const {
     if (message_pos) {
-      auto line = line_info(s, message_pos);
-      std::string msg;
-      if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
-          !unexpected_token.empty()) {
-        msg = replace_all(message, "%t", unexpected_token);
-      } else {
-        msg = message;
-      }
-      log(line.first, line.second, msg);
-    } else if (error_pos) {
-      auto line = line_info(s, error_pos);
-
-      std::string msg;
-      if (expected_tokens.empty()) {
-        msg = "syntax error.";
-      } else {
-        msg = "syntax error";
-
-        // unexpected token
-        if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
+      if (message_pos > last_output_pos) {
+        last_output_pos = message_pos;
+        auto line = line_info(s, message_pos);
+        std::string msg;
+        if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
             !unexpected_token.empty()) {
-          msg += ", unexpected '";
-          msg += unexpected_token;
-          msg += "'";
+          msg = replace_all(message, "%t", unexpected_token);
+
+          auto unexpected_char = unexpected_token.substr(
+              0, codepoint_length(unexpected_token.data(),
+                                  unexpected_token.size()));
+
+          msg = replace_all(msg, "%c", unexpected_char);
+        } else {
+          msg = message;
         }
+        log(line.first, line.second, msg);
+      }
+    } else if (error_pos) {
+      if (error_pos > last_output_pos) {
+        last_output_pos = error_pos;
+        auto line = line_info(s, error_pos);
 
-        auto first_item = true;
-        size_t i = 0;
-        while (i < expected_tokens.size()) {
-          auto [token, is_literal] =
-              expected_tokens[expected_tokens.size() - i - 1];
+        std::string msg;
+        if (expected_tokens.empty()) {
+          msg = "syntax error.";
+        } else {
+          msg = "syntax error";
 
-          // Skip rules start with '_'
-          if (!is_literal && token[0] != '_') {
-            msg += (first_item ? ", expecting " : ", ");
-            if (is_literal) {
-              msg += "'";
-              msg += token;
-              msg += "'";
-            } else {
-              msg += "<";
-              msg += token;
-              msg += ">";
-            }
-            first_item = false;
+          // unexpected token
+          if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
+              !unexpected_token.empty()) {
+            msg += ", unexpected '";
+            msg += unexpected_token;
+            msg += "'";
           }
 
-          i++;
-        }
-        msg += ".";
-      }
+          auto first_item = true;
+          size_t i = 0;
+          while (i < expected_tokens.size()) {
+            auto [token, is_literal] =
+                expected_tokens[expected_tokens.size() - i - 1];
 
-      log(line.first, line.second, msg);
+            // Skip rules start with '_'
+            if (!is_literal && token[0] != '_') {
+              msg += (first_item ? ", expecting " : ", ");
+              if (is_literal) {
+                msg += "'";
+                msg += token;
+                msg += "'";
+              } else {
+                msg += "<";
+                msg += token;
+                msg += ">";
+              }
+              first_item = false;
+            }
+
+            i++;
+          }
+          msg += ".";
+        }
+
+        log(line.first, line.second, msg);
+      }
     }
   }
 
@@ -724,7 +745,16 @@ private:
           i++;
         }
       }
-      return escape_characters(error_pos, std::min<size_t>(i, 8));
+
+      size_t count = 8;
+      size_t j = 0;
+      while (count > 0 && j < i) {
+        j += codepoint_length(&error_pos[j], i - j);
+        count--;
+      }
+
+      // return escape_characters(error_pos, std::min<size_t>(i, 8));
+      return escape_characters(error_pos, j);
     }
     return std::string();
   }
@@ -944,7 +974,7 @@ public:
 class Sequence : public Ope {
 public:
   template <typename... Args>
-  Sequence(const Args &...args)
+  Sequence(const Args &... args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
   Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
@@ -987,7 +1017,7 @@ public:
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
-  PrioritizedChoice(bool for_label, const Args &...args)
+  PrioritizedChoice(bool for_label, const Args &... args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
         for_label_(for_label) {}
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
@@ -1545,16 +1575,16 @@ public:
 /*
  * Factories
  */
-template <typename... Args> std::shared_ptr<Ope> seq(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
   return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
   return std::make_shared<PrioritizedChoice>(
       false, static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&... args) {
   return std::make_shared<PrioritizedChoice>(
       true, static_cast<std::shared_ptr<Ope>>(args)...);
 }
@@ -2757,7 +2787,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     auto label = dynamic_cast<Reference *>(rule.args_[0].get());
     if (label) {
       if (!label->rule_->error_message.empty()) {
-        c.error_info.message_pos = c.error_info.error_pos;
+        c.error_info.message_pos = s;
         c.error_info.message = label->rule_->error_message;
       }
     }
@@ -3043,7 +3073,8 @@ private:
 
     const static std::vector<std::pair<char32_t, char32_t>> range = {
         {0x0080, 0xFFFF}};
-    g["IdentStart"] <= cho(cls("a-zA-Z_%"), cls(range));
+    g["IdentStart"] <= seq(npd(lit(u8(u8"↑"))), npd(lit(u8(u8"⇑"))),
+                           cho(cls("a-zA-Z_%"), cls(range)));
 
     g["IdentRest"] <= cho(g["IdentStart"], cls("0-9"));
 
