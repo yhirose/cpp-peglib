@@ -29,7 +29,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
   * `{ precedence L - + L / * }` (Parsing infix expression)
   * `%recovery(` ... `)` (Error recovery operator)
-  * `exp⇑label` (Syntax sugar for `(exp / %recover(label))`)
+  * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
   * `label { message "..." }` (Error message instruction)
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
