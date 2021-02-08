@@ -733,15 +733,17 @@ struct ErrorInfo {
   }
 
 private:
+  int cast_char(char c) const { return static_cast<unsigned char>(c); }
+
   std::string heuristic_error_token(const char *s, size_t n,
                                     const char *error_pos) const {
     auto len = n - std::distance(s, error_pos);
     if (len) {
       size_t i = 0;
-      int c = error_pos[i++];
+      auto c = cast_char(error_pos[i++]);
       if (!std::ispunct(c) && !std::isspace(c)) {
-        while (i < len && !std::ispunct(error_pos[i]) &&
-               !std::isspace(error_pos[i])) {
+        while (i < len && !std::ispunct(cast_char(error_pos[i])) &&
+               !std::isspace(cast_char(error_pos[i]))) {
           i++;
         }
       }
@@ -753,7 +755,6 @@ private:
         count--;
       }
 
-      // return escape_characters(error_pos, std::min<size_t>(i, 8));
       return escape_characters(error_pos, j);
     }
     return std::string();
