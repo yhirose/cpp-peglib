@@ -459,7 +459,7 @@ vector<string> tags;
 Definition ROOT, TAG_NAME, _;
 ROOT     <= seq(_, zom(seq(chr('['), TAG_NAME, chr(']'), _)));
 TAG_NAME <= oom(seq(npd(chr(']')), dot())), [&](const SemanticValues& vs) {
-              tags.push_back(vs.str());
+              tags.push_back(vs.token_to_string());
             };
 _        <= zom(cls(" \t"));
 
