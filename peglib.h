@@ -3003,14 +3003,16 @@ class ParserGenerator {
 public:
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        Log log) {
-    return get_instance().perform_core(s, n, rules, start, log);
+                                        Log log,
+                                        std::shared_ptr<Grammar> prev_grammar = nullptr) {
+    return get_instance().perform_core(s, n, rules, start, log, prev_grammar);
   }
 
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
-                                        std::string &start, Log log) {
+                                        std::string &start, Log log,
+                                        std::shared_ptr<Grammar> prev_grammar = nullptr) {
     Rules dummy;
-    return parse(s, n, dummy, start, log);
+    return parse(s, n, dummy, start, log, prev_grammar);
   }
 
   // For debuging purpose
@@ -3034,12 +3036,16 @@ private:
 
   struct Data {
     std::shared_ptr<Grammar> grammar;
+    bool updating;
     std::string start;
     const char *start_pos = nullptr;
     std::vector<std::pair<std::string, const char *>> duplicates;
     std::map<std::string, Instruction> instructions;
 
-    Data() : grammar(std::make_shared<Grammar>()) {}
+    Data(std::shared_ptr<Grammar> prev_grammar) :
+      grammar(prev_grammar? prev_grammar : std::make_shared<Grammar>()),
+      updating(prev_grammar != nullptr)
+      {}
   };
 
   void make_grammar() {
@@ -3223,7 +3229,7 @@ private:
       }
 
       auto &grammar = *data.grammar;
-      if (!grammar.count(name)) {
+      if (!grammar.count(name) || data.updating) {
         auto &rule = grammar[name];
         rule <= ope;
         rule.name = name;
@@ -3234,6 +3240,8 @@ private:
 
         if (data.start.empty()) {
           data.start = name;
+        }
+        if (!data.start_pos) {
           data.start_pos = vs.sv().data();
         }
       } else {
@@ -3563,12 +3571,16 @@ private:
 
   std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        Log log) {
-    Data data;
+                                        Log log, std::shared_ptr<Grammar> prev_grammar) {
+    bool updating = prev_grammar != nullptr;
+    Data data(prev_grammar);
     auto &grammar = *data.grammar;
+    if (updating) {
+      data.start = start;
+    }
 
     // Built-in macros
-    {
+    if (!updating) {
       // `%recover`
       {
         auto &rule = grammar[RECOVER_DEFINITION_NAME];
@@ -3613,15 +3625,19 @@ private:
       }
     }
 
-    // Check duplicated definitions
-    auto ret = data.duplicates.empty();
+    bool ret = true;
 
-    for (const auto &x : data.duplicates) {
-      if (log) {
-        const auto &name = x.first;
-        auto ptr = x.second;
-        auto line = line_info(s, ptr);
-        log(line.first, line.second, "'" + name + "' is already defined.");
+    // Check duplicated definitions
+    if (!updating){
+      ret = data.duplicates.empty();
+
+      for (const auto &x : data.duplicates) {
+        if (log) {
+          const auto &name = x.first;
+          auto ptr = x.second;
+          auto line = line_info(s, ptr);
+          log(line.first, line.second, "'" + name + "' is already defined.");
+        }
       }
     }
 
@@ -4076,6 +4092,23 @@ public:
 
   bool load_grammar(std::string_view sv) {
     return load_grammar(sv.data(), sv.size());
+  }
+
+  bool update_grammar(const char *s, size_t n, const Rules &rules) {
+    grammar_ = ParserGenerator::parse(s, n, rules, start_, log, grammar_);
+    return grammar_ != nullptr;
+  }
+
+  bool update_grammar(const char *s, size_t n) {
+    return update_grammar(s, n, Rules());
+  }
+
+  bool update_grammar(std::string_view sv, const Rules &rules) {
+    return update_grammar(sv.data(), sv.size(), rules);
+  }
+
+  bool update_grammar(std::string_view sv) {
+    return update_grammar(sv.data(), sv.size());
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
