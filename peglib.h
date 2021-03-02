@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if !defined(__cplusplus) || __cplusplus < 201703L
@@ -656,8 +657,8 @@ struct ErrorInfo {
   }
 
   void add(const char *token, bool is_literal) {
-    for (const auto &x : expected_tokens) {
-      if (x.first == token && x.second == is_literal) { return; }
+    for (const auto &[t, l] : expected_tokens) {
+      if (t == token && l == is_literal) { return; }
     }
     expected_tokens.push_back(std::make_pair(token, is_literal));
   }
@@ -938,8 +939,8 @@ public:
     assert(capture_scope_stack.size() >= 2);
     auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
     auto prev = curr - 1;
-    for (const auto &kv : *curr) {
-      (*prev)[kv.first] = kv.second;
+    for (const auto &[k, v] : *curr) {
+      (*prev)[k] = v;
     }
   }
 
@@ -2001,8 +2002,7 @@ struct HasEmptyElement : public Ope::Visitor {
 private:
   void set_error() {
     is_empty = true;
-    error_s = refs_.back().first;
-    error_name = refs_.back().second;
+    tie(error_s, error_name) = refs_.back();
   }
   std::list<std::pair<const char *, std::string>> &refs_;
 };
@@ -2089,6 +2089,7 @@ struct ReferenceChecker : public Ope::Visitor {
 
   std::unordered_map<std::string, const char *> error_s;
   std::unordered_map<std::string, std::string> error_message;
+  std::unordered_set<std::string> referenced;
 
 private:
   const Grammar &grammar_;
@@ -2943,6 +2944,7 @@ inline void ReferenceChecker::visit(Reference &ope) {
     error_s[ope.name_] = ope.s_;
     error_message[ope.name_] = "'" + ope.name_ + "' is not defined.";
   } else {
+    if (!referenced.count(ope.name_)) { referenced.insert(ope.name_); }
     const auto &rule = grammar_.at(ope.name_);
     if (rule.is_macro) {
       if (!ope.is_macro_ || ope.args_.size() != rule.params.size()) {
@@ -3598,8 +3600,8 @@ private:
     }
 
     // User provided rules
-    for (const auto &x : rules) {
-      auto name = x.first;
+    for (auto [user_name, user_rule] : rules) {
+      auto name = user_name;
       auto ignore = false;
       if (!name.empty() && name[0] == '~') {
         ignore = true;
@@ -3607,7 +3609,7 @@ private:
       }
       if (!name.empty()) {
         auto &rule = grammar[name];
-        rule <= x.second;
+        rule <= user_rule;
         rule.name = name;
         rule.ignoreSemanticValue = ignore;
       }
@@ -3616,23 +3618,24 @@ private:
     // Check duplicated definitions
     auto ret = data.duplicates.empty();
 
-    for (const auto &x : data.duplicates) {
+    for (const auto &[name, ptr] : data.duplicates) {
       if (log) {
-        const auto &name = x.first;
-        auto ptr = x.second;
         auto line = line_info(s, ptr);
         log(line.first, line.second, "'" + name + "' is already defined.");
       }
     }
 
+    // Set root definition
+    auto &start_rule = grammar[data.start];
+
     // Check if the start rule has ignore operator
     {
-      auto &rule = grammar[data.start];
-      if (rule.ignoreSemanticValue) {
+      if (start_rule.ignoreSemanticValue) {
         if (log) {
-          auto line = line_info(s, rule.s_);
+          auto line = line_info(s, start_rule.s_);
           log(line.first, line.second,
-              "Ignore operator cannot be applied to '" + rule.name + "'.");
+              "Ignore operator cannot be applied to '" + start_rule.name +
+                  "'.");
         }
         ret = false;
       }
@@ -3641,17 +3644,32 @@ private:
     if (!ret) { return nullptr; }
 
     // Check missing definitions
-    for (auto &x : grammar) {
-      auto &rule = x.second;
+    auto referenced = std::unordered_set<std::string>{
+        WHITESPACE_DEFINITION_NAME,
+        WORD_DEFINITION_NAME,
+        RECOVER_DEFINITION_NAME,
+        start_rule.name,
+    };
 
+    for (auto &[_, rule] : grammar) {
       ReferenceChecker vis(grammar, rule.params);
       rule.accept(vis);
-      for (const auto &y : vis.error_s) {
-        const auto &name = y.first;
-        const auto ptr = y.second;
+      referenced.insert(vis.referenced.begin(), vis.referenced.end());
+      for (const auto &[name, ptr] : vis.error_s) {
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second, vis.error_message[name]);
+        }
+        ret = false;
+      }
+    }
+
+    for (auto &[name, rule] : grammar) {
+      if (!referenced.count(name)) {
+        if (log) {
+          auto line = line_info(s, rule.s_);
+          auto msg = "'" + name + "' is not referenced.";
+          log(line.first, line.second, msg);
         }
         ret = false;
       }
@@ -3669,10 +3687,7 @@ private:
     // Check left recursion
     ret = true;
 
-    for (auto &x : grammar) {
-      const auto &name = x.first;
-      auto &rule = x.second;
-
+    for (auto &[name, rule] : grammar) {
       DetectLeftRecursion vis(name);
       rule.accept(vis);
       if (vis.error_s) {
@@ -3685,9 +3700,6 @@ private:
     }
 
     if (!ret) { return nullptr; }
-
-    // Set root definition
-    auto &start_rule = grammar[data.start];
 
     // Check infinite loop
     for (auto &[name, rule] : grammar) {
@@ -3721,9 +3733,7 @@ private:
     }
 
     // Apply instructions
-    for (const auto &item : data.instructions) {
-      const auto &name = item.first;
-      const auto &instruction = item.second;
+    for (const auto &[name, instruction] : data.instructions) {
       auto &rule = grammar[name];
 
       if (instruction.type == "precedence") {

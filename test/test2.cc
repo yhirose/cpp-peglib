@@ -1036,10 +1036,21 @@ TEST_CASE("Macro passes an arg to another macro", "[macro]") {
         A    <- B(C)
         B(D) <- D
         C    <- 'c'
-        D    <- 'd'
 	)");
 
   REQUIRE(parser.parse("c"));
+}
+
+TEST_CASE("Unreferenced rule", "[macro]") {
+  parser parser(R"(
+        A    <- B(C)
+        B(D) <- D
+        C    <- 'c'
+        D    <- 'd'
+	)");
+
+  bool ret = parser;
+  REQUIRE(ret == false);
 }
 
 TEST_CASE("Nested macro call", "[macro]") {
