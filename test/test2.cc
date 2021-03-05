@@ -300,6 +300,68 @@ TEST_CASE("Precedence climbing", "[precedence]") {
   }
 }
 
+TEST_CASE("Precedence climbing with literal operator", "[precedence]") {
+  parser parser(R"(
+        START            <-  _ EXPRESSION
+        EXPRESSION       <-  ATOM (OPERATOR ATOM)* {
+                               precedence
+                                 L '#plus#' -     # weaker
+                                 L '#multiply#' / # stronger
+                             }
+        ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
+        OPERATOR         <-  T('#plus#' / '#multiply#' / [-/])
+        NUMBER           <-  T('-'? [0-9]+)
+		~_               <-  [ \t]*
+		T(S)             <-  < S > _
+	)");
+
+  REQUIRE(!!parser); // OK
+
+  parser.enable_packrat_parsing();
+
+  // Setup actions
+  parser["EXPRESSION"] = [](const SemanticValues &vs) -> long {
+    auto result = std::any_cast<long>(vs[0]);
+    if (vs.size() > 1) {
+      auto ope = std::any_cast<std::string>(vs[1]);
+      auto num = std::any_cast<long>(vs[2]);
+      if (ope == "#plus#") {
+        result += num;
+      } else if (ope == "-") {
+        result -= num;
+      } else if (ope == "#multiply#") {
+        result *= num;
+      } else if (ope == "/") {
+        result /= num;
+      }
+    }
+    return result;
+  };
+  parser["OPERATOR"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+
+  bool ret = parser;
+  REQUIRE(ret == true);
+
+  {
+    auto expr = " 1 #plus#  2 #multiply# 3 #multiply# (4 - 5 #plus# 6) / 7 - 8 ";
+    long val = 0;
+    ret = parser.parse(expr, val);
+
+    REQUIRE(ret == true);
+    REQUIRE(val == -3);
+  }
+
+  {
+    auto expr = "-1#plus#-2--3"; // -1 + -2 - -3 = 0
+    long val = 0;
+    ret = parser.parse(expr, val);
+
+    REQUIRE(ret == true);
+    REQUIRE(val == 0);
+  }
+}
+
 TEST_CASE("Precedence climbing with macro", "[precedence]") {
   // Create a PEG parser
   parser parser(R"(
