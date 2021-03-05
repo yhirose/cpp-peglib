@@ -1112,7 +1112,7 @@ TEST_CASE("Unreferenced rule", "[macro]") {
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  REQUIRE(ret == true); // This is OK, because it's a warning, not an erro...
 }
 
 TEST_CASE("Nested macro call", "[macro]") {

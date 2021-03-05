@@ -3677,7 +3677,6 @@ private:
           auto msg = "'" + name + "' is not referenced.";
           log(line.first, line.second, msg);
         }
-        ret = false;
       }
     }
 
