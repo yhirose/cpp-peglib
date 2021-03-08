@@ -420,6 +420,8 @@ AST generation
 
 *cpp-peglib* is able to generate an AST (Abstract Syntax Tree) when parsing. `enable_ast` method on `peg::parser` class enables the feature.
 
+NOTE: An AST node holds a corresponding token as `std::string_vew` for performance and less memory usage. It is users' responsibility to kepp the original source text along with the generated AST tree.
+
 ```
 peg::parser parser(R"(
   ...
