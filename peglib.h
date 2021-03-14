@@ -461,7 +461,7 @@ struct SemanticValues : protected std::vector<std::any> {
   // Input text
   const char *path = nullptr;
   const char *ss = nullptr;
-  const std::vector<size_t> *source_line_index = nullptr;
+  std::function<const std::vector<size_t> &()> source_line_index;
 
   // Matched string
   std::string_view sv() const { return sv_; }
@@ -473,7 +473,7 @@ struct SemanticValues : protected std::vector<std::any> {
 
   // Line number and column at which the matched string is
   std::pair<size_t, size_t> line_info() const {
-    const auto &idx = *source_line_index;
+    auto &idx = source_line_index();
 
     auto cur = static_cast<size_t>(std::distance(ss, sv_.data()));
     auto it = std::lower_bound(
@@ -560,7 +560,7 @@ private:
 /*
  * Semantic action
  */
-template <typename F, typename... Args> std::any call(F fn, Args &&...args) {
+template <typename F, typename... Args> std::any call(F fn, Args &&... args) {
   using R = decltype(fn(std::forward<Args>(args)...));
   if constexpr (std::is_void<R>::value) {
     fn(std::forward<Args>(args)...);
@@ -838,11 +838,6 @@ public:
         cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave), log(log) {
 
-    for (size_t pos = 0; pos < l; pos++) {
-      if (s[pos] == '\n') { source_line_index.push_back(pos); }
-    }
-    source_line_index.push_back(l);
-
     args_stack.resize(1);
 
     push_capture_scope();
@@ -905,7 +900,16 @@ public:
     auto &vs = *value_stack[value_stack_size++];
     vs.path = path;
     vs.ss = s;
-    vs.source_line_index = &source_line_index;
+    vs.source_line_index = [&]() -> const std::vector<size_t> & {
+      if (source_line_index.empty()) {
+        for (size_t pos = 0; pos < l; pos++) {
+          if (s[pos] == '\n') { source_line_index.push_back(pos); }
+        }
+        source_line_index.push_back(l);
+      }
+      return source_line_index;
+    };
+
     return vs;
   }
 
@@ -976,7 +980,7 @@ public:
 class Sequence : public Ope {
 public:
   template <typename... Args>
-  Sequence(const Args &...args)
+  Sequence(const Args &... args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
   Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
@@ -1019,7 +1023,7 @@ public:
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
-  PrioritizedChoice(bool for_label, const Args &...args)
+  PrioritizedChoice(bool for_label, const Args &... args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
         for_label_(for_label) {}
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
@@ -1577,16 +1581,16 @@ public:
 /*
  * Factories
  */
-template <typename... Args> std::shared_ptr<Ope> seq(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
   return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
   return std::make_shared<PrioritizedChoice>(
       false, static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&...args) {
+template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&... args) {
   return std::make_shared<PrioritizedChoice>(
       true, static_cast<std::shared_ptr<Ope>>(args)...);
 }
@@ -2430,24 +2434,29 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   // Word check
-  SemanticValues dummy_vs;
-  Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                  nullptr, nullptr);
-  std::any dummy_dt;
+  if (c.wordOpe) {
+    std::call_once(init_is_word, [&]() {
+      SemanticValues dummy_vs;
+      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
+                      nullptr, nullptr);
+      std::any dummy_dt;
 
-  std::call_once(init_is_word, [&]() {
-    if (c.wordOpe) {
       auto len =
           c.wordOpe->parse(lit.data(), lit.size(), dummy_vs, dummy_c, dummy_dt);
       is_word = success(len);
-    }
-  });
+    });
 
-  if (is_word) {
-    NotPredicate ope(c.wordOpe);
-    auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
-    if (fail(len)) { return len; }
-    i += len;
+    if (is_word) {
+      SemanticValues dummy_vs;
+      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
+                      nullptr, nullptr);
+      std::any dummy_dt;
+
+      NotPredicate ope(c.wordOpe);
+      auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
+      if (fail(len)) { return len; }
+      i += len;
+    }
   }
 
   // Skip whiltespace
