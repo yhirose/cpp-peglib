@@ -545,7 +545,8 @@ TEST_CASE("Calculator test2", "[general]") {
     )";
 
   std::string start;
-  auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, nullptr);
+  bool enablePackratParsing = false;
+  auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, enablePackratParsing, nullptr);
   auto &g = *grammar;
 
   // Setup actions

@@ -3014,14 +3014,16 @@ class ParserGenerator {
 public:
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        Log log) {
-    return get_instance().perform_core(s, n, rules, start, log);
+                                        bool &enablePackratParsing, Log log) {
+    return get_instance().perform_core(s, n, rules, start, enablePackratParsing,
+                                       log);
   }
 
   static std::shared_ptr<Grammar> parse(const char *s, size_t n,
-                                        std::string &start, Log log) {
+                                        std::string &start,
+                                        bool &enablePackratParsing, Log log) {
     Rules dummy;
-    return parse(s, n, dummy, start, log);
+    return parse(s, n, dummy, start, enablePackratParsing, log);
   }
 
   // For debuging purpose
@@ -3049,6 +3051,8 @@ private:
     const char *start_pos = nullptr;
     std::vector<std::pair<std::string, const char *>> duplicates;
     std::map<std::string, Instruction> instructions;
+    std::set<std::string_view> captures;
+    bool enablePackratParsing = true;
 
     Data() : grammar(std::make_shared<Grammar>()) {}
   };
@@ -3258,6 +3262,11 @@ private:
       }
     };
 
+    g["Definition"].enter = [](const char * /*s*/, size_t /*n*/, std::any &dt) {
+      auto &data = *std::any_cast<Data *>(dt);
+      data.captures.clear();
+    };
+
     g["Expression"] = [&](const SemanticValues &vs) {
       if (vs.size() == 1) {
         return std::any_cast<std::shared_ptr<Ope>>(vs[0]);
@@ -3415,6 +3424,9 @@ private:
       case 5: { // Capture
         const auto &name = std::any_cast<std::string_view>(vs[0]);
         auto ope = std::any_cast<std::shared_ptr<Ope>>(vs[1]);
+
+        data.captures.insert(name);
+
         return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
           auto &cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
           cs[name] = std::string(a_s, a_n);
@@ -3489,7 +3501,11 @@ private:
 
     g["BeginCap"] = [](const SemanticValues &vs) { return vs.token(); };
 
-    g["BackRef"] = [&](const SemanticValues &vs) {
+    g["BackRef"] = [&](const SemanticValues &vs, std::any &dt) {
+      auto &data = *std::any_cast<Data *>(dt);
+      if (data.captures.find(vs.token()) == data.captures.end()) {
+        data.enablePackratParsing = false;
+      }
       return bkr(vs.token_to_string());
     };
 
@@ -3580,7 +3596,7 @@ private:
 
   std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
                                         const Rules &rules, std::string &start,
-                                        Log log) {
+                                        bool &enablePackratParsing, Log log) {
     Data data;
     auto &grammar = *data.grammar;
 
@@ -3766,6 +3782,7 @@ private:
 
     // Set root definition
     start = data.start;
+    enablePackratParsing = data.enablePackratParsing;
 
     return data.grammar;
   }
@@ -4086,7 +4103,8 @@ public:
   operator bool() { return grammar_ != nullptr; }
 
   bool load_grammar(const char *s, size_t n, const Rules &rules) {
-    grammar_ = ParserGenerator::parse(s, n, rules, start_, log);
+    grammar_ =
+        ParserGenerator::parse(s, n, rules, start_, enablePackratParsing_, log);
     return grammar_ != nullptr;
   }
 
@@ -4176,7 +4194,7 @@ public:
   void enable_packrat_parsing() {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
-      rule.enablePackratParsing = true;
+      rule.enablePackratParsing = enablePackratParsing_ && true;
     }
   }
 
@@ -4221,6 +4239,7 @@ private:
 
   std::shared_ptr<Grammar> grammar_;
   std::string start_;
+  bool enablePackratParsing_ = false;
 };
 
 } // namespace peg
