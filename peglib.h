@@ -3732,9 +3732,9 @@ private:
     if (!ret) { return nullptr; }
 
     // Check infinite loop
-    for (auto &[name, rule] : grammar) {
-      DetectInfiniteLoop vis(rule.s_, name);
-      rule.accept(vis);
+    {
+      DetectInfiniteLoop vis(data.start_pos, data.start);
+      start_rule.accept(vis);
       if (vis.has_error) {
         if (log) {
           auto line = line_info(s, vis.error_s);
