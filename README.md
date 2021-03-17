@@ -335,7 +335,7 @@ S <- '(' ↑ P ')' / '"' ↑ P '"' / P
 P <- 'a' / 'b' / 'c'
 ```
 
-When we parse `(z` with the above grammar, we don't have to backtrack in `S` after `(` is matched because a cut operator is inserted there.
+When we parse `(z` with the above grammar, we don't have to backtrack in `S` after `(` is matched, because a cut operator is inserted there.
 
 Parameterized Rule or Macro
 ---------------------------
@@ -713,4 +713,4 @@ Sample codes
 License
 -------
 
-MIT license (© 2020 Yuji Hirose)
+MIT license (© 2021 Yuji Hirose)
