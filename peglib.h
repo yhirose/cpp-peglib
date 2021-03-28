@@ -2768,6 +2768,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (fail(chl)) {
       vs.assign(save_values.begin(), save_values.end());
       vs.tokens = save_tokens;
+      i = chl;
       break;
     }
 
