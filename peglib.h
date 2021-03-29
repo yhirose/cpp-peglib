@@ -737,14 +737,14 @@ private:
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
 
   std::string heuristic_error_token(const char *s, size_t n,
-                                    const char *error_pos) const {
-    auto len = n - std::distance(s, error_pos);
+                                    const char *pos) const {
+    auto len = n - std::distance(s, pos);
     if (len) {
       size_t i = 0;
-      auto c = cast_char(error_pos[i++]);
+      auto c = cast_char(pos[i++]);
       if (!std::ispunct(c) && !std::isspace(c)) {
-        while (i < len && !std::ispunct(cast_char(error_pos[i])) &&
-               !std::isspace(cast_char(error_pos[i]))) {
+        while (i < len && !std::ispunct(cast_char(pos[i])) &&
+               !std::isspace(cast_char(pos[i]))) {
           i++;
         }
       }
@@ -752,11 +752,11 @@ private:
       size_t count = 8;
       size_t j = 0;
       while (count > 0 && j < i) {
-        j += codepoint_length(&error_pos[j], i - j);
+        j += codepoint_length(&pos[j], i - j);
         count--;
       }
 
-      return escape_characters(error_pos, j);
+      return escape_characters(pos, j);
     }
     return std::string();
   }
