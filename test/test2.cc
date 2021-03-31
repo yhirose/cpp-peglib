@@ -168,39 +168,10 @@ TEST_CASE("Infinite loop 8", "[infinite loop]") {
     REQUIRE(!pg);
 }
 
-TEST_CASE("Infinite 9", "[infinite loop]") {
-  parser pg(R"(
-START      <- __? SECTION*
-
-SECTION    <- HEADER __ ENTRIES __?
-
-HEADER     <- '[' _ CATEGORY (':' _  ATTRIBUTES)? ']'^header
-
-CATEGORY   <- < [-_a-zA-Z0-9\u0080-\uFFFF ]+ > _
-ATTRIBUTES <- ATTRIBUTE (',' _ ATTRIBUTE)*
-ATTRIBUTE  <- < [-_a-zA-Z0-9\u0080-\uFFFF]+ > _
-
-ENTRIES    <- (ENTRY (__ ENTRY)*)?
-
-ENTRY      <- ONE_WAY PHRASE ('|' _ PHRASE)* !'='
-            / PHRASE ('|' _ PHRASE)+ !'='
-            / %recover(entry)
-
-ONE_WAY    <- PHRASE '=' _
-PHRASE     <- WORD (' ' WORD)* _
-WORD       <- < (![ \t\r\n=|[\]#] .)+ >
-
-~__        <- _ (comment? nl _)+
-~_         <- [ \t]*
-
-comment    <- ('#' (!nl .)*)
-nl         <- '\r'? '\n'
-
-header <- (!__ .)* { message "invalid section header, missing ']'." }
-
-# The `(!(__ / HEADER) )+` should be `(!(__ / HEADER) .)+`
-entry  <- (!(__ / HEADER) )+ { message "invalid token '%t', expecting another phrase." }
-  )");
+TEST_CASE("Infinite loop 9", "[infinite loop]") {
+    parser pg(R"(
+        ROOT <- %recover(('A' /)*)
+    )");
 
     REQUIRE(!pg);
 }

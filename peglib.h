@@ -2945,6 +2945,12 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
     ope.rule_->accept(*this);
     refs_.pop_back();
   }
+
+  if (ope.is_macro_) {
+    for (auto arg : ope.args_) {
+      arg->accept(*this);
+    }
+  }
 }
 
 inline void ReferenceChecker::visit(Reference &ope) {
