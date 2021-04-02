@@ -10,7 +10,7 @@ Since this library only supports C++17 compilers, please make sure that compiler
 
 You can also try the online version, PEG Playground at https://yhirose.github.io/cpp-peglib.
 
-The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bran Ford. *cpp-peglib* also supports the following additional syntax for now:
+The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bryan Ford. *cpp-peglib* also supports the following additional syntax for now:
 
   * `'...'i` (Case-insensitive literal operator)
   * `[^...]` (Negated character class operator)
@@ -39,7 +39,7 @@ This library supports the linear-time parsing known as the [*Packrat*](http://pd
 How to use
 ----------
 
-This is a simple calculator sample. It shows how to define grammar, associate samantic actions to the grammar, and handle semantic values.
+This is a simple calculator sample. It shows how to define grammar, associate semantic actions to the grammar, and handle semantic values.
 
 ```cpp
 // (1) Include the header file
@@ -132,7 +132,7 @@ There are four semantic actions available:
  - Semantic values
  - Matched string information
  - Token information if the rule is literal or uses a token boundary operator
- - Choice number when the rule is 'prioritized choise'
+ - Choice number when the rule is 'prioritized choice'
 
 `any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
 
@@ -169,7 +169,7 @@ struct SemanticValues : protected std::vector<any>
 }
 ```
 
-The following example uses `<` ... ` >` operator, which is *token boundary* operator.
+The following example uses `<` ... `>` operator, which is *token boundary* operator.
 
 ```cpp
 peg::parser parser(R"(
@@ -234,7 +234,7 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
-*enter* and *leave* actions are also avalable.
+*enter* and *leave* actions are also available.
 
 ```cpp
 parser["RULE"].enter = [](const char* s, size_t n, any& dt) {
@@ -420,7 +420,7 @@ AST generation
 
 *cpp-peglib* is able to generate an AST (Abstract Syntax Tree) when parsing. `enable_ast` method on `peg::parser` class enables the feature.
 
-NOTE: An AST node holds a corresponding token as `std::string_vew` for performance and less memory usage. It is users' responsibility to kepp the original source text along with the generated AST tree.
+NOTE: An AST node holds a corresponding token as `std::string_vew` for performance and less memory usage. It is users' responsibility to keep the original source text along with the generated AST tree.
 
 ```
 peg::parser parser(R"(
@@ -450,7 +450,7 @@ See actual usages in the [AST calculator example](https://github.com/yhirose/cpp
 Make a parser with parser combinators
 -------------------------------------
 
-Instead of makeing a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser combinatorss*. Here is an example:
+Instead of making a parser by parsing PEG syntax text, we can also construct a parser by hand with *parser combinators*. Here is an example:
 
 ```cpp
 using namespace peg;
@@ -524,9 +524,9 @@ cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports
 Error report and recovery
 -------------------------
 
-cpp-peglib supports the furthest failure error posision report as descrived in the Bryan Ford original document.
+cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
 
-For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be assosiated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
+For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
 The custom message supports `%t` which is a place holder for the unexpected token, and `%c` for the unexpected Unicode char.
 
@@ -555,12 +555,12 @@ NAME        ← < [a-zA-Z_][a-zA-Z_0-9]* >
 %word       ← NAME
 
 # Recovery operator labels
-semia       ← '' { message "missing simicolon in assignment." }
+semia       ← '' { message "missing semicolon in assignment." }
 stmtb       ← (!(Stmt / 'else' / '}') .)* { message "invalid statement" }
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
 ```
 
-For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is assosiated with a custom message "missing simicolon in assignment.".
+For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is associated with a custom message "missing semicolon in assignment.".
 
 Here is the result:
 
@@ -580,11 +580,11 @@ public class Example {
 
 > peglint java.peg sample.java
 sample.java:5:12: syntax error, unexpected '<', expecting <NAME>, <NUMBER>, <WhileStmt>.
-sample.java:8:5: missing simicolon in assignment.
+sample.java:8:5: missing semicolon in assignment.
 sample.java:8:6: invalid statement
 ```
 
-As you can see, it can now show more than one error, and provide more meaningfull error messages than the default messages.
+As you can see, it can now show more than one error, and provide more meaningful error messages than the default messages.
 
 peglint - PEG syntax lint utility
 ---------------------------------
@@ -604,8 +604,8 @@ usage: grammar_file_path [source_file_path]
     --source: source text
     --packrat: enable packrat memoise
     --ast: show AST tree
-    --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
-    --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
+    --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
+    --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show trace messages
 ```
 
