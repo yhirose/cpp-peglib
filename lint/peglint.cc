@@ -78,8 +78,8 @@ int main(int argc, const char **argv) {
     --source: source text
     --packrat: enable packrat memoise
     --ast: show AST tree
-    --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
-    --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
+    --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
+    --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show trace messages
 )";
 
