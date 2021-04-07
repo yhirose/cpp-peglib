@@ -413,7 +413,7 @@ Rule <- Atom (Operator Atom)* {
 }
 ```
 
-*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator tokens follow. The first entry has the highest order level.
+*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator *literal* tokens follow. The first entry has the highest order level.
 
 AST generation
 --------------
