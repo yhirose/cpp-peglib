@@ -13,9 +13,6 @@
 #include <cctype>
 #if __has_include(<charconv>)
 #include <charconv>
-#define CPPPEGLIB_HAS_CHARCONV true
-#else
-#define CPPPEGLIB_HAS_CHARCONV false
 #endif
 #include <cstring>
 #include <functional>
@@ -343,7 +340,12 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
 
 template <typename T> T token_to_number_(std::string_view sv) {
   T n = 0;
-  if constexpr (CPPPEGLIB_HAS_CHARCONV && !std::is_floating_point<T>::value) {
+#if __has_include(<charconv>)
+  if constexpr (!std::is_floating_point<T>::value) {
+    std::from_chars(sv.data(), sv.data() + sv.size(), n);
+#else
+  if constexpr (false) {
+#endif
     std::from_chars(sv.data(), sv.data() + sv.size(), n);
   } else {
     auto s = std::string(sv);
