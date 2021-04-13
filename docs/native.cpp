@@ -74,7 +74,8 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
 
   std::string json;
   json += "{";
-  json += "\"grammar\":" + grammarResult;
+  json += std::string("\"grammar_valid\":") + (ret ? "true" : "false");
+  json += ",\"grammar\":" + grammarResult;
   if (!codeResult.empty()) {
     json += ",\"code\":" + codeResult;
     json += ",\"ast\":\"" + astResult + "\"";

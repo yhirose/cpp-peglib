@@ -79,25 +79,25 @@ function parse() {
   const mode = optimazationMode == 'all';
   const data = JSON.parse(Module.lint(grammarText, codeText, mode));
 
-  const isValid = data.grammar.length === 0;
-  if (isValid) {
+  if (data.grammar_valid) {
     $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
 
     codeAst.insert(data.ast);
     codeAstOptimized.insert(data.astOptimized);
     $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
 
-    const isValid = data.code.length === 0;
-
-    if (!isValid) {
+    if (data.code.length > 0) {
       const html = generateErrorListHTML(data.code);
       $codeInfo.html(html);
       $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();
     }
   } else {
+    $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();
+  }
+
+  if (data.grammar.length > 0) {
     const html = generateErrorListHTML(data.grammar);
     $grammarInfo.html(html);
-    $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();
   }
 }
 
