@@ -84,12 +84,16 @@ function parse() {
 
     codeAst.insert(data.ast);
     codeAstOptimized.insert(data.astOptimized);
-    $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
+
+    if (data.source_valid) {
+      $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
+    } else {
+      $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();
+    }
 
     if (data.code.length > 0) {
       const html = generateErrorListHTML(data.code);
       $codeInfo.html(html);
-      $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();
     }
   } else {
     $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();

@@ -43,7 +43,7 @@ bool parse_grammar(const std::string &text, peg::parser &peg,
   return ret;
 }
 
-void parse_code(const std::string &text, peg::parser &peg, std::string &json,
+bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
                 std::shared_ptr<peg::Ast> &ast) {
   peg.enable_ast();
   bool init;
@@ -51,6 +51,7 @@ void parse_code(const std::string &text, peg::parser &peg, std::string &json,
   json += "[";
   auto ret = peg.parse_n(text.data(), text.size(), ast);
   json += "]";
+  return ret;
 }
 
 std::string lint(const std::string &grammarText, const std::string &codeText, bool opt_mode) {
@@ -60,11 +61,12 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
   std::string astResultOptimized;
 
   peg::parser peg;
-  auto ret = parse_grammar(grammarText, peg, grammarResult);
+  auto is_grammar_valid = parse_grammar(grammarText, peg, grammarResult);
+  auto is_source_valid = false;
 
-  if (ret && peg) {
+  if (is_grammar_valid && peg) {
     std::shared_ptr<peg::Ast> ast;
-    parse_code(codeText, peg, codeResult, ast);
+    is_source_valid = parse_code(codeText, peg, codeResult, ast);
     if (ast) {
       astResult = escape_json(peg::ast_to_s(ast));
       astResultOptimized = escape_json(
@@ -74,8 +76,9 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
 
   std::string json;
   json += "{";
-  json += std::string("\"grammar_valid\":") + (ret ? "true" : "false");
+  json += std::string("\"grammar_valid\":") + (is_grammar_valid ? "true" : "false");
   json += ",\"grammar\":" + grammarResult;
+  json += std::string(",\"source_valid\":") + (is_source_valid ? "true" : "false");
   if (!codeResult.empty()) {
     json += ",\"code\":" + codeResult;
     json += ",\"ast\":\"" + astResult + "\"";
