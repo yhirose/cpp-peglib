@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.1.0)
-project(cpp-peglib VERSION "1.3.7")
+project(cpp-peglib)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -44,12 +44,7 @@ configure_package_config_file(${PROJECT_SOURCE_DIR}/cmake/packaging/Config.cmake
     INSTALL_DESTINATION ${INSTALL_DESTINATION_PATH}
     PATH_VARS INCLUDE_INSTALL_DIR
 )
-write_basic_package_version_file(${PROJECT_BINARY_DIR}/cmake/config/${PROJECT_NAME}-config-version.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
 install(FILES ${PROJECT_BINARY_DIR}/cmake/config/${PROJECT_NAME}-config.cmake
-    ${PROJECT_BINARY_DIR}/cmake/config/${PROJECT_NAME}-config-version.cmake
     DESTINATION ${INSTALL_DESTINATION_PATH}
     COMPONENT cmake
 )
