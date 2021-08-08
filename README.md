@@ -191,7 +191,7 @@ We can ignore unnecessary semantic values from the list by using `~` operator.
 ```cpp
 peg::parser parser(R"(
   ROOT  <-  _ ITEM (',' _ ITEM _)*
-  ITEM  <-  ([a-z])+
+  ITEM  <-  ([a-z0-9])+
   ~_    <-  [ \t]*
 )");
 
