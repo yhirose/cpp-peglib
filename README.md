@@ -207,7 +207,7 @@ The following grammar is same as the above.
 ```cpp
 peg::parser parser(R"(
   ROOT  <-  ~_ ITEM (',' ~_ ITEM ~_)*
-  ITEM  <-  ([a-z])+
+  ITEM  <-  ([a-z0-9])+
   _     <-  [ \t]*
 )");
 ```
