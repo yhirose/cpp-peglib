@@ -19,8 +19,8 @@ endif()
 
 add_subdirectory(example)
 add_subdirectory(lint)
-
 add_subdirectory(test)
+
 enable_testing()
 
 install(FILES peglib.h DESTINATION include)

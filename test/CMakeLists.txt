@@ -1,12 +1,21 @@
 cmake_minimum_required(VERSION 3.1)
 project(test)
 
-include_directories(..)
+Include(FetchContent)
+
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v3.0.0-preview3
+)
+FetchContent_MakeAvailable(Catch2)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(test-main test-main.cc test1.cc test2.cc test3.cc)
-target_link_libraries(test-main ${add_link_deps})
+add_executable(test-main test1.cc test2.cc test3.cc)
+
+target_include_directories(test-main PRIVATE ..)
+target_link_libraries(test-main PRIVATE Catch2::Catch2WithMain)
 
 add_test(
   NAME TestMain
