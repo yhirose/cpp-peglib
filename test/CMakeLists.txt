@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.1)
 project(test)
 
 Include(FetchContent)
@@ -16,8 +16,6 @@ add_executable(test-main test1.cc test2.cc test3.cc)
 
 target_include_directories(test-main PRIVATE ..)
 target_link_libraries(test-main PRIVATE Catch2::Catch2WithMain)
-
-enable_testing()
 
 add_test(
   NAME TestMain
