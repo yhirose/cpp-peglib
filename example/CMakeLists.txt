@@ -1,9 +1,7 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.14)
 project(example)
 
 include_directories(..)
-
-set(CMAKE_CXX_STANDARD 17)
 
 add_executable(calc calc.cc)
 target_link_libraries(calc ${add_link_deps})

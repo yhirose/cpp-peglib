@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.1.0)
-project("cpp-peglib")
+cmake_minimum_required(VERSION 3.14)
+project(cpp-peglib)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)

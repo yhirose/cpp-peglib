@@ -1,23 +1,21 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.14)
 project(test)
 
-Include(FetchContent)
-
+include(FetchContent)
 FetchContent_Declare(
-  Catch2
-  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v3.0.0-preview3
+  googletest
+  URL https://github.com/google/googletest/archive/609281088cfefc76f9d0ce82e1ff6c30cc3591e5.zip
 )
-FetchContent_MakeAvailable(Catch2)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
-set(CMAKE_CXX_STANDARD 17)
+enable_testing()
 
 add_executable(test-main test1.cc test2.cc test3.cc)
 
 target_include_directories(test-main PRIVATE ..)
-target_link_libraries(test-main PRIVATE Catch2::Catch2WithMain)
 
-add_test(
-  NAME TestMain
-  COMMAND test-main
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+include(GoogleTest)
+gtest_discover_tests(test-main)
+target_link_libraries(test-main PRIVATE gtest_main)

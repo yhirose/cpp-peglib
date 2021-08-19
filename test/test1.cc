@@ -1,75 +1,75 @@
-﻿#include <catch2/catch_test_macros.hpp>
+﻿#include <gtest/gtest.h>
 #include <peglib.h>
 
 using namespace peg;
 
 #if !defined(PEGLIB_NO_UNICODE_CHARS)
-TEST_CASE("Simple syntax test (with unicode)", "[general]") {
+TEST(GeneralTest, Simple_syntax_test_with_unicode) {
   parser parser(u8" ROOT ← _ "
                 " _ <- ' ' ");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 #endif
 
-TEST_CASE("Simple syntax test", "[general]") {
+TEST(GeneralTest, Simple_syntax_test) {
   parser parser(R"(
         ROOT <- _
         _ <- ' '
     )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Empty syntax test", "[general]") {
+TEST(GeneralTest, Empty_syntax_test) {
   parser parser("");
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Start rule with ignore operator test", "[general]") {
+TEST(GeneralTest, Start_rule_with_ignore_operator_test) {
   parser parser(R"(
         ~ROOT <- _
         _ <- ' '
     )");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Invalid UTF-8 text test", "[general]") {
+TEST(GeneralTest, Invalid_UTF8_text_test) {
   std::string s = "a <- '";
   s += static_cast<char>(0xe8); // Make invalid utf8 text...
 
   parser parser(s.data());
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Backslash escape sequence test", "[general]") {
+TEST(GeneralTest, Backslash_escape_sequence_test) {
   parser parser(R"(
         ROOT <- _
         _ <- '\\'
     )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Invalid escape sequence test", "[general]") {
+TEST(GeneralTest, Invalid_escape_sequence_test) {
   parser parser(R"(
         ROOT <- _
         _ <- '\'
     )");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Action taking non const Semantic Values parameter", "[general]") {
+TEST(GeneralTest, Action_taking_non_const_Semantic_Values_parameter) {
   parser parser(R"(
         ROOT <- TEXT
         TEXT <- [a-zA-Z]+
@@ -85,11 +85,11 @@ TEST_CASE("Action taking non const Semantic Values parameter", "[general]") {
 
   std::string val;
   auto ret = parser.parse("hello", val);
-  REQUIRE(ret == true);
-  REQUIRE(val == "Hello");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ("Hello", val);
 }
 
-TEST_CASE("String capture test", "[general]") {
+TEST(GeneralTest, String_capture_test) {
   parser parser(R"(
         ROOT      <-  _ ('[' TAG_NAME ']' _)*
         TAG_NAME  <-  (!']' .)+
@@ -104,16 +104,16 @@ TEST_CASE("String capture test", "[general]") {
 
   auto ret = parser.parse(" [tag1] [tag:2] [tag-3] ");
 
-  REQUIRE(ret == true);
-  REQUIRE(tags.size() == 3);
-  REQUIRE(tags[0] == "tag1");
-  REQUIRE(tags[1] == "tag:2");
-  REQUIRE(tags[2] == "tag-3");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(3, tags.size());
+  EXPECT_EQ("tag1", tags[0]);
+  EXPECT_EQ("tag:2", tags[1]);
+  EXPECT_EQ("tag-3", tags[2]);
 }
 
 using namespace peg;
 
-TEST_CASE("String capture test2", "[general]") {
+TEST(GeneralTest, String_capture_test2) {
   std::vector<std::string_view> tags;
 
   Definition ROOT, TAG, TAG_NAME, WS;
@@ -125,14 +125,14 @@ TEST_CASE("String capture test2", "[general]") {
 
   auto r = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
-  REQUIRE(r.ret == true);
-  REQUIRE(tags.size() == 3);
-  REQUIRE(tags[0] == "tag1");
-  REQUIRE(tags[1] == "tag:2");
-  REQUIRE(tags[2] == "tag-3");
+  EXPECT_TRUE(r.ret);
+  EXPECT_EQ(3, tags.size());
+  EXPECT_EQ("tag1", tags[0]);
+  EXPECT_EQ("tag:2", tags[1]);
+  EXPECT_EQ("tag-3", tags[2]);
 }
 
-TEST_CASE("String capture test3", "[general]") {
+TEST(GeneralTest, String_capture_test3) {
   parser pg(R"(
         ROOT  <- _ TOKEN*
         TOKEN <- '[' < (!']' .)+ > ']' _
@@ -145,14 +145,14 @@ TEST_CASE("String capture test3", "[general]") {
 
   auto ret = pg.parse(" [tag1] [tag:2] [tag-3] ");
 
-  REQUIRE(ret == true);
-  REQUIRE(tags.size() == 3);
-  REQUIRE(tags[0] == "tag1");
-  REQUIRE(tags[1] == "tag:2");
-  REQUIRE(tags[2] == "tag-3");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(3, tags.size());
+  EXPECT_EQ("tag1", tags[0]);
+  EXPECT_EQ("tag:2", tags[1]);
+  EXPECT_EQ("tag-3", tags[2]);
 }
 
-TEST_CASE("Cyclic grammer test", "[general]") {
+TEST(GeneralTest, Cyclic_grammer_test) {
   Definition PARENT;
   Definition CHILD;
 
@@ -160,7 +160,7 @@ TEST_CASE("Cyclic grammer test", "[general]") {
   CHILD <= seq(PARENT);
 }
 
-TEST_CASE("Visit test", "[general]") {
+TEST(GeneralTest, Visit_test) {
   Definition ROOT, TAG, TAG_NAME, WS;
 
   ROOT <= seq(WS, zom(TAG));
@@ -171,10 +171,10 @@ TEST_CASE("Visit test", "[general]") {
   AssignIDToDefinition defIds;
   ROOT.accept(defIds);
 
-  REQUIRE(defIds.ids.size() == 4);
+  EXPECT_EQ(4, defIds.ids.size());
 }
 
-TEST_CASE("Token check test", "[general]") {
+TEST(GeneralTest, Token_check_test) {
   parser parser(R"(
         EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
@@ -185,14 +185,14 @@ TEST_CASE("Token check test", "[general]") {
         _                <-  [ \t\r\n]*
     )");
 
-  REQUIRE(parser["EXPRESSION"].is_token() == false);
-  REQUIRE(parser["FACTOR"].is_token() == false);
-  REQUIRE(parser["FACTOR_OPERATOR"].is_token() == true);
-  REQUIRE(parser["NUMBER"].is_token() == true);
-  REQUIRE(parser["_"].is_token() == true);
+  EXPECT_FALSE(parser["EXPRESSION"].is_token());
+  EXPECT_FALSE(parser["FACTOR"].is_token());
+  EXPECT_TRUE(parser["FACTOR_OPERATOR"].is_token());
+  EXPECT_TRUE(parser["NUMBER"].is_token());
+  EXPECT_TRUE(parser["_"].is_token());
 }
 
-TEST_CASE("Lambda action test", "[general]") {
+TEST(GeneralTest, Lambda_action_test) {
   parser parser(R"(
        START <- (CHAR)*
        CHAR  <- .
@@ -202,11 +202,11 @@ TEST_CASE("Lambda action test", "[general]") {
   parser["CHAR"] = [&](const SemanticValues &vs) { ss += *vs.sv().data(); };
 
   bool ret = parser.parse("hello");
-  REQUIRE(ret == true);
-  REQUIRE(ss == "hello");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ("hello", ss);
 }
 
-TEST_CASE("enter/leave handlers test", "[general]") {
+TEST(GeneralTest, enter_leave_handlers_test) {
   parser parser(R"(
         START  <- LTOKEN '=' RTOKEN
         LTOKEN <- TOKEN
@@ -238,20 +238,20 @@ TEST_CASE("enter/leave handlers test", "[general]") {
 
   bool require_upper_case = false;
   std::any dt = &require_upper_case;
-  REQUIRE(parser.parse("hello=world", dt) == false);
-  REQUIRE(parser.parse("HELLO=world", dt) == false);
-  REQUIRE(parser.parse("hello=WORLD", dt) == true);
-  REQUIRE(parser.parse("HELLO=WORLD", dt) == true);
+  EXPECT_FALSE(parser.parse("hello=world", dt));
+  EXPECT_FALSE(parser.parse("HELLO=world", dt));
+  EXPECT_TRUE(parser.parse("hello=WORLD", dt));
+  EXPECT_TRUE(parser.parse("HELLO=WORLD", dt));
 
   parser.log = [&](size_t ln, size_t col, const std::string &msg) {
-    REQUIRE(ln == 1);
-    REQUIRE(col == 7);
-    REQUIRE(msg == message);
+    EXPECT_EQ(1, ln);
+    EXPECT_EQ(7, col);
+    EXPECT_EQ(message, msg);
   };
   parser.parse("hello=world", dt);
 }
 
-TEST_CASE("WHITESPACE test", "[general]") {
+TEST(GeneralTest, WHITESPACE_test) {
   parser parser(R"(
         # Rules
         ROOT         <-  ITEM (',' ITEM)*
@@ -266,10 +266,10 @@ TEST_CASE("WHITESPACE test", "[general]") {
 
   auto ret = parser.parse(R"(  one, 	 "two, three",   four  )");
 
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("WHITESPACE test2", "[general]") {
+TEST(GeneralTest, WHITESPACE_test2) {
   parser parser(R"(
         # Rules
         ROOT         <-  ITEM (',' ITEM)*
@@ -287,14 +287,14 @@ TEST_CASE("WHITESPACE test2", "[general]") {
 
   auto ret = parser.parse(R"([one], 	[two] ,[three] )");
 
-  REQUIRE(ret == true);
-  REQUIRE(items.size() == 3);
-  REQUIRE(items[0] == "one");
-  REQUIRE(items[1] == "two");
-  REQUIRE(items[2] == "three");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(3, items.size());
+  EXPECT_EQ("one", items[0]);
+  EXPECT_EQ("two", items[1]);
+  EXPECT_EQ("three", items[2]);
 }
 
-TEST_CASE("WHITESPACE test3", "[general]") {
+TEST(GeneralTest, WHITESPACE_test3) {
   parser parser(R"(
         StrQuot      <- < '"' < (StrEscape / StrChars)* > '"' >
         StrEscape    <- '\\' any
@@ -304,14 +304,14 @@ TEST_CASE("WHITESPACE test3", "[general]") {
     )");
 
   parser["StrQuot"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.token() == R"(  aaa \" bbb  )");
+    EXPECT_EQ(R"(  aaa \" bbb  )", vs.token());
   };
 
   auto ret = parser.parse(R"( "  aaa \" bbb  " )");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("WHITESPACE test4", "[general]") {
+TEST(GeneralTest, WHITESPACE_test4) {
   parser parser(R"(
         ROOT         <-  HELLO OPE WORLD
         HELLO        <-  'hello'
@@ -321,60 +321,66 @@ TEST_CASE("WHITESPACE test4", "[general]") {
     )");
 
   parser["HELLO"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.token() == "hello");
+    EXPECT_EQ("hello", vs.token());
   };
 
-  parser["OPE"] = [](const SemanticValues &vs) { REQUIRE(vs.token() == "+"); };
+  parser["OPE"] = [](const SemanticValues &vs) {
+    EXPECT_EQ("+", vs.token());
+  };
 
   parser["WORLD"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.token() == "world");
+    EXPECT_EQ("world", vs.token());
   };
 
   auto ret = parser.parse("  hello + world  ");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Word expression test", "[general]") {
+TEST(GeneralTest, Word_expression_test) {
   parser parser(R"(
         ROOT         <-  'hello' ','? 'world'
         %whitespace  <-  [ \t\r\n]*
         %word        <-  [a-z]+
     )");
 
-  REQUIRE(parser.parse("helloworld") == false);
-  REQUIRE(parser.parse("hello world") == true);
-  REQUIRE(parser.parse("hello,world") == true);
-  REQUIRE(parser.parse("hello, world") == true);
-  REQUIRE(parser.parse("hello , world") == true);
+  EXPECT_FALSE(parser.parse("helloworld"));
+  EXPECT_TRUE(parser.parse("hello world"));
+  EXPECT_TRUE(parser.parse("hello,world"));
+  EXPECT_TRUE(parser.parse("hello, world"));
+  EXPECT_TRUE(parser.parse("hello , world"));
 }
 
-TEST_CASE("Skip token test", "[general]") {
+TEST(GeneralTest, Skip_token_test) {
   parser parser("  ROOT  <-  _ ITEM (',' _ ITEM _)* "
                 "  ITEM  <-  ([a-z0-9])+  "
                 "  ~_    <-  [ \t]*    ");
 
-  parser["ROOT"] = [&](const SemanticValues &vs) { REQUIRE(vs.size() == 2); };
+  parser["ROOT"] = [&](const SemanticValues &vs) {
+    EXPECT_EQ(2, vs.size());
+  };
 
   auto ret = parser.parse(" item1, item2 ");
 
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Skip token test2", "[general]") {
+TEST(GeneralTest, Skip_token_test2) {
   parser parser(R"(
         ROOT        <-  ITEM (',' ITEM)*
         ITEM        <-  < ([a-z0-9])+ >
         %whitespace <-  [ \t]*
     )");
 
-  parser["ROOT"] = [&](const SemanticValues &vs) { REQUIRE(vs.size() == 2); };
+  parser["ROOT"] = [&](const SemanticValues &vs) {
+    EXPECT_EQ(2, vs.size());
+  };
 
   auto ret = parser.parse(" item1, item2 ");
 
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Custom AST test", "[general]") {
+TEST(GeneralTest, Custom_AST_test) {
   struct CustomType {};
   using CustomAst = AstBase<CustomType>;
 
@@ -387,11 +393,11 @@ TEST_CASE("Custom AST test", "[general]") {
   parser.enable_ast<CustomAst>();
   std::shared_ptr<CustomAst> ast;
   bool ret = parser.parse("a b c", ast);
-  REQUIRE(ret == true);
-  REQUIRE(ast->nodes.size() == 4);
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(4, ast->nodes.size());
 }
 
-TEST_CASE("Backtracking test", "[general]") {
+TEST(GeneralTest, Backtracking_test) {
   parser parser(R"(
        START <- PAT1 / PAT2
        PAT1  <- HELLO ' One'
@@ -405,11 +411,11 @@ TEST_CASE("Backtracking test", "[general]") {
   parser.enable_packrat_parsing();
 
   bool ret = parser.parse("Hello Two");
-  REQUIRE(ret == true);
-  REQUIRE(count == 1); // Skip second time
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(1, count); // Skip second time
 }
 
-TEST_CASE("Backtracking with AST", "[general]") {
+TEST(GeneralTest, Backtracking_with_AST) {
   parser parser(R"(
         S <- A? B (A B)* A
         A <- 'a'
@@ -419,19 +425,19 @@ TEST_CASE("Backtracking with AST", "[general]") {
   parser.enable_ast();
   std::shared_ptr<Ast> ast;
   bool ret = parser.parse("ba", ast);
-  REQUIRE(ret == true);
-  REQUIRE(ast->nodes.size() == 2);
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(2, ast->nodes.size());
 }
 
-TEST_CASE("Octal/Hex/Unicode value test", "[general]") {
+TEST(GeneralTest, Octal_Hex_Unicode_value_test) {
   parser parser(R"( ROOT <- '\132\x7a\u30f3' )");
 
   auto ret = parser.parse("Zzン");
 
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Ignore case test", "[general]") {
+TEST(GeneralTest, Ignore_case_test) {
   parser parser(R"(
         ROOT         <-  HELLO WORLD
         HELLO        <-  'hello'i
@@ -440,18 +446,18 @@ TEST_CASE("Ignore case test", "[general]") {
     )");
 
   parser["HELLO"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.token() == "Hello");
+    EXPECT_EQ("Hello", vs.token());
   };
 
   parser["WORLD"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.token() == "World");
+    EXPECT_EQ("World", vs.token());
   };
 
   auto ret = parser.parse("  Hello World  ");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("mutable lambda test", "[general]") {
+TEST(GeneralTest, mutable_lambda_test) {
   std::vector<std::string_view> vec;
 
   parser pg("ROOT <- 'mutable lambda test'");
@@ -462,7 +468,7 @@ TEST_CASE("mutable lambda test", "[general]") {
   };
 }
 
-TEST_CASE("Simple calculator test", "[general]") {
+TEST(GeneralTest, Simple_calculator_test) {
   parser parser(R"(
         Additive  <- Multitive '+' Additive / Multitive
         Multitive <- Primary '*' Multitive / Primary
@@ -484,15 +490,17 @@ TEST_CASE("Simple calculator test", "[general]") {
     }
   };
 
-  parser["Number"] = [](const SemanticValues &vs) { return vs.token_to_number<int>(); };
+  parser["Number"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<int>();
+  };
 
   int val;
   parser.parse("(1+2)*3", val);
 
-  REQUIRE(val == 9);
+  EXPECT_EQ(9, val);
 }
 
-TEST_CASE("Calculator test", "[general]") {
+TEST(GeneralTest, Calculator_test) {
   // Construct grammer
   Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
@@ -528,11 +536,11 @@ TEST_CASE("Calculator test", "[general]") {
   long val;
   auto r = EXPRESSION.parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
 
-  REQUIRE(r.ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(r.ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Calculator test2", "[general]") {
+TEST(GeneralTest, Calculator_test2) {
   // Parse syntax
   auto syntax = R"(
         # Grammar for Calculator...
@@ -546,7 +554,8 @@ TEST_CASE("Calculator test2", "[general]") {
 
   std::string start;
   bool enablePackratParsing = false;
-  auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start, enablePackratParsing, nullptr);
+  auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start,
+                                        enablePackratParsing, nullptr);
   auto &g = *grammar;
 
   // Setup actions
@@ -567,18 +576,22 @@ TEST_CASE("Calculator test2", "[general]") {
   g["EXPRESSION"] = reduce;
   g["TERM"] = reduce;
   g["TERM_OPERATOR"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
-  g["FACTOR_OPERATOR"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
-  g["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  g["FACTOR_OPERATOR"] = [](const SemanticValues &vs) {
+    return *vs.sv().data();
+  };
+  g["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   // Parse
   long val;
   auto r = g[start].parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
 
-  REQUIRE(r.ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(r.ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Calculator test3", "[general]") {
+TEST(GeneralTest, Calculator_test3) {
   // Parse syntax
   parser parser(R"(
         # Grammar for Calculator...
@@ -613,17 +626,19 @@ TEST_CASE("Calculator test3", "[general]") {
   parser["FACTOR_OPERATOR"] = [](const SemanticValues &vs) {
     return static_cast<char>(*vs.sv().data());
   };
-  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   // Parse
   long val;
   auto ret = parser.parse("1+2*3*(4-5+6)/7-8", val);
 
-  REQUIRE(ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Calculator test with AST", "[general]") {
+TEST(GeneralTest, Calculator_test_with_AST) {
   parser parser(R"(
         EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
@@ -661,11 +676,11 @@ TEST_CASE("Calculator test with AST", "[general]") {
   ast = parser.optimize_ast(ast);
   auto val = eval(*ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Calculator test with combinators and AST", "[general]") {
+TEST(GeneralTest, Calculator_test_with_combinators_and_AST) {
   // Construct grammer
   AST_DEFINITIONS(EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR,
                   NUMBER);
@@ -702,11 +717,11 @@ TEST_CASE("Calculator test with combinators and AST", "[general]") {
   ast = AstOptimizer(true).optimize(ast);
   auto val = eval(*ast);
 
-  REQUIRE(r.ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(r.ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Ignore semantic value test", "[general]") {
+TEST(GeneralTest, Ignore_semantic_value_test) {
   parser parser(R"(
        START <-  ~HELLO WORLD
        HELLO <- 'Hello' _
@@ -719,12 +734,12 @@ TEST_CASE("Ignore semantic value test", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse("Hello World", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->nodes.size() == 1);
-  REQUIRE(ast->nodes[0]->name == "WORLD");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(1, ast->nodes.size());
+  EXPECT_EQ("WORLD", ast->nodes[0]->name);
 }
 
-TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]") {
+TEST(GeneralTest, Ignore_semantic_value_of_or_predicate_test) {
   parser parser(R"(
        START       <- _ !DUMMY HELLO_WORLD '.'
        HELLO_WORLD <- HELLO 'World' _
@@ -738,12 +753,12 @@ TEST_CASE("Ignore semantic value of 'or' predicate test", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse("Hello World.", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->nodes.size() == 1);
-  REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(1, ast->nodes.size());
+  EXPECT_EQ("HELLO_WORLD", ast->nodes[0]->name);
 }
 
-TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]") {
+TEST(GeneralTest, Ignore_semantic_value_of_and_predicate_test) {
   parser parser(R"(
        START       <- _ &HELLO HELLO_WORLD '.'
        HELLO_WORLD <- HELLO 'World' _
@@ -756,12 +771,12 @@ TEST_CASE("Ignore semantic value of 'and' predicate test", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse("Hello World.", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->nodes.size() == 1);
-  REQUIRE(ast->nodes[0]->name == "HELLO_WORLD");
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(1, ast->nodes.size());
+  EXPECT_EQ("HELLO_WORLD", ast->nodes[0]->name);
 }
 
-TEST_CASE("Literal token on AST test1", "[general]") {
+TEST(GeneralTest, Literal_token_on_AST_test1) {
   parser parser(R"(
         STRING_LITERAL  <- '"' (('\\"' / '\\t' / '\\n') / (!["] .))* '"'
     )");
@@ -770,13 +785,13 @@ TEST_CASE("Literal token on AST test1", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse(R"("a\tb")", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->is_token == true);
-  REQUIRE(ast->token == R"("a\tb")");
-  REQUIRE(ast->nodes.empty());
+  EXPECT_TRUE(ret);
+  EXPECT_TRUE(ast->is_token);
+  EXPECT_EQ(R"("a\tb")", ast->token);
+  EXPECT_TRUE(ast->nodes.empty());
 }
 
-TEST_CASE("Literal token on AST test2", "[general]") {
+TEST(GeneralTest, Literal_token_on_AST_test2) {
   parser parser(R"(
         STRING_LITERAL  <-  '"' (ESC / CHAR)* '"'
         ESC             <-  ('\\"' / '\\t' / '\\n')
@@ -787,13 +802,13 @@ TEST_CASE("Literal token on AST test2", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse(R"("a\tb")", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->is_token == false);
-  REQUIRE(ast->token.empty());
-  REQUIRE(ast->nodes.size() == 3);
+  EXPECT_TRUE(ret);
+  EXPECT_FALSE(ast->is_token);
+  EXPECT_TRUE(ast->token.empty());
+  EXPECT_EQ(3, ast->nodes.size());
 }
 
-TEST_CASE("Literal token on AST test3", "[general]") {
+TEST(GeneralTest, Literal_token_on_AST_test3) {
   parser parser(R"(
         STRING_LITERAL  <-  < '"' (ESC / CHAR)* '"' >
         ESC             <-  ('\\"' / '\\t' / '\\n')
@@ -804,30 +819,30 @@ TEST_CASE("Literal token on AST test3", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse(R"("a\tb")", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->is_token == true);
-  REQUIRE(ast->token == R"("a\tb")");
-  REQUIRE(ast->nodes.empty());
+  EXPECT_TRUE(ret);
+  EXPECT_TRUE(ast->is_token);
+  EXPECT_EQ(R"("a\tb")", ast->token);
+  EXPECT_TRUE(ast->nodes.empty());
 }
 
-TEST_CASE("Missing missing definitions test", "[general]") {
+TEST(GeneralTest, Missing_missing_definitions_test) {
   parser parser(R"(
         A <- B C
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Definition duplicates test", "[general]") {
+TEST(GeneralTest, Definition_duplicates_test) {
   parser parser(R"(
         A <- ''
         A <- ''
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Semantic values test", "[general]") {
+TEST(GeneralTest, Semantic_values_test) {
   parser parser(R"(
         term <- ( a b c x )? a b c
         a <- 'a'
@@ -839,9 +854,9 @@ TEST_CASE("Semantic values test", "[general]") {
   for (const auto &rule : parser.get_rule_names()) {
     parser[rule.data()] = [rule](const SemanticValues &vs, std::any &) {
       if (rule == "term") {
-        REQUIRE(std::any_cast<std::string>(vs[0]) == "a at 0");
-        REQUIRE(std::any_cast<std::string>(vs[1]) == "b at 1");
-        REQUIRE(std::any_cast<std::string>(vs[2]) == "c at 2");
+        EXPECT_EQ("a at 0", std::any_cast<std::string>(vs[0]));
+        EXPECT_EQ("b at 1", std::any_cast<std::string>(vs[1]));
+        EXPECT_EQ("c at 2", std::any_cast<std::string>(vs[2]));
         return std::string();
       } else {
         return rule + " at " + std::to_string(vs.sv().data() - vs.ss);
@@ -849,36 +864,36 @@ TEST_CASE("Semantic values test", "[general]") {
     };
   }
 
-  REQUIRE(parser.parse("abc"));
+  EXPECT_TRUE(parser.parse("abc"));
 }
 
-TEST_CASE("Ordered choice count", "[general]") {
+TEST(GeneralTest, Ordered_choice_count) {
   parser parser(R"(
         S <- 'a' / 'b'
     )");
 
   parser["S"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.choice() == 1);
-    REQUIRE(vs.choice_count() == 2);
+    EXPECT_EQ(1, vs.choice());
+    EXPECT_EQ(2, vs.choice_count());
   };
 
   parser.parse("b");
 }
 
-TEST_CASE("Ordered choice count 2", "[general]") {
+TEST(GeneralTest, Ordered_choice_count_2) {
   parser parser(R"(
         S <- ('a' / 'b')*
     )");
 
   parser["S"] = [](const SemanticValues &vs) {
-    REQUIRE(vs.choice() == 0);
-    REQUIRE(vs.choice_count() == 0);
+    EXPECT_EQ(0, vs.choice());
+    EXPECT_EQ(0, vs.choice_count());
   };
 
   parser.parse("b");
 }
 
-TEST_CASE("Semantic value tag", "[general]") {
+TEST(GeneralTest, Semantic_value_tag) {
   parser parser(R"(
         S <- A? B* C?
         A <- 'a'
@@ -889,54 +904,54 @@ TEST_CASE("Semantic value tag", "[general]") {
   {
     using namespace udl;
     parser["S"] = [](const SemanticValues &vs) {
-      REQUIRE(vs.size() == 1);
-      REQUIRE(vs.tags.size() == 1);
-      REQUIRE(vs.tags[0] == "C"_);
+      EXPECT_EQ(1, vs.size());
+      EXPECT_EQ(1, vs.tags.size());
+      EXPECT_EQ("C"_, vs.tags[0]);
     };
     auto ret = parser.parse("c");
-    REQUIRE(ret == true);
+    EXPECT_TRUE(ret);
   }
 
   {
     using namespace udl;
     parser["S"] = [](const SemanticValues &vs) {
-      REQUIRE(vs.size() == 2);
-      REQUIRE(vs.tags.size() == 2);
-      REQUIRE(vs.tags[0] == "B"_);
-      REQUIRE(vs.tags[1] == "B"_);
+      EXPECT_EQ(2, vs.size());
+      EXPECT_EQ(2, vs.tags.size());
+      EXPECT_EQ("B"_, vs.tags[0]);
+      EXPECT_EQ("B"_, vs.tags[1]);
     };
     auto ret = parser.parse("bb");
-    REQUIRE(ret == true);
+    EXPECT_TRUE(ret);
   }
 
   {
     using namespace udl;
     parser["S"] = [](const SemanticValues &vs) {
-      REQUIRE(vs.size() == 2);
-      REQUIRE(vs.tags.size() == 2);
-      REQUIRE(vs.tags[0] == "A"_);
-      REQUIRE(vs.tags[1] == "C"_);
+      EXPECT_EQ(2, vs.size());
+      EXPECT_EQ(2, vs.tags.size());
+      EXPECT_EQ("A"_, vs.tags[0]);
+      EXPECT_EQ("C"_, vs.tags[1]);
     };
     auto ret = parser.parse("ac");
-    REQUIRE(ret == true);
+    EXPECT_TRUE(ret);
   }
 }
 
-TEST_CASE("Negated Class test", "[general]") {
+TEST(GeneralTest, Negated_Class_test) {
   parser parser(R"(
         ROOT <- [^a-z_]+
     )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
-  REQUIRE(parser.parse("ABC123"));
-  REQUIRE_FALSE(parser.parse("ABcZ"));
-  REQUIRE_FALSE(parser.parse("ABCZ_"));
-  REQUIRE_FALSE(parser.parse(""));
+  EXPECT_TRUE(parser.parse("ABC123"));
+  EXPECT_FALSE(parser.parse("ABcZ"));
+  EXPECT_FALSE(parser.parse("ABCZ_"));
+  EXPECT_FALSE(parser.parse(""));
 }
 
-TEST_CASE("`token_to_number<float>` test", "[general]") {
+TEST(GeneralTest, token_to_number_float_test) {
   parser parser(R"(
     S <- '1.1'
   )");
@@ -945,10 +960,10 @@ TEST_CASE("`token_to_number<float>` test", "[general]") {
   std::shared_ptr<Ast> ast;
   auto ret = parser.parse("1.1", ast);
 
-  REQUIRE(ret == true);
-  REQUIRE(ast->is_token == true);
-  REQUIRE(ast->token == "1.1");
-  REQUIRE(ast->token_to_number<float>() == 1.1f);
-  REQUIRE(ast->nodes.empty());
+  EXPECT_TRUE(ret);
+  EXPECT_TRUE(ast->is_token);
+  EXPECT_EQ("1.1", ast->token);
+  EXPECT_EQ(1.1f, ast->token_to_number<float>());
+  EXPECT_TRUE(ast->nodes.empty());
 }
 

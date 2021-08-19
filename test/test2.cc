@@ -1,58 +1,53 @@
-﻿#include <catch2/catch_test_macros.hpp>
+﻿#include <gtest/gtest.h>
 #include <peglib.h>
 #include <sstream>
 
 using namespace peg;
 
-TEST_CASE("Token boundary 1", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_1) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- 'a' 'b' 'c'
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(pg.parse(" a  b  c "));
+  EXPECT_TRUE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 2", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_2) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- < 'a' 'b' 'c' >
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(!pg.parse(" a  b  c "));
+  EXPECT_FALSE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 3", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_3) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- < 'a' B 'c' >
         B           <- 'b'
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(!pg.parse(" a  b  c "));
+  EXPECT_FALSE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 4", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_4) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- < A 'b' 'c' >
         A           <- 'a'
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(!pg.parse(" a  b  c "));
+  EXPECT_FALSE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 5", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_5) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- A < 'b' C >
         A           <- 'a'
@@ -60,12 +55,11 @@ TEST_CASE("Token boundary 5", "[token boundary]")
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(!pg.parse(" a  b  c "));
+  EXPECT_FALSE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 6", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_6) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- < A > B C
         A           <- 'a'
@@ -74,12 +68,11 @@ TEST_CASE("Token boundary 6", "[token boundary]")
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(pg.parse(" a  b  c "));
+  EXPECT_TRUE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Token boundary 7", "[token boundary]")
-{
-    parser pg(R"(
+TEST(TokenBoundaryTest, Token_boundary_7) {
+  parser pg(R"(
         ROOT        <- TOP
         TOP         <- < A B C >
         A           <- 'a'
@@ -88,51 +81,50 @@ TEST_CASE("Token boundary 7", "[token boundary]")
         %whitespace <- [ \t\r\n]*
     )");
 
-    REQUIRE(!pg.parse(" a  b  c "));
+  EXPECT_FALSE(pg.parse(" a  b  c "));
 }
 
-TEST_CASE("Infinite loop 1", "[infinite loop]")
-{
-    parser pg(R"(
+TEST(InfiniteLoopTest, Infinite_loop_1) {
+  parser pg(R"(
         ROOT  <- WH TOKEN* WH
         TOKEN <- [a-z0-9]*
         WH    <- [ \t]*
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 2", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_2) {
   parser pg(R"(
         ROOT  <- WH TOKEN+ WH
         TOKEN <- [a-z0-9]*
         WH    <- [ \t]*
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 3", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_3) {
   parser pg(R"(
         ROOT  <- WH TOKEN* WH
         TOKEN <- !'word1'
         WH    <- [ \t]*
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 4", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_4) {
   parser pg(R"(
         ROOT  <- WH TOKEN* WH
         TOKEN <- &'word1'
         WH    <- [ \t]*
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 5", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_5) {
   parser pg(R"(
         Numbers <- Number*
         Number <- [0-9]+ / Spacing
@@ -140,43 +132,43 @@ TEST_CASE("Infinite loop 5", "[infinite loop]") {
         EOF <- !.
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 6", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_6) {
   parser pg(R"(
         S <- ''*
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 7", "[infinite loop]") {
+TEST(InfiniteLoopTest, Infinite_loop_7) {
   parser pg(R"(
         S <- A*
         A <- ''
     )");
 
-  REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 8", "[infinite loop]") {
-    parser pg(R"(
+TEST(InfiniteLoopTest, Infinite_loop_8) {
+  parser pg(R"(
         ROOT <- ('A' /)*
     )");
 
-    REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Infinite loop 9", "[infinite loop]") {
-    parser pg(R"(
+TEST(InfiniteLoopTest, Infinite_loop_9) {
+  parser pg(R"(
         ROOT <- %recover(('A' /)*)
     )");
 
-    REQUIRE(!pg);
+  EXPECT_FALSE(pg);
 }
 
-TEST_CASE("Not infinite 1", "[infinite loop]") {
+TEST(InfiniteLoopTest, Not_infinite_1) {
   parser pg(R"(
         Numbers <- Number* EOF
         Number <- [0-9]+ / Spacing
@@ -184,10 +176,10 @@ TEST_CASE("Not infinite 1", "[infinite loop]") {
         EOF <- !.
     )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 }
 
-TEST_CASE("Not infinite 2", "[infinite loop]") {
+TEST(InfiniteLoopTest, Not_infinite_2) {
   parser pg(R"(
         ROOT      <-  _ ('[' TAG_NAME ']' _)*
         # In a sequence operator, if there is at least one non-empty element, we can treat it as non-empty
@@ -195,10 +187,10 @@ TEST_CASE("Not infinite 2", "[infinite loop]") {
         _         <-  [ \t]*
     )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 }
 
-TEST_CASE("Not infinite 3", "[infinite loop]") {
+TEST(InfiniteLoopTest, Not_infinite_3) {
   parser pg(R"(
         EXPRESSION       <-  _ TERM (TERM_OPERATOR TERM)*
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
@@ -209,10 +201,10 @@ TEST_CASE("Not infinite 3", "[infinite loop]") {
         _                <-  [ \t\r\n]*
     )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 }
 
-TEST_CASE("Precedence climbing", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing) {
   parser parser(R"(
         START            <-  _ EXPRESSION
         EXPRESSION       <-  ATOM (OPERATOR ATOM)* {
@@ -227,7 +219,7 @@ TEST_CASE("Precedence climbing", "[precedence]") {
 		T(S)             <-  < S > _
 	)");
 
-  REQUIRE(!!parser); // OK
+  EXPECT_TRUE(!!parser);
 
   parser.enable_packrat_parsing();
 
@@ -247,18 +239,20 @@ TEST_CASE("Precedence climbing", "[precedence]") {
     return result;
   };
   parser["OPERATOR"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
-  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   {
     auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == -3);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(-3, val);
   }
 
   {
@@ -266,12 +260,12 @@ TEST_CASE("Precedence climbing", "[precedence]") {
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == 0);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(0, val);
   }
 }
 
-TEST_CASE("Precedence climbing with literal operator", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing_with_literal_operator) {
   parser parser(R"(
         START            <-  _ EXPRESSION
         EXPRESSION       <-  ATOM (OPERATOR ATOM)* {
@@ -286,7 +280,7 @@ TEST_CASE("Precedence climbing with literal operator", "[precedence]") {
 		T(S)             <-  < S > _
 	)");
 
-  REQUIRE(!!parser); // OK
+  EXPECT_TRUE(!!parser);
 
   parser.enable_packrat_parsing();
 
@@ -308,19 +302,24 @@ TEST_CASE("Precedence climbing with literal operator", "[precedence]") {
     }
     return result;
   };
-  parser["OPERATOR"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
-  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  parser["OPERATOR"] = [](const SemanticValues &vs) {
+    return vs.token_to_string();
+  };
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   {
-    auto expr = " 1 #plus#  2 #multiply# 3 #multiply# (4 - 5 #plus# 6) / 7 - 8 ";
+    auto expr =
+        " 1 #plus#  2 #multiply# 3 #multiply# (4 - 5 #plus# 6) / 7 - 8 ";
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == -3);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(-3, val);
   }
 
   {
@@ -328,12 +327,12 @@ TEST_CASE("Precedence climbing with literal operator", "[precedence]") {
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == 0);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(0, val);
   }
 }
 
-TEST_CASE("Precedence climbing with macro", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing_with_macro) {
   // Create a PEG parser
   parser parser(R"(
         EXPRESSION             <-  INFIX_EXPRESSION(ATOM, OPERATOR)
@@ -351,7 +350,7 @@ TEST_CASE("Precedence climbing with macro", "[precedence]") {
   parser.enable_packrat_parsing();
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   // Setup actions
   parser["INFIX_EXPRESSION"] = [](const SemanticValues &vs) -> long {
@@ -369,15 +368,17 @@ TEST_CASE("Precedence climbing with macro", "[precedence]") {
     return result;
   };
   parser["OPERATOR"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
-  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   {
     auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == -3);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(-3, val);
   }
 
   {
@@ -385,12 +386,12 @@ TEST_CASE("Precedence climbing with macro", "[precedence]") {
     long val = 0;
     ret = parser.parse(expr, val);
 
-    REQUIRE(ret == true);
-    REQUIRE(val == 0);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(0, val);
   }
 }
 
-TEST_CASE("Precedence climbing error1", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing_error1) {
   parser parser(R"(
         START            <-  _ EXPRESSION
         EXPRESSION       <-  ATOM (OPERATOR ATOM1)* {
@@ -407,10 +408,10 @@ TEST_CASE("Precedence climbing error1", "[precedence]") {
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Precedence climbing error2", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing_error2) {
   parser parser(R"(
         START            <-  _ EXPRESSION
         EXPRESSION       <-  ATOM OPERATOR ATOM {
@@ -426,10 +427,10 @@ TEST_CASE("Precedence climbing error2", "[precedence]") {
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Precedence climbing error3", "[precedence]") {
+TEST(PrecedenceTest, Precedence_climbing_error3) {
   parser parser(R"(
         EXPRESSION               <-  PRECEDENCE_PARSING(ATOM, OPERATOR)
         PRECEDENCE_PARSING(A, O) <-  A (O A)+ {
@@ -444,10 +445,10 @@ TEST_CASE("Precedence climbing error3", "[precedence]") {
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Packrat parser test with %whitespace%", "[packrat]") {
+TEST(PackratTest, Packrat_parser_test_with_whitespace) {
   peg::parser parser(R"(
         ROOT         <-  'a'
         %whitespace  <-  SPACE*
@@ -457,10 +458,10 @@ TEST_CASE("Packrat parser test with %whitespace%", "[packrat]") {
   parser.enable_packrat_parsing();
 
   auto ret = parser.parse("a");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Packrat parser test with macro", "[packrat]") {
+TEST(PackratText, Packrat_parser_test_with_macro) {
   parser parser(R"(
         EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
         TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
@@ -476,11 +477,10 @@ TEST_CASE("Packrat parser test with macro", "[packrat]") {
   parser.enable_packrat_parsing();
 
   auto ret = parser.parse(" 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Packrat parser test with precedence expression parser",
-          "[packrat]") {
+TEST(PackratText, Packrat_parser_test_with_precedence_expression_parser) {
   peg::parser parser(R"(
     Expression  <- Atom (Operator Atom)* { precedence L + - L * / }
     Atom        <- _? Number _?
@@ -490,15 +490,15 @@ TEST_CASE("Packrat parser test with precedence expression parser",
   )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   parser.enable_packrat_parsing();
 
   ret = parser.parse(" 1 + 2 * 3 ");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 }
 
-TEST_CASE("Backreference test", "[backreference]") {
+TEST(BackreferenceText, Backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE < (!RQUOTE .)* > RQUOTE _
         LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
@@ -515,8 +515,8 @@ TEST_CASE("Backreference test", "[backreference]") {
             R"("hello world")"
         )delm");
 
-    REQUIRE(ret == true);
-    REQUIRE(token == "\"hello world\"");
+    EXPECT_TRUE(ret);
+    EXPECT_EQ("\"hello world\"", token);
   }
 
   {
@@ -525,8 +525,8 @@ TEST_CASE("Backreference test", "[backreference]") {
             R"foo("(hello world)")foo"
         )delm");
 
-    REQUIRE(ret == true);
-    REQUIRE(token == "\"(hello world)\"");
+    EXPECT_TRUE(ret);
+    EXPECT_EQ("\"(hello world)\"", token);
   }
 
   {
@@ -535,8 +535,8 @@ TEST_CASE("Backreference test", "[backreference]") {
             R"foo("(hello world)foo")foo"
         )delm");
 
-    REQUIRE(ret == false);
-    REQUIRE(token == "\"(hello world");
+    EXPECT_FALSE(ret);
+    EXPECT_EQ("\"(hello world", token);
   }
 
   {
@@ -545,12 +545,12 @@ TEST_CASE("Backreference test", "[backreference]") {
             R"foo("(hello world)")bar"
         )delm");
 
-    REQUIRE(ret == false);
-    REQUIRE(token.empty());
+    EXPECT_FALSE(ret);
+    EXPECT_TRUE(token.empty());
   }
 }
 
-TEST_CASE("Invalid backreference test", "[backreference]") {
+TEST(BackreferenceText, Invalid_backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _
         LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
@@ -558,13 +558,13 @@ TEST_CASE("Invalid backreference test", "[backreference]") {
         ~_     <- [ \t\r\n]*
     )");
 
-  REQUIRE_THROWS_AS(parser.parse(R"delm(
+  EXPECT_THROW(parser.parse(R"delm(
             R"foo("(hello world)")foo"
         )delm"),
-                    std::runtime_error);
+               std::runtime_error);
 }
 
-TEST_CASE("Nested capture test", "[backreference]") {
+TEST(BackreferenceText, Nested_capture_test) {
   parser parser(R"(
         ROOT      <- CONTENT
         CONTENT   <- (ELEMENT / TEXT)*
@@ -576,13 +576,13 @@ TEST_CASE("Nested capture test", "[backreference]") {
         TEXT_DATA <- ![<] .
     )");
 
-  REQUIRE(parser.parse("This is <b>a <u>test</u> text</b>."));
-  REQUIRE(!parser.parse("This is <b>a <u>test</b> text</u>."));
-  REQUIRE(!parser.parse("This is <b>a <u>test text</b>."));
-  REQUIRE(!parser.parse("This is a <u>test</u> text</b>."));
+  EXPECT_TRUE(parser.parse("This is <b>a <u>test</u> text</b>."));
+  EXPECT_FALSE(parser.parse("This is <b>a <u>test</b> text</u>."));
+  EXPECT_FALSE(parser.parse("This is <b>a <u>test text</b>."));
+  EXPECT_FALSE(parser.parse("This is a <u>test</u> text</b>."));
 }
 
-TEST_CASE("Backreference with Prioritized Choice test", "[backreference]") {
+TEST(BackreferenceText, Backreference_with_Prioritized_Choice_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH / CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -595,10 +595,10 @@ TEST_CASE("Backreference with Prioritized Choice test", "[backreference]") {
         CORRECT        <- 'correct'
     )");
 
-  REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
+  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
 }
 
-TEST_CASE("Backreference with Zero or More test", "[backreference]") {
+TEST(BackreferenceText, Backreference_with_Zero_or_More_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH* CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -611,18 +611,18 @@ TEST_CASE("Backreference with Zero or More test", "[backreference]") {
         CORRECT        <- 'correct'
     )");
 
-  REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
-  REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
-  REQUIRE(
-      !parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
-  REQUIRE(
+  EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
+  EXPECT_FALSE(
+      parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+  EXPECT_TRUE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
-  REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
-  REQUIRE_THROWS_AS(parser.parse("branchthatiswron_branchthatiscorrect"),
-                    std::runtime_error);
+  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
+  EXPECT_THROW(parser.parse("branchthatiswron_branchthatiscorrect"),
+               std::runtime_error);
 }
 
-TEST_CASE("Backreference with One or More test", "[backreference]") {
+TEST(BackreferenceText, Backreference_with_One_or_More_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH+ CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -635,17 +635,17 @@ TEST_CASE("Backreference with One or More test", "[backreference]") {
         CORRECT        <- 'correct'
     )");
 
-  REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
-  REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
-  REQUIRE(
-      !parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
-  REQUIRE(
+  EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
+  EXPECT_FALSE(
+      parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+  EXPECT_TRUE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
-  REQUIRE(!parser.parse("branchthatiscorrect"));
-  REQUIRE(!parser.parse("branchthatiswron_branchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswron_branchthatiscorrect"));
 }
 
-TEST_CASE("Backreference with Option test", "[backreference]") {
+TEST(BackreferenceText, Backreference_with_Option_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH? CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -658,115 +658,115 @@ TEST_CASE("Backreference with Option test", "[backreference]") {
         CORRECT        <- 'correct'
     )");
 
-  REQUIRE(parser.parse("branchthatiswrongbranchthatiscorrect"));
-  REQUIRE(!parser.parse("branchthatiswrongbranchthatIscorrect"));
-  REQUIRE(
-      !parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
-  REQUIRE(
-      !parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
-  REQUIRE_THROWS_AS(parser.parse("branchthatiscorrect"), std::runtime_error);
-  REQUIRE_THROWS_AS(parser.parse("branchthatiswron_branchthatiscorrect"),
-                    std::runtime_error);
+  EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
+  EXPECT_FALSE(
+      parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
+  EXPECT_FALSE(
+      parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
+  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
+  EXPECT_THROW(parser.parse("branchthatiswron_branchthatiscorrect"),
+               std::runtime_error);
 }
 
-TEST_CASE("Repetition {0}", "[repetition]") {
+TEST(RepetitionText, Repetition_0) {
   parser parser(R"(
         START <- '(' DIGIT{3} ') ' DIGIT{3} '-' DIGIT{4}
         DIGIT <- [0-9]
     )");
-  REQUIRE(parser.parse("(123) 456-7890"));
-  REQUIRE(!parser.parse("(12a) 456-7890"));
-  REQUIRE(!parser.parse("(123) 45-7890"));
-  REQUIRE(!parser.parse("(123) 45-7a90"));
+  EXPECT_TRUE(parser.parse("(123) 456-7890"));
+  EXPECT_FALSE(parser.parse("(12a) 456-7890"));
+  EXPECT_FALSE(parser.parse("(123) 45-7890"));
+  EXPECT_FALSE(parser.parse("(123) 45-7a90"));
 }
 
-TEST_CASE("Repetition {2,4}", "[repetition]") {
+TEST(RepetitionText, Repetition_2_4) {
   parser parser(R"(
         START <- DIGIT{2,4}
         DIGIT <- [0-9]
     )");
-  REQUIRE(!parser.parse("1"));
-  REQUIRE(parser.parse("12"));
-  REQUIRE(parser.parse("123"));
-  REQUIRE(parser.parse("1234"));
-  REQUIRE(!parser.parse("12345"));
+  EXPECT_FALSE(parser.parse("1"));
+  EXPECT_TRUE(parser.parse("12"));
+  EXPECT_TRUE(parser.parse("123"));
+  EXPECT_TRUE(parser.parse("1234"));
+  EXPECT_FALSE(parser.parse("12345"));
 }
 
-TEST_CASE("Repetition {2,1}", "[repetition]") {
+TEST(RepetitionText, Repetition_2_1) {
   parser parser(R"(
         START <- DIGIT{2,1} # invalid range
         DIGIT <- [0-9]
     )");
-  REQUIRE(!parser.parse("1"));
-  REQUIRE(parser.parse("12"));
-  REQUIRE(!parser.parse("123"));
+  EXPECT_FALSE(parser.parse("1"));
+  EXPECT_TRUE(parser.parse("12"));
+  EXPECT_FALSE(parser.parse("123"));
 }
 
-TEST_CASE("Repetition {2,}", "[repetition]") {
+TEST(RepetitionText, Repetition_2) {
   parser parser(R"(
         START <- DIGIT{2,}
         DIGIT <- [0-9]
     )");
-  REQUIRE(!parser.parse("1"));
-  REQUIRE(parser.parse("12"));
-  REQUIRE(parser.parse("123"));
-  REQUIRE(parser.parse("1234"));
+  EXPECT_FALSE(parser.parse("1"));
+  EXPECT_TRUE(parser.parse("12"));
+  EXPECT_TRUE(parser.parse("123"));
+  EXPECT_TRUE(parser.parse("1234"));
 }
 
-TEST_CASE("Repetition {,2}", "[repetition]") {
+TEST(RepetitionText, Repetition__2) {
   parser parser(R"(
         START <- DIGIT{,2}
         DIGIT <- [0-9]
     )");
-  REQUIRE(parser.parse("1"));
-  REQUIRE(parser.parse("12"));
-  REQUIRE(!parser.parse("123"));
-  REQUIRE(!parser.parse("1234"));
+  EXPECT_TRUE(parser.parse("1"));
+  EXPECT_TRUE(parser.parse("12"));
+  EXPECT_FALSE(parser.parse("123"));
+  EXPECT_FALSE(parser.parse("1234"));
 }
 
-TEST_CASE("Left recursive test", "[left recursive]") {
+TEST(LeftRecursiveTest, Left_recursive_test) {
   parser parser(R"(
         A <- A 'a'
         B <- A 'a'
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Left recursive with option test", "[left recursive]") {
+TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
   parser parser(R"(
         A  <- 'a' / 'b'? B 'c'
         B  <- A
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Left recursive with zom test", "[left recursive]") {
+TEST(LeftRecursiveTest, Left_recursive_with_zom_test) {
   parser parser(R"(
         A <- 'a'* A*
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Left recursive with a ZOM content rule", "[left recursive]") {
+TEST(LeftRecursiveTest, Left_recursive_with_a_ZOM_content_rule) {
   parser parser(R"(
         A <- B
         B <- _ A
         _ <- ' '* # Zero or more
     )");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("Left recursive with empty string test", "[left recursive]") {
+TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
   parser parser(" A <- '' A");
 
-  REQUIRE(!parser);
+  EXPECT_FALSE(parser);
 }
 
-TEST_CASE("User defined rule test", "[user rule]") {
+TEST(UserRuleTest, User_defined_rule_test) {
   auto g = parser(R"(
         ROOT <- _ 'Hello' _ NAME '!' _
     )",
@@ -783,10 +783,10 @@ TEST_CASE("User defined rule test", "[user rule]") {
                     })},
                    {"~_", zom(cls(" \t\r\n"))}});
 
-  REQUIRE(g.parse(" Hello BNF! ") == true);
+  EXPECT_TRUE(g.parse(" Hello BNF! "));
 }
 
-TEST_CASE("Semantic predicate test", "[predicate]") {
+TEST(PredicateText, Semantic_predicate_test) {
   parser parser("NUMBER  <-  [0-9]+");
 
   parser["NUMBER"] = [](const SemanticValues &vs) {
@@ -796,18 +796,18 @@ TEST_CASE("Semantic predicate test", "[predicate]") {
   };
 
   long val;
-  REQUIRE(parser.parse("100", val));
-  REQUIRE(val == 100);
+  EXPECT_TRUE(parser.parse("100", val));
+  EXPECT_EQ(100, val);
 
   parser.log = [](size_t line, size_t col, const std::string &msg) {
-    REQUIRE(line == 1);
-    REQUIRE(col == 1);
-    REQUIRE(msg == "value error!!");
+    EXPECT_EQ(1, line);
+    EXPECT_EQ(1, col);
+    EXPECT_EQ("value error!!", msg);
   };
-  REQUIRE(!parser.parse("200", val));
+  EXPECT_FALSE(parser.parse("200", val));
 }
 
-TEST_CASE("Japanese character", "[unicode]") {
+TEST(UnicodeText, Japanese_character) {
   peg::parser parser(u8R"(
         文 <- 修飾語? 主語 述語 '。'
         主語 <- 名詞 助詞
@@ -820,56 +820,56 @@ TEST_CASE("Japanese character", "[unicode]") {
     )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
-  REQUIRE(parser.parse(u8R"(サーバーを復旧します。)"));
+  EXPECT_TRUE(parser.parse(u8R"(サーバーを復旧します。)"));
 }
 
-TEST_CASE("dot with a code", "[unicode]") {
+TEST(UnicodeText, dot_with_a_code) {
   peg::parser parser(" S <- 'a' . 'b' ");
-  REQUIRE(parser.parse(u8R"(aあb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aあb)"));
 }
 
-TEST_CASE("dot with a char", "[unicode]") {
+TEST(UnicodeText, dot_with_a_char) {
   peg::parser parser(" S <- 'a' . 'b' ");
-  REQUIRE(parser.parse(u8R"(aåb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aåb)"));
 }
 
-TEST_CASE("character class", "[unicode]") {
+TEST(UnicodeText, character_class) {
   peg::parser parser(R"(
         S <- 'a' [い-おAさC-Eた-とは] 'b'
     )");
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
-  REQUIRE(!parser.parse(u8R"(aあb)"));
-  REQUIRE(parser.parse(u8R"(aいb)"));
-  REQUIRE(parser.parse(u8R"(aうb)"));
-  REQUIRE(parser.parse(u8R"(aおb)"));
-  REQUIRE(!parser.parse(u8R"(aかb)"));
-  REQUIRE(parser.parse(u8R"(aAb)"));
-  REQUIRE(!parser.parse(u8R"(aBb)"));
-  REQUIRE(parser.parse(u8R"(aEb)"));
-  REQUIRE(!parser.parse(u8R"(aFb)"));
-  REQUIRE(!parser.parse(u8R"(aそb)"));
-  REQUIRE(parser.parse(u8R"(aたb)"));
-  REQUIRE(parser.parse(u8R"(aちb)"));
-  REQUIRE(parser.parse(u8R"(aとb)"));
-  REQUIRE(!parser.parse(u8R"(aなb)"));
-  REQUIRE(parser.parse(u8R"(aはb)"));
-  REQUIRE(!parser.parse(u8R"(a?b)"));
+  EXPECT_FALSE(parser.parse(u8R"(aあb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aいb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aうb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aおb)"));
+  EXPECT_FALSE(parser.parse(u8R"(aかb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aAb)"));
+  EXPECT_FALSE(parser.parse(u8R"(aBb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aEb)"));
+  EXPECT_FALSE(parser.parse(u8R"(aFb)"));
+  EXPECT_FALSE(parser.parse(u8R"(aそb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aたb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aちb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aとb)"));
+  EXPECT_FALSE(parser.parse(u8R"(aなb)"));
+  EXPECT_TRUE(parser.parse(u8R"(aはb)"));
+  EXPECT_FALSE(parser.parse(u8R"(a?b)"));
 }
 
 #if 0 // TODO: Unicode Grapheme support
-TEST_CASE("dot with a grapheme", "[unicode]")
+TEST(UnicodeText, dot_with_a_grapheme)
 {
     peg::parser parser(" S <- 'a' . 'b' ");
-    REQUIRE(parser.parse(u8R"(aसिb)"));
+    EXPECT_TRUE(parser.parse(u8R"(aसिb)"));
 }
 #endif
 
-TEST_CASE("Macro simple test", "[macro]") {
+TEST(MacroText, Macro_simple_test) {
   parser parser(R"(
 		S     <- HELLO WORLD
 		HELLO <- T('hello')
@@ -877,60 +877,60 @@ TEST_CASE("Macro simple test", "[macro]") {
 		T(a)  <- a [ \t]*
 	)");
 
-  REQUIRE(parser.parse("hello \tworld "));
+  EXPECT_TRUE(parser.parse("hello \tworld "));
 }
 
-TEST_CASE("Macro two parameters", "[macro]") {
+TEST(MacroText, Macro_two_parameters) {
   parser parser(R"(
 		S           <- HELLO_WORLD
 		HELLO_WORLD <- T('hello', 'world')
 		T(a, b)     <- a [ \t]* b [ \t]*
 	)");
 
-  REQUIRE(parser.parse("hello \tworld "));
+  EXPECT_TRUE(parser.parse("hello \tworld "));
 }
 
-TEST_CASE("Macro syntax error", "[macro]") {
+TEST(MacroText, Macro_syntax_error) {
   parser parser(R"(
 		S     <- T('hello')
 		T (a) <- a [ \t]*
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Macro missing argument", "[macro]") {
+TEST(MacroText, Macro_missing_argument) {
   parser parser(R"(
 		S       <- T ('hello')
 		T(a, b) <- a [ \t]* b
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Macro reference syntax error", "[macro]") {
+TEST(MacroText, Macro_reference_syntax_error) {
   parser parser(R"(
 		S    <- T ('hello')
 		T(a) <- a [ \t]*
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Macro invalid macro reference error", "[macro]") {
+TEST(MacroText, Macro_invalid_macro_reference_error) {
   parser parser(R"(
 		S <- T('hello')
 		T <- 'world'
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == false);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Macro calculator", "[macro]") {
+TEST(MacroText, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(
         # Grammar for simple calculator...
@@ -969,41 +969,43 @@ TEST_CASE("Macro calculator", "[macro]") {
   parser["FACTOR_OPERATOR"] = [](const SemanticValues &vs) {
     return static_cast<char>(*vs.sv().data());
   };
-  parser["NUMBER"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   auto expr = " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ";
   long val = 0;
   ret = parser.parse(expr, val);
 
-  REQUIRE(ret == true);
-  REQUIRE(val == -3);
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(-3, val);
 }
 
-TEST_CASE("Macro expression arguments", "[macro]") {
+TEST(MacroText, Macro_expression_arguments) {
   parser parser(R"(
 		S             <- M('hello' / 'Hello', 'world' / 'World')
 		M(arg0, arg1) <- arg0 [ \t]+ arg1
 	)");
 
-  REQUIRE(parser.parse("Hello world"));
+  EXPECT_TRUE(parser.parse("Hello world"));
 }
 
-TEST_CASE("Macro recursive", "[macro]") {
+TEST(MacroText, Macro_recursive) {
   parser parser(R"(
 		S    <- M('abc')
 		M(s) <- !s / s ' ' M(s / '123') / s
 	)");
 
-  REQUIRE(parser.parse(""));
-  REQUIRE(parser.parse("abc"));
-  REQUIRE(parser.parse("abc abc"));
-  REQUIRE(parser.parse("abc 123 abc"));
+  EXPECT_TRUE(parser.parse(""));
+  EXPECT_TRUE(parser.parse("abc"));
+  EXPECT_TRUE(parser.parse("abc abc"));
+  EXPECT_TRUE(parser.parse("abc 123 abc"));
 }
 
-TEST_CASE("Macro recursive2", "[macro]") {
+TEST(MacroText, Macro_recursive2) {
   auto syntaxes = std::vector<const char *>{
       "S <- M('abc') M(s) <- !s / s ' ' M(s* '-' '123') / s",
       "S <- M('abc') M(s) <- !s / s ' ' M(s+ '-' '123') / s",
@@ -1016,11 +1018,11 @@ TEST_CASE("Macro recursive2", "[macro]") {
 
   for (const auto &syntax : syntaxes) {
     parser parser(syntax);
-    REQUIRE(parser.parse("abc abc-123"));
+    EXPECT_TRUE(parser.parse("abc abc-123"));
   }
 }
 
-TEST_CASE("Macro exclusive modifiers", "[macro]") {
+TEST(MacroText, Macro_exclusive_modifiers) {
   parser parser(R"(
 		S                   <- Modifiers(!"") _
 		Modifiers(Appeared) <- (!Appeared) (
@@ -1032,15 +1034,15 @@ TEST_CASE("Macro exclusive modifiers", "[macro]") {
 		_                   <- [ \t\r\n]*
 	)");
 
-  REQUIRE(parser.parse("public"));
-  REQUIRE(parser.parse("static"));
-  REQUIRE(parser.parse("final"));
-  REQUIRE(parser.parse("public static final"));
-  REQUIRE(!parser.parse("public public"));
-  REQUIRE(!parser.parse("public static public"));
+  EXPECT_TRUE(parser.parse("public"));
+  EXPECT_TRUE(parser.parse("static"));
+  EXPECT_TRUE(parser.parse("final"));
+  EXPECT_TRUE(parser.parse("public static final"));
+  EXPECT_FALSE(parser.parse("public public"));
+  EXPECT_FALSE(parser.parse("public static public"));
 }
 
-TEST_CASE("Macro token check test", "[macro]") {
+TEST(MacroText, Macro_token_check_test) {
   parser parser(R"(
         # Grammar for simple calculator...
         EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
@@ -1054,27 +1056,27 @@ TEST_CASE("Macro token check test", "[macro]") {
 		T(S)             <-  < S > _
 	)");
 
-  REQUIRE(parser["EXPRESSION"].is_token() == false);
-  REQUIRE(parser["TERM"].is_token() == false);
-  REQUIRE(parser["FACTOR"].is_token() == false);
-  REQUIRE(parser["FACTOR_OPERATOR"].is_token() == true);
-  REQUIRE(parser["NUMBER"].is_token() == true);
-  REQUIRE(parser["_"].is_token() == true);
-  REQUIRE(parser["LIST"].is_token() == false);
-  REQUIRE(parser["T"].is_token() == true);
+  EXPECT_FALSE(parser["EXPRESSION"].is_token());
+  EXPECT_FALSE(parser["TERM"].is_token());
+  EXPECT_FALSE(parser["FACTOR"].is_token());
+  EXPECT_TRUE(parser["FACTOR_OPERATOR"].is_token());
+  EXPECT_TRUE(parser["NUMBER"].is_token());
+  EXPECT_TRUE(parser["_"].is_token());
+  EXPECT_FALSE(parser["LIST"].is_token());
+  EXPECT_TRUE(parser["T"].is_token());
 }
 
-TEST_CASE("Macro passes an arg to another macro", "[macro]") {
+TEST(MacroText, Macro_passes_an_arg_to_another_macro) {
   parser parser(R"(
         A    <- B(C)
         B(D) <- D
         C    <- 'c'
 	)");
 
-  REQUIRE(parser.parse("c"));
+  EXPECT_TRUE(parser.parse("c"));
 }
 
-TEST_CASE("Unreferenced rule", "[macro]") {
+TEST(MacroText, Unreferenced_rule) {
   parser parser(R"(
         A    <- B(C)
         B(D) <- D
@@ -1083,10 +1085,10 @@ TEST_CASE("Unreferenced rule", "[macro]") {
 	)");
 
   bool ret = parser;
-  REQUIRE(ret == true); // This is OK, because it's a warning, not an erro...
+  EXPECT_TRUE(ret); // This is OK, because it's a warning, not an erro...
 }
 
-TEST_CASE("Nested macro call", "[macro]") {
+TEST(MacroText, Nested_macro_call) {
   parser parser(R"(
         A    <- B(T)
         B(X) <- C(X)
@@ -1094,20 +1096,20 @@ TEST_CASE("Nested macro call", "[macro]") {
         T    <- 'val'
 	)");
 
-  REQUIRE(parser.parse("val"));
+  EXPECT_TRUE(parser.parse("val"));
 }
 
-TEST_CASE("Nested macro call2", "[macro]") {
+TEST(MacroText, Nested_macro_call2) {
   parser parser(R"(
         START           <- A('TestVal1', 'TestVal2')+
         A(Aarg1, Aarg2) <- B(Aarg1) '#End'
         B(Barg1)        <- '#' Barg1
 	)");
 
-  REQUIRE(parser.parse("#TestVal1#End"));
+  EXPECT_TRUE(parser.parse("#TestVal1#End"));
 }
 
-TEST_CASE("Line information test", "[line information]") {
+TEST(LineInformationTest, Line_information_test) {
   parser parser(R"(
         S    <- _ (WORD _)+
         WORD <- [A-Za-z]+
@@ -1120,43 +1122,64 @@ TEST_CASE("Line information test", "[line information]") {
   };
 
   bool ret = parser;
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
   ret = parser.parse(" Mon Tue Wed \nThu  Fri  Sat\nSun\n");
-  REQUIRE(ret == true);
+  EXPECT_TRUE(ret);
 
-  REQUIRE(locations[0] == std::make_pair<size_t, size_t>(1, 2));
-  REQUIRE(locations[1] == std::make_pair<size_t, size_t>(1, 6));
-  REQUIRE(locations[2] == std::make_pair<size_t, size_t>(1, 10));
-  REQUIRE(locations[3] == std::make_pair<size_t, size_t>(2, 1));
-  REQUIRE(locations[4] == std::make_pair<size_t, size_t>(2, 6));
-  REQUIRE(locations[5] == std::make_pair<size_t, size_t>(2, 11));
-  REQUIRE(locations[6] == std::make_pair<size_t, size_t>(3, 1));
+  {
+    auto val = std::make_pair<size_t, size_t>(1, 2);
+    EXPECT_TRUE(val == locations[0]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(1, 6);
+    EXPECT_TRUE(val == locations[1]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(1, 10);
+    EXPECT_TRUE(val == locations[2]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(2, 1);
+    EXPECT_TRUE(val == locations[3]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(2, 6);
+    EXPECT_TRUE(val == locations[4]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(2, 11);
+    EXPECT_TRUE(val == locations[5]);
+  }
+  {
+    auto val = std::make_pair<size_t, size_t>(3, 1);
+    EXPECT_TRUE(val == locations[6]);
+  }
 }
 
-TEST_CASE("Dictionary", "[dic]") {
+TEST(DicText, Dictionary) {
   parser parser(R"(
         START <- 'This month is ' MONTH '.'
         MONTH <- 'Jan' | 'January' | 'Feb' | 'February'
 	)");
 
-  REQUIRE(parser.parse("This month is Jan."));
-  REQUIRE(parser.parse("This month is January."));
-  REQUIRE_FALSE(parser.parse("This month is Jannuary."));
-  REQUIRE_FALSE(parser.parse("This month is ."));
+  EXPECT_TRUE(parser.parse("This month is Jan."));
+  EXPECT_TRUE(parser.parse("This month is January."));
+  EXPECT_FALSE(parser.parse("This month is Jannuary."));
+  EXPECT_FALSE(parser.parse("This month is ."));
 }
 
-TEST_CASE("Dictionary invalid", "[dic]") {
+TEST(DicText, Dictionary_invalid) {
   parser parser(R"(
         START <- 'This month is ' MONTH '.'
         MONTH <- 'Jan' | 'January' | [a-z]+ | 'Feb' | 'February'
 	)");
 
   bool ret = parser;
-  REQUIRE_FALSE(ret);
+  EXPECT_FALSE(ret);
 }
 
-TEST_CASE("Error recovery 1", "[error]") {
+TEST(ErrorText, Error_recovery_1) {
   parser pg(R"(
 START      <- __? SECTION*
 
@@ -1188,26 +1211,26 @@ header <- (!__ .)* { message "invalid section header, missing ']'." }
 entry  <- (!(__ / HEADER) .)+ { message "invalid entry." }
   )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-    R"(3:1: invalid entry.)",
-    R"(7:1: invalid entry.)",
-    R"(10:11: invalid section header, missing ']'.)",
-    R"(18:1: invalid entry.)",
+      R"(3:1: invalid entry.)",
+      R"(7:1: invalid entry.)",
+      R"(10:11: invalid section header, missing ']'.)",
+      R"(18:1: invalid entry.)",
   };
 
   size_t i = 0;
   pg.log = [&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
-    REQUIRE(ss.str() == errors[i++]);
+    EXPECT_EQ(errors[i++], ss.str());
   };
 
   pg.enable_ast();
 
   std::shared_ptr<Ast> ast;
-  REQUIRE_FALSE(pg.parse(R"([Section 1]
+  EXPECT_FALSE(pg.parse(R"([Section 1]
 111 = 222 | 333
 aaa || bbb
 ccc = ddd
@@ -1229,12 +1252,12 @@ lll = mmm | nnn = ooo
 [Section 5]
 rrr | sss
 
-  )", ast));
+  )",
+                        ast));
 
   ast = pg.optimize_ast(ast);
 
-  REQUIRE(ast_to_s(ast) ==
-R"(+ START
+  EXPECT_EQ(R"(+ START
   + SECTION
     - HEADER/0[CATEGORY] (Section 1)
     + ENTRIES
@@ -1278,10 +1301,10 @@ R"(+ START
       + ENTRY/1
         - PHRASE/0[WORD] (rrr)
         - PHRASE/0[WORD] (sss)
-)");
+)", ast_to_s(ast));
 }
 
-TEST_CASE("Error recovery 2", "[error]") {
+TEST(ErrorText, Error_recovery_2) {
   parser pg(R"(
     START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover(.*))
     ENTRY <- '[' ITEM (',' ITEM)* ']'
@@ -1293,36 +1316,37 @@ TEST_CASE("Error recovery 2", "[error]") {
     Space <- [ \n]
   )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-    R"(1:6: syntax error, unexpected ']'.)",
-    R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
-    R"(1:24: syntax error, unexpected ',', expecting <WORD>.)",
-    R"(1:31: syntax error, unexpected 'ccc', expecting <NUM>.)",
-    R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
-    R"(1:55: syntax error, unexpected ']', expecting <WORD>.)",
-    R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
-    R"(2:3: syntax error.)",
+      R"(1:6: syntax error, unexpected ']'.)",
+      R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
+      R"(1:24: syntax error, unexpected ',', expecting <WORD>.)",
+      R"(1:31: syntax error, unexpected 'ccc', expecting <NUM>.)",
+      R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
+      R"(1:55: syntax error, unexpected ']', expecting <WORD>.)",
+      R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
+      R"(2:3: syntax error.)",
   };
 
   size_t i = 0;
   pg.log = [&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
-    REQUIRE(ss.str() == errors[i++]);
+    EXPECT_EQ(errors[i++], ss.str());
   };
 
   pg.enable_ast();
 
   std::shared_ptr<Ast> ast;
-  REQUIRE_FALSE(pg.parse(R"([000]],[111],[222z,"aaa,"bbb",ccc"],[ddd",444,555,"eee],[
-  )", ast));
+  EXPECT_FALSE(
+      pg.parse(R"([000]],[111],[222z,"aaa,"bbb",ccc"],[ddd",444,555,"eee],[
+  )",
+               ast));
 
   ast = pg.optimize_ast(ast);
 
-  REQUIRE(ast_to_s(ast) ==
-R"(+ START
+  EXPECT_EQ(R"(+ START
   - ENTRY/0[NUM] (000)
   - ENTRY/0[NUM] (111)
   + ENTRY
@@ -1335,10 +1359,11 @@ R"(+ START
     - ITEM/1[NUM] (444)
     - ITEM/1[NUM] (555)
     + ITEM/2
-)");
+)",
+            ast_to_s(ast));
 }
 
-TEST_CASE("Error recovery 3", "[error]") {
+TEST(ErrorText, Error_recovery_3) {
   parser pg(R"~(
 # Grammar
 START      <- __? SECTION*
@@ -1386,36 +1411,36 @@ skip             <- (!(__) .)*
 skip_puncs       <- [|=]* _
   )~");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-    R"(3:7: Wildcard characters (*) should not be used)",
-    R"(4:6: Wildcard characters (?) should not be used)",
-    R"(5:6: Duplicate OR operator (|))",
-    R"(9:4: Missing OR operator (|))",
-    R"(11:16: Expect phrase)",
-    R"(13:11: Missing opening/closing square bracket)",
-    R"(16:10: Section name 日 must be in English)",
-    R"(16:11: Section name 本 must be in English)",
-    R"(16:12: Section name 語 must be in English)",
-    R"(16:13: Section name で must be in English)",
-    R"(16:14: Section name す must be in English)",
-    R"(21:17: Use of invalid operator)",
-    R"(24:10: Use of invalid operator combination)",
-    R"(26:10: Missing OR operator (|))",
+      R"(3:7: Wildcard characters (*) should not be used)",
+      R"(4:6: Wildcard characters (?) should not be used)",
+      R"(5:6: Duplicate OR operator (|))",
+      R"(9:4: Missing OR operator (|))",
+      R"(11:16: Expect phrase)",
+      R"(13:11: Missing opening/closing square bracket)",
+      R"(16:10: Section name 日 must be in English)",
+      R"(16:11: Section name 本 must be in English)",
+      R"(16:12: Section name 語 must be in English)",
+      R"(16:13: Section name で must be in English)",
+      R"(16:14: Section name す must be in English)",
+      R"(21:17: Use of invalid operator)",
+      R"(24:10: Use of invalid operator combination)",
+      R"(26:10: Missing OR operator (|))",
   };
 
   size_t i = 0;
   pg.log = [&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
-    REQUIRE(ss.str() == errors[i++]);
+    EXPECT_EQ(errors[i++], ss.str());
   };
 
   pg.enable_ast();
 
   std::shared_ptr<Ast> ast;
-  REQUIRE_FALSE(pg.parse(R"([Section 1]
+  EXPECT_FALSE(pg.parse(R"([Section 1]
 111 = 222 | 333
 AAA BB* | CCC
 AAA B?B | CCC
@@ -1442,12 +1467,12 @@ ppp qqq |= rrr
 
 Section 6]
 sss | ttt
-  )", ast));
+  )",
+                        ast));
 
   ast = pg.optimize_ast(ast);
 
-  REQUIRE(ast_to_s(ast) ==
-R"(+ START
+  EXPECT_EQ(R"(+ START
   + SECTION
     - HEADER/0[CATEGORY] (Section 1)
     + ENTRIES
@@ -1546,10 +1571,10 @@ R"(+ START
           - WORD (sss)
         + PHRASE
           - WORD (ttt)
-)");
+)", ast_to_s(ast));
 }
 
-TEST_CASE("Error recovery Java", "[error]") {
+TEST(ErrorText, Error_recovery_Java) {
   parser pg(R"(
 Prog       ← PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR
 BlockStmt  ← LCUR (Stmt)* RCUR^rcblk
@@ -1611,24 +1636,24 @@ semia      ← '' { message "missing simicolon in assignment." }
 SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   )");
 
-  REQUIRE(!!pg); // OK
+  EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-    R"(8:5: missing simicolon in assignment.)",
-    R"(8:6: missing end of block.)",
+      R"(8:5: missing simicolon in assignment.)",
+      R"(8:6: missing end of block.)",
   };
 
   size_t i = 0;
   pg.log = [&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
-    REQUIRE(ss.str() == errors[i++]);
+    EXPECT_EQ(errors[i++], ss.str());
   };
 
   pg.enable_ast();
 
   std::shared_ptr<Ast> ast;
-  REQUIRE_FALSE(pg.parse(R"(public class Example {
+  EXPECT_FALSE(pg.parse(R"(public class Example {
   public static void main(String[] args) {
     int n = 5;
     int f = 1;
@@ -1639,12 +1664,12 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
     System.out.println(f);
   }
 }
-  )", ast));
+  )",
+                        ast));
 
   ast = pg.optimize_ast(ast);
 
-  REQUIRE(ast_to_s(ast) ==
-R"(+ Prog
+  EXPECT_EQ(R"(+ Prog
   - PUBLIC (public)
   - CLASS (class)
   - NAME (Example)
@@ -1680,5 +1705,6 @@ R"(+ Prog
             - MulExp/0[NAME] (n)
             - MINUS (-)
             - MulExp/0[NUMBER] (1)
-)");
+)",
+            ast_to_s(ast));
 }

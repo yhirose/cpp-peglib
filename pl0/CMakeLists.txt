@@ -1,9 +1,7 @@
-cmake_minimum_required(VERSION 3.1)
+/Users/yhirose/Projects/cpp-peglib/.travis.yml
 project(pl0)
 
 include_directories(..)
-
-set(CMAKE_CXX_STANDARD 17)
 
 add_executable(pl0 pl0.cc)
 find_package(LLVM REQUIRED CONFIG)
