@@ -620,13 +620,9 @@ private:
  */
 // Note: 'parse_error' exception class should be be used in sematic action
 // handlers to reject the rule.
-struct parse_error {
-  parse_error() = default;
-  parse_error(const char *s) : s_(s) {}
-  const char *what() const { return s_.empty() ? nullptr : s_.data(); }
-
-private:
-  std::string s_;
+class parse_error : public std::runtime_error {
+public:
+  parse_error(const char *what_arg) : std::runtime_error(what_arg) {}
 };
 
 /*
