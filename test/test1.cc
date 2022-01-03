@@ -967,3 +967,18 @@ TEST(GeneralTest, token_to_number_float_test) {
   EXPECT_TRUE(ast->nodes.empty());
 }
 
+TEST(GeneralTest, ParentReferencesShouldNotBeExpired) {
+	auto parser = peg::parser(R"(
+		ROOT            <- OPTIMIZES_AWAY
+		OPTIMIZES_AWAY  <- ITEM+
+		ITEM            <- 'a'
+	)");
+	parser.enable_ast<peg::Ast>();
+
+	std::shared_ptr<peg::Ast> ast;
+	parser.parse("aaa", ast);
+	ast = parser.optimize_ast(ast);
+
+	EXPECT_FALSE(ast->nodes[0]->parent.expired());
+}
+
