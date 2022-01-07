@@ -459,11 +459,15 @@ inline constexpr unsigned int operator"" _(const char *s, size_t l) {
 /*
  * Semantic values
  */
+class Context;
+
 struct SemanticValues : protected std::vector<std::any> {
+  SemanticValues() = default;
+  SemanticValues(Context *c): c_(c) {}
+
   // Input text
   const char *path = nullptr;
   const char *ss = nullptr;
-  std::function<const std::vector<size_t> &()> source_line_index;
 
   // Matched string
   std::string_view sv() const { return sv_; }
@@ -553,6 +557,9 @@ private:
   friend class Holder;
   friend class PrecedenceClimbing;
 
+  const std::vector<size_t> &source_line_index() const;
+
+  Context *c_ = nullptr;
   std::string_view sv_;
   size_t choice_count_ = 0;
   size_t choice_ = 0;
@@ -773,7 +780,6 @@ private:
 /*
  * Context
  */
-class Context;
 class Ope;
 class Definition;
 
@@ -882,7 +888,7 @@ public:
   SemanticValues &push() {
     assert(value_stack_size <= value_stack.size());
     if (value_stack_size == value_stack.size()) {
-      value_stack.emplace_back(std::make_shared<SemanticValues>());
+      value_stack.emplace_back(std::make_shared<SemanticValues>(this));
     } else {
       auto &vs = *value_stack[value_stack_size];
       if (!vs.empty()) {
@@ -898,15 +904,6 @@ public:
     auto &vs = *value_stack[value_stack_size++];
     vs.path = path;
     vs.ss = s;
-    vs.source_line_index = [&]() -> const std::vector<size_t> & {
-      if (source_line_index.empty()) {
-        for (size_t pos = 0; pos < l; pos++) {
-          if (s[pos] == '\n') { source_line_index.push_back(pos); }
-        }
-        source_line_index.push_back(l);
-      }
-      return source_line_index;
-    };
 
     return vs;
   }
@@ -2467,6 +2464,19 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   return i;
+}
+
+inline const std::vector<size_t> &SemanticValues::source_line_index() const {
+  if (!c_) {
+    std::vector<size_t>();
+  }
+  if (c_->source_line_index.empty()) {
+    for (size_t pos = 0; pos < c_->l; pos++) {
+      if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
+    }
+    c_->source_line_index.push_back(c_->l);
+  }
+  return c_->source_line_index;
 }
 
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
