@@ -463,7 +463,7 @@ class Context;
 
 struct SemanticValues : protected std::vector<std::any> {
   SemanticValues() = default;
-  SemanticValues(Context *c): c_(c) {}
+  SemanticValues(Context *c) : c_(c) {}
 
   // Input text
   const char *path = nullptr;
@@ -569,7 +569,7 @@ private:
 /*
  * Semantic action
  */
-template <typename F, typename... Args> std::any call(F fn, Args &&... args) {
+template <typename F, typename... Args> std::any call(F fn, Args &&...args) {
   using R = decltype(fn(std::forward<Args>(args)...));
   if constexpr (std::is_void<R>::value) {
     fn(std::forward<Args>(args)...);
@@ -975,7 +975,7 @@ public:
 class Sequence : public Ope {
 public:
   template <typename... Args>
-  Sequence(const Args &... args)
+  Sequence(const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
   Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
@@ -1018,7 +1018,7 @@ public:
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
-  PrioritizedChoice(bool for_label, const Args &... args)
+  PrioritizedChoice(bool for_label, const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
         for_label_(for_label) {}
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
@@ -1576,16 +1576,16 @@ public:
 /*
  * Factories
  */
-template <typename... Args> std::shared_ptr<Ope> seq(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> seq(Args &&...args) {
   return std::make_shared<Sequence>(static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> cho(Args &&...args) {
   return std::make_shared<PrioritizedChoice>(
       false, static_cast<std::shared_ptr<Ope>>(args)...);
 }
 
-template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&... args) {
+template <typename... Args> std::shared_ptr<Ope> cho4label_(Args &&...args) {
   return std::make_shared<PrioritizedChoice>(
       true, static_cast<std::shared_ptr<Ope>>(args)...);
 }
@@ -2467,9 +2467,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 }
 
 inline const std::vector<size_t> &SemanticValues::source_line_index() const {
-  if (!c_) {
-    std::vector<size_t>();
-  }
+  if (!c_) { std::vector<size_t>(); }
   if (c_->source_line_index.empty()) {
     for (size_t pos = 0; pos < c_->l; pos++) {
       if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
@@ -3058,14 +3056,16 @@ private:
   struct Instruction {
     std::string type;
     std::any data;
+    std::string_view sv;
   };
 
   struct Data {
     std::shared_ptr<Grammar> grammar;
     std::string start;
     const char *start_pos = nullptr;
-    std::vector<std::pair<std::string, const char *>> duplicates;
-    std::map<std::string, Instruction> instructions;
+    std::vector<std::pair<std::string, const char *>> duplicates_of_definition;
+    std::vector<std::pair<std::string, const char *>> duplicates_of_instruction;
+    std::map<std::string, std::vector<Instruction>> instructions;
     std::set<std::string_view> captures;
     bool enablePackratParsing = true;
 
@@ -3194,10 +3194,14 @@ private:
     ~g["COMMA"] <= seq(chr(','), g["Spacing"]);
 
     // Instruction grammars
-    g["Instruction"] <= seq(g["BeginBlacket"],
-                            cho(cho(g["PrecedenceClimbing"]),
-                                cho(g["ErrorMessage"]), cho(g["NoAstOpt"])),
-                            g["EndBlacket"]);
+    g["Instruction"] <=
+        seq(g["BeginBlacket"],
+            opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
+                                                  g["InstructionItem"])))),
+            g["EndBlacket"]);
+    g["InstructionItem"] <=
+        cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
+    ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
     ~g["SpacesOom"] <= oom(g["Space"]);
@@ -3245,16 +3249,34 @@ private:
 
       std::vector<std::string> params;
       std::shared_ptr<Ope> ope;
+      auto has_instructions = false;
+
       if (is_macro) {
         params = std::any_cast<std::vector<std::string>>(vs[2]);
         ope = std::any_cast<std::shared_ptr<Ope>>(vs[4]);
         if (vs.size() == 6) {
-          data.instructions[name] = std::any_cast<Instruction>(vs[5]);
+          has_instructions = true;
         }
       } else {
         ope = std::any_cast<std::shared_ptr<Ope>>(vs[3]);
         if (vs.size() == 5) {
-          data.instructions[name] = std::any_cast<Instruction>(vs[4]);
+          has_instructions = true;
+        }
+      }
+
+      if (has_instructions) {
+        auto index = is_macro ? 5 : 4;
+        std::set<std::string> types;
+        for (const auto &instruction :
+             std::any_cast<std::vector<Instruction>>(vs[index])) {
+          const auto &type = instruction.type;
+          if (types.find(type) == types.end()) {
+            data.instructions[name].push_back(instruction);
+            types.insert(instruction.type);
+          } else {
+            // data.duplicates_of_instruction.emplace_back(type, vs.sv().data());
+            data.duplicates_of_instruction.emplace_back(type, instruction.sv.data());
+          }
         }
       }
 
@@ -3273,7 +3295,7 @@ private:
           data.start_pos = vs.sv().data();
         }
       } else {
-        data.duplicates.emplace_back(name, vs.sv().data());
+        data.duplicates_of_definition.emplace_back(name, vs.sv().data());
       }
     };
 
@@ -3548,6 +3570,7 @@ private:
       Instruction instruction;
       instruction.type = "precedence";
       instruction.data = binOpeInfo;
+      instruction.sv = vs.sv();
       return instruction;
     };
     g["PrecedenceInfo"] = [](const SemanticValues &vs) {
@@ -3560,13 +3583,19 @@ private:
       Instruction instruction;
       instruction.type = "message";
       instruction.data = std::any_cast<std::string>(vs[0]);
+      instruction.sv = vs.sv();
       return instruction;
     };
 
-    g["NoAstOpt"] = [](const SemanticValues & /*vs*/) {
+    g["NoAstOpt"] = [](const SemanticValues & vs) {
       Instruction instruction;
       instruction.type = "no_ast_opt";
+      instruction.sv = vs.sv();
       return instruction;
+    };
+
+    g["Instruction"] = [](const SemanticValues &vs) {
+      return vs.transform<Instruction>();
     };
   }
 
@@ -3662,13 +3691,27 @@ private:
     }
 
     // Check duplicated definitions
-    auto ret = data.duplicates.empty();
+    auto ret = true;
 
-    for (const auto &[name, ptr] : data.duplicates) {
-      if (log) {
-        auto line = line_info(s, ptr);
-        log(line.first, line.second, "'" + name + "' is already defined.");
+    if (!data.duplicates_of_definition.empty()) {
+      for (const auto &[name, ptr] : data.duplicates_of_definition) {
+        if (log) {
+          auto line = line_info(s, ptr);
+          log(line.first, line.second, "The definition '" + name + "' is already defined.");
+        }
       }
+      ret = false;
+    }
+
+    // Check duplicated instructions
+    if (!data.duplicates_of_instruction.empty()) {
+      for (const auto &[type, ptr] : data.duplicates_of_instruction) {
+        if (log) {
+          auto line = line_info(s, ptr);
+          log(line.first, line.second, "The instruction '" + type + "' is already defined.");
+        }
+      }
+      ret = false;
     }
 
     // Set root definition
@@ -3778,20 +3821,22 @@ private:
     }
 
     // Apply instructions
-    for (const auto &[name, instruction] : data.instructions) {
+    for (const auto &[name, instructions] : data.instructions) {
       auto &rule = grammar[name];
 
-      if (instruction.type == "precedence") {
-        const auto &info =
-            std::any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
+      for (const auto& instruction: instructions) {
+        if (instruction.type == "precedence") {
+          const auto &info =
+              std::any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
 
-        if (!apply_precedence_instruction(rule, info, s, log)) {
-          return nullptr;
+          if (!apply_precedence_instruction(rule, info, s, log)) {
+            return nullptr;
+          }
+        } else if (instruction.type == "message") {
+          rule.error_message = std::any_cast<std::string>(instruction.data);
+        } else if (instruction.type == "no_ast_opt") {
+          rule.no_ast_opt = true;
         }
-      } else if (instruction.type == "message") {
-        rule.error_message = std::any_cast<std::string>(instruction.data);
-      } else if (instruction.type == "no_ast_opt") {
-        rule.no_ast_opt = true;
       }
     }
 
