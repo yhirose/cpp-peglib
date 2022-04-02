@@ -17,3 +17,6 @@ target_link_libraries(calc4 ${add_link_deps})
 
 add_executable(calc5 calc5.cc)
 target_link_libraries(calc5 ${add_link_deps})
+
+add_executable(indent indent.cc)
+target_link_libraries(indent ${add_link_deps})
