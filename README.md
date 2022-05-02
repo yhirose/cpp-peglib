@@ -483,6 +483,7 @@ The following are available operators:
 | cap      | Capture                         | bkr      | Back reference       |
 | dic      | Dictionary                      | pre      | Infix expression     |
 | rec      | Infix expression                | usr      | User defined parser  |
+| rep      | Repetition                      |          |                      |
 
 Adjust definitions
 ------------------
