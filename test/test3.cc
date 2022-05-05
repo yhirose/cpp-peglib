@@ -159,7 +159,7 @@ TEST(LeftRecursiveTest, PEG_Class) {
   EXPECT_TRUE(exact(g, "Class", "[az]"));
   EXPECT_TRUE(exact(g, "Class", "[a-zA-Z-]"));
   EXPECT_TRUE(exact(g, "Class", "[a-zA-Z-0-9]"));
-  EXPECT_FALSE(exact(g, "Class", "[a-]"));
+  EXPECT_TRUE(exact(g, "Class", "[a-]"));
   EXPECT_TRUE(exact(g, "Class", "[-a]"));
   EXPECT_FALSE(exact(g, "Class", "["));
   EXPECT_FALSE(exact(g, "Class", "[a"));
@@ -168,7 +168,7 @@ TEST(LeftRecursiveTest, PEG_Class) {
   EXPECT_TRUE(exact(g, "Class", u8"[あ-ん]"));
   EXPECT_FALSE(exact(g, "Class", u8"あ-ん"));
   EXPECT_TRUE(exact(g, "Class", "[-+]"));
-  EXPECT_FALSE(exact(g, "Class", "[+-]"));
+  EXPECT_TRUE(exact(g, "Class", "[+-]"));
   EXPECT_TRUE(exact(g, "Class", "[\\^]"));
 }
 
@@ -180,7 +180,7 @@ TEST(LeftRecursiveTest, PEG_Negated_Class) {
   EXPECT_TRUE(exact(g, "NegatedClass", "[^az]"));
   EXPECT_TRUE(exact(g, "NegatedClass", "[^a-zA-Z-]"));
   EXPECT_TRUE(exact(g, "NegatedClass", "[^a-zA-Z-0-9]"));
-  EXPECT_FALSE(exact(g, "NegatedClass", "[^a-]"));
+  EXPECT_TRUE(exact(g, "NegatedClass", "[^a-]"));
   EXPECT_TRUE(exact(g, "NegatedClass", "[^-a]"));
   EXPECT_FALSE(exact(g, "NegatedClass", "[^"));
   EXPECT_FALSE(exact(g, "NegatedClass", "[^a"));
@@ -189,7 +189,7 @@ TEST(LeftRecursiveTest, PEG_Negated_Class) {
   EXPECT_TRUE(exact(g, "NegatedClass", u8"[^あ-ん]"));
   EXPECT_FALSE(exact(g, "NegatedClass", u8"^あ-ん"));
   EXPECT_TRUE(exact(g, "NegatedClass", "[^-+]"));
-  EXPECT_FALSE(exact(g, "NegatedClass", "[^+-]"));
+  EXPECT_TRUE(exact(g, "NegatedClass", "[^+-]"));
   EXPECT_TRUE(exact(g, "NegatedClass", "[^^]"));
 }
 

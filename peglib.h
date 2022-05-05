@@ -3132,7 +3132,10 @@ private:
                              tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'),
                              g["Spacing"]);
 
-    g["Range"] <= cho(seq(g["Char"], chr('-'), g["Char"]), g["Char"]);
+    // NOTE: This is different from The original Brian Ford's paper, and this
+    // modification allows us to specify `[+-]` as a valid char class.
+    g["Range"] <= cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
+
     g["Char"] <=
         cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
             seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
