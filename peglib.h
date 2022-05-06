@@ -19,7 +19,6 @@
 #include <initializer_list>
 #include <iostream>
 #include <limits>
-#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -964,7 +963,7 @@ public:
   bool is_traceable(const Ope &ope) const;
 
   mutable size_t next_trace_id = 0;
-  mutable std::list<size_t> trace_ids;
+  mutable std::vector<size_t> trace_ids;
 };
 
 /*
@@ -1955,7 +1954,7 @@ private:
 };
 
 struct HasEmptyElement : public Ope::Visitor {
-  HasEmptyElement(std::list<std::pair<const char *, std::string>> &refs)
+  HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs)
       : refs_(refs) {}
 
   void visit(Sequence &ope) override {
@@ -2013,7 +2012,7 @@ private:
     is_empty = true;
     tie(error_s, error_name) = refs_.back();
   }
-  std::list<std::pair<const char *, std::string>> &refs_;
+  std::vector<std::pair<const char *, std::string>> &refs_;
 };
 
 struct DetectInfiniteLoop : public Ope::Visitor {
@@ -2064,7 +2063,8 @@ struct DetectInfiniteLoop : public Ope::Visitor {
   std::string error_name;
 
 private:
-  std::list<std::pair<const char *, std::string>> refs_;
+  std::vector<std::pair<const char *, std::string>> refs_;
+  std::unordered_map<std::string, bool> has_error_cache_;
 };
 
 struct ReferenceChecker : public Ope::Visitor {
@@ -2956,9 +2956,15 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
   if (it != refs_.end()) { return; }
 
   if (ope.rule_) {
-    refs_.emplace_back(ope.s_, ope.name_);
-    ope.rule_->accept(*this);
-    refs_.pop_back();
+    auto it = has_error_cache_.find(ope.name_);
+    if (it != has_error_cache_.end()) {
+      has_error = it->second;
+    } else {
+      refs_.emplace_back(ope.s_, ope.name_);
+      ope.rule_->accept(*this);
+      refs_.pop_back();
+      has_error_cache_[ope.name_] = has_error;
+    }
   }
 
   if (ope.is_macro_) {
