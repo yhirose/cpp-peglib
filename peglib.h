@@ -208,9 +208,11 @@ inline std::string escape_characters(const char *s, size_t n) {
   for (size_t i = 0; i < n; i++) {
     auto c = s[i];
     switch (c) {
+    case '\f': str += "\\f"; break;
     case '\n': str += "\\n"; break;
     case '\r': str += "\\r"; break;
     case '\t': str += "\\t"; break;
+    case '\v': str += "\\v"; break;
     default: str += c; break;
     }
   }
@@ -280,6 +282,10 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
       i++;
       if (i == n) { throw std::runtime_error("Invalid escape sequence..."); }
       switch (s[i]) {
+      case 'f':
+        r += '\f';
+        i++;
+        break;
       case 'n':
         r += '\n';
         i++;
@@ -290,6 +296,10 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
         break;
       case 't':
         r += '\t';
+        i++;
+        break;
+      case 'v':
+        r += '\v';
         i++;
         break;
       case '\'':
@@ -3137,7 +3147,7 @@ private:
     g["Range"] <= cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
 
     g["Char"] <=
-        cho(seq(chr('\\'), cls("nrt'\"[]\\^")),
+        cho(seq(chr('\\'), cls("fnrtv'\"[]\\^")),
             seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
             seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
             seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),

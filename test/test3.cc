@@ -205,9 +205,11 @@ TEST(LeftRecursiveTest, PEG_Range) {
 
 TEST(LeftRecursiveTest, PEG_Char) {
   auto g = ParserGenerator::grammar();
+  EXPECT_TRUE(exact(g, "Char", "\\f"));
   EXPECT_TRUE(exact(g, "Char", "\\n"));
   EXPECT_TRUE(exact(g, "Char", "\\r"));
   EXPECT_TRUE(exact(g, "Char", "\\t"));
+  EXPECT_TRUE(exact(g, "Char", "\\v"));
   EXPECT_TRUE(exact(g, "Char", "\\'"));
   EXPECT_TRUE(exact(g, "Char", "\\\""));
   EXPECT_TRUE(exact(g, "Char", "\\["));
