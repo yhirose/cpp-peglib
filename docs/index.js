@@ -119,6 +119,7 @@ function makeOnClickInInfo(editor) {
   return function () {
     const el = $(this);
     editor.navigateTo(el.data('ln') - 1, el.data('col') - 1);
+    editor.scrollToLine(el.data('ln') - 1, true, false, null);
     editor.focus();
   }
 };
