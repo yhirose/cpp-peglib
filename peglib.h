@@ -3810,17 +3810,8 @@ private:
     if (!ret) { return nullptr; }
 
     // Check infinite loop
-    {
-      DetectInfiniteLoop vis(data.start_pos, data.start);
-      start_rule.accept(vis);
-      if (vis.has_error) {
-        if (log) {
-          auto line = line_info(s, vis.error_s);
-          log(line.first, line.second,
-              "infinite loop is detected in '" + vis.error_name + "'.");
-        }
-        return nullptr;
-      }
+    if (detect_infiniteLoop(data, start_rule, log, s)) {
+      return nullptr;
     }
 
     // Automatic whitespace skipping
@@ -3831,13 +3822,22 @@ private:
         if (IsLiteralToken::check(*ope)) { rule <= tok(ope); }
       }
 
-      start_rule.whitespaceOpe =
-          wsp(grammar[WHITESPACE_DEFINITION_NAME].get_core_operator());
+      auto &rule = grammar[WHITESPACE_DEFINITION_NAME];
+      start_rule.whitespaceOpe = wsp(rule.get_core_operator());
+
+      if (detect_infiniteLoop(data, rule, log, s)) {
+        return nullptr;
+      }
     }
 
     // Word expression
     if (grammar.count(WORD_DEFINITION_NAME)) {
-      start_rule.wordOpe = grammar[WORD_DEFINITION_NAME].get_core_operator();
+      auto &rule = grammar[WORD_DEFINITION_NAME];
+      start_rule.wordOpe = rule.get_core_operator();
+
+      if (detect_infiniteLoop(data, rule, log, s)) {
+        return nullptr;
+      }
     }
 
     // Apply instructions
@@ -3865,6 +3865,20 @@ private:
     enablePackratParsing = data.enablePackratParsing;
 
     return data.grammar;
+  }
+
+  bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log, const char *s) const {
+    DetectInfiniteLoop vis(data.start_pos, rule.name);
+    rule.accept(vis);
+    if (vis.has_error) {
+      if (log) {
+        auto line = line_info(s, vis.error_s);
+        log(line.first, line.second,
+            "infinite loop is detected in '" + vis.error_name + "'.");
+      }
+      return true;
+    }
+    return false;
   }
 
   Grammar g;

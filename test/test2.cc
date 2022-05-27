@@ -204,6 +204,25 @@ TEST(InfiniteLoopTest, Not_infinite_3) {
   EXPECT_TRUE(!!pg);
 }
 
+TEST(InfiniteLoopTest, whitespace) {
+  parser pg(R"(
+    S <- 'hello'
+    %whitespace <- ('')*
+  )");
+
+  EXPECT_FALSE(pg);
+}
+
+TEST(InfiniteLoopTest, word) {
+  parser pg(R"(
+    S <- 'hello'
+    %whitespace <- ' '*
+    %word <- ('')*
+  )");
+
+  EXPECT_FALSE(pg);
+}
+
 TEST(PrecedenceTest, Precedence_climbing) {
   parser parser(R"(
         START            <-  _ EXPRESSION
