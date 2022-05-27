@@ -2561,7 +2561,6 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
 
 inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
                                  SemanticValues &vs, std::any &dt) const {
-  if (ignore_trace_state || peg::OpeType<peg::Ignore>::check(ope)) { return; }
   trace_ids.push_back(next_trace_id++);
   tracer_enter(ope, a_s, n, vs, *this, dt);
 }
@@ -2569,13 +2568,13 @@ inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
 inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
                                  SemanticValues &vs, std::any &dt,
                                  size_t len) const {
-  if (ignore_trace_state || peg::OpeType<peg::Ignore>::check(ope)) { return; }
   tracer_leave(ope, a_s, n, vs, *this, dt, len);
   trace_ids.pop_back();
 }
 
 inline bool Context::is_traceable(const Ope &ope) const {
   if (tracer_enter && tracer_leave) {
+    if (ignore_trace_state) { return false; }
     return !OpeType<Reference>::check(ope);
   }
   return false;
@@ -2720,6 +2719,12 @@ inline const char *Holder::trace_name() const {
 
 inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
                                     Context &c, std::any &dt) const {
+  auto save_ignore_trace_state = c.ignore_trace_state;
+  if (rule_ && rule_->ignoreSemanticValue) {
+    c.ignore_trace_state = !c.tracer_verbose;
+  }
+  auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
   if (rule_) {
     // Reference rule
     if (rule_->is_macro) {
