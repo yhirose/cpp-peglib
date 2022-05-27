@@ -12,7 +12,8 @@ usage: grammar_file_path [source_file_path]
     --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
     --source: source text
-    --trace: show trace messages
+    --trace: show concise trace messages
+    --trace-verbose: show verbose trace messages
 ```
 
 ### Build peglint

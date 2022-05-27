@@ -607,7 +607,8 @@ usage: grammar_file_path [source_file_path]
     --ast: show AST tree
     --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
-    --trace: show trace messages
+    --trace: show concise trace messages
+    --trace-verbose: show verbose trace messages
 ```
 
 ### Grammar check
