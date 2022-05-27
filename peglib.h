@@ -1,7 +1,7 @@
 ﻿//
 //  peglib.h
 //
-//  Copyright (c) 2020 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2022 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -719,11 +719,10 @@ struct ErrorInfo {
           auto first_item = true;
           size_t i = 0;
           while (i < expected_tokens.size()) {
-            auto [token, is_literal] =
-                expected_tokens[expected_tokens.size() - i - 1];
+            auto [token, is_literal] = expected_tokens[i];
 
             // Skip rules start with '_'
-            if (!is_literal && token[0] != '_') {
+            if (!is_literal || token[0] != '_') {
               msg += (first_item ? ", expecting " : ", ");
               if (is_literal) {
                 msg += "'";
@@ -1123,6 +1122,7 @@ public:
       auto se = scope_exit([&]() { c.pop_capture_scope(); });
       auto save_sv_size = vs.size();
       auto save_tok_size = vs.tokens.size();
+      auto save_error_info = c.error_info;
       const auto &rule = *ope_;
       auto len = rule.parse(s + i, n - i, vs, c, dt);
       if (success(len)) {
@@ -1137,6 +1137,7 @@ public:
           vs.tokens.erase(vs.tokens.begin() +
                           static_cast<std::ptrdiff_t>(save_tok_size));
         }
+        c.error_info = save_error_info;
         break;
       }
       i += len;

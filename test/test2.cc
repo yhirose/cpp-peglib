@@ -461,7 +461,7 @@ TEST(PackratTest, Packrat_parser_test_with_whitespace) {
   EXPECT_TRUE(ret);
 }
 
-TEST(PackratText, Packrat_parser_test_with_macro) {
+TEST(PackratTest, Packrat_parser_test_with_macro) {
   parser parser(R"(
         EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
         TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
@@ -480,7 +480,7 @@ TEST(PackratText, Packrat_parser_test_with_macro) {
   EXPECT_TRUE(ret);
 }
 
-TEST(PackratText, Packrat_parser_test_with_precedence_expression_parser) {
+TEST(PackratTest, Packrat_parser_test_with_precedence_expression_parser) {
   peg::parser parser(R"(
     Expression  <- Atom (Operator Atom)* { precedence L + - L * / }
     Atom        <- _? Number _?
@@ -498,7 +498,7 @@ TEST(PackratText, Packrat_parser_test_with_precedence_expression_parser) {
   EXPECT_TRUE(ret);
 }
 
-TEST(BackreferenceText, Backreference_test) {
+TEST(BackreferenceTest, Backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE < (!RQUOTE .)* > RQUOTE _
         LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
@@ -550,7 +550,7 @@ TEST(BackreferenceText, Backreference_test) {
   }
 }
 
-TEST(BackreferenceText, Invalid_backreference_test) {
+TEST(BackreferenceTest, Invalid_backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _
         LQUOTE <- 'R"' $delm< [a-zA-Z]* > '('
@@ -564,7 +564,7 @@ TEST(BackreferenceText, Invalid_backreference_test) {
                std::runtime_error);
 }
 
-TEST(BackreferenceText, Nested_capture_test) {
+TEST(BackreferenceTest, Nested_capture_test) {
   parser parser(R"(
         ROOT      <- CONTENT
         CONTENT   <- (ELEMENT / TEXT)*
@@ -582,7 +582,7 @@ TEST(BackreferenceText, Nested_capture_test) {
   EXPECT_FALSE(parser.parse("This is a <u>test</u> text</b>."));
 }
 
-TEST(BackreferenceText, Backreference_with_Prioritized_Choice_test) {
+TEST(BackreferenceTest, Backreference_with_Prioritized_Choice_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH / CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -598,7 +598,7 @@ TEST(BackreferenceText, Backreference_with_Prioritized_Choice_test) {
   EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
 }
 
-TEST(BackreferenceText, Backreference_with_Zero_or_More_test) {
+TEST(BackreferenceTest, Backreference_with_Zero_or_More_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH* CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -622,7 +622,7 @@ TEST(BackreferenceText, Backreference_with_Zero_or_More_test) {
                std::runtime_error);
 }
 
-TEST(BackreferenceText, Backreference_with_One_or_More_test) {
+TEST(BackreferenceTest, Backreference_with_One_or_More_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH+ CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -645,7 +645,7 @@ TEST(BackreferenceText, Backreference_with_One_or_More_test) {
   EXPECT_FALSE(parser.parse("branchthatiswron_branchthatiscorrect"));
 }
 
-TEST(BackreferenceText, Backreference_with_Option_test) {
+TEST(BackreferenceTest, Backreference_with_Option_test) {
   parser parser(R"(
         TREE           <- WRONG_BRANCH? CORRECT_BRANCH
         WRONG_BRANCH   <- BRANCH THAT IS_capture WRONG
@@ -669,7 +669,7 @@ TEST(BackreferenceText, Backreference_with_Option_test) {
                std::runtime_error);
 }
 
-TEST(RepetitionText, Repetition_0) {
+TEST(RepetitionTest, Repetition_0) {
   parser parser(R"(
         START <- '(' DIGIT{3} ') ' DIGIT{3} '-' DIGIT{4}
         DIGIT <- [0-9]
@@ -680,7 +680,7 @@ TEST(RepetitionText, Repetition_0) {
   EXPECT_FALSE(parser.parse("(123) 45-7a90"));
 }
 
-TEST(RepetitionText, Repetition_2_4) {
+TEST(RepetitionTest, Repetition_2_4) {
   parser parser(R"(
         START <- DIGIT{2,4}
         DIGIT <- [0-9]
@@ -692,7 +692,7 @@ TEST(RepetitionText, Repetition_2_4) {
   EXPECT_FALSE(parser.parse("12345"));
 }
 
-TEST(RepetitionText, Repetition_2_1) {
+TEST(RepetitionTest, Repetition_2_1) {
   parser parser(R"(
         START <- DIGIT{2,1} # invalid range
         DIGIT <- [0-9]
@@ -702,7 +702,7 @@ TEST(RepetitionText, Repetition_2_1) {
   EXPECT_FALSE(parser.parse("123"));
 }
 
-TEST(RepetitionText, Repetition_2) {
+TEST(RepetitionTest, Repetition_2) {
   parser parser(R"(
         START <- DIGIT{2,}
         DIGIT <- [0-9]
@@ -713,7 +713,7 @@ TEST(RepetitionText, Repetition_2) {
   EXPECT_TRUE(parser.parse("1234"));
 }
 
-TEST(RepetitionText, Repetition__2) {
+TEST(RepetitionTest, Repetition__2) {
   parser parser(R"(
         START <- DIGIT{,2}
         DIGIT <- [0-9]
@@ -786,7 +786,7 @@ TEST(UserRuleTest, User_defined_rule_test) {
   EXPECT_TRUE(g.parse(" Hello BNF! "));
 }
 
-TEST(PredicateText, Semantic_predicate_test) {
+TEST(PredicateTest, Semantic_predicate_test) {
   parser parser("NUMBER  <-  [0-9]+");
 
   parser["NUMBER"] = [](const SemanticValues &vs) {
@@ -807,7 +807,7 @@ TEST(PredicateText, Semantic_predicate_test) {
   EXPECT_FALSE(parser.parse("200", val));
 }
 
-TEST(UnicodeText, Japanese_character) {
+TEST(UnicodeTest, Japanese_character) {
   peg::parser parser(u8R"(
         文 <- 修飾語? 主語 述語 '。'
         主語 <- 名詞 助詞
@@ -825,17 +825,17 @@ TEST(UnicodeText, Japanese_character) {
   EXPECT_TRUE(parser.parse(u8R"(サーバーを復旧します。)"));
 }
 
-TEST(UnicodeText, dot_with_a_code) {
+TEST(UnicodeTest, dot_with_a_code) {
   peg::parser parser(" S <- 'a' . 'b' ");
   EXPECT_TRUE(parser.parse(u8R"(aあb)"));
 }
 
-TEST(UnicodeText, dot_with_a_char) {
+TEST(UnicodeTest, dot_with_a_char) {
   peg::parser parser(" S <- 'a' . 'b' ");
   EXPECT_TRUE(parser.parse(u8R"(aåb)"));
 }
 
-TEST(UnicodeText, character_class) {
+TEST(UnicodeTest, character_class) {
   peg::parser parser(R"(
         S <- 'a' [い-おAさC-Eた-とは] 'b'
     )");
@@ -862,14 +862,14 @@ TEST(UnicodeText, character_class) {
 }
 
 #if 0 // TODO: Unicode Grapheme support
-TEST(UnicodeText, dot_with_a_grapheme)
+TEST(UnicodeTest, dot_with_a_grapheme)
 {
     peg::parser parser(" S <- 'a' . 'b' ");
     EXPECT_TRUE(parser.parse(u8R"(aसिb)"));
 }
 #endif
 
-TEST(MacroText, Macro_simple_test) {
+TEST(MacroTest, Macro_simple_test) {
   parser parser(R"(
 		S     <- HELLO WORLD
 		HELLO <- T('hello')
@@ -880,7 +880,7 @@ TEST(MacroText, Macro_simple_test) {
   EXPECT_TRUE(parser.parse("hello \tworld "));
 }
 
-TEST(MacroText, Macro_two_parameters) {
+TEST(MacroTest, Macro_two_parameters) {
   parser parser(R"(
 		S           <- HELLO_WORLD
 		HELLO_WORLD <- T('hello', 'world')
@@ -890,7 +890,7 @@ TEST(MacroText, Macro_two_parameters) {
   EXPECT_TRUE(parser.parse("hello \tworld "));
 }
 
-TEST(MacroText, Macro_syntax_error) {
+TEST(MacroTest, Macro_syntax_error) {
   parser parser(R"(
 		S     <- T('hello')
 		T (a) <- a [ \t]*
@@ -900,7 +900,7 @@ TEST(MacroText, Macro_syntax_error) {
   EXPECT_FALSE(ret);
 }
 
-TEST(MacroText, Macro_missing_argument) {
+TEST(MacroTest, Macro_missing_argument) {
   parser parser(R"(
 		S       <- T ('hello')
 		T(a, b) <- a [ \t]* b
@@ -910,7 +910,7 @@ TEST(MacroText, Macro_missing_argument) {
   EXPECT_FALSE(ret);
 }
 
-TEST(MacroText, Macro_reference_syntax_error) {
+TEST(MacroTest, Macro_reference_syntax_error) {
   parser parser(R"(
 		S    <- T ('hello')
 		T(a) <- a [ \t]*
@@ -920,7 +920,7 @@ TEST(MacroText, Macro_reference_syntax_error) {
   EXPECT_FALSE(ret);
 }
 
-TEST(MacroText, Macro_invalid_macro_reference_error) {
+TEST(MacroTest, Macro_invalid_macro_reference_error) {
   parser parser(R"(
 		S <- T('hello')
 		T <- 'world'
@@ -930,7 +930,7 @@ TEST(MacroText, Macro_invalid_macro_reference_error) {
   EXPECT_FALSE(ret);
 }
 
-TEST(MacroText, Macro_calculator) {
+TEST(MacroTest, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(
         # Grammar for simple calculator...
@@ -984,7 +984,7 @@ TEST(MacroText, Macro_calculator) {
   EXPECT_EQ(-3, val);
 }
 
-TEST(MacroText, Macro_expression_arguments) {
+TEST(MacroTest, Macro_expression_arguments) {
   parser parser(R"(
 		S             <- M('hello' / 'Hello', 'world' / 'World')
 		M(arg0, arg1) <- arg0 [ \t]+ arg1
@@ -993,7 +993,7 @@ TEST(MacroText, Macro_expression_arguments) {
   EXPECT_TRUE(parser.parse("Hello world"));
 }
 
-TEST(MacroText, Macro_recursive) {
+TEST(MacroTest, Macro_recursive) {
   parser parser(R"(
 		S    <- M('abc')
 		M(s) <- !s / s ' ' M(s / '123') / s
@@ -1005,7 +1005,7 @@ TEST(MacroText, Macro_recursive) {
   EXPECT_TRUE(parser.parse("abc 123 abc"));
 }
 
-TEST(MacroText, Macro_recursive2) {
+TEST(MacroTest, Macro_recursive2) {
   auto syntaxes = std::vector<const char *>{
       "S <- M('abc') M(s) <- !s / s ' ' M(s* '-' '123') / s",
       "S <- M('abc') M(s) <- !s / s ' ' M(s+ '-' '123') / s",
@@ -1022,7 +1022,7 @@ TEST(MacroText, Macro_recursive2) {
   }
 }
 
-TEST(MacroText, Macro_exclusive_modifiers) {
+TEST(MacroTest, Macro_exclusive_modifiers) {
   parser parser(R"(
 		S                   <- Modifiers(!"") _
 		Modifiers(Appeared) <- (!Appeared) (
@@ -1042,7 +1042,7 @@ TEST(MacroText, Macro_exclusive_modifiers) {
   EXPECT_FALSE(parser.parse("public static public"));
 }
 
-TEST(MacroText, Macro_token_check_test) {
+TEST(MacroTest, Macro_token_check_test) {
   parser parser(R"(
         # Grammar for simple calculator...
         EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
@@ -1066,7 +1066,7 @@ TEST(MacroText, Macro_token_check_test) {
   EXPECT_TRUE(parser["T"].is_token());
 }
 
-TEST(MacroText, Macro_passes_an_arg_to_another_macro) {
+TEST(MacroTest, Macro_passes_an_arg_to_another_macro) {
   parser parser(R"(
         A    <- B(C)
         B(D) <- D
@@ -1076,7 +1076,7 @@ TEST(MacroText, Macro_passes_an_arg_to_another_macro) {
   EXPECT_TRUE(parser.parse("c"));
 }
 
-TEST(MacroText, Unreferenced_rule) {
+TEST(MacroTest, Unreferenced_rule) {
   parser parser(R"(
         A    <- B(C)
         B(D) <- D
@@ -1088,7 +1088,7 @@ TEST(MacroText, Unreferenced_rule) {
   EXPECT_TRUE(ret); // This is OK, because it's a warning, not an erro...
 }
 
-TEST(MacroText, Nested_macro_call) {
+TEST(MacroTest, Nested_macro_call) {
   parser parser(R"(
         A    <- B(T)
         B(X) <- C(X)
@@ -1099,7 +1099,7 @@ TEST(MacroText, Nested_macro_call) {
   EXPECT_TRUE(parser.parse("val"));
 }
 
-TEST(MacroText, Nested_macro_call2) {
+TEST(MacroTest, Nested_macro_call2) {
   parser parser(R"(
         START           <- A('TestVal1', 'TestVal2')+
         A(Aarg1, Aarg2) <- B(Aarg1) '#End'
@@ -1157,7 +1157,7 @@ TEST(LineInformationTest, Line_information_test) {
   }
 }
 
-TEST(DicText, Dictionary) {
+TEST(DicTest, Dictionary) {
   parser parser(R"(
         START <- 'This month is ' MONTH '.'
         MONTH <- 'Jan' | 'January' | 'Feb' | 'February'
@@ -1169,7 +1169,7 @@ TEST(DicText, Dictionary) {
   EXPECT_FALSE(parser.parse("This month is ."));
 }
 
-TEST(DicText, Dictionary_invalid) {
+TEST(DicTest, Dictionary_invalid) {
   parser parser(R"(
         START <- 'This month is ' MONTH '.'
         MONTH <- 'Jan' | 'January' | [a-z]+ | 'Feb' | 'February'
@@ -1179,7 +1179,57 @@ TEST(DicText, Dictionary_invalid) {
   EXPECT_FALSE(ret);
 }
 
-TEST(ErrorText, Error_recovery_1) {
+TEST(ErrorTest, Default_error_handling_1) {
+  parser pg(R"(
+    S <- '@' A B
+    A <- < [a-z]+ >
+    B <- 'hello' | 'world'
+    %whitespace <- [ ]*
+    %word       <- [a-z]
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  std::vector<std::string> errors{
+      R"(1:8: syntax error, unexpected 'typo', expecting <B>.)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    EXPECT_EQ(errors[i++], ss.str());
+  };
+
+  EXPECT_FALSE(pg.parse(" @ aaa typo "));
+}
+
+TEST(ErrorTest, Default_error_handling_2) {
+  parser pg(R"(
+    S <- '@' A B
+    A <- < [a-z]+ >
+    B <- 'hello' / 'world'
+    %whitespace <- ' '*
+    %word       <- [a-z]
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  std::vector<std::string> errors{
+      R"(1:8: syntax error, unexpected 'typo', expecting 'hello', 'world'.)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    EXPECT_EQ(errors[i++], ss.str());
+  };
+
+  EXPECT_FALSE(pg.parse(" @ aaa typo "));
+}
+
+TEST(ErrorTest, Error_recovery_1) {
   parser pg(R"(
 START      <- __? SECTION*
 
@@ -1304,7 +1354,7 @@ rrr | sss
 )", ast_to_s(ast));
 }
 
-TEST(ErrorText, Error_recovery_2) {
+TEST(ErrorTest, Error_recovery_2) {
   parser pg(R"(
     START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover(.*))
     ENTRY <- '[' ITEM (',' ITEM)* ']'
@@ -1312,20 +1362,20 @@ TEST(ErrorText, Error_recovery_2) {
     NUM   <- [0-9]+ ![a-z]
     WORD  <- '"' [a-z]+ '"'
 
-    ~_    <- Space+
+    ~_    <- Space*
     Space <- [ \n]
   )");
 
   EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-      R"(1:6: syntax error, unexpected ']'.)",
+      R"(1:6: syntax error, unexpected ']', expecting ','.)",
       R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
-      R"(1:24: syntax error, unexpected ',', expecting <WORD>.)",
-      R"(1:31: syntax error, unexpected 'ccc', expecting <NUM>.)",
-      R"(1:38: syntax error, unexpected 'ddd', expecting <NUM>.)",
-      R"(1:55: syntax error, unexpected ']', expecting <WORD>.)",
-      R"(1:58: syntax error, unexpected '\n', expecting <NUM>.)",
+      R"(1:24: syntax error, unexpected ',', expecting '"'.)",
+      R"(1:31: syntax error, unexpected 'ccc', expecting '"', <NUM>.)",
+      R"(1:38: syntax error, unexpected 'ddd', expecting '"', <NUM>.)",
+      R"(1:55: syntax error, unexpected ']', expecting '"'.)",
+      R"(1:58: syntax error, unexpected '\n', expecting '"', <NUM>.)",
       R"(2:3: syntax error.)",
   };
 
@@ -1363,7 +1413,8 @@ TEST(ErrorText, Error_recovery_2) {
             ast_to_s(ast));
 }
 
-TEST(ErrorText, Error_recovery_3) {
+
+TEST(ErrorTest, Error_recovery_3) {
   parser pg(R"~(
 # Grammar
 START      <- __? SECTION*
@@ -1574,7 +1625,7 @@ sss | ttt
 )", ast_to_s(ast));
 }
 
-TEST(ErrorText, Error_recovery_Java) {
+TEST(ErrorTest, Error_recovery_Java) {
   parser pg(R"(
 Prog       ← PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR
 BlockStmt  ← LCUR (Stmt)* RCUR^rcblk
