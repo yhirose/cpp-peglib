@@ -1,7 +1,7 @@
 //
 //  peglint.cc
 //
-//  Copyright (c) 2021 Yuji Hirose. All rights reserved.
+//  Copyright (c) 2022 Yuji Hirose. All rights reserved.
 //  MIT License
 //
 
@@ -41,6 +41,7 @@ int main(int argc, const char **argv) {
   auto opt_source = false;
   vector<char> source;
   auto opt_trace = false;
+  auto opt_verbose = false;
   vector<const char *> path_list;
 
   auto argi = 1;
@@ -66,6 +67,9 @@ int main(int argc, const char **argv) {
       }
     } else if (string("--trace") == arg) {
       opt_trace = true;
+    } else if (string("--trace-verbose") == arg) {
+      opt_trace = true;
+      opt_verbose = true;
     } else {
       path_list.push_back(arg);
     }
@@ -81,6 +85,7 @@ int main(int argc, const char **argv) {
     --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show trace messages
+    --trace-verbose: show verbose trace messages
 )";
 
     return 1;
@@ -176,7 +181,7 @@ int main(int argc, const char **argv) {
           }
           std::cout << "L " << pos << "\t" << indent << ret << name << " #"
                     << c.trace_ids.back() << choice.str() << token << matched << std::endl;
-        });
+        }, opt_verbose);
   }
 
   if (opt_ast) {

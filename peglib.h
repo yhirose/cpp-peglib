@@ -837,18 +837,20 @@ public:
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
+  const bool tracer_verbose;
 
   Log log;
 
   Context(const char *path, const char *s, size_t l, size_t def_count,
           std::shared_ptr<Ope> whitespaceOpe, std::shared_ptr<Ope> wordOpe,
           bool enablePackratParsing, TracerEnter tracer_enter,
-          TracerLeave tracer_leave, Log log)
+          TracerLeave tracer_leave, bool tracer_verbose, Log log)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
         def_count(def_count), enablePackratParsing(enablePackratParsing),
         cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
         cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
-        tracer_enter(tracer_enter), tracer_leave(tracer_leave), log(log) {
+        tracer_enter(tracer_enter), tracer_leave(tracer_leave),
+        tracer_verbose(tracer_verbose), log(log) {
 
     args_stack.resize(1);
 
@@ -953,16 +955,15 @@ public:
 
   void set_error_pos(const char *a_s, const char *literal = nullptr);
 
-  // void trace_enter(const char *name, const char *a_s, size_t n,
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
                    SemanticValues &vs, std::any &dt) const;
-  // void trace_leave(const char *name, const char *a_s, size_t n,
   void trace_leave(const Ope &ope, const char *a_s, size_t n,
                    SemanticValues &vs, std::any &dt, size_t len) const;
   bool is_traceable(const Ope &ope) const;
 
   mutable size_t next_trace_id = 0;
   mutable std::vector<size_t> trace_ids;
+  bool ignore_trace_state = false;
 };
 
 /*
@@ -1742,17 +1743,40 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
-struct IsReference : public Ope::Visitor {
-  void visit(Reference &) override { is_reference_ = true; }
+template <typename T>
+struct OpeType : public Ope::Visitor {
+  void visit(Sequence &) override { ret_ = std::is_same<Sequence, T>::value; }
+  void visit(PrioritizedChoice &) override { ret_ = std::is_same<PrioritizedChoice, T>::value; }
+  void visit(Repetition &) override { ret_ = std::is_same<Repetition, T>::value; }
+  void visit(AndPredicate &) override { ret_ = std::is_same<AndPredicate, T>::value; }
+  void visit(NotPredicate &) override { ret_ = std::is_same<NotPredicate, T>::value; }
+  void visit(Dictionary &) override { ret_ = std::is_same<Dictionary, T>::value; }
+  void visit(LiteralString &) override { ret_ = std::is_same<LiteralString, T>::value; }
+  void visit(CharacterClass &) override { ret_ = std::is_same<CharacterClass, T>::value; }
+  void visit(Character &) override { ret_ = std::is_same<Character, T>::value; }
+  void visit(AnyCharacter &) override { ret_ = std::is_same<AnyCharacter, T>::value; }
+  void visit(CaptureScope &) override { ret_ = std::is_same<CaptureScope, T>::value; }
+  void visit(Capture &) override { ret_ = std::is_same<Capture, T>::value; }
+  void visit(TokenBoundary &) override { ret_ = std::is_same<TokenBoundary, T>::value; }
+  void visit(Ignore &) override { ret_ = std::is_same<Ignore, T>::value; }
+  void visit(User &) override { ret_ = std::is_same<User, T>::value; }
+  void visit(WeakHolder &) override { ret_ = std::is_same<WeakHolder, T>::value; }
+  void visit(Holder &) override { ret_ = std::is_same<Holder, T>::value; }
+  void visit(Reference &) override { ret_ = std::is_same<Reference, T>::value; }
+  void visit(Whitespace &) override { ret_ = std::is_same<Whitespace, T>::value; }
+  void visit(BackReference &) override { ret_ = std::is_same<BackReference, T>::value; }
+  void visit(PrecedenceClimbing &) override { ret_ = std::is_same<PrecedenceClimbing, T>::value; }
+  void visit(Recovery &) override { ret_ = std::is_same<Recovery, T>::value; }
+  void visit(Cut &) override { ret_ = std::is_same<Cut, T>::value; }
 
-  static bool check(Ope &ope) {
-    IsReference vis;
-    ope.accept(vis);
-    return vis.is_reference_;
+  static bool check(const Ope &ope) {
+    OpeType vis;
+    const_cast<Ope &>(ope).accept(vis);
+    return vis.ret_;
   }
 
 private:
-  bool is_reference_ = false;
+  bool ret_ = false;
 };
 
 struct TraceOpeName : public Ope::Visitor {
@@ -2378,6 +2402,7 @@ public:
   std::vector<std::string> params;
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
+  bool tracer_verbose = false;
   bool disable_action = false;
 
   std::string error_message;
@@ -2405,13 +2430,28 @@ private:
     initialize_definition_ids();
 
     std::shared_ptr<Ope> ope = holder_;
-    if (whitespaceOpe) { ope = std::make_shared<Sequence>(whitespaceOpe, ope); }
 
-    Context cxt(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
-                enablePackratParsing, tracer_enter, tracer_leave, log);
+    Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
+              enablePackratParsing, tracer_enter, tracer_leave, tracer_verbose,
+              log);
 
-    auto len = ope->parse(s, n, vs, cxt, dt);
-    return Result{success(len), cxt.recovered, len, cxt.error_info};
+    size_t i = 0;
+
+    if (whitespaceOpe) {
+      auto save_ignore_trace_state = c.ignore_trace_state;
+      c.ignore_trace_state = !c.tracer_verbose;
+      auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
+      auto len = whitespaceOpe->parse(s, n, vs, c, dt);
+      if (fail(len)) {
+        return Result{success(len), c.recovered, len, c.error_info};
+      }
+
+      i = len;
+    }
+
+    auto len = ope->parse(s + i, n - i, vs, c, dt);
+    return Result{success(i + len), c.recovered, i + len, c.error_info};
   }
 
   std::shared_ptr<Holder> holder_;
@@ -2441,10 +2481,14 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
   // Word check
   if (c.wordOpe) {
+    auto save_ignore_trace_state = c.ignore_trace_state;
+    c.ignore_trace_state = !c.tracer_verbose;
+    auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
     std::call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
       Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, nullptr);
+                      nullptr, false, nullptr);
       std::any dummy_dt;
 
       auto len =
@@ -2455,7 +2499,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     if (is_word) {
       SemanticValues dummy_vs;
       Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, nullptr);
+                      nullptr, false, nullptr);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -2468,6 +2512,10 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   // Skip whiltespace
   if (!c.in_token_boundary_count) {
     if (c.whitespaceOpe) {
+      auto save_ignore_trace_state = c.ignore_trace_state;
+      c.ignore_trace_state = !c.tracer_verbose;
+      auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
       auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
       if (fail(len)) { return len; }
       i += len;
@@ -2513,6 +2561,7 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
 
 inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
                                  SemanticValues &vs, std::any &dt) const {
+  if (ignore_trace_state || peg::OpeType<peg::Ignore>::check(ope)) { return; }
   trace_ids.push_back(next_trace_id++);
   tracer_enter(ope, a_s, n, vs, *this, dt);
 }
@@ -2520,13 +2569,14 @@ inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
 inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
                                  SemanticValues &vs, std::any &dt,
                                  size_t len) const {
+  if (ignore_trace_state || peg::OpeType<peg::Ignore>::check(ope)) { return; }
   tracer_leave(ope, a_s, n, vs, *this, dt, len);
   trace_ids.pop_back();
 }
 
 inline bool Context::is_traceable(const Ope &ope) const {
   if (tracer_enter && tracer_leave) {
-    return !IsReference::check(const_cast<Ope &>(ope));
+    return !OpeType<Reference>::check(ope);
   }
   return false;
 }
@@ -2561,6 +2611,10 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
+  auto save_ignore_trace_state = c.ignore_trace_state;
+  c.ignore_trace_state = !c.tracer_verbose;
+  auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
   size_t len;
   {
     c.in_token_boundary_count++;
@@ -4296,11 +4350,12 @@ public:
     }
   }
 
-  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
+  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave, bool tracer_verbose = false) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.tracer_enter = tracer_enter;
       rule.tracer_leave = tracer_leave;
+      rule.tracer_verbose = tracer_verbose;
     }
   }
 
