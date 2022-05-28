@@ -324,9 +324,7 @@ TEST(GeneralTest, WHITESPACE_test4) {
     EXPECT_EQ("hello", vs.token());
   };
 
-  parser["OPE"] = [](const SemanticValues &vs) {
-    EXPECT_EQ("+", vs.token());
-  };
+  parser["OPE"] = [](const SemanticValues &vs) { EXPECT_EQ("+", vs.token()); };
 
   parser["WORLD"] = [](const SemanticValues &vs) {
     EXPECT_EQ("world", vs.token());
@@ -355,9 +353,7 @@ TEST(GeneralTest, Skip_token_test) {
                 "  ITEM  <-  ([a-z0-9])+  "
                 "  ~_    <-  [ \t]*    ");
 
-  parser["ROOT"] = [&](const SemanticValues &vs) {
-    EXPECT_EQ(2, vs.size());
-  };
+  parser["ROOT"] = [&](const SemanticValues &vs) { EXPECT_EQ(2, vs.size()); };
 
   auto ret = parser.parse(" item1, item2 ");
 
@@ -371,9 +367,7 @@ TEST(GeneralTest, Skip_token_test2) {
         %whitespace <-  [ \t]*
     )");
 
-  parser["ROOT"] = [&](const SemanticValues &vs) {
-    EXPECT_EQ(2, vs.size());
-  };
+  parser["ROOT"] = [&](const SemanticValues &vs) { EXPECT_EQ(2, vs.size()); };
 
   auto ret = parser.parse(" item1, item2 ");
 
@@ -968,17 +962,17 @@ TEST(GeneralTest, token_to_number_float_test) {
 }
 
 TEST(GeneralTest, ParentReferencesShouldNotBeExpired) {
-	auto parser = peg::parser(R"(
+  auto parser = peg::parser(R"(
 		ROOT            <- OPTIMIZES_AWAY
 		OPTIMIZES_AWAY  <- ITEM+
 		ITEM            <- 'a'
 	)");
-	parser.enable_ast<peg::Ast>();
+  parser.enable_ast<peg::Ast>();
 
-	std::shared_ptr<peg::Ast> ast;
-	parser.parse("aaa", ast);
-	ast = parser.optimize_ast(ast);
+  std::shared_ptr<peg::Ast> ast;
+  parser.parse("aaa", ast);
+  ast = parser.optimize_ast(ast);
 
-	EXPECT_FALSE(ast->nodes[0]->parent.expired());
+  EXPECT_FALSE(ast->nodes[0]->parent.expired());
 }
 

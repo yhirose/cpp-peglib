@@ -1278,7 +1278,7 @@ TEST(ErrorTest, Default_error_handling_fiblang) {
   EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-    R"(4:7: syntax error, unexpected 'frm', expecting 'from'.)",
+      R"(4:7: syntax error, unexpected 'frm', expecting 'from'.)",
   };
 
   size_t i = 0;
@@ -1418,7 +1418,8 @@ rrr | sss
       + ENTRY/1
         - PHRASE/0[WORD] (rrr)
         - PHRASE/0[WORD] (sss)
-)", ast_to_s(ast));
+)",
+            ast_to_s(ast));
 }
 
 TEST(ErrorTest, Error_recovery_2) {
@@ -1479,7 +1480,6 @@ TEST(ErrorTest, Error_recovery_2) {
 )",
             ast_to_s(ast));
 }
-
 
 TEST(ErrorTest, Error_recovery_3) {
   parser pg(R"~(
@@ -1689,7 +1689,8 @@ sss | ttt
           - WORD (sss)
         + PHRASE
           - WORD (ttt)
-)", ast_to_s(ast));
+)",
+            ast_to_s(ast));
 }
 
 TEST(ErrorTest, Error_recovery_Java) {

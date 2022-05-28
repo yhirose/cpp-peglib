@@ -1745,29 +1745,56 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
-template <typename T>
-struct OpeType : public Ope::Visitor {
+template <typename T> struct OpeType : public Ope::Visitor {
   void visit(Sequence &) override { ret_ = std::is_same<Sequence, T>::value; }
-  void visit(PrioritizedChoice &) override { ret_ = std::is_same<PrioritizedChoice, T>::value; }
-  void visit(Repetition &) override { ret_ = std::is_same<Repetition, T>::value; }
-  void visit(AndPredicate &) override { ret_ = std::is_same<AndPredicate, T>::value; }
-  void visit(NotPredicate &) override { ret_ = std::is_same<NotPredicate, T>::value; }
-  void visit(Dictionary &) override { ret_ = std::is_same<Dictionary, T>::value; }
-  void visit(LiteralString &) override { ret_ = std::is_same<LiteralString, T>::value; }
-  void visit(CharacterClass &) override { ret_ = std::is_same<CharacterClass, T>::value; }
+  void visit(PrioritizedChoice &) override {
+    ret_ = std::is_same<PrioritizedChoice, T>::value;
+  }
+  void visit(Repetition &) override {
+    ret_ = std::is_same<Repetition, T>::value;
+  }
+  void visit(AndPredicate &) override {
+    ret_ = std::is_same<AndPredicate, T>::value;
+  }
+  void visit(NotPredicate &) override {
+    ret_ = std::is_same<NotPredicate, T>::value;
+  }
+  void visit(Dictionary &) override {
+    ret_ = std::is_same<Dictionary, T>::value;
+  }
+  void visit(LiteralString &) override {
+    ret_ = std::is_same<LiteralString, T>::value;
+  }
+  void visit(CharacterClass &) override {
+    ret_ = std::is_same<CharacterClass, T>::value;
+  }
   void visit(Character &) override { ret_ = std::is_same<Character, T>::value; }
-  void visit(AnyCharacter &) override { ret_ = std::is_same<AnyCharacter, T>::value; }
-  void visit(CaptureScope &) override { ret_ = std::is_same<CaptureScope, T>::value; }
+  void visit(AnyCharacter &) override {
+    ret_ = std::is_same<AnyCharacter, T>::value;
+  }
+  void visit(CaptureScope &) override {
+    ret_ = std::is_same<CaptureScope, T>::value;
+  }
   void visit(Capture &) override { ret_ = std::is_same<Capture, T>::value; }
-  void visit(TokenBoundary &) override { ret_ = std::is_same<TokenBoundary, T>::value; }
+  void visit(TokenBoundary &) override {
+    ret_ = std::is_same<TokenBoundary, T>::value;
+  }
   void visit(Ignore &) override { ret_ = std::is_same<Ignore, T>::value; }
   void visit(User &) override { ret_ = std::is_same<User, T>::value; }
-  void visit(WeakHolder &) override { ret_ = std::is_same<WeakHolder, T>::value; }
+  void visit(WeakHolder &) override {
+    ret_ = std::is_same<WeakHolder, T>::value;
+  }
   void visit(Holder &) override { ret_ = std::is_same<Holder, T>::value; }
   void visit(Reference &) override { ret_ = std::is_same<Reference, T>::value; }
-  void visit(Whitespace &) override { ret_ = std::is_same<Whitespace, T>::value; }
-  void visit(BackReference &) override { ret_ = std::is_same<BackReference, T>::value; }
-  void visit(PrecedenceClimbing &) override { ret_ = std::is_same<PrecedenceClimbing, T>::value; }
+  void visit(Whitespace &) override {
+    ret_ = std::is_same<Whitespace, T>::value;
+  }
+  void visit(BackReference &) override {
+    ret_ = std::is_same<BackReference, T>::value;
+  }
+  void visit(PrecedenceClimbing &) override {
+    ret_ = std::is_same<PrecedenceClimbing, T>::value;
+  }
   void visit(Recovery &) override { ret_ = std::is_same<Recovery, T>::value; }
   void visit(Cut &) override { ret_ = std::is_same<Cut, T>::value; }
 
@@ -2442,7 +2469,8 @@ private:
     if (whitespaceOpe) {
       auto save_ignore_trace_state = c.ignore_trace_state;
       c.ignore_trace_state = !c.tracer_verbose;
-      auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+      auto se =
+          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
       auto len = whitespaceOpe->parse(s, n, vs, c, dt);
       if (fail(len)) {
@@ -2485,7 +2513,8 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   if (c.wordOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
     c.ignore_trace_state = !c.tracer_verbose;
-    auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    auto se =
+        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
     std::call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
@@ -2516,7 +2545,8 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     if (c.whitespaceOpe) {
       auto save_ignore_trace_state = c.ignore_trace_state;
       c.ignore_trace_state = !c.tracer_verbose;
-      auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+      auto se =
+          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
       auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
       if (fail(len)) { return len; }
@@ -2614,7 +2644,8 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         std::any &dt) const {
   auto save_ignore_trace_state = c.ignore_trace_state;
   c.ignore_trace_state = !c.tracer_verbose;
-  auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+  auto se =
+      scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
   size_t len;
   {
@@ -2725,7 +2756,8 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
   if (rule_ && rule_->ignoreSemanticValue) {
     c.ignore_trace_state = !c.tracer_verbose;
   }
-  auto se = scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+  auto se =
+      scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
   if (rule_) {
     // Reference rule
@@ -3212,7 +3244,8 @@ private:
 
     // NOTE: This is different from The original Brian Ford's paper, and this
     // modification allows us to specify `[+-]` as a valid char class.
-    g["Range"] <= cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
+    g["Range"] <=
+        cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
 
     g["Char"] <=
         cho(seq(chr('\\'), cls("fnrtv'\"[]\\^")),
@@ -3335,14 +3368,10 @@ private:
       if (is_macro) {
         params = std::any_cast<std::vector<std::string>>(vs[2]);
         ope = std::any_cast<std::shared_ptr<Ope>>(vs[4]);
-        if (vs.size() == 6) {
-          has_instructions = true;
-        }
+        if (vs.size() == 6) { has_instructions = true; }
       } else {
         ope = std::any_cast<std::shared_ptr<Ope>>(vs[3]);
-        if (vs.size() == 5) {
-          has_instructions = true;
-        }
+        if (vs.size() == 5) { has_instructions = true; }
       }
 
       if (has_instructions) {
@@ -3355,8 +3384,10 @@ private:
             data.instructions[name].push_back(instruction);
             types.insert(instruction.type);
           } else {
-            // data.duplicates_of_instruction.emplace_back(type, vs.sv().data());
-            data.duplicates_of_instruction.emplace_back(type, instruction.sv.data());
+            // data.duplicates_of_instruction.emplace_back(type,
+            // vs.sv().data());
+            data.duplicates_of_instruction.emplace_back(type,
+                                                        instruction.sv.data());
           }
         }
       }
@@ -3668,7 +3699,7 @@ private:
       return instruction;
     };
 
-    g["NoAstOpt"] = [](const SemanticValues & vs) {
+    g["NoAstOpt"] = [](const SemanticValues &vs) {
       Instruction instruction;
       instruction.type = "no_ast_opt";
       instruction.sv = vs.sv();
@@ -3778,7 +3809,8 @@ private:
       for (const auto &[name, ptr] : data.duplicates_of_definition) {
         if (log) {
           auto line = line_info(s, ptr);
-          log(line.first, line.second, "The definition '" + name + "' is already defined.");
+          log(line.first, line.second,
+              "The definition '" + name + "' is already defined.");
         }
       }
       ret = false;
@@ -3789,7 +3821,8 @@ private:
       for (const auto &[type, ptr] : data.duplicates_of_instruction) {
         if (log) {
           auto line = line_info(s, ptr);
-          log(line.first, line.second, "The instruction '" + type + "' is already defined.");
+          log(line.first, line.second,
+              "The instruction '" + type + "' is already defined.");
         }
       }
       ret = false;
@@ -3871,9 +3904,7 @@ private:
     if (!ret) { return nullptr; }
 
     // Check infinite loop
-    if (detect_infiniteLoop(data, start_rule, log, s)) {
-      return nullptr;
-    }
+    if (detect_infiniteLoop(data, start_rule, log, s)) { return nullptr; }
 
     // Automatic whitespace skipping
     if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
@@ -3886,9 +3917,7 @@ private:
       auto &rule = grammar[WHITESPACE_DEFINITION_NAME];
       start_rule.whitespaceOpe = wsp(rule.get_core_operator());
 
-      if (detect_infiniteLoop(data, rule, log, s)) {
-        return nullptr;
-      }
+      if (detect_infiniteLoop(data, rule, log, s)) { return nullptr; }
     }
 
     // Word expression
@@ -3896,16 +3925,14 @@ private:
       auto &rule = grammar[WORD_DEFINITION_NAME];
       start_rule.wordOpe = rule.get_core_operator();
 
-      if (detect_infiniteLoop(data, rule, log, s)) {
-        return nullptr;
-      }
+      if (detect_infiniteLoop(data, rule, log, s)) { return nullptr; }
     }
 
     // Apply instructions
     for (const auto &[name, instructions] : data.instructions) {
       auto &rule = grammar[name];
 
-      for (const auto& instruction: instructions) {
+      for (const auto &instruction : instructions) {
         if (instruction.type == "precedence") {
           const auto &info =
               std::any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
@@ -3928,7 +3955,8 @@ private:
     return data.grammar;
   }
 
-  bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log, const char *s) const {
+  bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log,
+                           const char *s) const {
     DetectInfiniteLoop vis(data.start_pos, rule.name);
     rule.accept(vis);
     if (vis.has_error) {
@@ -4357,7 +4385,8 @@ public:
     }
   }
 
-  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave, bool tracer_verbose = false) {
+  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave,
+                    bool tracer_verbose = false) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.tracer_enter = tracer_enter;

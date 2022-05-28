@@ -124,9 +124,7 @@ int main(int argc, const char **argv) {
     cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
   };
 
-  if (opt_packrat) {
-    parser.enable_packrat_parsing();
-  }
+  if (opt_packrat) { parser.enable_packrat_parsing(); }
 
   if (opt_trace) {
     size_t prev_pos = 0;
@@ -180,8 +178,10 @@ int main(int argc, const char **argv) {
             matched = ", match '" + peg::escape_characters(s, len) + "'";
           }
           std::cout << "L " << pos << "\t" << indent << ret << name << " #"
-                    << c.trace_ids.back() << choice.str() << token << matched << std::endl;
-        }, opt_verbose);
+                    << c.trace_ids.back() << choice.str() << token << matched
+                    << std::endl;
+        },
+        opt_verbose);
   }
 
   if (opt_ast) {
@@ -191,9 +191,7 @@ int main(int argc, const char **argv) {
     auto ret = parser.parse_n(source.data(), source.size(), ast);
 
     if (ast) {
-      if (opt_optimize) {
-        ast = parser.optimize_ast(ast, opt_mode);
-      }
+      if (opt_optimize) { ast = parser.optimize_ast(ast, opt_mode); }
       std::cout << peg::ast_to_s(ast);
     }
 

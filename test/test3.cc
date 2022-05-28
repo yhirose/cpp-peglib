@@ -152,8 +152,9 @@ TEST(LeftRecursiveTest, PEG_Literal) {
 
 TEST(LeftRecursiveTest, PEG_Class) {
   auto g = ParserGenerator::grammar();
-  EXPECT_FALSE(exact(g, "Class", "[]")); // NOTE: This is different from the Brian Ford's paper, but
-                  // same as RegExp
+  EXPECT_FALSE(
+      exact(g, "Class", "[]")); // NOTE: This is different from the Brian Ford's
+                                // paper, but same as RegExp
   EXPECT_TRUE(exact(g, "Class", "[a]"));
   EXPECT_TRUE(exact(g, "Class", "[a-z]"));
   EXPECT_TRUE(exact(g, "Class", "[az]"));
