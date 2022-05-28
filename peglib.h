@@ -662,6 +662,7 @@ struct ErrorInfo {
   const char *message_pos = nullptr;
   std::string message;
   mutable const char *last_output_pos = nullptr;
+  bool keep_previous_token = false;
 
   void clear() {
     error_pos = nullptr;
@@ -1047,9 +1048,11 @@ public:
       auto &chldsv = c.push();
       c.push_capture_scope();
 
+      c.error_info.keep_previous_token = id > 0;
       auto se = scope_exit([&]() {
         c.pop();
         c.pop_capture_scope();
+        c.error_info.keep_previous_token = false;
       });
 
       len = ope->parse(s, n, chldsv, c, dt);
@@ -1123,7 +1126,7 @@ public:
       auto se = scope_exit([&]() { c.pop_capture_scope(); });
       auto save_sv_size = vs.size();
       auto save_tok_size = vs.tokens.size();
-      auto save_error_info = c.error_info;
+
       const auto &rule = *ope_;
       auto len = rule.parse(s + i, n - i, vs, c, dt);
       if (success(len)) {
@@ -1138,7 +1141,6 @@ public:
           vs.tokens.erase(vs.tokens.begin() +
                           static_cast<std::ptrdiff_t>(save_tok_size));
         }
-        c.error_info = save_error_info;
         break;
       }
       i += len;
@@ -2539,7 +2541,7 @@ inline const std::vector<size_t> &SemanticValues::source_line_index() const {
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
   if (log) {
     if (error_info.error_pos <= a_s) {
-      if (error_info.error_pos < a_s) {
+      if (error_info.error_pos < a_s || !error_info.keep_previous_token) {
         error_info.error_pos = a_s;
         error_info.expected_tokens.clear();
       }

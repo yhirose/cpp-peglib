@@ -1248,6 +1248,54 @@ TEST(ErrorTest, Default_error_handling_2) {
   EXPECT_FALSE(pg.parse(" @ aaa typo "));
 }
 
+TEST(ErrorTest, Default_error_handling_fiblang) {
+  parser pg(R"(
+    # Syntax
+    START             ← STATEMENTS
+    STATEMENTS        ← (DEFINITION / EXPRESSION)*
+    DEFINITION        ← 'def' ↑ Identifier '(' Identifier ')' EXPRESSION
+    EXPRESSION        ← TERNARY
+    TERNARY           ← CONDITION ('?' EXPRESSION (':' / %recover(col)) EXPRESSION)?
+    CONDITION         ← INFIX (ConditionOperator INFIX)?
+    INFIX             ← CALL (InfixOperator CALL)*
+    CALL              ← PRIMARY ('(' EXPRESSION ')')?
+    PRIMARY           ← FOR / Identifier / '(' ↑ EXPRESSION ')' / Number
+    FOR               ← 'for' ↑ Identifier 'from' Number 'to' Number EXPRESSION
+
+    # Token
+    ConditionOperator ← '<'
+    InfixOperator     ← '+' / '-'
+    Identifier        ← !Keyword < [a-zA-Z][a-zA-Z0-9_]* >
+    Number            ← < [0-9]+ >
+    Keyword           ← 'def' / 'for' / 'from' / 'to'
+
+    %whitespace       ← [ \t\r\n]*
+    %word             ← [a-zA-Z]
+
+    col ← '' { message "missing colon." }
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  std::vector<std::string> errors{
+    R"(4:7: syntax error, unexpected 'frm', expecting 'from'.)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    EXPECT_EQ(errors[i++], ss.str());
+  };
+
+  EXPECT_FALSE(pg.parse(R"(def fib(x)
+  x < 2 ? 1 : fib(x - 2) + fib(x - 1)
+
+for n frm 1 to 30
+  puts(fib(n))
+  )"));
+}
+
 TEST(ErrorTest, Error_recovery_1) {
   parser pg(R"(
 START      <- __? SECTION*
@@ -1395,7 +1443,7 @@ TEST(ErrorTest, Error_recovery_2) {
       R"(1:38: syntax error, unexpected 'ddd', expecting '"', <NUM>.)",
       R"(1:55: syntax error, unexpected ']', expecting '"'.)",
       R"(1:58: syntax error, unexpected '\n', expecting '"', <NUM>.)",
-      R"(2:3: syntax error.)",
+      R"(2:3: syntax error, expecting ']'.)",
   };
 
   size_t i = 0;
