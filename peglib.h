@@ -2535,7 +2535,10 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
       NotPredicate ope(c.wordOpe);
       auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
-      if (fail(len)) { return len; }
+      if (fail(len)) {
+        c.set_error_pos(s, lit.data());
+        return len;
+      }
       i += len;
     }
   }
