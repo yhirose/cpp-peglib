@@ -1745,7 +1745,7 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
-template <typename T> struct OpeType : public Ope::Visitor {
+template <typename T> struct IsOpeType : public Ope::Visitor {
   void visit(Sequence &) override { ret_ = std::is_same<Sequence, T>::value; }
   void visit(PrioritizedChoice &) override {
     ret_ = std::is_same<PrioritizedChoice, T>::value;
@@ -1799,7 +1799,7 @@ template <typename T> struct OpeType : public Ope::Visitor {
   void visit(Cut &) override { ret_ = std::is_same<Cut, T>::value; }
 
   static bool check(const Ope &ope) {
-    OpeType vis;
+    IsOpeType vis;
     const_cast<Ope &>(ope).accept(vis);
     return vis.ret_;
   }
@@ -2274,19 +2274,6 @@ private:
   const std::vector<std::string> &params_;
 };
 
-struct IsPrioritizedChoice : public Ope::Visitor {
-  void visit(PrioritizedChoice &) override { result_ = true; }
-
-  static bool check(Ope &ope) {
-    IsPrioritizedChoice vis;
-    ope.accept(vis);
-    return vis.result_;
-  }
-
-private:
-  bool result_ = false;
-};
-
 /*
  * Keywords
  */
@@ -2610,7 +2597,7 @@ inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
 inline bool Context::is_traceable(const Ope &ope) const {
   if (tracer_enter && tracer_leave) {
     if (ignore_trace_state) { return false; }
-    return !OpeType<Reference>::check(ope);
+    return !IsOpeType<Reference>::check(ope);
   }
   return false;
 }
@@ -2707,7 +2694,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       chldsv.sv_ = std::string_view(s, len);
       chldsv.name_ = outer_->name;
 
-      if (!IsPrioritizedChoice::check(*ope_)) {
+      if (!IsOpeType<PrioritizedChoice>::check(*ope_)) {
         chldsv.choice_count_ = 0;
         chldsv.choice_ = 0;
       }
