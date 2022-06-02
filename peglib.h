@@ -2811,7 +2811,10 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
       return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false);
     }
   }
-  throw std::runtime_error("Invalid back reference...");
+
+  c.error_info.message_pos = s;
+  c.error_info.message = "undefined back reference '$" + name_ + "'...";
+  return static_cast<size_t>(-1);
 }
 
 inline Definition &
@@ -3176,10 +3179,16 @@ private:
     std::shared_ptr<Grammar> grammar;
     std::string start;
     const char *start_pos = nullptr;
+
     std::vector<std::pair<std::string, const char *>> duplicates_of_definition;
+
     std::vector<std::pair<std::string, const char *>> duplicates_of_instruction;
     std::map<std::string, std::vector<Instruction>> instructions;
-    std::set<std::string_view> captures;
+
+    std::vector<std::pair<std::string, const char *>> undefined_back_references;
+    std::vector<std::set<std::string_view>> captures_stack{{}};
+
+    std::set<std::string_view> captures_in_current_definition;
     bool enablePackratParsing = true;
 
     Data() : grammar(std::make_shared<Grammar>()) {}
@@ -3200,17 +3209,16 @@ private:
         seq(g["Suffix"], opt(seq(g["LABEL"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
-    g["Primary"] <=
-        cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
-                npd(g["LEFTARROW"])),
-            seq(g["Ignore"], g["Identifier"],
-                npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
-            seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-            seq(g["BeginTok"], g["Expression"], g["EndTok"]),
-            seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]),
-            seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
-            g["LiteralI"], g["Dictionary"], g["Literal"], g["NegatedClass"],
-            g["Class"], g["DOT"]);
+    g["Primary"] <= cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
+                            npd(g["LEFTARROW"])),
+                        seq(g["Ignore"], g["Identifier"],
+                            npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
+                        seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+                        seq(g["BeginTok"], g["Expression"], g["EndTok"]),
+                        g["CapScope"],
+                        seq(g["BeginCap"], g["Expression"], g["EndCap"]),
+                        g["BackRef"], g["LiteralI"], g["Dictionary"],
+                        g["Literal"], g["NegatedClass"], g["Class"], g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
     g["IdentCont"] <= seq(g["IdentStart"], zom(g["IdentRest"]));
@@ -3267,6 +3275,8 @@ private:
                                 seq(g["Number"], g["COMMA"]), g["Number"],
                                 seq(g["COMMA"], g["Number"]));
     g["Number"] <= seq(oom(cls("0-9")), g["Spacing"]);
+
+    g["CapScope"] <= seq(g["BeginCapScope"], g["Expression"], g["EndCapScope"]);
 
     g["LEFTARROW"] <= seq(cho(lit("<-"), lit(u8(u8"←"))), g["Spacing"]);
     ~g["SLASH"] <= seq(chr('/'), g["Spacing"]);
@@ -3416,7 +3426,7 @@ private:
 
     g["Definition"].enter = [](const char * /*s*/, size_t /*n*/, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
-      data.captures.clear();
+      data.captures_in_current_definition.clear();
     };
 
     g["Expression"] = [&](const SemanticValues &vs) {
@@ -3517,29 +3527,6 @@ private:
       }
     };
 
-    g["RepetitionRange"] = [&](const SemanticValues &vs) {
-      switch (vs.choice()) {
-      case 0: { // Number COMMA Number
-        auto min = std::any_cast<size_t>(vs[0]);
-        auto max = std::any_cast<size_t>(vs[1]);
-        return std::pair(min, max);
-      }
-      case 1: // Number COMMA
-        return std::pair(std::any_cast<size_t>(vs[0]),
-                         std::numeric_limits<size_t>::max());
-      case 2: { // Number
-        auto n = std::any_cast<size_t>(vs[0]);
-        return std::pair(n, n);
-      }
-      default: // COMMA Number
-        return std::pair(std::numeric_limits<size_t>::min(),
-                         std::any_cast<size_t>(vs[0]));
-      }
-    };
-    g["Number"] = [&](const SemanticValues &vs) {
-      return vs.token_to_number<size_t>();
-    };
-
     g["Primary"] = [&](const SemanticValues &vs, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
 
@@ -3577,7 +3564,8 @@ private:
         const auto &name = std::any_cast<std::string_view>(vs[0]);
         auto ope = std::any_cast<std::shared_ptr<Ope>>(vs[1]);
 
-        data.captures.insert(name);
+        data.captures_stack.back().insert(name);
+        data.captures_in_current_definition.insert(name);
 
         return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
           auto &cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
@@ -3641,6 +3629,40 @@ private:
       return resolve_escape_sequence(vs.sv().data(), vs.sv().length());
     };
 
+    g["RepetitionRange"] = [&](const SemanticValues &vs) {
+      switch (vs.choice()) {
+      case 0: { // Number COMMA Number
+        auto min = std::any_cast<size_t>(vs[0]);
+        auto max = std::any_cast<size_t>(vs[1]);
+        return std::pair(min, max);
+      }
+      case 1: // Number COMMA
+        return std::pair(std::any_cast<size_t>(vs[0]),
+                         std::numeric_limits<size_t>::max());
+      case 2: { // Number
+        auto n = std::any_cast<size_t>(vs[0]);
+        return std::pair(n, n);
+      }
+      default: // COMMA Number
+        return std::pair(std::numeric_limits<size_t>::min(),
+                         std::any_cast<size_t>(vs[0]));
+      }
+    };
+    g["Number"] = [&](const SemanticValues &vs) {
+      return vs.token_to_number<size_t>();
+    };
+
+    g["CapScope"].enter = [](const char * /*s*/, size_t /*n*/, std::any &dt) {
+      auto &data = *std::any_cast<Data *>(dt);
+      data.captures_stack.emplace_back();
+    };
+    g["CapScope"].leave = [](const char * /*s*/, size_t /*n*/,
+                             size_t /*matchlen*/, std::any & /*value*/,
+                             std::any &dt) {
+      auto &data = *std::any_cast<Data *>(dt);
+      data.captures_stack.pop_back();
+    };
+
     g["AND"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
     g["NOT"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
     g["QUESTION"] = [](const SemanticValues &vs) { return *vs.sv().data(); };
@@ -3655,9 +3677,31 @@ private:
 
     g["BackRef"] = [&](const SemanticValues &vs, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
-      if (data.captures.find(vs.token()) == data.captures.end()) {
+
+      // Undefined back reference check
+      {
+        auto found = false;
+        auto it = data.captures_stack.rbegin();
+        while (it != data.captures_stack.rend()) {
+          if (it->find(vs.token()) != it->end()) {
+            found = true;
+            break;
+          }
+          ++it;
+        }
+        if (!found) {
+          auto ptr = vs.token().data() - 1; // include '$' symbol
+          data.undefined_back_references.emplace_back(vs.token(), ptr);
+        }
+      }
+
+      // NOTE: Disable packrat parsing if a back reference is not defined in
+      // captures in the current definition rule.
+      if (data.captures_in_current_definition.find(vs.token()) ==
+          data.captures_in_current_definition.end()) {
         data.enablePackratParsing = false;
       }
+
       return bkr(vs.token_to_string());
     };
 
@@ -3826,6 +3870,18 @@ private:
           auto line = line_info(s, ptr);
           log(line.first, line.second,
               "The instruction '" + type + "' is already defined.");
+        }
+      }
+      ret = false;
+    }
+
+    // Check undefined back references
+    if (!data.undefined_back_references.empty()) {
+      for (const auto &[name, ptr] : data.undefined_back_references) {
+        if (log) {
+          auto line = line_info(s, ptr);
+          log(line.first, line.second,
+              "The back reference '" + name + "' is undefined.");
         }
       }
       ret = false;

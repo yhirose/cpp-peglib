@@ -569,6 +569,11 @@ TEST(BackreferenceTest, Backreference_test) {
   }
 }
 
+TEST(BackreferenceTest, Undefined_backreference_test) {
+  parser parser("S <- $bref");
+  EXPECT_FALSE(parser);
+}
+
 TEST(BackreferenceTest, Invalid_backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _
@@ -577,10 +582,10 @@ TEST(BackreferenceTest, Invalid_backreference_test) {
         ~_     <- [ \t\r\n]*
     )");
 
-  EXPECT_THROW(parser.parse(R"delm(
+  EXPECT_FALSE(parser);
+  EXPECT_FALSE(parser.parse(R"delm(
             R"foo("(hello world)")foo"
-        )delm"),
-               std::runtime_error);
+        )delm"));
 }
 
 TEST(BackreferenceTest, Nested_capture_test) {
@@ -595,6 +600,7 @@ TEST(BackreferenceTest, Nested_capture_test) {
         TEXT_DATA <- ![<] .
     )");
 
+  EXPECT_TRUE(!!parser);
   EXPECT_TRUE(parser.parse("This is <b>a <u>test</u> text</b>."));
   EXPECT_FALSE(parser.parse("This is <b>a <u>test</b> text</u>."));
   EXPECT_FALSE(parser.parse("This is <b>a <u>test text</b>."));
@@ -614,7 +620,8 @@ TEST(BackreferenceTest, Backreference_with_Prioritized_Choice_test) {
         CORRECT        <- 'correct'
     )");
 
-  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
+  EXPECT_TRUE(!!parser);
+  EXPECT_FALSE(parser.parse("branchthatiscorrect"));
 }
 
 TEST(BackreferenceTest, Backreference_with_Zero_or_More_test) {
@@ -630,15 +637,15 @@ TEST(BackreferenceTest, Backreference_with_Zero_or_More_test) {
         CORRECT        <- 'correct'
     )");
 
+  EXPECT_TRUE(!!parser);
   EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
   EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
   EXPECT_FALSE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
   EXPECT_TRUE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
-  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
-  EXPECT_THROW(parser.parse("branchthatiswron_branchthatiscorrect"),
-               std::runtime_error);
+  EXPECT_FALSE(parser.parse("branchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswron_branchthatiscorrect"));
 }
 
 TEST(BackreferenceTest, Backreference_with_One_or_More_test) {
@@ -654,6 +661,7 @@ TEST(BackreferenceTest, Backreference_with_One_or_More_test) {
         CORRECT        <- 'correct'
     )");
 
+  EXPECT_TRUE(!!parser);
   EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
   EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
   EXPECT_FALSE(
@@ -677,15 +685,15 @@ TEST(BackreferenceTest, Backreference_with_Option_test) {
         CORRECT        <- 'correct'
     )");
 
+  EXPECT_TRUE(!!parser);
   EXPECT_TRUE(parser.parse("branchthatiswrongbranchthatiscorrect"));
   EXPECT_FALSE(parser.parse("branchthatiswrongbranchthatIscorrect"));
   EXPECT_FALSE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatiscorrect"));
   EXPECT_FALSE(
       parser.parse("branchthatiswrongbranchthatIswrongbranchthatIscorrect"));
-  EXPECT_THROW(parser.parse("branchthatiscorrect"), std::runtime_error);
-  EXPECT_THROW(parser.parse("branchthatiswron_branchthatiscorrect"),
-               std::runtime_error);
+  EXPECT_FALSE(parser.parse("branchthatiscorrect"));
+  EXPECT_FALSE(parser.parse("branchthatiswron_branchthatiscorrect"));
 }
 
 TEST(RepetitionTest, Repetition_0) {
