@@ -41,7 +41,8 @@ int main(int argc, const char **argv) {
   auto opt_source = false;
   vector<char> source;
   auto opt_trace = false;
-  auto opt_verbose = false;
+  auto opt_trace_verbose = false;
+  auto opt_profile = false;
   vector<const char *> path_list;
 
   auto argi = 1;
@@ -68,8 +69,9 @@ int main(int argc, const char **argv) {
     } else if (string("--trace") == arg) {
       opt_trace = true;
     } else if (string("--trace-verbose") == arg) {
-      opt_trace = true;
-      opt_verbose = true;
+      opt_trace_verbose = true;
+    } else if (string("--profile") == arg) {
+      opt_profile = true;
     } else {
       path_list.push_back(arg);
     }
@@ -86,6 +88,7 @@ int main(int argc, const char **argv) {
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show concise trace messages
     --trace-verbose: show verbose trace messages
+    --profile: show profile report
 )";
 
     return 1;
@@ -126,12 +129,10 @@ int main(int argc, const char **argv) {
 
   if (opt_packrat) { parser.enable_packrat_parsing(); }
 
-  if (opt_trace) {
+  if (opt_trace || opt_trace_verbose) {
     size_t prev_pos = 0;
     parser.enable_trace(
-        [&](const peg::Ope &ope, const char *s, size_t /*n*/,
-            const peg::SemanticValues & /*sv*/, const peg::Context &c,
-            const std::any & /*dt*/) {
+        [&](auto &ope, auto s, auto, auto &, auto &c, auto &) {
           auto pos = static_cast<size_t>(s - c.s);
           auto backtrack = (pos < prev_pos ? "*" : "");
           string indent;
@@ -150,9 +151,7 @@ int main(int argc, const char **argv) {
                     << " #" << c.trace_ids.back() << std::endl;
           prev_pos = static_cast<size_t>(pos);
         },
-        [&](const peg::Ope &ope, const char *s, size_t /*n*/,
-            const peg::SemanticValues &sv, const peg::Context &c,
-            const std::any & /*dt*/, size_t len) {
+        [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len) {
           auto pos = static_cast<size_t>(s - c.s);
           if (len != static_cast<size_t>(-1)) { pos += len; }
           string indent;
@@ -181,7 +180,58 @@ int main(int argc, const char **argv) {
                     << c.trace_ids.back() << choice.str() << token << matched
                     << std::endl;
         },
-        opt_verbose);
+        opt_trace_verbose);
+  }
+
+  struct StatsItem {
+    std::string name;
+    size_t success;
+    size_t fail;
+  };
+  std::vector<StatsItem> stats;
+  std::map<std::string, size_t> stats_index;
+  size_t stats_item_total = false;
+
+  if (opt_profile) {
+    parser.enable_trace(
+        [&](auto &ope, auto, auto, auto &, auto &, auto &) {
+          if (peg::IsOpeType<peg::Holder>::check(ope)) {
+            auto &name = dynamic_cast<const peg::Holder &>(ope).name();
+            if (stats_index.find(name) == stats_index.end()) {
+              stats_index[name] = stats_index.size();
+              stats.push_back({name, 0, 0});
+            }
+            stats_item_total++;
+          }
+        },
+        [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len) {
+          if (peg::IsOpeType<peg::Holder>::check(ope)) {
+            auto &name = dynamic_cast<const peg::Holder &>(ope).name();
+            auto index = stats_index[name];
+            auto &stat = stats[index];
+            if (len != static_cast<size_t>(-1)) {
+              stat.success++;
+            } else {
+              stat.fail++;
+            }
+            if (index == 0) {
+              size_t id = 0;
+              std::cout << "  id       total      %     success        fail  "
+                           "definition"
+                        << std::endl;
+              for (auto &[name, success, fail] : stats) {
+                char buff[BUFSIZ];
+                auto total = success + fail;
+                auto ratio = total * 100.0 / stats_item_total;
+                sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
+                        ratio, success, fail, name.c_str());
+                std::cout << buff << std::endl;
+                id++;
+              }
+            }
+          }
+        },
+        true);
   }
 
   if (opt_ast) {

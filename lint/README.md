@@ -14,6 +14,7 @@ usage: grammar_file_path [source_file_path]
     --source: source text
     --trace: show concise trace messages
     --trace-verbose: show verbose trace messages
+    --profile: show profile report
 ```
 
 ### Build peglint

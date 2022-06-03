@@ -609,6 +609,7 @@ usage: grammar_file_path [source_file_path]
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show concise trace messages
     --trace-verbose: show verbose trace messages
+    --profile: show profile report
 ```
 
 ### Grammar check

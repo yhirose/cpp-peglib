@@ -1467,7 +1467,8 @@ public:
 
   std::any reduce(SemanticValues &vs, std::any &dt) const;
 
-  const char *trace_name() const;
+  const std::string &name() const;
+  const std::string &trace_name() const;
 
   std::shared_ptr<Ope> ope_;
   Definition *outer_;
@@ -1825,7 +1826,7 @@ struct TraceOpeName : public Ope::Visitor {
   void visit(Ignore &) override { name_ = "Ignore"; }
   void visit(User &) override { name_ = "User"; }
   void visit(WeakHolder &) override { name_ = "WeakHolder"; }
-  void visit(Holder &ope) override { name_ = ope.trace_name(); }
+  void visit(Holder &ope) override { name_ = ope.trace_name().data(); }
   void visit(Reference &) override { name_ = "Reference"; }
   void visit(Whitespace &) override { name_ = "Whitespace"; }
   void visit(BackReference &) override { name_ = "BackReference"; }
@@ -1929,7 +1930,7 @@ private:
 };
 
 struct FindLiteralToken : public Ope::Visitor {
-  void visit(LiteralString &ope) override { token_ = ope.lit_.c_str(); }
+  void visit(LiteralString &ope) override { token_ = ope.lit_.data(); }
   void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
   void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
@@ -2491,7 +2492,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   for (; i < lit.size(); i++) {
     if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i]))
                                : (s[i] != lit[i]))) {
-      c.set_error_pos(s, lit.c_str());
+      c.set_error_pos(s, lit.data());
       return static_cast<size_t>(-1);
     }
   }
@@ -2574,7 +2575,7 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
             token && token[0] != '\0') {
           error_info.add(token, true);
         } else {
-          error_info.add(rule->name.c_str(), false);
+          error_info.add(rule->name.data(), false);
         }
       }
     }
@@ -2735,9 +2736,13 @@ inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
   }
 }
 
-inline const char *Holder::trace_name() const {
+inline const std::string &Holder::name() const {
+  return outer_->name;
+}
+
+inline const std::string &Holder::trace_name() const {
   if (trace_name_.empty()) { trace_name_ = "[" + outer_->name + "]"; }
-  return trace_name_.data();
+  return trace_name_;
 }
 
 inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
