@@ -41,7 +41,7 @@ int main(int argc, const char **argv) {
   auto opt_source = false;
   vector<char> source;
   auto opt_trace = false;
-  auto opt_trace_verbose = false;
+  auto opt_verbose = false;
   auto opt_profile = false;
   vector<const char *> path_list;
 
@@ -68,10 +68,10 @@ int main(int argc, const char **argv) {
       }
     } else if (string("--trace") == arg) {
       opt_trace = true;
-    } else if (string("--trace-verbose") == arg) {
-      opt_trace_verbose = true;
     } else if (string("--profile") == arg) {
       opt_profile = true;
+    } else if (string("--verbose") == arg) {
+      opt_verbose = true;
     } else {
       path_list.push_back(arg);
     }
@@ -87,8 +87,8 @@ int main(int argc, const char **argv) {
     --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --trace: show concise trace messages
-    --trace-verbose: show verbose trace messages
     --profile: show profile report
+    --verbose: verbose output for trace and profile
 )";
 
     return 1;
@@ -129,125 +129,15 @@ int main(int argc, const char **argv) {
 
   if (opt_packrat) { parser.enable_packrat_parsing(); }
 
-  if (opt_trace || opt_trace_verbose) {
-    size_t prev_pos = 0;
-    parser.enable_trace(
-        [&](auto &ope, auto s, auto, auto &, auto &c, auto &) {
-          auto pos = static_cast<size_t>(s - c.s);
-          auto backtrack = (pos < prev_pos ? "*" : "");
-          string indent;
-          auto level = c.trace_ids.size() - 1;
-          while (level--) {
-            indent += "│";
-          }
-          std::string name;
-          {
-            name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
-
-            auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
-            if (lit) { name += " '" + peg::escape_characters(lit->lit_) + "'"; }
-          }
-          std::cout << "E " << pos << backtrack << "\t" << indent << "┌" << name
-                    << " #" << c.trace_ids.back() << std::endl;
-          prev_pos = static_cast<size_t>(pos);
-        },
-        [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len) {
-          auto pos = static_cast<size_t>(s - c.s);
-          if (len != static_cast<size_t>(-1)) { pos += len; }
-          string indent;
-          auto level = c.trace_ids.size() - 1;
-          while (level--) {
-            indent += "│";
-          }
-          auto ret = len != static_cast<size_t>(-1) ? "└o " : "└x ";
-          auto name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
-          std::stringstream choice;
-          if (sv.choice_count() > 0) {
-            choice << " " << sv.choice() << "/" << sv.choice_count();
-          }
-          std::string token;
-          if (!sv.tokens.empty()) {
-            token += ", token '";
-            token += sv.tokens[0];
-            token += "'";
-          }
-          std::string matched;
-          if (peg::success(len) &&
-              peg::TokenChecker::is_token(const_cast<peg::Ope &>(ope))) {
-            matched = ", match '" + peg::escape_characters(s, len) + "'";
-          }
-          std::cout << "L " << pos << "\t" << indent << ret << name << " #"
-                    << c.trace_ids.back() << choice.str() << token << matched
-                    << std::endl;
-        },
-        opt_trace_verbose);
+  if (opt_trace) {
+    enable_tracing(parser);
   }
-
-  struct StatsItem {
-    std::string name;
-    size_t success;
-    size_t fail;
-  };
-  std::vector<StatsItem> stats;
-  std::map<std::string, size_t> stats_index;
-  size_t stats_item_total = 0;
 
   if (opt_profile) {
-    parser.enable_trace(
-        [&](auto &ope, auto, auto, auto &, auto &, auto &) {
-          auto holder = dynamic_cast<const peg::Holder *>(&ope);
-          if (holder) {
-            auto &name = holder->name();
-            if (stats_index.find(name) == stats_index.end()) {
-              stats_index[name] = stats_index.size();
-              stats.push_back({name, 0, 0});
-            }
-            stats_item_total++;
-          }
-        },
-        [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len) {
-          auto holder = dynamic_cast<const peg::Holder *>(&ope);
-          if (holder) {
-            auto &name = holder->name();
-            auto index = stats_index[name];
-            auto &stat = stats[index];
-            if (len != static_cast<size_t>(-1)) {
-              stat.success++;
-            } else {
-              stat.fail++;
-            }
-            if (index == 0) {
-              size_t id = 0;
-              std::cout << "  id       total      %     success        fail  "
-                           "definition"
-                        << std::endl;
-              size_t total_total, total_success = 0, total_fail = 0;
-              char buff[BUFSIZ];
-              for (auto &[name, success, fail] : stats) {
-                auto total = success + fail;
-                total_success += success;
-                total_fail += fail;
-                auto ratio = total * 100.0 / stats_item_total;
-                sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
-                        ratio, success, fail, name.c_str());
-                std::cout << buff << std::endl;
-                id++;
-              }
-              std::cout << std::endl;
-              total_total = total_success + total_fail;
-              sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "",
-                      total_total, "", total_success, total_fail,
-                      "Total counters");
-              std::cout << buff << std::endl;
-              sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
-                      total_success * 100.0 / total_total,
-                      total_fail * 100.0 / total_total, "% success/fail");
-              std::cout << buff << std::endl;
-            }
-          }
-        },
-        true);
+    enable_profiling(parser);
   }
+
+  parser.set_verbose_trace(opt_verbose);
 
   if (opt_ast) {
     parser.enable_ast();

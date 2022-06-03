@@ -13,8 +13,8 @@ usage: grammar_file_path [source_file_path]
     --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
     --source: source text
     --trace: show concise trace messages
-    --trace-verbose: show verbose trace messages
     --profile: show profile report
+    --verbose: verbose output for trace and profile
 ```
 
 ### Build peglint

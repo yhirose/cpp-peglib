@@ -792,13 +792,15 @@ private:
 class Ope;
 class Definition;
 
-using TracerEnter = std::function<void(const Ope &name, const char *s, size_t n,
-                                       const SemanticValues &vs,
-                                       const Context &c, const std::any &dt)>;
+using TracerEnter = std::function<void(
+    const Ope &name, const char *s, size_t n, const SemanticValues &vs,
+    const Context &c, const std::any &dt, std::any &trace_data)>;
 
 using TracerLeave = std::function<void(
     const Ope &ope, const char *s, size_t n, const SemanticValues &vs,
-    const Context &c, const std::any &dt, size_t)>;
+    const Context &c, const std::any &dt, size_t, std::any &trace_data)>;
+
+using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 
 class Context {
 public:
@@ -838,20 +840,22 @@ public:
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
-  const bool tracer_verbose;
+  std::any trace_data;
+  const bool verbose_trace;
 
   Log log;
 
   Context(const char *path, const char *s, size_t l, size_t def_count,
           std::shared_ptr<Ope> whitespaceOpe, std::shared_ptr<Ope> wordOpe,
           bool enablePackratParsing, TracerEnter tracer_enter,
-          TracerLeave tracer_leave, bool tracer_verbose, Log log)
+          TracerLeave tracer_leave, std::any trace_data, bool verbose_trace,
+          Log log)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
         def_count(def_count), enablePackratParsing(enablePackratParsing),
         cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
         cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
-        tracer_verbose(tracer_verbose), log(log) {
+        trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
 
     args_stack.resize(1);
 
@@ -957,9 +961,9 @@ public:
   void set_error_pos(const char *a_s, const char *literal = nullptr);
 
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
-                   SemanticValues &vs, std::any &dt) const;
+                   const SemanticValues &vs, std::any &dt);
   void trace_leave(const Ope &ope, const char *a_s, size_t n,
-                   SemanticValues &vs, std::any &dt, size_t len) const;
+                   const SemanticValues &vs, std::any &dt, size_t len);
   bool is_traceable(const Ope &ope) const;
 
   mutable size_t next_trace_id = 0;
@@ -2354,10 +2358,13 @@ public:
   bool enablePackratParsing = false;
   bool is_macro = false;
   std::vector<std::string> params;
+  bool disable_action = false;
+
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
-  bool tracer_verbose = false;
-  bool disable_action = false;
+  bool verbose_trace = false;
+  TracerStartOrEnd tracer_start;
+  TracerStartOrEnd tracer_end;
 
   std::string error_message;
   bool no_ast_opt = false;
@@ -2385,15 +2392,21 @@ private:
 
     std::shared_ptr<Ope> ope = holder_;
 
+    std::any trace_data;
+    if (tracer_start) { tracer_start(trace_data); }
+    auto se = scope_exit([&]() {
+      if (tracer_end) { tracer_end(trace_data); }
+    });
+
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
-              enablePackratParsing, tracer_enter, tracer_leave, tracer_verbose,
-              log);
+              enablePackratParsing, tracer_enter, tracer_leave, trace_data,
+              verbose_trace, log);
 
     size_t i = 0;
 
     if (whitespaceOpe) {
       auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.tracer_verbose;
+      c.ignore_trace_state = !c.verbose_trace;
       auto se =
           scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
@@ -2437,14 +2450,14 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   // Word check
   if (c.wordOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.tracer_verbose;
+    c.ignore_trace_state = !c.verbose_trace;
     auto se =
         scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
     std::call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
       Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, false, nullptr);
+                      nullptr, nullptr, false, nullptr);
       std::any dummy_dt;
 
       auto len =
@@ -2455,7 +2468,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     if (is_word) {
       SemanticValues dummy_vs;
       Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, false, nullptr);
+                      nullptr, nullptr, false, nullptr);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -2472,7 +2485,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   if (!c.in_token_boundary_count) {
     if (c.whitespaceOpe) {
       auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.tracer_verbose;
+      c.ignore_trace_state = !c.verbose_trace;
       auto se =
           scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
@@ -2520,22 +2533,22 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
 }
 
 inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
-                                 SemanticValues &vs, std::any &dt) const {
+                                 const SemanticValues &vs, std::any &dt) {
   trace_ids.push_back(next_trace_id++);
-  tracer_enter(ope, a_s, n, vs, *this, dt);
+  tracer_enter(ope, a_s, n, vs, *this, dt, trace_data);
 }
 
 inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
-                                 SemanticValues &vs, std::any &dt,
-                                 size_t len) const {
-  tracer_leave(ope, a_s, n, vs, *this, dt, len);
+                                 const SemanticValues &vs, std::any &dt,
+                                 size_t len) {
+  tracer_leave(ope, a_s, n, vs, *this, dt, len, trace_data);
   trace_ids.pop_back();
 }
 
 inline bool Context::is_traceable(const Ope &ope) const {
   if (tracer_enter && tracer_leave) {
     if (ignore_trace_state) { return false; }
-    return !dynamic_cast<const peg::Reference*>(&ope);
+    return !dynamic_cast<const peg::Reference *>(&ope);
   }
   return false;
 }
@@ -2571,7 +2584,7 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
   auto save_ignore_trace_state = c.ignore_trace_state;
-  c.ignore_trace_state = !c.tracer_verbose;
+  c.ignore_trace_state = !c.verbose_trace;
   auto se =
       scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
@@ -2632,7 +2645,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       chldsv.sv_ = std::string_view(s, len);
       chldsv.name_ = outer_->name;
 
-      if (!dynamic_cast<const peg::PrioritizedChoice*>(ope_.get())) {
+      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_.get())) {
         chldsv.choice_count_ = 0;
         chldsv.choice_ = 0;
       }
@@ -2673,9 +2686,7 @@ inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
   }
 }
 
-inline const std::string &Holder::name() const {
-  return outer_->name;
-}
+inline const std::string &Holder::name() const { return outer_->name; }
 
 inline const std::string &Holder::trace_name() const {
   if (trace_name_.empty()) { trace_name_ = "[" + outer_->name + "]"; }
@@ -2686,7 +2697,7 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
                                     Context &c, std::any &dt) const {
   auto save_ignore_trace_state = c.ignore_trace_state;
   if (rule_ && rule_->ignoreSemanticValue) {
-    c.ignore_trace_state = !c.tracer_verbose;
+    c.ignore_trace_state = !c.verbose_trace;
   }
   auto se =
       scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
@@ -4373,13 +4384,29 @@ public:
     }
   }
 
-  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave,
-                    bool tracer_verbose = false) {
+  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.tracer_enter = tracer_enter;
       rule.tracer_leave = tracer_leave;
-      rule.tracer_verbose = tracer_verbose;
+    }
+  }
+
+  void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave,
+                    TracerStartOrEnd tracer_start, TracerStartOrEnd tracer_end) {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.tracer_enter = tracer_enter;
+      rule.tracer_leave = tracer_leave;
+      rule.tracer_start = tracer_start;
+      rule.tracer_end = tracer_end;
+    }
+  }
+
+  void set_verbose_trace(bool verbose_trace) {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.verbose_trace = verbose_trace;
     }
   }
 
@@ -4419,4 +4446,141 @@ private:
   bool enablePackratParsing_ = false;
 };
 
+/*-----------------------------------------------------------------------------
+ *  enable_tracing
+ *---------------------------------------------------------------------------*/
+
+inline void enable_tracing(parser &parser) {
+  size_t prev_pos = 0;
+  parser.enable_trace(
+      [&](auto &ope, auto s, auto, auto &, auto &c, auto &, auto &) {
+        auto pos = static_cast<size_t>(s - c.s);
+        auto backtrack = (pos < prev_pos ? "*" : "");
+        std::string indent;
+        auto level = c.trace_ids.size() - 1;
+        while (level--) {
+          indent += "│";
+        }
+        std::string name;
+        {
+          name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
+
+          auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
+          if (lit) { name += " '" + peg::escape_characters(lit->lit_) + "'"; }
+        }
+        std::cout << "E " << pos << backtrack << "\t" << indent << "┌" << name
+                  << " #" << c.trace_ids.back() << std::endl;
+        prev_pos = static_cast<size_t>(pos);
+      },
+      [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len,
+          auto &) {
+        auto pos = static_cast<size_t>(s - c.s);
+        if (len != static_cast<size_t>(-1)) { pos += len; }
+        std::string indent;
+        auto level = c.trace_ids.size() - 1;
+        while (level--) {
+          indent += "│";
+        }
+        auto ret = len != static_cast<size_t>(-1) ? "└o " : "└x ";
+        auto name = peg::TraceOpeName::get(const_cast<peg::Ope &>(ope));
+        std::stringstream choice;
+        if (sv.choice_count() > 0) {
+          choice << " " << sv.choice() << "/" << sv.choice_count();
+        }
+        std::string token;
+        if (!sv.tokens.empty()) {
+          token += ", token '";
+          token += sv.tokens[0];
+          token += "'";
+        }
+        std::string matched;
+        if (peg::success(len) &&
+            peg::TokenChecker::is_token(const_cast<peg::Ope &>(ope))) {
+          matched = ", match '" + peg::escape_characters(s, len) + "'";
+        }
+        std::cout << "L " << pos << "\t" << indent << ret << name << " #"
+                  << c.trace_ids.back() << choice.str() << token << matched
+                  << std::endl;
+      },
+      [&](auto &) {}, [&](auto &) {});
+}
+
+/*-----------------------------------------------------------------------------
+ *  enable_profiling
+ *---------------------------------------------------------------------------*/
+
+inline void enable_profiling(parser &parser) {
+  struct Stats {
+    struct Item {
+      std::string name;
+      size_t success;
+      size_t fail;
+    };
+    std::vector<Item> items;
+    std::map<std::string, size_t> index;
+    size_t total = 0;
+  };
+
+  parser.enable_trace(
+      [&](auto &ope, auto, auto, auto &, auto &, auto &,
+          std::any &trace_data) {
+        if (auto holder = dynamic_cast<const peg::Holder *>(&ope)) {
+          auto &stats = *std::any_cast<Stats *>(trace_data);
+
+          auto &name = holder->name();
+          if (stats.index.find(name) == stats.index.end()) {
+            stats.index[name] = stats.index.size();
+            stats.items.push_back({name, 0, 0});
+          }
+          stats.total++;
+        }
+      },
+      [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len,
+          std::any &trace_data) {
+        if (auto holder = dynamic_cast<const peg::Holder *>(&ope)) {
+          auto &stats = *std::any_cast<Stats *>(trace_data);
+
+          auto &name = holder->name();
+          auto index = stats.index[name];
+          auto &stat = stats.items[index];
+          if (len != static_cast<size_t>(-1)) {
+            stat.success++;
+          } else {
+            stat.fail++;
+          }
+          if (index == 0) {
+            size_t id = 0;
+            std::cout << "  id       total      %     success        fail  "
+                         "definition"
+                      << std::endl;
+            size_t total_total, total_success = 0, total_fail = 0;
+            char buff[BUFSIZ];
+            for (auto &[name, success, fail] : stats.items) {
+              auto total = success + fail;
+              total_success += success;
+              total_fail += fail;
+              auto ratio = total * 100.0 / stats.total;
+              sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
+                      ratio, success, fail, name.c_str());
+              std::cout << buff << std::endl;
+              id++;
+            }
+            std::cout << std::endl;
+            total_total = total_success + total_fail;
+            sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", total_total,
+                    "", total_success, total_fail, "Total counters");
+            std::cout << buff << std::endl;
+            sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
+                    total_success * 100.0 / total_total,
+                    total_fail * 100.0 / total_total, "% success/fail");
+            std::cout << buff << std::endl;
+          }
+        }
+      },
+      [&](auto &trace_data) { trace_data = new Stats{}; },
+      [&](auto &trace_data) {
+        auto stats = std::any_cast<Stats *>(trace_data);
+        delete stats;
+      });
+}
 } // namespace peg
