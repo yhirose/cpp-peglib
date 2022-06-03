@@ -8,7 +8,7 @@
 <div id="main">
   <div class="editor-container">
     <ul class="editor-header">
-      <li><span>Grammar</span></li>
+      <li><span>Grammar</span><label for="opt_noautorefresh">Disable auto refresh: <input  id="opt_noautorefresh" type="checkbox"/></label></li>
       <li><span id="grammar-validation" class="editor-validation">Valid</span></li>
     </ul>
     <pre id="grammar-editor" class="editor-area">{{syntax}}</pre>
@@ -16,7 +16,11 @@
   </div>
   <div class="editor-container">
     <ul class="editor-header">
-      <li><span>Source Code</span></li>
+      <li>
+	<span>Source Code</span>
+	<label for="opt_profile">Enable profile: <input  id="opt_profile" type="checkbox"/></label>
+	<label for="opt_packrat">Enable packrat: <input  id="opt_packrat" type="checkbox"/></label>
+	</li>
       <li><span id="code-validation" class="editor-validation">Valid</span></li>
     </ul>
     <pre id="code-editor" class="editor-area">{{source}}</pre>

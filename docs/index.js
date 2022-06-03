@@ -51,6 +51,8 @@ function generateErrorListHTML(errors) {
 }
 
 function parse() {
+  const noAutoRefreshMode = $('#opt_noautorefresh').prop('checked');
+  if(noAutoRefreshMode) return;
   const $grammarValidation = $('#grammar-validation');
   const $grammarInfo = $('#grammar-info');
   const grammarText = grammar.getValue();
@@ -60,6 +62,8 @@ function parse() {
   const codeText = code.getValue();
 
   const optimazationMode = $('#opt_mode').val();
+  const profileMode = $('#opt_profile').prop('checked');
+  const packratMode = $('#opt_packrat').prop('checked');
 
   localStorage.setItem('grammarText', grammarText);
   localStorage.setItem('codeText', codeText);
@@ -77,7 +81,8 @@ function parse() {
   }
 
   const mode = optimazationMode == 'all';
-  const data = JSON.parse(Module.lint(grammarText, codeText, mode));
+  const lint_result = Module.lint(grammarText, codeText, mode, profileMode, packratMode);
+  const data = JSON.parse(lint_result);
 
   if (data.grammar_valid) {
     $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
@@ -94,6 +99,9 @@ function parse() {
     if (data.code.length > 0) {
       const html = generateErrorListHTML(data.code);
       $codeInfo.html(html);
+    }
+    else if (data.profile) {
+        $codeInfo.html(data.profile);
     }
   } else {
     $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();
@@ -125,6 +133,9 @@ function makeOnClickInInfo(editor) {
 };
 $('#grammar-info').on('click', 'li', makeOnClickInInfo(grammar));
 $('#code-info').on('click', 'li', makeOnClickInInfo(code));
+$('#opt_noautorefresh').change(function(){
+	if(!this.checked) parse();
+  });
 
 // Event handing in the AST optimazation
 $('#opt_mode').on('change', setupTimer);

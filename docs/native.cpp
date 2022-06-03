@@ -54,7 +54,8 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
   return ret;
 }
 
-std::string lint(const std::string &grammarText, const std::string &codeText, bool opt_mode) {
+std::string lint(const std::string &grammarText, const std::string &codeText,
+		bool opt_mode, bool opt_profile, bool opt_packrat) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -64,8 +65,48 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
   auto is_grammar_valid = parse_grammar(grammarText, peg, grammarResult);
   auto is_source_valid = false;
 
+  struct StatsItem {
+    std::string name;
+    size_t success;
+    size_t fail;
+  };
+  std::vector<StatsItem> stats;
+  std::map<std::string, size_t> stats_index;
+  size_t stats_item_total = 0;
+
   if (is_grammar_valid && peg) {
     std::shared_ptr<peg::Ast> ast;
+
+  if (opt_packrat) { peg.enable_packrat_parsing(); }
+  if (opt_profile) {
+    peg.enable_trace(
+        [&](auto &ope, auto, auto, auto &, auto &, auto &) {
+          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          if (holder) {
+            auto &name = holder->name();
+            if (stats_index.find(name) == stats_index.end()) {
+              stats_index[name] = stats_index.size();
+              stats.push_back({name, 0, 0});
+            }
+            stats_item_total++;
+          }
+        },
+        [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len) {
+          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          if (holder) {
+            auto &name = holder->name();
+            auto index = stats_index[name];
+            auto &stat = stats[index];
+            if (len != static_cast<size_t>(-1)) {
+              stat.success++;
+            } else {
+              stat.fail++;
+            }
+          }
+        },
+        true);
+  }
+
     is_source_valid = parse_code(codeText, peg, codeResult, ast);
     if (ast) {
       astResult = escape_json(peg::ast_to_s(ast));
@@ -83,6 +124,39 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
     json += ",\"code\":" + codeResult;
     json += ",\"ast\":\"" + astResult + "\"";
     json += ",\"astOptimized\":\"" + astResultOptimized + "\"";
+    if (opt_profile) {
+      size_t id = 0;
+      std::string profile_buf = "<pre>";
+      profile_buf += "  id       total      %     success        fail  "
+                   "definition<br/>";
+      size_t total_total, total_success = 0, total_fail = 0;
+      char buff[BUFSIZ];
+      for (auto &[name, success, fail] : stats) {
+        total_success += success;
+        total_fail += fail;
+      }
+      total_total = total_success + total_fail;
+      sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s<br/>", "",
+              total_total, "", total_success, total_fail,
+              "Total counters");
+      profile_buf += buff;
+      sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s<br/>", "", "",
+              "", total_success*100.0/total_total,
+              total_fail*100.0/total_total, "% success/fail");
+      profile_buf += buff;
+      profile_buf += "<br/>";
+      for (auto &[name, success, fail] : stats) {
+        auto total = success + fail;
+        auto ratio = total * 100.0 / stats_item_total;
+        sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s<br/>", id, total,
+                ratio, success, fail, name.c_str());
+        profile_buf += buff;
+        id++;
+      }
+      profile_buf += "</pre>";
+
+      json += ",\"profile\":\"" + escape_json(profile_buf) + "\"";
+    }
   }
   json += "}";
 

@@ -190,7 +190,7 @@ int main(int argc, const char **argv) {
   };
   std::vector<StatsItem> stats;
   std::map<std::string, size_t> stats_index;
-  size_t stats_item_total = false;
+  size_t stats_item_total = 0;
 
   if (opt_profile) {
     parser.enable_trace(
