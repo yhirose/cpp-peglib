@@ -195,7 +195,7 @@ int main(int argc, const char **argv) {
   if (opt_profile) {
     parser.enable_trace(
         [&](auto &ope, auto, auto, auto &, auto &, auto &) {
-          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          auto holder = dynamic_cast<const peg::Holder *>(&ope);
           if (holder) {
             auto &name = holder->name();
             if (stats_index.find(name) == stats_index.end()) {
@@ -206,7 +206,7 @@ int main(int argc, const char **argv) {
           }
         },
         [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len) {
-          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          auto holder = dynamic_cast<const peg::Holder *>(&ope);
           if (holder) {
             auto &name = holder->name();
             auto index = stats_index[name];
@@ -221,15 +221,28 @@ int main(int argc, const char **argv) {
               std::cout << "  id       total      %     success        fail  "
                            "definition"
                         << std::endl;
+              size_t total_total, total_success = 0, total_fail = 0;
+              char buff[BUFSIZ];
               for (auto &[name, success, fail] : stats) {
-                char buff[BUFSIZ];
                 auto total = success + fail;
+                total_success += success;
+                total_fail += fail;
                 auto ratio = total * 100.0 / stats_item_total;
                 sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
                         ratio, success, fail, name.c_str());
                 std::cout << buff << std::endl;
                 id++;
               }
+              std::cout << std::endl;
+              total_total = total_success + total_fail;
+              sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "",
+                      total_total, "", total_success, total_fail,
+                      "Total counters");
+              std::cout << buff << std::endl;
+              sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
+                      total_success * 100.0 / total_total,
+                      total_fail * 100.0 / total_total, "% success/fail");
+              std::cout << buff << std::endl;
             }
           }
         },
