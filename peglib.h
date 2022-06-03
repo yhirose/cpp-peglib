@@ -1746,69 +1746,6 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
-template <typename T> struct IsOpeType : public Ope::Visitor {
-  void visit(Sequence &) override { ret_ = std::is_same<Sequence, T>::value; }
-  void visit(PrioritizedChoice &) override {
-    ret_ = std::is_same<PrioritizedChoice, T>::value;
-  }
-  void visit(Repetition &) override {
-    ret_ = std::is_same<Repetition, T>::value;
-  }
-  void visit(AndPredicate &) override {
-    ret_ = std::is_same<AndPredicate, T>::value;
-  }
-  void visit(NotPredicate &) override {
-    ret_ = std::is_same<NotPredicate, T>::value;
-  }
-  void visit(Dictionary &) override {
-    ret_ = std::is_same<Dictionary, T>::value;
-  }
-  void visit(LiteralString &) override {
-    ret_ = std::is_same<LiteralString, T>::value;
-  }
-  void visit(CharacterClass &) override {
-    ret_ = std::is_same<CharacterClass, T>::value;
-  }
-  void visit(Character &) override { ret_ = std::is_same<Character, T>::value; }
-  void visit(AnyCharacter &) override {
-    ret_ = std::is_same<AnyCharacter, T>::value;
-  }
-  void visit(CaptureScope &) override {
-    ret_ = std::is_same<CaptureScope, T>::value;
-  }
-  void visit(Capture &) override { ret_ = std::is_same<Capture, T>::value; }
-  void visit(TokenBoundary &) override {
-    ret_ = std::is_same<TokenBoundary, T>::value;
-  }
-  void visit(Ignore &) override { ret_ = std::is_same<Ignore, T>::value; }
-  void visit(User &) override { ret_ = std::is_same<User, T>::value; }
-  void visit(WeakHolder &) override {
-    ret_ = std::is_same<WeakHolder, T>::value;
-  }
-  void visit(Holder &) override { ret_ = std::is_same<Holder, T>::value; }
-  void visit(Reference &) override { ret_ = std::is_same<Reference, T>::value; }
-  void visit(Whitespace &) override {
-    ret_ = std::is_same<Whitespace, T>::value;
-  }
-  void visit(BackReference &) override {
-    ret_ = std::is_same<BackReference, T>::value;
-  }
-  void visit(PrecedenceClimbing &) override {
-    ret_ = std::is_same<PrecedenceClimbing, T>::value;
-  }
-  void visit(Recovery &) override { ret_ = std::is_same<Recovery, T>::value; }
-  void visit(Cut &) override { ret_ = std::is_same<Cut, T>::value; }
-
-  static bool check(const Ope &ope) {
-    IsOpeType vis;
-    const_cast<Ope &>(ope).accept(vis);
-    return vis.ret_;
-  }
-
-private:
-  bool ret_ = false;
-};
-
 struct TraceOpeName : public Ope::Visitor {
   void visit(Sequence &) override { name_ = "Sequence"; }
   void visit(PrioritizedChoice &) override { name_ = "PrioritizedChoice"; }
@@ -2598,7 +2535,7 @@ inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
 inline bool Context::is_traceable(const Ope &ope) const {
   if (tracer_enter && tracer_leave) {
     if (ignore_trace_state) { return false; }
-    return !IsOpeType<Reference>::check(ope);
+    return !dynamic_cast<const peg::Reference*>(&ope);
   }
   return false;
 }
@@ -2695,7 +2632,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       chldsv.sv_ = std::string_view(s, len);
       chldsv.name_ = outer_->name;
 
-      if (!IsOpeType<PrioritizedChoice>::check(*ope_)) {
+      if (!dynamic_cast<const peg::PrioritizedChoice*>(ope_.get())) {
         chldsv.choice_count_ = 0;
         chldsv.choice_ = 0;
       }

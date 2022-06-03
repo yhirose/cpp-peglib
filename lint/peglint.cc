@@ -195,8 +195,9 @@ int main(int argc, const char **argv) {
   if (opt_profile) {
     parser.enable_trace(
         [&](auto &ope, auto, auto, auto &, auto &, auto &) {
-          if (peg::IsOpeType<peg::Holder>::check(ope)) {
-            auto &name = dynamic_cast<const peg::Holder &>(ope).name();
+          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          if (holder) {
+            auto &name = holder->name();
             if (stats_index.find(name) == stats_index.end()) {
               stats_index[name] = stats_index.size();
               stats.push_back({name, 0, 0});
@@ -205,8 +206,9 @@ int main(int argc, const char **argv) {
           }
         },
         [&](auto &ope, auto, auto, auto &, auto &, auto &, auto len) {
-          if (peg::IsOpeType<peg::Holder>::check(ope)) {
-            auto &name = dynamic_cast<const peg::Holder &>(ope).name();
+          auto holder = dynamic_cast<const peg::Holder*>(&ope);
+          if (holder) {
+            auto &name = holder->name();
             auto index = stats_index[name];
             auto &stat = stats[index];
             if (len != static_cast<size_t>(-1)) {
