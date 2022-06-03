@@ -1,34 +1,34 @@
 // Setup editros
-const grammar = ace.edit("grammar-editor");
-grammar.setShowPrintMargin(false);
-grammar.setValue(localStorage.getItem('grammarText') || '');
-grammar.moveCursorTo(0, 0);
+function setupInfoArea(id) {
+  const e = ace.edit(id);
+  e.setShowPrintMargin(false);
+  e.setOptions({
+    readOnly: true,
+    highlightActiveLine: false,
+    highlightGutterLine: false
+  })
+  e.renderer.$cursorLayer.element.style.opacity=0;
+  return e;
+}
 
-const code = ace.edit("code-editor");
-code.setShowPrintMargin(false);
-code.setValue(localStorage.getItem('codeText') || '');
-code.moveCursorTo(0, 0);
+function setupEditorArea(id, lsKey) {
+  const e = ace.edit(id);
+  e.setShowPrintMargin(false);
+  e.setValue(localStorage.getItem(lsKey) || '');
+  e.moveCursorTo(0, 0);
+  return e;
+}
 
-const codeAst = ace.edit("code-ast");
-codeAst.setShowPrintMargin(false);
-codeAst.setOptions({
-  readOnly: true,
-  highlightActiveLine: false,
-  highlightGutterLine: false
-})
-codeAst.renderer.$cursorLayer.element.style.opacity=0;
+const grammar = setupEditorArea("grammar-editor", "grammarText");
+const code = setupEditorArea("code-editor", "codeText");
 
-const codeAstOptimized = ace.edit("code-ast-optimized");
-codeAstOptimized.setShowPrintMargin(false);
-codeAstOptimized.setOptions({
-  readOnly: true,
-  highlightActiveLine: false,
-  highlightGutterLine: false
-})
-codeAstOptimized.renderer.$cursorLayer.element.style.opacity=0;
+const codeAst = setupInfoArea("code-ast");
+const codeAstOptimized = setupInfoArea("code-ast-optimized");
+const profile = setupInfoArea("profile");
 
 $('#opt_mode').val(localStorage.getItem('optimazationMode') || 'all');
 
+// Parse
 function escapeHtml(unsafe) {
   return unsafe
     .replace(/&/g, "&amp;")
@@ -71,6 +71,7 @@ function parse() {
   $codeValidation.hide();
   codeAst.setValue('');
   codeAstOptimized.setValue('');
+  profile.setValue('');
 
   if (grammarText.length === 0) {
    return;
@@ -84,6 +85,7 @@ function parse() {
 
     codeAst.insert(data.ast);
     codeAstOptimized.insert(data.astOptimized);
+    profile.insert(data.profile);
 
     if (data.source_valid) {
       $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();

@@ -59,14 +59,21 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
   std::string codeResult;
   std::string astResult;
   std::string astResultOptimized;
+  std::string profileResult;
 
   peg::parser peg;
   auto is_grammar_valid = parse_grammar(grammarText, peg, grammarResult);
   auto is_source_valid = false;
 
   if (is_grammar_valid && peg) {
+    std::stringstream ss;
+    peg::enable_profiling(peg, ss);
+
     std::shared_ptr<peg::Ast> ast;
     is_source_valid = parse_code(codeText, peg, codeResult, ast);
+
+    profileResult = escape_json(ss.str());
+
     if (ast) {
       astResult = escape_json(peg::ast_to_s(ast));
       astResultOptimized = escape_json(
@@ -83,6 +90,7 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
     json += ",\"code\":" + codeResult;
     json += ",\"ast\":\"" + astResult + "\"";
     json += ",\"astOptimized\":\"" + astResultOptimized + "\"";
+    json += ",\"profile\":\"" + profileResult + "\"";
   }
   json += "}";
 

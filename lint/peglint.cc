@@ -130,11 +130,11 @@ int main(int argc, const char **argv) {
   if (opt_packrat) { parser.enable_packrat_parsing(); }
 
   if (opt_trace) {
-    enable_tracing(parser);
+    enable_tracing(parser, std::cout);
   }
 
   if (opt_profile) {
-    enable_profiling(parser);
+    enable_profiling(parser, std::cout);
   }
 
   parser.set_verbose_trace(opt_verbose);

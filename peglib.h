@@ -4393,7 +4393,8 @@ public:
   }
 
   void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave,
-                    TracerStartOrEnd tracer_start, TracerStartOrEnd tracer_end) {
+                    TracerStartOrEnd tracer_start,
+                    TracerStartOrEnd tracer_end) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.tracer_enter = tracer_enter;
@@ -4450,7 +4451,7 @@ private:
  *  enable_tracing
  *---------------------------------------------------------------------------*/
 
-inline void enable_tracing(parser &parser) {
+inline void enable_tracing(parser &parser, std::ostream &os) {
   size_t prev_pos = 0;
   parser.enable_trace(
       [&](auto &ope, auto s, auto, auto &, auto &c, auto &, auto &) {
@@ -4468,8 +4469,8 @@ inline void enable_tracing(parser &parser) {
           auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
           if (lit) { name += " '" + peg::escape_characters(lit->lit_) + "'"; }
         }
-        std::cout << "E " << pos << backtrack << "\t" << indent << "┌" << name
-                  << " #" << c.trace_ids.back() << std::endl;
+        os << "E " << pos << backtrack << "\t" << indent << "┌" << name << " #"
+           << c.trace_ids.back() << std::endl;
         prev_pos = static_cast<size_t>(pos);
       },
       [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len,
@@ -4498,9 +4499,9 @@ inline void enable_tracing(parser &parser) {
             peg::TokenChecker::is_token(const_cast<peg::Ope &>(ope))) {
           matched = ", match '" + peg::escape_characters(s, len) + "'";
         }
-        std::cout << "L " << pos << "\t" << indent << ret << name << " #"
-                  << c.trace_ids.back() << choice.str() << token << matched
-                  << std::endl;
+        os << "L " << pos << "\t" << indent << ret << name << " #"
+           << c.trace_ids.back() << choice.str() << token << matched
+           << std::endl;
       },
       [&](auto &) {}, [&](auto &) {});
 }
@@ -4509,7 +4510,7 @@ inline void enable_tracing(parser &parser) {
  *  enable_profiling
  *---------------------------------------------------------------------------*/
 
-inline void enable_profiling(parser &parser) {
+inline void enable_profiling(parser &parser, std::ostream &os) {
   struct Stats {
     struct Item {
       std::string name;
@@ -4522,8 +4523,7 @@ inline void enable_profiling(parser &parser) {
   };
 
   parser.enable_trace(
-      [&](auto &ope, auto, auto, auto &, auto &, auto &,
-          std::any &trace_data) {
+      [&](auto &ope, auto, auto, auto &, auto &, auto &, std::any &trace_data) {
         if (auto holder = dynamic_cast<const peg::Holder *>(&ope)) {
           auto &stats = *std::any_cast<Stats *>(trace_data);
 
@@ -4550,9 +4550,9 @@ inline void enable_profiling(parser &parser) {
           }
           if (index == 0) {
             size_t id = 0;
-            std::cout << "  id       total      %     success        fail  "
-                         "definition"
-                      << std::endl;
+            os << "  id       total      %     success        fail  "
+                  "definition"
+               << std::endl;
             size_t total_total, total_success = 0, total_fail = 0;
             char buff[BUFSIZ];
             for (auto &[name, success, fail] : stats.items) {
@@ -4562,18 +4562,18 @@ inline void enable_profiling(parser &parser) {
               auto ratio = total * 100.0 / stats.total;
               sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
                       ratio, success, fail, name.c_str());
-              std::cout << buff << std::endl;
+              os << buff << std::endl;
               id++;
             }
-            std::cout << std::endl;
+            os << std::endl;
             total_total = total_success + total_fail;
             sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", total_total,
                     "", total_success, total_fail, "Total counters");
-            std::cout << buff << std::endl;
+            os << buff << std::endl;
             sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
                     total_success * 100.0 / total_total,
                     total_fail * 100.0 / total_total, "% success/fail");
-            std::cout << buff << std::endl;
+            os << buff << std::endl;
           }
         }
       },
