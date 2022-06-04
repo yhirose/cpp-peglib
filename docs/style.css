@@ -42,6 +42,9 @@ body {
 .editor-header > li.validation-indicator {
   margin-left: auto;
 }
+.editor-header.right-align {
+  margin-left: auto;
+}
 .editor-validation {
   padding: 9px 11px;
   color: green;
@@ -75,10 +78,14 @@ body {
 .option {
   margin-right: 12px;
 }
+.option:last-child {
+  margin-right: 0;
+}
 .option > span > * {
   margin-right: 8px;
 }
 .option .parse {
   cursor: pointer;
   padding: 9px 11px;
+  margin-right: 0;
 }
