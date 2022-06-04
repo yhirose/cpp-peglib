@@ -24,7 +24,7 @@ const code = setupEditorArea("code-editor", "codeText");
 
 const codeAst = setupInfoArea("code-ast");
 const codeAstOptimized = setupInfoArea("code-ast-optimized");
-const profile = setupInfoArea("profile");
+const codeProfile = setupInfoArea("code-profile");
 
 $('#opt-mode').val(localStorage.getItem('optimazationMode') || 'all');
 $('#packrat').prop('checked', localStorage.getItem('packrat') === 'true');
@@ -80,27 +80,26 @@ function parse() {
   $codeValidation.hide();
   codeAst.setValue('');
   codeAstOptimized.setValue('');
-  profile.setValue('');
+  codeProfile.setValue('');
 
   if (grammarText.length === 0) {
    return;
   }
 
   const mode = optimazationMode == 'all';
-  console.log({packrat});
   const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat));
 
   if (data.grammar_valid) {
-    $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
+    $grammarValidation.removeClass('validation-invalid').show();
 
     codeAst.insert(data.ast);
     codeAstOptimized.insert(data.astOptimized);
-    profile.insert(data.profile);
+    codeProfile.insert(data.profile);
 
     if (data.source_valid) {
-      $codeValidation.removeClass('editor-validation-invalid').text('Valid').show();
+      $codeValidation.removeClass('validation-invalid').show();
     } else {
-      $codeValidation.addClass('editor-validation-invalid').text('Invalid').show();
+      $codeValidation.addClass('validation-invalid').show();
     }
 
     if (data.code.length > 0) {
@@ -108,7 +107,7 @@ function parse() {
       $codeInfo.html(html);
     }
   } else {
-    $grammarValidation.addClass('editor-validation-invalid').text('Invalid').show();
+    $grammarValidation.addClass('validation-invalid').show();
   }
 
   if (data.grammar.length > 0) {
@@ -152,6 +151,22 @@ $('#auto-refresh').on('change', () => {
   setupTimer();
 });
 $('#parse').on('click', parse);
+
+// Show windows
+function setupToolWindow(lsKeyName, buttonSel, codeSel) {
+  let show = localStorage.getItem(lsKeyName) === 'true';
+  $(buttonSel).prop('checked', show);
+  $(codeSel).css({ 'display': show ? 'block' : 'none' });
+
+  $(buttonSel).on('change', () => {
+    show = !show;
+    localStorage.setItem(lsKeyName, show);
+    $(codeSel).css({ 'display': show ? 'block' : 'none' });
+  });
+}
+setupToolWindow('show-ast', '#show-ast', '#code-ast');
+setupToolWindow('show-ast-optimized', '#show-ast-optimized', '#code-ast-optimized');
+setupToolWindow('show-profile', '#show-profile', '#code-profile');
 
 // Show page
 $('#main').css({

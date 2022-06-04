@@ -4548,32 +4548,40 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
           } else {
             stat.fail++;
           }
+
           if (index == 0) {
-            size_t id = 0;
+            char buff[BUFSIZ];
+
+            size_t total_success = 0;
+            size_t total_fail = 0;
+            for (auto &[name, success, fail] : stats.items) {
+              total_success += success;
+              total_fail += fail;
+            }
+
             os << "  id       total      %     success        fail  "
                   "definition"
                << std::endl;
-            size_t total_total, total_success = 0, total_fail = 0;
-            char buff[BUFSIZ];
+
+            auto grand_total = total_success + total_fail;
+            sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", grand_total,
+                    "", total_success, total_fail, "Total counters");
+            os << buff << std::endl;
+
+            sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
+                    total_success * 100.0 / grand_total,
+                    total_fail * 100.0 / grand_total, "% success/fail");
+            os << buff << std::endl;
+
+            size_t id = 0;
             for (auto &[name, success, fail] : stats.items) {
               auto total = success + fail;
-              total_success += success;
-              total_fail += fail;
               auto ratio = total * 100.0 / stats.total;
               sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
                       ratio, success, fail, name.c_str());
               os << buff << std::endl;
               id++;
             }
-            os << std::endl;
-            total_total = total_success + total_fail;
-            sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", total_total,
-                    "", total_success, total_fail, "Total counters");
-            os << buff << std::endl;
-            sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
-                    total_success * 100.0 / total_total,
-                    total_fail * 100.0 / total_total, "% success/fail");
-            os << buff << std::endl;
           }
         }
       },

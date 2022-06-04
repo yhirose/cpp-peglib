@@ -19,41 +19,53 @@ body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  margin: 8px;
+  margin: 6px;
 }
 .editor-container:first-child {
   margin-right: 0;
 }
 .editor-header {
   display: flex;
-  height: 48px;
-  padding: 4px 8px;
+  margin: 0 2px;
+}
+.editor-header > li {
+  height: 32px;
+  line-height: 24px;
 }
 .editor-header > li > span {
-  height: 38px;
-  line-height: 38px;
+  margin-right: 6px;
 }
-.editor-header > li > a {
-  height: 38px;
-  line-height: 38px;
-  padding: .3em .5em;
-  border: 1px solid red;
-}
-.editor-header > li.validation-indicator {
+.editor-options {
   margin-left: auto;
 }
-.editor-header.right-align {
-  margin-left: auto;
+.editor-header-options {
+  display: flex;
 }
-.editor-validation {
-  padding: 9px 11px;
-  color: green;
+.validation {
+  display: inline-block;
+  height: 20px;
+  width: 20px;
+  margin: 2px 0;
+  border-radius: 50%;
   background-color: lightgreen;
-  border-radius: 5px;
 }
-.editor-validation-invalid {
-  color: red;
+.validation-invalid {
   background-color: pink;
+}
+.option {
+  margin-right: 8px;
+}
+.option:last-child {
+  margin-right: 0;
+}
+.option input[type=checkbox] {
+  margin-right: 4px;
+}
+.option .parse {
+  padding-left: 8px;
+  padding-right: 8px;
+  height: 24px;
+  cursor: pointer;
 }
 .editor-area {
   flex: 1;
@@ -73,19 +85,8 @@ body {
   background-color: lightyellow;
 }
 .editor-sub-header {
-  padding: 4px 8px;
+  padding: 4px;
 }
-.option {
-  margin-right: 12px;
-}
-.option:last-child {
-  margin-right: 0;
-}
-.option > span > * {
-  margin-right: 8px;
-}
-.option .parse {
-  cursor: pointer;
-  padding: 9px 11px;
-  margin-right: 0;
+.show-toggle {
+  margin-right: 6px;
 }

@@ -8,33 +8,35 @@
 <div id="main">
   <div class="editor-container">
     <ul class="editor-header">
+      <li><span><span id="grammar-validation" class="validation"></span></span></li>
       <li><span>Grammar</span></li>
-      <li class="validation-indicator"><span id="grammar-validation" class="editor-validation">Valid</span></li>
     </ul>
     <pre id="grammar-editor" class="editor-area">{{syntax}}</pre>
     <div id="grammar-info" class="editor-info"></div>
   </div>
   <div class="editor-container">
     <ul class="editor-header">
+      <li><span><span id="code-validation" class="validation"></span></span></li>
       <li><span>Source Code</span></li>
-      <li class="validation-indicator"><span id="code-validation" class="editor-validation">Valid</span></li>
+      <li class="editor-options">
+        <ul class="editor-header-options">
+          <li class="option"><input id="packrat" type="checkbox"><label>Packrat</label></li>
+          <li class="option"><input id="auto-refresh" type="checkbox"><label>Auto Refresh</label></li>
+          <li class="option"><button id="parse" class="parse">Parse</button></li>
+        </ul>
+      </li>
     </ul>
     <pre id="code-editor" class="editor-area">{{source}}</pre>
-    <div id="code-info" class="editor-info"></div>
-  </div>
-  <div class="editor-container">
-    <ul class="editor-header right-align">
-      <li class="option"><span><input id="packrat" type="checkbox"><label>Packrat</label></span></li>
-      <li class="option"><span><input id="auto-refresh" type="checkbox"><label>Auto Refresh</label><button id="parse" class="parse">Parse</button></span></li>
-    </ul>
-    <div class="editor-sub-header">AST</div>
+    <div class="editor-sub-header"><input id="show-ast" class="show-toggle" type="checkbox">AST</div>
     <pre id="code-ast" class="editor-area"></pre>
-    <div class="editor-sub-header">Optimized AST&nbsp;&nbsp;&nbsp;&nbsp;
+    <div class="editor-sub-header"><input id="show-ast-optimized" class="show-toggle" type="checkbox">Optimized AST&nbsp;&nbsp;&nbsp;&nbsp;
       mode:&nbsp;<select id="opt-mode" type="checkbox"><option value="all">All</option><option value="only">Only</option></select>
     </div>
     <pre id="code-ast-optimized" class="editor-area"></pre>
-    <div class="editor-sub-header">Profile</div>
-    <div id="profile" class="editor-area"></div>
+    <div class="editor-sub-header"><input id="show-profile" class="show-toggle" type="checkbox">Profile</div>
+    <div id="code-profile" class="editor-area"></div>
+
+    <div id="code-info" class="editor-info"></div>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.2/ace.js"></script>
