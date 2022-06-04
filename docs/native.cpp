@@ -54,7 +54,7 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
   return ret;
 }
 
-std::string lint(const std::string &grammarText, const std::string &codeText, bool opt_mode) {
+std::string lint(const std::string &grammarText, const std::string &codeText, bool opt_mode, bool packrat) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -68,6 +68,10 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
   if (is_grammar_valid && peg) {
     std::stringstream ss;
     peg::enable_profiling(peg, ss);
+
+    if (packrat) {
+      peg.enable_packrat_parsing();
+    }
 
     std::shared_ptr<peg::Ast> ast;
     is_source_valid = parse_code(codeText, peg, codeResult, ast);

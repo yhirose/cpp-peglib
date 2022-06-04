@@ -26,7 +26,10 @@ const codeAst = setupInfoArea("code-ast");
 const codeAstOptimized = setupInfoArea("code-ast-optimized");
 const profile = setupInfoArea("profile");
 
-$('#opt_mode').val(localStorage.getItem('optimazationMode') || 'all');
+$('#opt-mode').val(localStorage.getItem('optimazationMode') || 'all');
+$('#packrat').prop('checked', localStorage.getItem('packrat') === 'true');
+$('#auto-refresh').prop('checked', localStorage.getItem('autoRefresh') === 'true');
+$('#parse').prop('disabled', $('#auto-refresh').prop('checked'));
 
 // Parse
 function escapeHtml(unsafe) {
@@ -50,6 +53,14 @@ function generateErrorListHTML(errors) {
   return html;
 }
 
+function updateLocalStorage() {
+  localStorage.setItem('grammarText', grammar.getValue());
+  localStorage.setItem('codeText', code.getValue());
+  localStorage.setItem('optimazationMode', $('#opt-mode').val());
+  localStorage.setItem('packrat', $('#packrat').prop('checked'));
+  localStorage.setItem('autoRefresh', $('#auto-refresh').prop('checked'));
+}
+
 function parse() {
   const $grammarValidation = $('#grammar-validation');
   const $grammarInfo = $('#grammar-info');
@@ -59,11 +70,9 @@ function parse() {
   const $codeInfo = $('#code-info');
   const codeText = code.getValue();
 
-  const optimazationMode = $('#opt_mode').val();
-
-  localStorage.setItem('grammarText', grammarText);
-  localStorage.setItem('codeText', codeText);
-  localStorage.setItem('optimazationMode', optimazationMode);
+  const optimazationMode = $('#opt-mode').val();
+  const packrat = $('#packrat').prop('checked');
+  const autoRefresh = $('#auto-refresh').prop('checked');
 
   $grammarInfo.html('');
   $grammarValidation.hide();
@@ -78,7 +87,8 @@ function parse() {
   }
 
   const mode = optimazationMode == 'all';
-  const data = JSON.parse(Module.lint(grammarText, codeText, mode));
+  console.log({packrat});
+  const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat));
 
   if (data.grammar_valid) {
     $grammarValidation.removeClass('editor-validation-invalid').text('Valid').show();
@@ -111,7 +121,12 @@ function parse() {
 let timer;
 function setupTimer() {
   clearTimeout(timer);
-  timer = setTimeout(parse, 750);
+  timer = setTimeout(() => {
+    updateLocalStorage();
+    if ($('#auto-refresh').prop('checked')) {
+      parse();
+    }
+  }, 750);
 };
 grammar.getSession().on('change', setupTimer);
 code.getSession().on('change', setupTimer);
@@ -129,7 +144,14 @@ $('#grammar-info').on('click', 'li', makeOnClickInInfo(grammar));
 $('#code-info').on('click', 'li', makeOnClickInInfo(code));
 
 // Event handing in the AST optimazation
-$('#opt_mode').on('change', setupTimer);
+$('#opt-mode').on('change', setupTimer);
+$('#packrat').on('change', setupTimer);
+$('#auto-refresh').on('change', () => {
+  updateLocalStorage();
+  $('#parse').prop('disabled', $('#auto-refresh').prop('checked'));
+  setupTimer();
+});
+$('#parse').on('click', parse);
 
 // Show page
 $('#main').css({

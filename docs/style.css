@@ -29,9 +29,6 @@ body {
   height: 48px;
   padding: 4px 8px;
 }
-.editor-header > li:last-child {
-  margin-left: auto;
-}
 .editor-header > li > span {
   height: 38px;
   line-height: 38px;
@@ -41,6 +38,9 @@ body {
   line-height: 38px;
   padding: .3em .5em;
   border: 1px solid red;
+}
+.editor-header > li.validation-indicator {
+  margin-left: auto;
 }
 .editor-validation {
   padding: 9px 11px;
@@ -71,4 +71,14 @@ body {
 }
 .editor-sub-header {
   padding: 4px 8px;
+}
+.option {
+  margin-right: 12px;
+}
+.option > span > * {
+  margin-right: 8px;
+}
+.option .parse {
+  cursor: pointer;
+  padding: 9px 11px;
 }
