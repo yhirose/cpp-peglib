@@ -223,6 +223,16 @@ TEST(InfiniteLoopTest, word) {
   EXPECT_FALSE(pg);
 }
 
+TEST(InfiniteLoopTest, in_sequence) {
+  parser pg(R"(
+    S <- A*
+    A <- 'a' B
+    B <- 'a' ''*
+  )");
+
+  EXPECT_FALSE(pg);
+}
+
 TEST(PrecedenceTest, Precedence_climbing) {
   parser parser(R"(
         START            <-  _ EXPRESSION

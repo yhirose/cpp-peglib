@@ -1953,23 +1953,7 @@ struct HasEmptyElement : public Ope::Visitor {
   HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs)
       : refs_(refs) {}
 
-  void visit(Sequence &ope) override {
-    auto save_is_empty = false;
-    const char *save_error_s = nullptr;
-    std::string save_error_name;
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-      if (!is_empty) { return; }
-      save_is_empty = is_empty;
-      save_error_s = error_s;
-      save_error_name = error_name;
-      is_empty = false;
-      error_name.clear();
-    }
-    is_empty = save_is_empty;
-    error_s = save_error_s;
-    error_name = save_error_name;
-  }
+  void visit(Sequence &ope) override;
   void visit(PrioritizedChoice &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -2012,9 +1996,14 @@ private:
 };
 
 struct DetectInfiniteLoop : public Ope::Visitor {
-  DetectInfiniteLoop(const char *s, const std::string &name) {
+  DetectInfiniteLoop(const char *s, const std::string &name,
+                     std::vector<std::pair<const char *, std::string>> &refs)
+      : refs_(refs) {
     refs_.emplace_back(s, name);
   }
+
+  DetectInfiniteLoop(std::vector<std::pair<const char *, std::string>> &refs)
+      : refs_(refs) {}
 
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
@@ -2059,7 +2048,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
   std::string error_name;
 
 private:
-  std::vector<std::pair<const char *, std::string>> refs_;
+  std::vector<std::pair<const char *, std::string>> &refs_;
   std::unordered_map<std::string, bool> has_error_cache_;
 };
 
@@ -2972,6 +2961,44 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
     }
   }
   done_ = true;
+}
+
+inline void HasEmptyElement::visit(Sequence &ope) {
+  auto save_is_empty = false;
+  const char *save_error_s = nullptr;
+  std::string save_error_name;
+
+  auto it = ope.opes_.begin();
+  while (it != ope.opes_.end()) {
+    (*it)->accept(*this);
+    if (!is_empty) {
+      ++it;
+      while (it != ope.opes_.end()) {
+        DetectInfiniteLoop vis(refs_);
+        (*it)->accept(vis);
+        if (vis.has_error) {
+          std::cout << "infinite loop!" << std::endl;
+          is_empty = true;
+          error_s = vis.error_s;
+          error_name = vis.error_name;
+        }
+        ++it;
+      }
+      return;
+    }
+
+    save_is_empty = is_empty;
+    save_error_s = error_s;
+    save_error_name = error_name;
+
+    is_empty = false;
+    error_name.clear();
+    ++it;
+  }
+
+  is_empty = save_is_empty;
+  error_s = save_error_s;
+  error_name = save_error_name;
 }
 
 inline void HasEmptyElement::visit(Reference &ope) {
@@ -3956,7 +3983,8 @@ private:
 
   bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log,
                            const char *s) const {
-    DetectInfiniteLoop vis(data.start_pos, rule.name);
+    std::vector<std::pair<const char *, std::string>> refs;
+    DetectInfiniteLoop vis(data.start_pos, rule.name, refs);
     rule.accept(vis);
     if (vis.has_error) {
       if (log) {
