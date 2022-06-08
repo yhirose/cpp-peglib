@@ -4496,8 +4496,8 @@ inline void enable_tracing(parser &parser, std::ostream &os) {
           auto lit = dynamic_cast<const peg::LiteralString *>(&ope);
           if (lit) { name += " '" + peg::escape_characters(lit->lit_) + "'"; }
         }
-        os << "E " << pos << backtrack << "\t" << indent << "┌" << name << " #"
-           << c.trace_ids.back() << std::endl;
+        os << "E " << pos + 1 << backtrack << "\t" << indent << "┌" << name
+           << " #" << c.trace_ids.back() << std::endl;
         prev_pos = static_cast<size_t>(pos);
       },
       [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len,
@@ -4526,7 +4526,7 @@ inline void enable_tracing(parser &parser, std::ostream &os) {
             peg::TokenChecker::is_token(const_cast<peg::Ope &>(ope))) {
           matched = ", match '" + peg::escape_characters(s, len) + "'";
         }
-        os << "L " << pos << "\t" << indent << ret << name << " #"
+        os << "L " << pos + 1 << "\t" << indent << ret << name << " #"
            << c.trace_ids.back() << choice.str() << token << matched
            << std::endl;
       },
