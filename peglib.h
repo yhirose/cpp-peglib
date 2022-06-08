@@ -2401,14 +2401,18 @@ private:
 
       auto len = whitespaceOpe->parse(s, n, vs, c, dt);
       if (fail(len)) {
-        return Result{success(len), c.recovered, len, c.error_info};
+        return Result{false, c.recovered, i, c.error_info};
       }
 
       i = len;
     }
 
     auto len = ope->parse(s + i, n - i, vs, c, dt);
-    return Result{success(i + len), c.recovered, i + len, c.error_info};
+    if (success(len)) {
+      return Result{true, c.recovered, i + len, c.error_info};
+    } else {
+      return Result{false, c.recovered, i, c.error_info};
+    }
   }
 
   std::shared_ptr<Holder> holder_;
