@@ -2358,6 +2358,8 @@ public:
   std::string error_message;
   bool no_ast_opt = false;
 
+  bool eoi_check = true;
+
 private:
   friend class Reference;
   friend class ParserGenerator;
@@ -2409,12 +2411,14 @@ private:
     auto ret = success(len);
     if (ret) {
       i += len;
-      if (i < n) {
-        if (c.error_info.error_pos - c.s < s + i - c.s) {
-          c.error_info.message_pos = s + i;
-          c.error_info.message = "expected end of input";
+      if (eoi_check) {
+        if (i < n) {
+          if (c.error_info.error_pos - c.s < s + i - c.s) {
+            c.error_info.message_pos = s + i;
+            c.error_info.message = "expected end of input";
+          }
+          ret = false;
         }
-        ret = false;
       }
     }
     return Result{ret, c.recovered, i, c.error_info};
@@ -4408,6 +4412,13 @@ public:
       rules.push_back(name);
     }
     return rules;
+  }
+
+  void disable_eoi_check() {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.eoi_check = false;
+    }
   }
 
   void enable_packrat_parsing() {

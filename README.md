@@ -32,6 +32,8 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
   * `label { message "..." }` (Error message instruction)
 
+'End of Input' check will be done as default. In order to disable the check, please call `disable_eoi_check`.
+
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
   IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).

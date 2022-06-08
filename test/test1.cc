@@ -978,6 +978,17 @@ TEST(GeneralTest, ParentReferencesShouldNotBeExpired) {
 
 TEST(GeneralTest, EndOfInputTest) {
   auto parser = peg::parser(R"(
+    S <- '[[' (!']]' .)* ']]' !.
+	)");
+
+  parser.disable_eoi_check();
+
+  auto ret = parser.parse("[[]]]");
+  EXPECT_FALSE(ret);
+}
+
+TEST(GeneralTest, DefaultEndOfInputTest) {
+  auto parser = peg::parser(R"(
     S <- '[[' (!']]' .)* ']]'
 	)");
 
@@ -987,10 +998,12 @@ TEST(GeneralTest, EndOfInputTest) {
 
 TEST(GeneralTest, DisableEndOfInputCheckTest) {
   auto parser = peg::parser(R"(
-    S <- '[[' (!']]' .)* ']]' !.
+    S <- '[[' (!']]' .)* ']]'
 	)");
 
+  parser.disable_eoi_check();
+
   auto ret = parser.parse("[[]]]");
-  EXPECT_FALSE(ret);
+  EXPECT_TRUE(ret);
 }
 

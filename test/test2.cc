@@ -1228,7 +1228,7 @@ TEST(DicTest, Dictionary_invalid) {
 
 TEST(ErrorTest, Default_error_handling_1) {
   parser pg(R"(
-    S <- '@' A B !.
+    S <- '@' A B
     A <- < [a-z]+ >
     B <- 'hello' | 'world'
     %whitespace <- [ ]*
@@ -1253,7 +1253,7 @@ TEST(ErrorTest, Default_error_handling_1) {
 
 TEST(ErrorTest, Default_error_handling_2) {
   parser pg(R"(
-    S <- '@' A B !.
+    S <- '@' A B
     A <- < [a-z]+ >
     B <- 'hello' / 'world'
     %whitespace <- ' '*
@@ -1279,7 +1279,7 @@ TEST(ErrorTest, Default_error_handling_2) {
 TEST(ErrorTest, Default_error_handling_fiblang) {
   parser pg(R"(
     # Syntax
-    START             ← STATEMENTS !.
+    START             ← STATEMENTS
     STATEMENTS        ← (DEFINITION / EXPRESSION)*
     DEFINITION        ← 'def' ↑ Identifier '(' Identifier ')' EXPRESSION
     EXPRESSION        ← TERNARY
@@ -1326,7 +1326,7 @@ for n frm 1 to 30
 
 TEST(ErrorTest, Error_recovery_1) {
   parser pg(R"(
-START      <- __? SECTION* !.
+START      <- __? SECTION*
 
 SECTION    <- HEADER __ ENTRIES __?
 
@@ -1490,29 +1490,13 @@ TEST(ErrorTest, Error_recovery_2) {
   )",
                ast));
 
-  ast = pg.optimize_ast(ast);
-
-  EXPECT_EQ(R"(+ START
-  - ENTRY/0[NUM] (000)
-  - ENTRY/0[NUM] (111)
-  + ENTRY
-    + ITEM/2
-    + ITEM/2
-    - ITEM/0[WORD] ("bbb")
-    + ITEM/2
-  + ENTRY
-    + ITEM/2
-    - ITEM/1[NUM] (444)
-    - ITEM/1[NUM] (555)
-    + ITEM/2
-)",
-            ast_to_s(ast));
+  EXPECT_FALSE(ast);
 }
 
 TEST(ErrorTest, Error_recovery_3) {
   parser pg(R"~(
 # Grammar
-START      <- __? SECTION* !.
+START      <- __? SECTION*
 
 SECTION    <- HEADER __ ENTRIES __?
 
@@ -1723,7 +1707,7 @@ sss | ttt
 
 TEST(ErrorTest, Error_recovery_Java) {
   parser pg(R"(
-Prog       ← PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR !.
+Prog       ← PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR
 BlockStmt  ← LCUR (Stmt)* RCUR^rcblk
 Stmt       ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt
 IfStmt     ← IF LPAR Exp RPAR Stmt (ELSE Stmt)?
