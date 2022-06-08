@@ -3363,8 +3363,6 @@ private:
             data.instructions[name].push_back(instruction);
             types.insert(instruction.type);
           } else {
-            // data.duplicates_of_instruction.emplace_back(type,
-            // vs.sv().data());
             data.duplicates_of_instruction.emplace_back(type,
                                                         instruction.sv.data());
           }
@@ -4386,10 +4384,9 @@ public:
   }
 
   template <typename T>
-  bool parse(const char *s, std::any &dt, T &val,
+  bool parse(std::string_view sv, std::any &dt, T &val,
              const char *path = nullptr) const {
-    auto n = strlen(s);
-    return parse_n(s, n, dt, val, path);
+    return parse_n(sv.data(), sv.size(), dt, val, path);
   }
 
   Definition &operator[](const char *s) { return (*grammar_)[s]; }
