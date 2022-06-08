@@ -2977,7 +2977,6 @@ inline void HasEmptyElement::visit(Sequence &ope) {
         DetectInfiniteLoop vis(refs_);
         (*it)->accept(vis);
         if (vis.has_error) {
-          std::cout << "infinite loop!" << std::endl;
           is_empty = true;
           error_s = vis.error_s;
           error_name = vis.error_name;
