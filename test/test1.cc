@@ -976,3 +976,21 @@ TEST(GeneralTest, ParentReferencesShouldNotBeExpired) {
   EXPECT_FALSE(ast->nodes[0]->parent.expired());
 }
 
+TEST(GeneralTest, EndOfInputTest) {
+  auto parser = peg::parser(R"(
+    S <- '[[' (!']]' .)* ']]'
+	)");
+
+  auto ret = parser.parse("[[]]]");
+  EXPECT_FALSE(ret);
+}
+
+TEST(GeneralTest, DisableEndOfInputCheckTest) {
+  auto parser = peg::parser(R"(
+    S <- '[[' (!']]' .)* ']]' !.
+	)");
+
+  auto ret = parser.parse("[[]]]");
+  EXPECT_FALSE(ret);
+}
+
