@@ -2400,19 +2400,24 @@ private:
           scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
       auto len = whitespaceOpe->parse(s, n, vs, c, dt);
-      if (fail(len)) {
-        return Result{false, c.recovered, i, c.error_info};
-      }
+      if (fail(len)) { return Result{false, c.recovered, i, c.error_info}; }
 
       i = len;
     }
 
     auto len = ope->parse(s + i, n - i, vs, c, dt);
-    if (success(len)) {
-      return Result{true, c.recovered, i + len, c.error_info};
-    } else {
-      return Result{false, c.recovered, i, c.error_info};
+    auto ret = success(len);
+    if (ret) {
+      i += len;
+      if (i < n) {
+        if (c.error_info.error_pos - c.s < s + i - c.s) {
+          c.error_info.message_pos = s + i;
+          c.error_info.message = "expected end of input";
+        }
+        ret = false;
+      }
     }
+    return Result{ret, c.recovered, i, c.error_info};
   }
 
   std::shared_ptr<Holder> holder_;
@@ -4457,9 +4462,8 @@ public:
 private:
   bool post_process(const char *s, size_t n,
                     const Definition::Result &r) const {
-    auto ret = r.ret && r.len == n;
-    if (log && !ret) { r.error_info.output_log(log, s, n); }
-    return ret && !r.recovered;
+    if (log && !r.ret) { r.error_info.output_log(log, s, n); }
+    return r.ret && !r.recovered;
   }
 
   std::vector<std::string> get_no_ast_opt_rules() const {
