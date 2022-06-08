@@ -233,6 +233,16 @@ TEST(InfiniteLoopTest, in_sequence) {
   EXPECT_FALSE(pg);
 }
 
+TEST(InfiniteLoopTest, in_prioritized_choice) {
+  parser pg(R"(
+    S <- A*
+    A <- 'a' / 'b' B
+    B <- 'a' ''*
+  )");
+
+  EXPECT_FALSE(pg);
+}
+
 TEST(PrecedenceTest, Precedence_climbing) {
   parser parser(R"(
         START            <-  _ EXPRESSION
