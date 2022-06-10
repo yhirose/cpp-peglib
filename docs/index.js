@@ -152,6 +152,18 @@ $('#auto-refresh').on('change', () => {
 });
 $('#parse').on('click', parse);
 
+// Resize editors to fit their parents
+function resizeEditorsToParent() {
+	code.resize();
+  code.renderer.updateFull();
+	codeAst.resize();
+  codeAst.renderer.updateFull();
+	codeAstOptimized.resize();
+  codeAstOptimized.renderer.updateFull();
+	codeProfile.resize();
+  codeProfile.renderer.updateFull();
+}
+
 // Show windows
 function setupToolWindow(lsKeyName, buttonSel, codeSel) {
   let show = localStorage.getItem(lsKeyName) === 'true';
@@ -162,6 +174,7 @@ function setupToolWindow(lsKeyName, buttonSel, codeSel) {
     show = !show;
     localStorage.setItem(lsKeyName, show);
     $(codeSel).css({ 'display': show ? 'block' : 'none' });
+    resizeEditorsToParent();
   });
 }
 setupToolWindow('show-ast', '#show-ast', '#code-ast');
