@@ -4595,11 +4595,11 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
 
           if (index == 0) {
             auto end = std::chrono::steady_clock::now();
-            auto µs = std::chrono::duration_cast<std::chrono::microseconds>(
+            auto nano = std::chrono::duration_cast<std::chrono::microseconds>(
                           end - stats.start)
                           .count();
-            auto s = µs / 1000000.0;
-            os << "duration: " << s << "s (" << µs << "µs)" << std::endl << std::endl;
+            auto sec = nano / 1000000.0;
+            os << "duration: " << sec << "s (" << nano << "µs)" << std::endl << std::endl;
 
             char buff[BUFSIZ];
             size_t total_success = 0;
