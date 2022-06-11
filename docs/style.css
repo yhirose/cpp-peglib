@@ -13,6 +13,7 @@ body {
 #main {
   flex: 1;
   display: none;
+  z-index: 0;
 }
 .editor-container {
   flex: 1;
@@ -89,4 +90,12 @@ body {
 }
 .show-toggle {
   margin-right: 6px;
+}
+#overlay {
+  position: absolute;
+  width: 100vw;
+  height: 100vh;
+  cursor: wait;
+  display: none;
+  z-index: -1;
 }

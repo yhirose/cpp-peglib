@@ -4563,6 +4563,7 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
     std::vector<Item> items;
     std::map<std::string, size_t> index;
     size_t total = 0;
+    std::chrono::steady_clock::time_point start;
   };
 
   parser.enable_trace(
@@ -4593,8 +4594,14 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
           }
 
           if (index == 0) {
-            char buff[BUFSIZ];
+            auto end = std::chrono::steady_clock::now();
+            auto µs = std::chrono::duration_cast<std::chrono::microseconds>(
+                          end - stats.start)
+                          .count();
+            auto s = µs / 1000000.0;
+            os << "duration: " << s << "s (" << µs << "µs)" << std::endl << std::endl;
 
+            char buff[BUFSIZ];
             size_t total_success = 0;
             size_t total_fail = 0;
             for (auto &[name, success, fail] : stats.items) {
@@ -4614,7 +4621,8 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
             sprintf(buff, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
                     total_success * 100.0 / grand_total,
                     total_fail * 100.0 / grand_total, "% success/fail");
-            os << buff << std::endl;
+            os << buff << std::endl << std::endl;
+            ;
 
             size_t id = 0;
             for (auto &[name, success, fail] : stats.items) {
@@ -4628,7 +4636,11 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
           }
         }
       },
-      [&](auto &trace_data) { trace_data = new Stats{}; },
+      [&](auto &trace_data) {
+        auto stats = new Stats{};
+        stats->start = std::chrono::steady_clock::now();
+        trace_data = stats;
+      },
       [&](auto &trace_data) {
         auto stats = std::any_cast<Stats *>(trace_data);
         delete stats;

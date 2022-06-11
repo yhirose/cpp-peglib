@@ -72,7 +72,6 @@ function parse() {
 
   const optimazationMode = $('#opt-mode').val();
   const packrat = $('#packrat').prop('checked');
-  const autoRefresh = $('#auto-refresh').prop('checked');
 
   $grammarInfo.html('');
   $grammarValidation.hide();
@@ -87,33 +86,46 @@ function parse() {
   }
 
   const mode = optimazationMode == 'all';
-  const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat));
 
-  if (data.grammar_valid) {
-    $grammarValidation.removeClass('validation-invalid').show();
+  $('#overlay').css({
+    'z-index': '1',
+    'display': 'block',
+    'background-color': 'rgba(0, 0, 0, 0.1)'
+  });
+  window.setTimeout(() => {
+    const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat));
+      $('#overlay').css({
+        'z-index': '-1',
+        'display': 'none',
+        'background-color': 'rgba(1, 1, 1, 1.0)'
+      });
 
-    codeAst.insert(data.ast);
-    codeAstOptimized.insert(data.astOptimized);
-    codeProfile.insert(data.profile);
+    if (data.grammar_valid) {
+      $grammarValidation.removeClass('validation-invalid').show();
 
-    if (data.source_valid) {
-      $codeValidation.removeClass('validation-invalid').show();
+      codeAst.insert(data.ast);
+      codeAstOptimized.insert(data.astOptimized);
+      codeProfile.insert(data.profile);
+
+      if (data.source_valid) {
+        $codeValidation.removeClass('validation-invalid').show();
+      } else {
+        $codeValidation.addClass('validation-invalid').show();
+      }
+
+      if (data.code.length > 0) {
+        const html = generateErrorListHTML(data.code);
+        $codeInfo.html(html);
+      }
     } else {
-      $codeValidation.addClass('validation-invalid').show();
+      $grammarValidation.addClass('validation-invalid').show();
     }
 
-    if (data.code.length > 0) {
-      const html = generateErrorListHTML(data.code);
-      $codeInfo.html(html);
+    if (data.grammar.length > 0) {
+      const html = generateErrorListHTML(data.grammar);
+      $grammarInfo.html(html);
     }
-  } else {
-    $grammarValidation.addClass('validation-invalid').show();
-  }
-
-  if (data.grammar.length > 0) {
-    const html = generateErrorListHTML(data.grammar);
-    $grammarInfo.html(html);
-  }
+  }, 0);
 }
 
 // Event handing for text editiing
@@ -190,6 +202,8 @@ $('#main').css({
 var Module = {
   onRuntimeInitialized: function() {
     // Initial parse
-    parse();
+    if ($('#auto-refresh').prop('checked')) {
+      parse();
+    }
   }
 };
