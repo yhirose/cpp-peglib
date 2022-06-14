@@ -9,6 +9,14 @@ inline bool exact(Grammar &g, const char *d, const char *s) {
   return r.ret && r.len == n;
 }
 
+#if defined(__cpp_lib_char8_t)
+inline bool exact(Grammar &g, const char *d, const char8_t *s) {
+  auto n = strlen(reinterpret_cast<const char *>(s));
+  auto r = g[d].parse(s, n);
+  return r.ret && r.len == n;
+}
+#endif
+
 inline Grammar &make_peg_grammar() { return ParserGenerator::grammar(); }
 
 TEST(PEGTest, PEG_Grammar) {

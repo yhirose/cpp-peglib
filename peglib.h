@@ -2309,6 +2309,60 @@ public:
     return parse_and_get_value(s, n, dt, val, path, log);
   }
 
+#if defined(__cpp_lib_char8_t)
+  Result parse(const char8_t *s, size_t n, const char *path = nullptr,
+               Log log = nullptr) const {
+    return parse(reinterpret_cast<const char *>(s), n, path, log);
+  }
+
+  Result parse(const char8_t *s, const char *path = nullptr,
+               Log log = nullptr) const {
+    return parse(reinterpret_cast<const char *>(s), path, log);
+  }
+
+  Result parse(const char8_t *s, size_t n, std::any &dt,
+               const char *path = nullptr, Log log = nullptr) const {
+    return parse(reinterpret_cast<const char *>(s), n, dt, path, log);
+  }
+
+  Result parse(const char8_t *s, std::any &dt, const char *path = nullptr,
+               Log log = nullptr) const {
+    return parse(reinterpret_cast<const char *>(s), dt, path, log);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char8_t *s, size_t n, T &val,
+                             const char *path = nullptr,
+                             Log log = nullptr) const {
+    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, *path,
+                               log);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char8_t *s, T &val,
+                             const char *path = nullptr,
+                             Log log = nullptr) const {
+    return parse_and_get_value(reinterpret_cast<const char *>(s), val, *path,
+                               log);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char8_t *s, size_t n, std::any &dt, T &val,
+                             const char *path = nullptr,
+                             Log log = nullptr) const {
+    return parse_and_get_value(reinterpret_cast<const char *>(s), n, dt, val,
+                               *path, log);
+  }
+
+  template <typename T>
+  Result parse_and_get_value(const char8_t *s, std::any &dt, T &val,
+                             const char *path = nullptr,
+                             Log log = nullptr) const {
+    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val,
+                               *path, log);
+  }
+#endif
+
   void operator=(Action a) { action = a; }
 
   template <typename T> Definition &operator,(T fn) {
@@ -4317,12 +4371,20 @@ public:
     load_grammar(s, n, rules);
   }
 
+  parser(const char *s, size_t n) : parser(s, n, Rules()) {}
+
   parser(std::string_view sv, const Rules &rules)
       : parser(sv.data(), sv.size(), rules) {}
 
-  parser(const char *s, size_t n) : parser(s, n, Rules()) {}
-
   parser(std::string_view sv) : parser(sv.data(), sv.size(), Rules()) {}
+
+#if defined(__cpp_lib_char8_t)
+  parser(std::u8string_view sv, const Rules &rules)
+      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), rules) {}
+
+  parser(std::u8string_view sv)
+      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), Rules()) {}
+#endif
 
   operator bool() { return grammar_ != nullptr; }
 
@@ -4352,10 +4414,6 @@ public:
     return false;
   }
 
-  bool parse(std::string_view sv, const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), path);
-  }
-
   bool parse_n(const char *s, size_t n, std::any &dt,
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
@@ -4363,11 +4421,6 @@ public:
       return post_process(s, n, rule.parse(s, n, dt, path, log));
     }
     return false;
-  }
-
-  bool parse(std::string_view sv, std::any &dt,
-             const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), dt, path);
   }
 
   template <typename T>
@@ -4381,11 +4434,6 @@ public:
   }
 
   template <typename T>
-  bool parse(std::string_view sv, T &val, const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), val, path);
-  }
-
-  template <typename T>
   bool parse_n(const char *s, size_t n, std::any &dt, T &val,
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
@@ -4396,11 +4444,50 @@ public:
     return false;
   }
 
+  bool parse(std::string_view sv, const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), path);
+  }
+
+  bool parse(std::string_view sv, std::any &dt,
+             const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), dt, path);
+  }
+
+  template <typename T>
+  bool parse(std::string_view sv, T &val, const char *path = nullptr) const {
+    return parse_n(sv.data(), sv.size(), val, path);
+  }
+
   template <typename T>
   bool parse(std::string_view sv, std::any &dt, T &val,
              const char *path = nullptr) const {
     return parse_n(sv.data(), sv.size(), dt, val, path);
   }
+
+#if defined(__cpp_lib_char8_t)
+  bool parse(std::u8string_view sv, const char *path = nullptr) const {
+    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), path);
+  }
+
+  bool parse(std::u8string_view sv, std::any &dt,
+             const char *path = nullptr) const {
+    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), dt,
+                   path);
+  }
+
+  template <typename T>
+  bool parse(std::u8string_view sv, T &val, const char *path = nullptr) const {
+    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), val,
+                   path);
+  }
+
+  template <typename T>
+  bool parse(std::u8string_view sv, std::any &dt, T &val,
+             const char *path = nullptr) const {
+    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), dt,
+                   val, path);
+  }
+#endif
 
   Definition &operator[](const char *s) { return (*grammar_)[s]; }
 
@@ -4596,10 +4683,11 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
           if (index == 0) {
             auto end = std::chrono::steady_clock::now();
             auto nano = std::chrono::duration_cast<std::chrono::microseconds>(
-                          end - stats.start)
-                          .count();
+                            end - stats.start)
+                            .count();
             auto sec = nano / 1000000.0;
-            os << "duration: " << sec << "s (" << nano << "µs)" << std::endl << std::endl;
+            os << "duration: " << sec << "s (" << nano << "µs)" << std::endl
+               << std::endl;
 
             char buff[BUFSIZ];
             size_t total_success = 0;
