@@ -1950,8 +1950,9 @@ private:
 };
 
 struct HasEmptyElement : public Ope::Visitor {
-  HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs)
-      : refs_(refs) {}
+  HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs,
+                  std::unordered_map<std::string, bool> &has_error_cache)
+      : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override;
   void visit(PrioritizedChoice &ope) override {
@@ -1993,17 +1994,20 @@ private:
     tie(error_s, error_name) = refs_.back();
   }
   std::vector<std::pair<const char *, std::string>> &refs_;
+  std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
 struct DetectInfiniteLoop : public Ope::Visitor {
   DetectInfiniteLoop(const char *s, const std::string &name,
-                     std::vector<std::pair<const char *, std::string>> &refs)
-      : refs_(refs) {
+                     std::vector<std::pair<const char *, std::string>> &refs,
+                     std::unordered_map<std::string, bool> &has_error_cache)
+      : refs_(refs), has_error_cache_(has_error_cache) {
     refs_.emplace_back(s, name);
   }
 
-  DetectInfiniteLoop(std::vector<std::pair<const char *, std::string>> &refs)
-      : refs_(refs) {}
+  DetectInfiniteLoop(std::vector<std::pair<const char *, std::string>> &refs,
+                     std::unordered_map<std::string, bool> &has_error_cache)
+      : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
@@ -2019,7 +2023,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
   }
   void visit(Repetition &ope) override {
     if (ope.max_ == std::numeric_limits<size_t>::max()) {
-      HasEmptyElement vis(refs_);
+      HasEmptyElement vis(refs_, has_error_cache_);
       ope.ope_->accept(vis);
       if (vis.is_empty) {
         has_error = true;
@@ -2049,7 +2053,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
 
 private:
   std::vector<std::pair<const char *, std::string>> &refs_;
-  std::unordered_map<std::string, bool> has_error_cache_;
+  std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
 struct ReferenceChecker : public Ope::Visitor {
@@ -3041,7 +3045,7 @@ inline void HasEmptyElement::visit(Sequence &ope) {
     if (!is_empty) {
       ++it;
       while (it != ope.opes_.end()) {
-        DetectInfiniteLoop vis(refs_);
+        DetectInfiniteLoop vis(refs_, has_error_cache_);
         (*it)->accept(vis);
         if (vis.has_error) {
           is_empty = true;
@@ -4048,7 +4052,8 @@ private:
   bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log,
                            const char *s) const {
     std::vector<std::pair<const char *, std::string>> refs;
-    DetectInfiniteLoop vis(data.start_pos, rule.name, refs);
+    std::unordered_map<std::string, bool> has_error_cache;
+    DetectInfiniteLoop vis(data.start_pos, rule.name, refs, has_error_cache);
     rule.accept(vis);
     if (vis.has_error) {
       if (log) {
