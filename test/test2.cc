@@ -1452,20 +1452,20 @@ rrr | sss
 
 TEST(ErrorTest, Error_recovery_2) {
   parser pg(R"(
-    START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover(.*))
+    START <- ENTRY (',' ENTRY)* _*
     ENTRY <- '[' ITEM (',' ITEM)* ']'
     ITEM  <- WORD / NUM / %recover((!(',' / ']') .)+)
     NUM   <- [0-9]+ ![a-z]
     WORD  <- '"' [a-z]+ '"'
 
-    ~_    <- Space*
+    ~_    <- Space
     Space <- [ \n]
   )");
 
   EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-      R"(1:6: syntax error, unexpected ']', expecting ','.)",
+      R"(1:6: syntax error, unexpected ']', expecting <Space>.)",
       R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
       R"(1:24: syntax error, unexpected ',', expecting '"'.)",
       R"(1:31: syntax error, unexpected 'ccc', expecting '"', <NUM>.)",

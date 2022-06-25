@@ -1125,7 +1125,7 @@ public:
       count++;
     }
 
-    while (n - i > 0 && count < max_) {
+    while (count < max_) {
       c.push_capture_scope();
       auto se = scope_exit([&]() { c.pop_capture_scope(); });
       auto save_sv_size = vs.size();
@@ -2936,11 +2936,6 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
 
   if (success(len)) {
     c.recovered = true;
-
-    if (c.log) {
-      c.error_info.output_log(c.log, c.s, c.l);
-      c.error_info.clear();
-    }
   }
 
   // Cut
