@@ -658,7 +658,7 @@ using Log = std::function<void(size_t, size_t, const std::string &)>;
  */
 struct ErrorInfo {
   const char *error_pos = nullptr;
-  std::vector<std::pair<const char *, bool>> expected_tokens;
+  std::vector<std::pair<std::string, bool>> expected_tokens;
   const char *message_pos = nullptr;
   std::string message;
   mutable const char *last_output_pos = nullptr;
