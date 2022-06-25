@@ -28,7 +28,9 @@ Primary <-
 	/ LiteralI
 	/ Dictionary
 	/ Literal
+	/ NegatedClassI
 	/ NegatedClass
+	/ ClassI
 	/ Class
 	/  DOT
 
@@ -56,7 +58,9 @@ LiteralI <-
 
 # NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
 Class <-  '['  !'^' <(!']'  Range)+>  ']' Spacing
+ClassI <-  '['  !'^' <(!']'  Range)+>  ']i' Spacing
 NegatedClass <-  "[^" <(!']'  Range)+>  ']' Spacing
+NegatedClassI <-  "[^" <(!']'  Range)+>  ']i' Spacing
 
 Range <-  (Char  '-'  ! ']' Char) /  Char
 

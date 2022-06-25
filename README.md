@@ -13,7 +13,9 @@ You can also try the online version, PEG Playground at https://yhirose.github.io
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bryan Ford. *cpp-peglib* also supports the following additional syntax for now:
 
   * `'...'i` (Case-insensitive literal operator)
+  * `[...]i` (Case-insensitive character class operator)
   * `[^...]` (Negated character class operator)
+  * `[^...]i` (Case-insensitive negated character class operator)
   * `{2,5}` (Regex-like repetition operator)
   * `<` ... `>` (Token boundary operator)
   * `~` (Ignore operator)

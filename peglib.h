@@ -1265,7 +1265,8 @@ public:
 class CharacterClass : public Ope,
                        public std::enable_shared_from_this<CharacterClass> {
 public:
-  CharacterClass(const std::string &s, bool negated) : negated_(negated) {
+  CharacterClass(const std::string &s, bool negated, bool ignore_case)
+      : negated_(negated), ignore_case_(ignore_case) {
     auto chars = decode(s.data(), s.length());
     auto i = 0u;
     while (i < chars.size()) {
@@ -1284,8 +1285,8 @@ public:
   }
 
   CharacterClass(const std::vector<std::pair<char32_t, char32_t>> &ranges,
-                 bool negated)
-      : ranges_(ranges), negated_(negated) {
+                 bool negated, bool ignore_case)
+      : ranges_(ranges), negated_(negated), ignore_case_(ignore_case) {
     assert(!ranges_.empty());
   }
 
@@ -1300,7 +1301,7 @@ public:
     auto len = decode_codepoint(s, n, cp);
 
     for (const auto &range : ranges_) {
-      if (range.first <= cp && cp <= range.second) {
+      if (in_range(range, cp)) {
         if (negated_) {
           c.set_error_pos(s);
           return static_cast<size_t>(-1);
@@ -1320,8 +1321,20 @@ public:
 
   void accept(Visitor &v) override;
 
+private:
+  bool in_range(const std::pair<char32_t, char32_t> &range, char32_t cp) const {
+    if (ignore_case_) {
+      auto cpl = std::tolower(cp);
+      return std::tolower(range.first) <= cpl &&
+             cpl <= std::tolower(range.second);
+    } else {
+      return range.first <= cp && cp <= range.second;
+    }
+  }
+
   std::vector<std::pair<char32_t, char32_t>> ranges_;
   bool negated_;
+  bool ignore_case_;
 };
 
 class Character : public Ope, public std::enable_shared_from_this<Character> {
@@ -1646,21 +1659,23 @@ inline std::shared_ptr<Ope> liti(std::string &&s) {
 }
 
 inline std::shared_ptr<Ope> cls(const std::string &s) {
-  return std::make_shared<CharacterClass>(s, false);
+  return std::make_shared<CharacterClass>(s, false, false);
 }
 
 inline std::shared_ptr<Ope>
-cls(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
-  return std::make_shared<CharacterClass>(ranges, false);
+cls(const std::vector<std::pair<char32_t, char32_t>> &ranges,
+    bool ignore_case = false) {
+  return std::make_shared<CharacterClass>(ranges, false, ignore_case);
 }
 
 inline std::shared_ptr<Ope> ncls(const std::string &s) {
-  return std::make_shared<CharacterClass>(s, true);
+  return std::make_shared<CharacterClass>(s, true, false);
 }
 
 inline std::shared_ptr<Ope>
-ncls(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
-  return std::make_shared<CharacterClass>(ranges, true);
+ncls(const std::vector<std::pair<char32_t, char32_t>> &ranges,
+     bool ignore_case = false) {
+  return std::make_shared<CharacterClass>(ranges, true, ignore_case);
 }
 
 inline std::shared_ptr<Ope> chr(char dt) {
@@ -2934,9 +2949,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     len = rule.parse(s, n, dummy_vs, c, dummy_dt);
   }
 
-  if (success(len)) {
-    c.recovered = true;
-  }
+  if (success(len)) { c.recovered = true; }
 
   // Cut
   if (!c.cut_stack.empty()) {
@@ -3241,16 +3254,16 @@ private:
         seq(g["Suffix"], opt(seq(g["LABEL"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
-    g["Primary"] <= cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
-                            npd(g["LEFTARROW"])),
-                        seq(g["Ignore"], g["Identifier"],
-                            npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
-                        seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                        seq(g["BeginTok"], g["Expression"], g["EndTok"]),
-                        g["CapScope"],
-                        seq(g["BeginCap"], g["Expression"], g["EndCap"]),
-                        g["BackRef"], g["LiteralI"], g["Dictionary"],
-                        g["Literal"], g["NegatedClass"], g["Class"], g["DOT"]);
+    g["Primary"] <=
+        cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
+                npd(g["LEFTARROW"])),
+            seq(g["Ignore"], g["Identifier"],
+                npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
+            seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+            seq(g["BeginTok"], g["Expression"], g["EndTok"]), g["CapScope"],
+            seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
+            g["LiteralI"], g["Dictionary"], g["Literal"], g["NegatedClassI"],
+            g["NegatedClass"], g["ClassI"], g["Class"], g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
     g["IdentCont"] <= seq(g["IdentStart"], zom(g["IdentRest"]));
@@ -3281,9 +3294,16 @@ private:
     g["Class"] <= seq(chr('['), npd(chr('^')),
                       tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'),
                       g["Spacing"]);
+    g["ClassI"] <= seq(chr('['), npd(chr('^')),
+                       tok(oom(seq(npd(chr(']')), g["Range"]))), lit("]i"),
+                       g["Spacing"]);
+
     g["NegatedClass"] <= seq(lit("[^"),
                              tok(oom(seq(npd(chr(']')), g["Range"]))), chr(']'),
                              g["Spacing"]);
+    g["NegatedClassI"] <= seq(lit("[^"),
+                              tok(oom(seq(npd(chr(']')), g["Range"]))),
+                              lit("]i"), g["Spacing"]);
 
     // NOTE: This is different from The original Brian Ford's paper, and this
     // modification allows us to specify `[+-]` as a valid char class.
@@ -3634,9 +3654,17 @@ private:
       auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
       return cls(ranges);
     };
+    g["ClassI"] = [](const SemanticValues &vs) {
+      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
+      return cls(ranges, true);
+    };
     g["NegatedClass"] = [](const SemanticValues &vs) {
       auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
       return ncls(ranges);
+    };
+    g["NegatedClassI"] = [](const SemanticValues &vs) {
+      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
+      return ncls(ranges, true);
     };
     g["Range"] = [](const SemanticValues &vs) {
       switch (vs.choice()) {

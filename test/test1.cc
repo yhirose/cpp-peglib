@@ -431,13 +431,13 @@ TEST(GeneralTest, Octal_Hex_Unicode_value_test) {
   EXPECT_TRUE(ret);
 }
 
-TEST(GeneralTest, Ignore_case_test) {
+TEST(GeneralTest, Ignore_case_literal_test) {
   parser parser(R"(
-        ROOT         <-  HELLO WORLD
-        HELLO        <-  'hello'i
-        WORLD        <-  'world'i
-        %whitespace  <-  [ \t\r\n]*
-    )");
+    ROOT         <-  HELLO WORLD
+    HELLO        <-  'hello'i
+    WORLD        <-  'world'i
+    %whitespace  <-  [ \t\r\n]*
+  )");
 
   parser["HELLO"] = [](const SemanticValues &vs) {
     EXPECT_EQ("Hello", vs.token());
@@ -449,6 +449,23 @@ TEST(GeneralTest, Ignore_case_test) {
 
   auto ret = parser.parse("  Hello World  ");
   EXPECT_TRUE(ret);
+}
+
+TEST(GeneralTest, Ignore_case_character_class_test) {
+  parser parser(R"(ROOT <-  [a-z]i+)");
+
+  EXPECT_TRUE(parser.parse("abc"));
+  EXPECT_TRUE(parser.parse("ABC"));
+  EXPECT_TRUE(parser.parse("Abc"));
+  EXPECT_TRUE(parser.parse("Abc"));
+  EXPECT_FALSE(parser.parse("123"));
+}
+
+TEST(GeneralTest, Ignore_case_negate_character_class_test) {
+  parser parser(R"(ROOT <-  [^a-z]i+)");
+
+  EXPECT_TRUE(parser.parse("123"));
+  EXPECT_FALSE(parser.parse("ABC"));
 }
 
 TEST(GeneralTest, mutable_lambda_test) {
