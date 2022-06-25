@@ -10,6 +10,8 @@ else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 endif()
 
+option(PEGLIB_BUILD_TESTS "Build cpp-peglib tests" ON)
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads)
 
@@ -19,8 +21,10 @@ endif()
 
 add_subdirectory(example)
 add_subdirectory(lint)
-add_subdirectory(test)
 
-enable_testing()
+if (${PEGLIB_BUILD_TESTS})
+  add_subdirectory(test)
+  enable_testing()
+endif()
 
 install(FILES peglib.h DESTINATION include)
