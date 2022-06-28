@@ -1,0 +1,26 @@
+# JSON grammar based on RFC 4627 (http://www.ietf.org/rfc/rfc4627.txt)
+
+json        <- object / array
+
+object      <- '{' (member (',' member)*)? '}' { no_ast_opt }
+member      <- string ':' value
+
+array       <- '[' (value (',' value)*)? ']'
+
+value       <- boolean / null / number / string / object / array
+
+boolean     <- 'false' / 'true'
+null        <- 'null'
+
+number      <- < minus int frac exp >
+minus       <- '-'?
+int         <- '0' / [1-9][0-9]*
+frac        <- ('.' [0-9]+)?
+exp         <- ([eE] [-+]? [0-9]+)?
+
+string      <- '"' < char* > '"'
+char        <- unescaped / escaped
+escaped     <- '\\' (["\\/bfnrt] / 'u' [a-fA-F0-9]{4})
+unescaped   <- [\u0020-\u0021\u0023-\u005b\u005d-\u10ffff]
+
+%whitespace <- [ \t\r\n]*
