@@ -39,9 +39,14 @@ Block <- Statements {}
                               size_t /*matchlen*/, std::any & /*value*/,
                               std::any & /*dt*/) { indent -= 2; };
 
-  parser["Samedent"] = [&](const SemanticValues &vs, std::any & /*dt*/) {
-    if (indent != vs.sv().size()) { throw parse_error("different indent..."); }
-  };
+  parser["Samedent"].predicate =
+      [&](const SemanticValues &vs, const std::any & /*dt*/, std::string &msg) {
+        if (indent != vs.sv().size()) {
+          msg = "different indent...";
+          return false;
+        }
+        return true;
+      };
 
   parser.enable_ast();
 

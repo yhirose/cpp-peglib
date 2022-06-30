@@ -632,16 +632,6 @@ private:
 };
 
 /*
- * Semantic predicate
- */
-// Note: 'parse_error' exception class should be be used in sematic action
-// handlers to reject the rule.
-class parse_error : public std::runtime_error {
-public:
-  parse_error(const char *what_arg) : std::runtime_error(what_arg) {}
-};
-
-/*
  * Parse result helper
  */
 inline bool success(size_t len) { return len != static_cast<size_t>(-1); }
@@ -996,29 +986,29 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    auto &chldsv = c.push();
+    auto &chldvs = c.push();
     auto pop_se = scope_exit([&]() { c.pop(); });
     size_t i = 0;
     for (const auto &ope : opes_) {
       const auto &rule = *ope;
-      auto len = rule.parse(s + i, n - i, chldsv, c, dt);
+      auto len = rule.parse(s + i, n - i, chldvs, c, dt);
       if (fail(len)) { return len; }
       i += len;
     }
-    if (!chldsv.empty()) {
-      for (size_t j = 0; j < chldsv.size(); j++) {
-        vs.emplace_back(std::move(chldsv[j]));
+    if (!chldvs.empty()) {
+      for (size_t j = 0; j < chldvs.size(); j++) {
+        vs.emplace_back(std::move(chldvs[j]));
       }
     }
-    if (!chldsv.tags.empty()) {
-      for (size_t j = 0; j < chldsv.tags.size(); j++) {
-        vs.tags.emplace_back(std::move(chldsv.tags[j]));
+    if (!chldvs.tags.empty()) {
+      for (size_t j = 0; j < chldvs.tags.size(); j++) {
+        vs.tags.emplace_back(std::move(chldvs.tags[j]));
       }
     }
-    vs.sv_ = chldsv.sv_;
-    if (!chldsv.tokens.empty()) {
-      for (size_t j = 0; j < chldsv.tokens.size(); j++) {
-        vs.tokens.emplace_back(std::move(chldsv.tokens[j]));
+    vs.sv_ = chldvs.sv_;
+    if (!chldvs.tokens.empty()) {
+      for (size_t j = 0; j < chldvs.tokens.size(); j++) {
+        vs.tokens.emplace_back(std::move(chldvs.tokens[j]));
       }
     }
     return i;
@@ -1049,7 +1039,7 @@ public:
     for (const auto &ope : opes_) {
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
-      auto &chldsv = c.push();
+      auto &chldvs = c.push();
       c.push_capture_scope();
 
       c.error_info.keep_previous_token = id > 0;
@@ -1059,25 +1049,25 @@ public:
         c.error_info.keep_previous_token = false;
       });
 
-      len = ope->parse(s, n, chldsv, c, dt);
+      len = ope->parse(s, n, chldvs, c, dt);
 
       if (success(len)) {
-        if (!chldsv.empty()) {
-          for (size_t i = 0; i < chldsv.size(); i++) {
-            vs.emplace_back(std::move(chldsv[i]));
+        if (!chldvs.empty()) {
+          for (size_t i = 0; i < chldvs.size(); i++) {
+            vs.emplace_back(std::move(chldvs[i]));
           }
         }
-        if (!chldsv.tags.empty()) {
-          for (size_t i = 0; i < chldsv.tags.size(); i++) {
-            vs.tags.emplace_back(std::move(chldsv.tags[i]));
+        if (!chldvs.tags.empty()) {
+          for (size_t i = 0; i < chldvs.tags.size(); i++) {
+            vs.tags.emplace_back(std::move(chldvs.tags[i]));
           }
         }
-        vs.sv_ = chldsv.sv_;
+        vs.sv_ = chldvs.sv_;
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        if (!chldsv.tokens.empty()) {
-          for (size_t i = 0; i < chldsv.tokens.size(); i++) {
-            vs.tokens.emplace_back(std::move(chldsv.tokens[i]));
+        if (!chldvs.tokens.empty()) {
+          for (size_t i = 0; i < chldvs.tokens.size(); i++) {
+            vs.tokens.emplace_back(std::move(chldvs.tokens[i]));
           }
         }
         c.shift_capture_values();
@@ -1184,14 +1174,14 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chldsv = c.push();
+    auto &chldvs = c.push();
     c.push_capture_scope();
     auto se = scope_exit([&]() {
       c.pop();
       c.pop_capture_scope();
     });
     const auto &rule = *ope_;
-    auto len = rule.parse(s, n, chldsv, c, dt);
+    auto len = rule.parse(s, n, chldvs, c, dt);
     if (success(len)) {
       return 0;
     } else {
@@ -1210,13 +1200,13 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chldsv = c.push();
+    auto &chldvs = c.push();
     c.push_capture_scope();
     auto se = scope_exit([&]() {
       c.pop();
       c.pop_capture_scope();
     });
-    auto len = ope_->parse(s, n, chldsv, c, dt);
+    auto len = ope_->parse(s, n, chldvs, c, dt);
     if (success(len)) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1429,9 +1419,9 @@ public:
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
     const auto &rule = *ope_;
-    auto &chldsv = c.push();
+    auto &chldvs = c.push();
     auto se = scope_exit([&]() { c.pop(); });
-    return rule.parse(s, n, chldsv, c, dt);
+    return rule.parse(s, n, chldvs, c, dt);
   }
 
   void accept(Visitor &v) override;
@@ -2408,6 +2398,10 @@ public:
   std::string name;
   const char *s_ = nullptr;
 
+  std::function<bool(const SemanticValues &vs, const std::any &dt,
+                     std::string &msg)>
+      predicate;
+
   size_t id = 0;
   Action action;
   std::function<void(const char *s, size_t n, std::any &dt)> enter;
@@ -2695,6 +2689,15 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     c.rule_stack.push_back(outer_);
     auto len = ope_->parse(s, n, vs, c, dt);
     c.rule_stack.pop_back();
+
+    std::string msg;
+    if (outer_->predicate && !outer_->predicate(vs, dt, msg)) {
+      if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+        c.error_info.message_pos = s;
+        c.error_info.message = msg;
+      }
+      len = static_cast<size_t>(-1);
+    }
     return len;
   }
 
@@ -2709,34 +2712,31 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (outer_->leave) { outer_->leave(s, n, len, a_val, dt); }
     });
 
-    auto &chldsv = c.push();
+    auto &chldvs = c.push();
 
     c.rule_stack.push_back(outer_);
-    len = ope_->parse(s, n, chldsv, c, dt);
+    len = ope_->parse(s, n, chldvs, c, dt);
     c.rule_stack.pop_back();
 
     // Invoke action
     if (success(len)) {
-      chldsv.sv_ = std::string_view(s, len);
-      chldsv.name_ = outer_->name;
+      chldvs.sv_ = std::string_view(s, len);
+      chldvs.name_ = outer_->name;
 
       if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_.get())) {
-        chldsv.choice_count_ = 0;
-        chldsv.choice_ = 0;
+        chldvs.choice_count_ = 0;
+        chldvs.choice_ = 0;
       }
 
-      try {
-        a_val = reduce(chldsv, dt);
-      } catch (const parse_error &e) {
-        if (c.log) {
-          if (e.what()) {
-            if (c.error_info.message_pos < s) {
-              c.error_info.message_pos = s;
-              c.error_info.message = e.what();
-            }
-          }
+      std::string msg;
+      if (outer_->predicate && !outer_->predicate(chldvs, dt, msg)) {
+        if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+          c.error_info.message_pos = s;
+          c.error_info.message = msg;
         }
         len = static_cast<size_t>(-1);
+      } else {
+        a_val = reduce(chldvs, dt);
       }
     }
   });

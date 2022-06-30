@@ -837,9 +837,16 @@ TEST(PredicateTest, Semantic_predicate_test) {
   parser parser("NUMBER  <-  [0-9]+");
 
   parser["NUMBER"] = [](const SemanticValues &vs) {
-    auto val = vs.token_to_number<long>();
-    if (val != 100) { throw parse_error("value error!!"); }
-    return val;
+    return vs.token_to_number<long>();
+  };
+
+  parser["NUMBER"].predicate = [](const SemanticValues &vs,
+                                  const std::any & /*dt*/, std::string &msg) {
+    if (vs.token_to_number<long>() != 100) {
+      msg = "value error!!";
+      return false;
+    }
+    return true;
   };
 
   long val;

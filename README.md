@@ -216,17 +216,22 @@ peg::parser parser(R"(
 )");
 ```
 
-*Semantic predicate* support is available. We can do it by throwing a `peg::parse_error` exception in a semantic action.
+*Semantic predicate* support is available with a *predicate* action.
 
 ```cpp
 peg::parser parser("NUMBER  <-  [0-9]+");
 
-parser["NUMBER"] = [](const SemanticValues& vs) {
-  auto val = vs.token_to_number<long>();
-  if (val != 100) {
-    throw peg::parse_error("value error!!");
+parser["NUMBER"] = [](const SemanticValues &vs) {
+  return vs.token_to_number<long>();
+};
+
+parser["NUMBER"].predicate = [](const SemanticValues &vs,
+                                const std::any & /*dt*/, std::string &msg) {
+  if (vs.token_to_number<long>() != 100) {
+    msg = "value error!!";
+    return false;
   }
-  return val;
+  return true;
 };
 
 long val;

@@ -226,14 +226,17 @@ TEST(GeneralTest, enter_leave_handlers_test) {
 
   auto message = "should be upper case string...";
 
-  parser["TOKEN"] = [&](const SemanticValues &vs, std::any &dt) {
+  parser["TOKEN"].predicate = [&](const SemanticValues &vs, const std::any &dt,
+                                  std::string &msg) {
     auto &require_upper_case = *std::any_cast<bool *>(dt);
     if (require_upper_case) {
       const auto &s = vs.sv();
       if (!std::all_of(s.begin(), s.end(), ::isupper)) {
-        throw parse_error(message);
+        msg = message;
+        return false;
       }
     }
+    return true;
   };
 
   bool require_upper_case = false;
