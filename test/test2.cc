@@ -196,7 +196,7 @@ TEST(InfiniteLoopTest, Not_infinite_3) {
         TERM             <-  FACTOR (FACTOR_OPERATOR FACTOR)*
         FACTOR           <-  NUMBER / '(' _ EXPRESSION ')' _ # Recursive...
         TERM_OPERATOR    <-  < [-+] > _
-        FACTOR_OPERATOR  <-  < [/*] > _
+        FACTOR_OPERATOR  <-  < [*/] > _
         NUMBER           <-  < [0-9]+ > _
         _                <-  [ \t\r\n]*
     )");
@@ -252,7 +252,7 @@ TEST(PrecedenceTest, Precedence_climbing) {
                                  L * /
                              }
         ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
-        OPERATOR         <-  T([-+/*])
+        OPERATOR         <-  T([-+*/])
         NUMBER           <-  T('-'? [0-9]+)
 		~_               <-  [ \t]*
 		T(S)             <-  < S > _
@@ -381,7 +381,7 @@ TEST(PrecedenceTest, Precedence_climbing_with_macro) {
                                        L * /
                                    }
         ATOM                   <-  NUMBER / '(' EXPRESSION ')'
-        OPERATOR               <-  < [-+/*] >
+        OPERATOR               <-  < [-+*/] >
         NUMBER                 <-  < '-'? [0-9]+ >
         %whitespace            <-  [ \t]*
 	)");
@@ -440,7 +440,7 @@ TEST(PrecedenceTest, Precedence_climbing_error1) {
                              }
         ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
         ATOM1            <-  NUMBER / T('(') EXPRESSION T(')')
-        OPERATOR         <-  T([-+/*])
+        OPERATOR         <-  T([-+*/])
         NUMBER           <-  T('-'? [0-9]+)
 		~_               <-  [ \t]*
 		T(S)             <-  < S > _
@@ -459,7 +459,7 @@ TEST(PrecedenceTest, Precedence_climbing_error2) {
                                  L * /
                              }
         ATOM             <-  NUMBER / T('(') EXPRESSION T(')')
-        OPERATOR         <-  T([-+/*])
+        OPERATOR         <-  T([-+*/])
         NUMBER           <-  T('-'? [0-9]+)
 		~_               <-  [ \t]*
 		T(S)             <-  < S > _
@@ -478,7 +478,7 @@ TEST(PrecedenceTest, Precedence_climbing_error3) {
                                          L * /
                                      }
         ATOM                     <-  NUMBER / '(' EXPRESSION ')'
-        OPERATOR                 <-  < [-+/*] >
+        OPERATOR                 <-  < [-+*/] >
         NUMBER                   <-  < '-'? [0-9]+ >
         %whitespace              <-  [ \t]*
 	)");
@@ -506,7 +506,7 @@ TEST(PackratTest, Packrat_parser_test_with_macro) {
         TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
         FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
         TERM_OPERATOR    <-  T([-+])
-        FACTOR_OPERATOR  <-  T([/*])
+        FACTOR_OPERATOR  <-  T([*/])
         NUMBER           <-  T([0-9]+)
 		~_               <-  [ \t]*
 		LIST(I, D)       <-  I (D I)*
@@ -985,7 +985,7 @@ TEST(MacroTest, Macro_calculator) {
         TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
         FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
         TERM_OPERATOR    <-  T([-+])
-        FACTOR_OPERATOR  <-  T([/*])
+        FACTOR_OPERATOR  <-  T([*/])
         NUMBER           <-  T([0-9]+)
 		~_               <-  [ \t]*
 		LIST(I, D)       <-  I (D I)*
@@ -1096,7 +1096,7 @@ TEST(MacroTest, Macro_token_check_test) {
         TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
         FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
         TERM_OPERATOR    <-  T([-+])
-        FACTOR_OPERATOR  <-  T([/*])
+        FACTOR_OPERATOR  <-  T([*/])
         NUMBER           <-  T([0-9]+)
 		~_               <-  [ \t]*
 		LIST(I, D)       <-  I (D I)*
