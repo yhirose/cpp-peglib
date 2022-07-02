@@ -864,13 +864,13 @@ TEST(PredicateTest, Semantic_predicate_test) {
 TEST(SymbolTableTest, symbol_instruction_test) {
   parser parser(R"(
 S            <- (Decl / Ref)*
-Decl         <- 'decl' symbol(Name)
-Ref          <- 'ref' is_symbol(Name)
+Decl         <- 'decl' symbol
+Ref          <- 'ref' is_symbol
 Name         <- < [a-zA-Z]+ >
 %whitespace  <- [ \t\r\n]*
 
-symbol(s)    <- s { declare_symbol var_table }
-is_symbol(s) <- s { check_symbol var_table }
+symbol       <- Name { declare_symbol var_table }
+is_symbol    <- Name { check_symbol var_table }
 )");
 
   {
@@ -900,17 +900,65 @@ decl aaa
   }
 }
 
-TEST(SymbolTableTest, with_predicate_test) {
+TEST(SymbolTableTest, typedef_test) {
+  parser parser(R"(
+S            <- (Decl / TypeDef)*
+Decl         <- 'decl' type
+TypeDef      <- 'typedef' type_ref type ';'
+type         <- Name { declare_symbol type_table }
+type_ref     <- Name { check_symbol type_table }
+
+Name         <- < [a-zA-Z0-9_]+ >
+%whitespace  <- [ \t\r\n]*
+)");
+
+  {
+    const auto source = R"(decl long
+typedef long __off64_t;
+typedef __off64_t __loff_t;
+)";
+    EXPECT_TRUE(parser.parse(source));
+  }
+
+  {
+    const auto source = R"(decl long
+typedef long __off64_t;
+typedef __off64_T __loff_t;
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      EXPECT_EQ(3, line);
+      EXPECT_EQ(9, col);
+      EXPECT_EQ("'__off64_T' doesn't exist.", msg);
+    };
+    EXPECT_FALSE(parser.parse(source));
+  }
+
+  {
+    const auto source = R"(decl long
+typedef long __off64_t;
+typedef __off64_t __loff_t;
+typedef __off64_t __loff_t;
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      EXPECT_EQ(4, line);
+      EXPECT_EQ(19, col);
+      EXPECT_EQ("'__loff_t' already exists.", msg);
+    };
+    EXPECT_FALSE(parser.parse(source));
+  }
+}
+
+TEST(SymbolTableTest, predicate_test) {
   parser parser(R"(
 S            <- (Decl / Ref)*
-Decl         <- 'decl' symbol(Name)
-Ref          <- 'ref' is_symbol(Name)
+Decl         <- 'decl' symbol
+Ref          <- 'ref' is_symbol
 Name         <- < [a-zA-Z]+ >
 %whitespace  <- [ \t\r\n]*
 
 # These must be tokens.
-symbol(s)    <- < s >
-is_symbol(s) <- < s >
+symbol       <- < Name >
+is_symbol    <- < Name >
 )");
 
   std::set<std::string> dic;
@@ -1096,13 +1144,13 @@ TEST(MacroTest, Macro_invalid_macro_reference_error) {
 TEST(MacroTest, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(
-        # Grammar for simple calculator...
-        EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
-        TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
-        FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
-        TERM_OPERATOR    <-  T([-+])
-        FACTOR_OPERATOR  <-  T([*/])
-        NUMBER           <-  T([0-9]+)
+    # Grammar for simple calculator...
+    EXPRESSION       <-  _ LIST(TERM, TERM_OPERATOR)
+    TERM             <-  LIST(FACTOR, FACTOR_OPERATOR)
+    FACTOR           <-  NUMBER / T('(') EXPRESSION T(')')
+    TERM_OPERATOR    <-  T([-+])
+    FACTOR_OPERATOR  <-  T([*/])
+    NUMBER           <-  T([0-9]+)
 		~_               <-  [ \t]*
 		LIST(I, D)       <-  I (D I)*
 		T(S)             <-  < S > _

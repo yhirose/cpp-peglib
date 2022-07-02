@@ -2695,42 +2695,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     c.rule_stack.push_back(outer_);
     auto len = ope_->parse(s, n, vs, c, dt);
     c.rule_stack.pop_back();
-
-    std::string msg;
-
-    if (success(len)) {
-      if (outer_->predicate && !outer_->predicate(vs, dt, msg)) {
-        len = static_cast<size_t>(-1);
-      } else if (outer_->declare_symbol) {
-        assert(outer_->is_token());
-        auto symbol = vs.token_to_string();
-        auto &table = c.symbol_tables[outer_->symbol_table_name];
-        auto ret = table.find(symbol) != table.end();
-        if (ret) {
-          msg = "'" + symbol + "' already exists.";
-          len = static_cast<size_t>(-1);
-        } else {
-          table.insert(symbol);
-        }
-      } else if (outer_->check_symbol) {
-        assert(outer_->is_token());
-        auto symbol = vs.token_to_string();
-        auto &table = c.symbol_tables[outer_->symbol_table_name];
-        auto ret = table.find(symbol) != table.end();
-        if (!ret) {
-          msg = "'" + symbol + "' doesn't exist.";
-          len = static_cast<size_t>(-1);
-        }
-      }
-    }
-
-    if (fail(len)) {
-      if (c.log && !msg.empty() && c.error_info.message_pos < s) {
-        c.error_info.message_pos = s;
-        c.error_info.message = msg;
-      }
-    }
-
     return len;
   }
 
@@ -2768,8 +2732,33 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           c.error_info.message = msg;
         }
         len = static_cast<size_t>(-1);
-      } else {
+      } else if (outer_->declare_symbol) {
+        assert(outer_->is_token());
+        auto symbol = chldvs.token_to_string();
+        auto &table = c.symbol_tables[outer_->symbol_table_name];
+        if (table.find(symbol) != table.end()) {
+          msg = "'" + symbol + "' already exists.";
+          len = static_cast<size_t>(-1);
+        } else {
+          table.insert(symbol);
+        }
+      } else if (outer_->check_symbol) {
+        assert(outer_->is_token());
+        auto symbol = chldvs.token_to_string();
+        auto &table = c.symbol_tables[outer_->symbol_table_name];
+        if (table.find(symbol) == table.end()) {
+          msg = "'" + symbol + "' doesn't exist.";
+          len = static_cast<size_t>(-1);
+        }
+      }
+
+      if (success(len)) {
         a_val = reduce(chldvs, dt);
+      } else {
+        if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+          c.error_info.message_pos = s;
+          c.error_info.message = msg;
+        }
       }
     }
   });

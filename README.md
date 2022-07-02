@@ -466,14 +466,14 @@ Simple symbol table support is available with `declare_symbol` and `check_symbol
 
 ```peg
 S            <- (Decl / Ref)*
-Decl         <- 'decl' symbol(Name)
-Ref          <- 'ref' is_symbol(Name)
+Decl         <- 'decl' symbol
+Ref          <- 'ref' is_symbol
 Name         <- < [a-zA-Z]+ >
 %whitespace  <- [ \t\r\n]*
 
 # 'var_table' is a table name.
-symbol(s)    <- s { declare_symbol var_table } # Declare symbol instruction
-is_symbol(s) <- s { check_symbol var_table }   # Check symbol instruction
+symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
+is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
 ```
 
 If we parse the following text with the above grammar, it will fail.
