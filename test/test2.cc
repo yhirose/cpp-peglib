@@ -861,6 +861,115 @@ TEST(PredicateTest, Semantic_predicate_test) {
   EXPECT_FALSE(parser.parse("200", val));
 }
 
+TEST(SymbolTableTest, symbol_instruction_test) {
+  parser parser(R"(
+S            <- (Decl / Ref)*
+Decl         <- 'decl' symbol(Name)
+Ref          <- 'ref' is_symbol(Name)
+Name         <- < [a-zA-Z]+ >
+%whitespace  <- [ \t\r\n]*
+
+symbol(s)    <- s { declare_symbol var_table }
+is_symbol(s) <- s { check_symbol var_table }
+)");
+
+  {
+    const auto source = R"(decl aaa
+ref aaa
+ref bbb
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      EXPECT_EQ(3, line);
+      EXPECT_EQ(5, col);
+      EXPECT_EQ("'bbb' doesn't exist.", msg);
+    };
+    EXPECT_FALSE(parser.parse(source));
+  }
+
+  {
+    const auto source = R"(decl aaa
+ref aaa
+decl aaa
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      EXPECT_EQ(3, line);
+      EXPECT_EQ(6, col);
+      EXPECT_EQ("'aaa' already exists.", msg);
+    };
+    EXPECT_FALSE(parser.parse(source));
+  }
+}
+
+TEST(SymbolTableTest, with_predicate_test) {
+  parser parser(R"(
+S            <- (Decl / Ref)*
+Decl         <- 'decl' symbol(Name)
+Ref          <- 'ref' is_symbol(Name)
+Name         <- < [a-zA-Z]+ >
+%whitespace  <- [ \t\r\n]*
+
+# These must be tokens.
+symbol(s)    <- < s >
+is_symbol(s) <- < s >
+)");
+
+  std::set<std::string> dic;
+
+  parser[R"(symbol)"].predicate =
+      [&](const SemanticValues &vs, const std::any & /*dt*/, std::string &msg) {
+        auto tok = vs.token_to_string();
+        if (dic.find(tok) != dic.end()) {
+          msg = "'" + tok + "' already exists.";
+          return false;
+        }
+        dic.insert(tok);
+        return true;
+      };
+
+  parser[R"(is_symbol)"].predicate =
+      [&](const SemanticValues &vs, const std::any & /*dt*/, std::string &msg) {
+        auto tok = vs.token_to_string();
+        if (dic.find(tok) == dic.end()) {
+          msg = "'" + tok + "' doesn't exist.";
+          return false;
+        }
+        return true;
+      };
+
+  parser.enable_ast();
+
+  {
+    const auto source = R"(decl aaa
+ref aaa
+ref bbb
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      EXPECT_EQ(3, line);
+      EXPECT_EQ(5, col);
+      EXPECT_EQ("'bbb' doesn't exist.", msg);
+    };
+    std::shared_ptr<Ast> ast;
+    dic.clear();
+    EXPECT_FALSE(parser.parse(source, ast));
+  }
+
+  {
+    const auto source = R"(decl aaa
+ref aaa
+decl aaa
+)";
+    parser.log = [](size_t line, size_t col, const std::string &msg) {
+      std::cerr << line << ":" << col << ": " << msg << "\n";
+      EXPECT_EQ(3, line);
+      EXPECT_EQ(6, col);
+      EXPECT_EQ("'aaa' already exists.", msg);
+    };
+    std::shared_ptr<Ast> ast;
+    dic.clear();
+    EXPECT_FALSE(parser.parse(source, ast));
+  }
+}
+
 TEST(UnicodeTest, Japanese_character) {
   peg::parser parser(u8R"(
         文 <- 修飾語? 主語 述語 '。'

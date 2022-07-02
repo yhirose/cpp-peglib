@@ -19,8 +19,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(add_link_deps Threads::Threads)
 endif()
 
-add_subdirectory(example)
 add_subdirectory(lint)
+
+add_subdirectory(example)
+# add_subdirectory(cymbol)
 
 if (${PEGLIB_BUILD_TESTS})
   add_subdirectory(test)

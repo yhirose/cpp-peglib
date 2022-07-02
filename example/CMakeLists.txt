@@ -20,6 +20,3 @@ target_link_libraries(calc5 ${add_link_deps})
 
 add_executable(indent indent.cc)
 target_link_libraries(indent ${add_link_deps})
-
-add_executable(symbol_check symbol_check.cc)
-target_link_libraries(symbol_check ${add_link_deps})

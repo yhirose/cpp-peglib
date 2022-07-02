@@ -833,6 +833,8 @@ public:
   std::any trace_data;
   const bool verbose_trace;
 
+  std::map<std::string, std::unordered_set<std::string>> symbol_tables;
+
   Log log;
 
   Context(const char *path, const char *s, size_t l, size_t def_count,
@@ -1950,7 +1952,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
 
 private:
   std::string name_;
-  std::set<std::string> refs_;
+  std::unordered_set<std::string> refs_;
   bool done_ = false;
 };
 
@@ -2425,6 +2427,10 @@ public:
   std::string error_message;
   bool no_ast_opt = false;
 
+  bool declare_symbol = false;
+  bool check_symbol = false;
+  std::string symbol_table_name;
+
   bool eoi_check = true;
 
 private:
@@ -2691,13 +2697,40 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     c.rule_stack.pop_back();
 
     std::string msg;
-    if (outer_->predicate && !outer_->predicate(vs, dt, msg)) {
+
+    if (success(len)) {
+      if (outer_->predicate && !outer_->predicate(vs, dt, msg)) {
+        len = static_cast<size_t>(-1);
+      } else if (outer_->declare_symbol) {
+        assert(outer_->is_token());
+        auto symbol = vs.token_to_string();
+        auto &table = c.symbol_tables[outer_->symbol_table_name];
+        auto ret = table.find(symbol) != table.end();
+        if (ret) {
+          msg = "'" + symbol + "' already exists.";
+          len = static_cast<size_t>(-1);
+        } else {
+          table.insert(symbol);
+        }
+      } else if (outer_->check_symbol) {
+        assert(outer_->is_token());
+        auto symbol = vs.token_to_string();
+        auto &table = c.symbol_tables[outer_->symbol_table_name];
+        auto ret = table.find(symbol) != table.end();
+        if (!ret) {
+          msg = "'" + symbol + "' doesn't exist.";
+          len = static_cast<size_t>(-1);
+        }
+      }
+    }
+
+    if (fail(len)) {
       if (c.log && !msg.empty() && c.error_info.message_pos < s) {
         c.error_info.message_pos = s;
         c.error_info.message = msg;
       }
-      len = static_cast<size_t>(-1);
     }
+
     return len;
   }
 
@@ -3378,8 +3411,9 @@ private:
             opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
                                                   g["InstructionItem"])))),
             g["EndBlacket"]);
-    g["InstructionItem"] <=
-        cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
+    g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
+                                g["NoAstOpt"], g["DeclareSymbol"],
+                                g["CheckSymbol"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
@@ -3412,6 +3446,12 @@ private:
     // No Ast node optimazation instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
 
+    // Symbol table instruction
+    g["DeclareSymbol"] <= seq(lit("declare_symbol"), g["SpacesZom"],
+                              g["Identifier"], g["SpacesZom"]);
+    g["CheckSymbol"] <= seq(lit("check_symbol"), g["SpacesZom"],
+                            g["Identifier"], g["SpacesZom"]);
+
     // Set definition names
     for (auto &x : g) {
       x.second.name = x.first;
@@ -3441,13 +3481,16 @@ private:
 
       if (has_instructions) {
         auto index = is_macro ? 5 : 4;
-        std::set<std::string> types;
+        std::unordered_set<std::string> types;
         for (const auto &instruction :
              std::any_cast<std::vector<Instruction>>(vs[index])) {
           const auto &type = instruction.type;
           if (types.find(type) == types.end()) {
             data.instructions[name].push_back(instruction);
             types.insert(instruction.type);
+            if (type == "declare_symbol" || type == "check_symbol") {
+              if (!TokenChecker::is_token(*ope)) { ope = tok(ope); }
+            }
           } else {
             data.duplicates_of_instruction.emplace_back(type,
                                                         instruction.sv.data());
@@ -3811,6 +3854,22 @@ private:
       return instruction;
     };
 
+    g["DeclareSymbol"] = [](const SemanticValues &vs) {
+      Instruction instruction;
+      instruction.type = "declare_symbol";
+      instruction.data = std::string("default");
+      instruction.sv = vs.sv();
+      return instruction;
+    };
+
+    g["CheckSymbol"] = [](const SemanticValues &vs) {
+      Instruction instruction;
+      instruction.type = "check_symbol";
+      instruction.data = std::string("default");
+      instruction.sv = vs.sv();
+      return instruction;
+    };
+
     g["Instruction"] = [](const SemanticValues &vs) {
       return vs.transform<Instruction>();
     };
@@ -4061,6 +4120,12 @@ private:
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
           rule.no_ast_opt = true;
+        } else if (instruction.type == "declare_symbol") {
+          rule.declare_symbol = true;
+          rule.symbol_table_name = std::any_cast<std::string>(instruction.data);
+        } else if (instruction.type == "check_symbol") {
+          rule.check_symbol = true;
+          rule.symbol_table_name = std::any_cast<std::string>(instruction.data);
         }
       }
     }
