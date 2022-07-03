@@ -563,6 +563,7 @@ private:
   friend class Context;
   friend class Sequence;
   friend class PrioritizedChoice;
+  friend class Repetition;
   friend class Holder;
   friend class PrecedenceClimbing;
 
@@ -892,7 +893,7 @@ public:
     }
   }
 
-  SemanticValues &push() {
+  SemanticValues &push_semantic_values_scope() {
     assert(value_stack_size <= value_stack.size());
     if (value_stack_size == value_stack.size()) {
       value_stack.emplace_back(std::make_shared<SemanticValues>(this));
@@ -911,11 +912,10 @@ public:
     auto &vs = *value_stack[value_stack_size++];
     vs.path = path;
     vs.ss = s;
-
     return vs;
   }
 
-  void pop() { value_stack_size--; }
+  void pop_semantic_values_scope() { value_stack_size--; }
 
   void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
     args_stack.emplace_back(args);
@@ -988,30 +988,23 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    auto &chldvs = c.push();
-    auto pop_se = scope_exit([&]() { c.pop(); });
+    auto &chvs = c.push_semantic_values_scope();
+    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
     size_t i = 0;
     for (const auto &ope : opes_) {
-      const auto &rule = *ope;
-      auto len = rule.parse(s + i, n - i, chldvs, c, dt);
+      auto len = ope->parse(s + i, n - i, chvs, c, dt);
       if (fail(len)) { return len; }
       i += len;
     }
-    if (!chldvs.empty()) {
-      for (size_t j = 0; j < chldvs.size(); j++) {
-        vs.emplace_back(std::move(chldvs[j]));
-      }
+    vs.sv_ = chvs.sv_;
+    for (auto &v : chvs) {
+      vs.emplace_back(std::move(v));
     }
-    if (!chldvs.tags.empty()) {
-      for (size_t j = 0; j < chldvs.tags.size(); j++) {
-        vs.tags.emplace_back(std::move(chldvs.tags[j]));
-      }
+    for (auto &tag : chvs.tags) {
+      vs.tags.emplace_back(std::move(tag));
     }
-    vs.sv_ = chldvs.sv_;
-    if (!chldvs.tokens.empty()) {
-      for (size_t j = 0; j < chldvs.tokens.size(); j++) {
-        vs.tokens.emplace_back(std::move(chldvs.tokens[j]));
-      }
+    for (auto &tok : chvs.tokens) {
+      vs.tokens.emplace_back(std::move(tok));
     }
     return i;
   }
@@ -1041,36 +1034,29 @@ public:
     for (const auto &ope : opes_) {
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
-      auto &chldvs = c.push();
+      auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
-
       c.error_info.keep_previous_token = id > 0;
       auto se = scope_exit([&]() {
-        c.pop();
+        c.pop_semantic_values_scope();
         c.pop_capture_scope();
         c.error_info.keep_previous_token = false;
       });
 
-      len = ope->parse(s, n, chldvs, c, dt);
+      len = ope->parse(s, n, chvs, c, dt);
 
       if (success(len)) {
-        if (!chldvs.empty()) {
-          for (size_t i = 0; i < chldvs.size(); i++) {
-            vs.emplace_back(std::move(chldvs[i]));
-          }
-        }
-        if (!chldvs.tags.empty()) {
-          for (size_t i = 0; i < chldvs.tags.size(); i++) {
-            vs.tags.emplace_back(std::move(chldvs.tags[i]));
-          }
-        }
-        vs.sv_ = chldvs.sv_;
+        vs.sv_ = chvs.sv_;
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        if (!chldvs.tokens.empty()) {
-          for (size_t i = 0; i < chldvs.tokens.size(); i++) {
-            vs.tokens.emplace_back(std::move(chldvs.tokens[i]));
-          }
+        for (auto &v : chvs) {
+          vs.emplace_back(std::move(v));
+        }
+        for (auto &tag : chvs.tags) {
+          vs.tags.emplace_back(std::move(tag));
+        }
+        for (auto &tok : chvs.tokens) {
+          vs.tokens.emplace_back(std::move(tok));
         }
         c.shift_capture_values();
         break;
@@ -1104,11 +1090,26 @@ public:
     size_t count = 0;
     size_t i = 0;
     while (count < min_) {
+      auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
-      auto se = scope_exit([&]() { c.pop_capture_scope(); });
-      const auto &rule = *ope_;
-      auto len = rule.parse(s + i, n - i, vs, c, dt);
+      auto se = scope_exit([&]() {
+        c.pop_semantic_values_scope();
+        c.pop_capture_scope();
+      });
+
+      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
+
       if (success(len)) {
+        vs.sv_ = chvs.sv_;
+        for (auto &v : chvs) {
+          vs.emplace_back(std::move(v));
+        }
+        for (auto &tag : chvs.tags) {
+          vs.tags.emplace_back(std::move(tag));
+        }
+        for (auto &tok : chvs.tokens) {
+          vs.tokens.emplace_back(std::move(tok));
+        }
         c.shift_capture_values();
       } else {
         return len;
@@ -1118,25 +1119,28 @@ public:
     }
 
     while (count < max_) {
+      auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
-      auto se = scope_exit([&]() { c.pop_capture_scope(); });
-      auto save_sv_size = vs.size();
-      auto save_tok_size = vs.tokens.size();
+      auto se = scope_exit([&]() {
+        c.pop_semantic_values_scope();
+        c.pop_capture_scope();
+      });
 
-      const auto &rule = *ope_;
-      auto len = rule.parse(s + i, n - i, vs, c, dt);
+      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
+
       if (success(len)) {
+        vs.sv_ = chvs.sv_;
+        for (auto &v : chvs) {
+          vs.emplace_back(std::move(v));
+        }
+        for (auto &tag : chvs.tags) {
+          vs.tags.emplace_back(std::move(tag));
+        }
+        for (auto &tok : chvs.tokens) {
+          vs.tokens.emplace_back(std::move(tok));
+        }
         c.shift_capture_values();
       } else {
-        if (vs.size() != save_sv_size) {
-          vs.erase(vs.begin() + static_cast<std::ptrdiff_t>(save_sv_size));
-          vs.tags.erase(vs.tags.begin() +
-                        static_cast<std::ptrdiff_t>(save_sv_size));
-        }
-        if (vs.tokens.size() != save_tok_size) {
-          vs.tokens.erase(vs.tokens.begin() +
-                          static_cast<std::ptrdiff_t>(save_tok_size));
-        }
         break;
       }
       i += len;
@@ -1176,14 +1180,15 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chldvs = c.push();
+    auto &chvs = c.push_semantic_values_scope();
     c.push_capture_scope();
     auto se = scope_exit([&]() {
-      c.pop();
+      c.pop_semantic_values_scope();
       c.pop_capture_scope();
     });
-    const auto &rule = *ope_;
-    auto len = rule.parse(s, n, chldvs, c, dt);
+
+    auto len = ope_->parse(s, n, chvs, c, dt);
+
     if (success(len)) {
       return 0;
     } else {
@@ -1202,13 +1207,13 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chldvs = c.push();
+    auto &chvs = c.push_semantic_values_scope();
     c.push_capture_scope();
     auto se = scope_exit([&]() {
-      c.pop();
+      c.pop_semantic_values_scope();
       c.pop_capture_scope();
     });
-    auto len = ope_->parse(s, n, chldvs, c, dt);
+    auto len = ope_->parse(s, n, chvs, c, dt);
     if (success(len)) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1371,9 +1376,7 @@ public:
                     std::any &dt) const override {
     c.push_capture_scope();
     auto se = scope_exit([&]() { c.pop_capture_scope(); });
-    const auto &rule = *ope_;
-    auto len = rule.parse(s, n, vs, c, dt);
-    return len;
+    return ope_->parse(s, n, vs, c, dt);
   }
 
   void accept(Visitor &v) override;
@@ -1390,8 +1393,7 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    const auto &rule = *ope_;
-    auto len = rule.parse(s, n, vs, c, dt);
+    auto len = ope_->parse(s, n, vs, c, dt);
     if (success(len) && match_action_) { match_action_(s, len, c); }
     return len;
   }
@@ -1420,10 +1422,9 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    const auto &rule = *ope_;
-    auto &chldvs = c.push();
-    auto se = scope_exit([&]() { c.pop(); });
-    return rule.parse(s, n, chldvs, c, dt);
+    auto &chvs = c.push_semantic_values_scope();
+    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+    return ope_->parse(s, n, chvs, c, dt);
   }
 
   void accept(Visitor &v) override;
@@ -1456,8 +1457,7 @@ public:
                     std::any &dt) const override {
     auto ope = weak_.lock();
     assert(ope);
-    const auto &rule = *ope;
-    return rule.parse(s, n, vs, c, dt);
+    return ope->parse(s, n, vs, c, dt);
   }
 
   void accept(Visitor &v) override;
@@ -1522,8 +1522,7 @@ public:
     if (c.in_whitespace) { return 0; }
     c.in_whitespace = true;
     auto se = scope_exit([&]() { c.in_whitespace = false; });
-    const auto &rule = *ope_;
-    return rule.parse(s, n, vs, c, dt);
+    return ope_->parse(s, n, vs, c, dt);
   }
 
   void accept(Visitor &v) override;
@@ -2703,30 +2702,28 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
   c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
     if (outer_->enter) { outer_->enter(s, n, dt); }
-
-    auto se2 = scope_exit([&]() {
-      c.pop();
+    auto &chvs = c.push_semantic_values_scope();
+    auto se = scope_exit([&]() {
+      c.pop_semantic_values_scope();
       if (outer_->leave) { outer_->leave(s, n, len, a_val, dt); }
     });
 
-    auto &chldvs = c.push();
-
     c.rule_stack.push_back(outer_);
-    len = ope_->parse(s, n, chldvs, c, dt);
+    len = ope_->parse(s, n, chvs, c, dt);
     c.rule_stack.pop_back();
 
     // Invoke action
     if (success(len)) {
-      chldvs.sv_ = std::string_view(s, len);
-      chldvs.name_ = outer_->name;
+      chvs.sv_ = std::string_view(s, len);
+      chvs.name_ = outer_->name;
 
       if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_.get())) {
-        chldvs.choice_count_ = 0;
-        chldvs.choice_ = 0;
+        chvs.choice_count_ = 0;
+        chvs.choice_ = 0;
       }
 
       std::string msg;
-      if (outer_->predicate && !outer_->predicate(chldvs, dt, msg)) {
+      if (outer_->predicate && !outer_->predicate(chvs, dt, msg)) {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
           c.error_info.message = msg;
@@ -2734,7 +2731,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         len = static_cast<size_t>(-1);
       } else if (outer_->declare_symbol) {
         assert(outer_->is_token());
-        auto symbol = chldvs.token_to_string();
+        auto symbol = chvs.token_to_string();
         auto &table = c.symbol_tables[outer_->symbol_table_name];
         if (table.find(symbol) != table.end()) {
           msg = "'" + symbol + "' already exists.";
@@ -2744,7 +2741,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         }
       } else if (outer_->check_symbol) {
         assert(outer_->is_token());
-        auto symbol = chldvs.token_to_string();
+        auto symbol = chvs.token_to_string();
         auto &table = c.symbol_tables[outer_->symbol_table_name];
         if (table.find(symbol) == table.end()) {
           msg = "'" + symbol + "' doesn't exist.";
@@ -2753,7 +2750,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       if (success(len)) {
-        a_val = reduce(chldvs, dt);
+        a_val = reduce(chvs, dt);
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -2894,11 +2891,11 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     std::vector<std::any> save_values(vs.begin(), vs.end());
     auto save_tokens = vs.tokens;
 
-    auto chv = c.push();
-    auto chl = binop_->parse(s + i, n - i, chv, c, dt);
-    c.pop();
+    auto chvs = c.push_semantic_values_scope();
+    auto chlen = binop_->parse(s + i, n - i, chvs, c, dt);
+    c.pop_semantic_values_scope();
 
-    if (fail(chl)) { break; }
+    if (fail(chlen)) { break; }
 
     auto it = info_.find(tok);
     if (it == info_.end()) { break; }
@@ -2908,25 +2905,25 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     if (level < min_prec) { break; }
 
-    vs.emplace_back(std::move(chv[0]));
-    i += chl;
+    vs.emplace_back(std::move(chvs[0]));
+    i += chlen;
 
     auto next_min_prec = level;
     if (assoc == 'L') { next_min_prec = level + 1; }
 
-    chv = c.push();
-    chl = parse_expression(s + i, n - i, chv, c, dt, next_min_prec);
-    c.pop();
+    chvs = c.push_semantic_values_scope();
+    chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
+    c.pop_semantic_values_scope();
 
-    if (fail(chl)) {
+    if (fail(chlen)) {
       vs.assign(save_values.begin(), save_values.end());
       vs.tokens = save_tokens;
-      i = chl;
+      i = chlen;
       break;
     }
 
-    vs.emplace_back(std::move(chv[0]));
-    i += chl;
+    vs.emplace_back(std::move(chvs[0]));
+    i += chlen;
 
     std::any val;
     if (rule_.action) {
