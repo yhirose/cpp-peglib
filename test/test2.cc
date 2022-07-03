@@ -862,8 +862,7 @@ TEST(PredicateTest, Semantic_predicate_test) {
 }
 
 TEST(SymbolTableTest, symbol_instruction_test) {
-  parser parser(R"(
-S            <- (Decl / Ref)*
+  parser parser(R"(S            <- (Decl / Ref)*
 Decl         <- 'decl' symbol
 Ref          <- 'ref' is_symbol
 Name         <- < [a-zA-Z]+ >
@@ -898,6 +897,44 @@ decl aaa
     };
     EXPECT_FALSE(parser.parse(source));
   }
+}
+
+TEST(SymbolTableTest, symbol_instruction_backtrack_test) {
+  parser parser(R"(S            <- (DeclBT / Decl / Ref)*
+DeclBT       <- 'decl' symbol 'backtrack' # match fails, so symbol should not be set
+Decl         <- 'decl' symbol
+Ref          <- 'ref' is_symbol
+Name         <- < [a-zA-Z]+ >
+%whitespace  <- [ \t\r\n]*
+
+# 'var_table' is a table name.
+symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
+is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
+)");
+
+  const auto source = R"(decl foo
+ref foo
+)";
+  EXPECT_TRUE(parser.parse(source));
+}
+
+TEST(SymbolTableTest, symbol_instruction_backtrack_test2) {
+  parser parser(R"(S            <- DeclBT* Decl Ref
+DeclBT       <- 'decl' symbol 'backtrack' # match fails, so symbol should not be set
+Decl         <- 'decl' symbol
+Ref          <- 'ref' is_symbol
+Name         <- < [a-zA-Z]+ >
+%whitespace  <- [ \t\r\n]*
+
+# 'var_table' is a table name.
+symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
+is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
+)");
+
+  const auto source = R"(decl foo
+ref foo
+)";
+  EXPECT_TRUE(parser.parse(source));
 }
 
 TEST(SymbolTableTest, typedef_test) {

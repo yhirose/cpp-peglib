@@ -819,6 +819,10 @@ public:
   std::vector<std::map<std::string_view, std::string>> capture_scope_stack;
   size_t capture_scope_stack_size = 0;
 
+  std::vector<std::map<std::string, std::unordered_set<std::string>>>
+      symbol_tables_stack;
+  size_t symbol_tables_stack_size = 0;
+
   std::vector<bool> cut_stack;
 
   const size_t def_count;
@@ -833,8 +837,6 @@ public:
   TracerLeave tracer_leave;
   std::any trace_data;
   const bool verbose_trace;
-
-  std::map<std::string, std::unordered_set<std::string>> symbol_tables;
 
   Log log;
 
@@ -851,11 +853,19 @@ public:
         trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
 
     args_stack.resize(1);
-
     push_capture_scope();
+    push_symbol_tables();
   }
 
-  ~Context() { assert(!value_stack_size); }
+  ~Context() {
+    pop_capture_scope();
+    pop_symbol_tables();
+
+    assert(!value_stack_size);
+    assert(!capture_scope_stack_size);
+    assert(!symbol_tables_stack_size);
+    assert(cut_stack.empty());
+  }
 
   Context(const Context &) = delete;
   Context(Context &&) = delete;
@@ -942,12 +952,56 @@ public:
   void pop_capture_scope() { capture_scope_stack_size--; }
 
   void shift_capture_values() {
-    assert(capture_scope_stack.size() >= 2);
+    assert(capture_scope_stack_size >= 2);
     auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
     auto prev = curr - 1;
     for (const auto &[k, v] : *curr) {
       (*prev)[k] = v;
     }
+  }
+
+  void push_symbol_tables() {
+    assert(symbol_tables_stack_size <= symbol_tables_stack.size());
+    if (symbol_tables_stack_size == symbol_tables_stack.size()) {
+      symbol_tables_stack.emplace_back(
+          std::map<std::string, std::unordered_set<std::string>>());
+    } else {
+      auto &tables = symbol_tables_stack[symbol_tables_stack_size];
+      if (!tables.empty()) { tables.clear(); }
+    }
+    symbol_tables_stack_size++;
+  }
+
+  void pop_symbol_tables() { symbol_tables_stack_size--; }
+
+  void shift_symbol_tables() {
+    assert(symbol_tables_stack_size >= 2);
+    auto curr = &symbol_tables_stack[symbol_tables_stack_size - 1];
+    auto prev = curr - 1;
+    for (const auto &[k, v] : *curr) {
+      (*prev)[k].insert(v.begin(), v.end());
+    }
+  }
+
+  void declare_symbol(const std::string &table_name,
+                      const std::string &symbol) {
+    assert(symbol_tables_stack_size >= 1);
+    auto &table = symbol_tables_stack[symbol_tables_stack_size - 1][table_name];
+    table.insert(symbol);
+  }
+
+  bool check_symbol(const std::string &table_name, const std::string &symbol) {
+    int i = symbol_tables_stack_size - 1;
+    while (i >= 0) {
+      const auto &tables = symbol_tables_stack[i];
+      if (auto it = tables.find(table_name); it != tables.end()) {
+        if (const auto &table = it->second; table.find(symbol) != table.end()) {
+          return true;
+        }
+      }
+      i--;
+    }
+    return false;
   }
 
   void set_error_pos(const char *a_s, const char *literal = nullptr);
@@ -1036,10 +1090,12 @@ public:
 
       auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
+      c.push_symbol_tables();
       c.error_info.keep_previous_token = id > 0;
       auto se = scope_exit([&]() {
         c.pop_semantic_values_scope();
         c.pop_capture_scope();
+        c.pop_symbol_tables();
         c.error_info.keep_previous_token = false;
       });
 
@@ -1059,6 +1115,7 @@ public:
           vs.tokens.emplace_back(std::move(tok));
         }
         c.shift_capture_values();
+        c.shift_symbol_tables();
         break;
       } else if (!c.cut_stack.empty() && c.cut_stack.back()) {
         break;
@@ -1092,9 +1149,11 @@ public:
     while (count < min_) {
       auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
+      c.push_symbol_tables();
       auto se = scope_exit([&]() {
         c.pop_semantic_values_scope();
         c.pop_capture_scope();
+        c.pop_symbol_tables();
       });
 
       auto len = ope_->parse(s + i, n - i, chvs, c, dt);
@@ -1111,6 +1170,7 @@ public:
           vs.tokens.emplace_back(std::move(tok));
         }
         c.shift_capture_values();
+        c.shift_symbol_tables();
       } else {
         return len;
       }
@@ -1121,9 +1181,11 @@ public:
     while (count < max_) {
       auto &chvs = c.push_semantic_values_scope();
       c.push_capture_scope();
+      c.push_symbol_tables();
       auto se = scope_exit([&]() {
         c.pop_semantic_values_scope();
         c.pop_capture_scope();
+        c.pop_symbol_tables();
       });
 
       auto len = ope_->parse(s + i, n - i, chvs, c, dt);
@@ -1140,6 +1202,7 @@ public:
           vs.tokens.emplace_back(std::move(tok));
         }
         c.shift_capture_values();
+        c.shift_symbol_tables();
       } else {
         break;
       }
@@ -1182,9 +1245,11 @@ public:
                     Context &c, std::any &dt) const override {
     auto &chvs = c.push_semantic_values_scope();
     c.push_capture_scope();
+    c.push_symbol_tables();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
       c.pop_capture_scope();
+      c.pop_symbol_tables();
     });
 
     auto len = ope_->parse(s, n, chvs, c, dt);
@@ -1209,9 +1274,11 @@ public:
                     Context &c, std::any &dt) const override {
     auto &chvs = c.push_semantic_values_scope();
     c.push_capture_scope();
+    c.push_symbol_tables();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
       c.pop_capture_scope();
+      c.pop_symbol_tables();
     });
     auto len = ope_->parse(s, n, chvs, c, dt);
     if (success(len)) {
@@ -2732,18 +2799,16 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       } else if (outer_->declare_symbol) {
         assert(outer_->is_token());
         auto symbol = chvs.token_to_string();
-        auto &table = c.symbol_tables[outer_->symbol_table_name];
-        if (table.find(symbol) != table.end()) {
+        if (c.check_symbol(outer_->symbol_table_name, symbol)) {
           msg = "'" + symbol + "' already exists.";
           len = static_cast<size_t>(-1);
         } else {
-          table.insert(symbol);
+          c.declare_symbol(outer_->symbol_table_name, symbol);
         }
       } else if (outer_->check_symbol) {
         assert(outer_->is_token());
         auto symbol = chvs.token_to_string();
-        auto &table = c.symbol_tables[outer_->symbol_table_name];
-        if (table.find(symbol) == table.end()) {
+        if (!c.check_symbol(outer_->symbol_table_name, symbol)) {
           msg = "'" + symbol + "' doesn't exist.";
           len = static_cast<size_t>(-1);
         }
