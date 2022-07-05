@@ -45,7 +45,11 @@ function generateErrorListHTML(errors) {
   let html = '<ul>';
 
   html += $.map(errors, function (x) {
-    return '<li data-ln="' + x.ln + '" data-col="' + x.col + '"><span>' + x.ln + ':' + x.col + '</span> <span>' + escapeHtml(x.msg) + '</span></li>';
+    if (x.gln && x.gcol) {
+      return `<li data-ln="${x.ln}" data-col="${x.col}" data-gln="${x.gln}" data-gcol="${x.gcol}"><span>${x.ln}:${x.col}</span> <span>${escapeHtml(x.msg)}</span></li>`;
+    } else {
+      return `<li data-ln="${x.ln}" data-col="${x.col}"><span>${x.ln}:${x.col}</span> <span>${escapeHtml(x.msg)}</span></li>`;
+    }
   }).join('');
 
   html += '<ul>';
@@ -149,6 +153,11 @@ function makeOnClickInInfo(editor) {
     editor.navigateTo(el.data('ln') - 1, el.data('col') - 1);
     editor.scrollToLine(el.data('ln') - 1, true, false, null);
     editor.focus();
+
+    if(el.data('gln') && el.data('gcol')) {
+      grammar.navigateTo(el.data('gln') - 1, el.data('gcol') - 1);
+      grammar.scrollToLine(el.data('gln') - 1, true, false, null);
+    }
   }
 };
 $('#grammar-info').on('click', 'li', makeOnClickInInfo(grammar));

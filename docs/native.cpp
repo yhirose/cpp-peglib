@@ -18,15 +18,24 @@ std::string escape_json(const std::string &s) {
   return o.str();
 }
 
-std::function<void(size_t, size_t, const std::string &)>
-makeJSONFormatter(std::string &json, bool &init) {
+std::function<void(size_t, size_t, const std::string &, const std::string &)>
+makeJSONFormatter(peg::parser &peg, std::string &json, bool &init) {
   init = true;
-  return [&](size_t ln, size_t col, const std::string &msg) mutable {
+  return [&](size_t ln, size_t col, const std::string &msg, const std::string &rule) mutable {
     if (!init) { json += ","; }
     json += "{";
     json += R"("ln":)" + std::to_string(ln) + ",";
     json += R"("col":)" + std::to_string(col) + ",";
     json += R"("msg":")" + escape_json(msg) + R"(")";
+    if (!rule.empty()) {
+      auto it = peg.get_grammar().find(rule);
+      if (it != peg.get_grammar().end()) {
+        auto [gln, gcol] = it->second.line_;
+        json += ",";
+        json += R"("gln":)" + std::to_string(gln) + ",";
+        json += R"("gcol":)" + std::to_string(gcol);
+      }
+    }
     json += "}";
 
     init = false;
@@ -36,7 +45,7 @@ makeJSONFormatter(std::string &json, bool &init) {
 bool parse_grammar(const std::string &text, peg::parser &peg,
                    std::string &json) {
   bool init;
-  peg.set_logger(makeJSONFormatter(json, init));
+  peg.set_logger(makeJSONFormatter(peg, json, init));
   json += "[";
   auto ret = peg.load_grammar(text.data(), text.size());
   json += "]";
@@ -47,7 +56,7 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
                 std::shared_ptr<peg::Ast> &ast) {
   peg.enable_ast();
   bool init;
-  peg.set_logger(makeJSONFormatter(json, init));
+  peg.set_logger(makeJSONFormatter(peg, json, init));
   json += "[";
   auto ret = peg.parse_n(text.data(), text.size(), ast);
   json += "]";

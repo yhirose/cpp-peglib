@@ -901,7 +901,8 @@ TEST(GeneralTest, Semantic_values_test) {
         x <- 'x'
     )");
 
-  for (const auto &rule : parser.get_rule_names()) {
+  for (const auto &item : parser.get_grammar()) {
+    const auto &rule = item.first;
     parser[rule.data()] = [rule](const SemanticValues &vs, std::any &) {
       if (rule == "term") {
         EXPECT_EQ("a at 0", std::any_cast<std::string>(vs[0]));

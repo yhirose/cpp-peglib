@@ -2328,6 +2328,7 @@ public:
 
   std::string name;
   const char *s_ = nullptr;
+  std::pair<size_t, size_t> line_ = {1, 1};
 
   std::function<bool(const SemanticValues &vs, const std::any &dt,
                      std::string &msg)>
@@ -2557,6 +2558,9 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
               msg += "'";
             } else {
               msg += "<" + error_rule->name + ">";
+              if (label.empty()) {
+                label = error_rule->name;
+              }
             }
             first_item = false;
           }
@@ -2937,12 +2941,10 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   // Custom error message
   if (c.log) {
     auto label = dynamic_cast<Reference *>(rule.args_[0].get());
-    if (label) {
-      if (!label->rule_->error_message.empty()) {
-        c.error_info.message_pos = s;
-        c.error_info.message = label->rule_->error_message;
-        c.error_info.label = label->rule_->name;
-      }
+    if (label && !label->rule_->error_message.empty()) {
+      c.error_info.message_pos = s;
+      c.error_info.message = label->rule_->error_message;
+      c.error_info.label = label->rule_->name;
     }
   }
 
@@ -3481,13 +3483,14 @@ private:
         rule <= ope;
         rule.name = name;
         rule.s_ = vs.sv().data();
+        rule.line_ = line_info(vs.ss, rule.s_);
         rule.ignoreSemanticValue = ignore;
         rule.is_macro = is_macro;
         rule.params = params;
 
         if (data.start.empty()) {
-          data.start = name;
-          data.start_pos = vs.sv().data();
+          data.start = rule.name;
+          data.start_pos = rule.s_;
         }
       } else {
         data.duplicates_of_definition.emplace_back(name, vs.sv().data());
@@ -4549,13 +4552,7 @@ public:
 
   const Definition &operator[](const char *s) const { return (*grammar_)[s]; }
 
-  std::vector<std::string> get_rule_names() const {
-    std::vector<std::string> rules;
-    for (auto &[name, _] : *grammar_) {
-      rules.push_back(name);
-    }
-    return rules;
-  }
+  const Grammar &get_grammar() const { return *grammar_; }
 
   void disable_eoi_check() {
     if (grammar_ != nullptr) {
