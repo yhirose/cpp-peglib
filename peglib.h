@@ -536,6 +536,19 @@ struct SemanticValues : protected std::vector<std::any> {
     return r;
   }
 
+  void append(SemanticValues &chvs) {
+    sv_ = chvs.sv_;
+    for (auto &v : chvs) {
+      emplace_back(std::move(v));
+    }
+    for (auto &tag : chvs.tags) {
+      tags.emplace_back(std::move(tag));
+    }
+    for (auto &tok : chvs.tokens) {
+      tokens.emplace_back(std::move(tok));
+    }
+  }
+
   using std::vector<std::any>::iterator;
   using std::vector<std::any>::const_iterator;
   using std::vector<std::any>::size;
@@ -647,9 +660,11 @@ using Log = std::function<void(size_t, size_t, const std::string &)>;
 /*
  * ErrorInfo
  */
+class Definition;
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
-  std::vector<std::pair<std::string, bool>> expected_tokens;
+  std::vector<std::pair<const char *, const Definition *>> expected_tokens;
   const char *message_pos = nullptr;
   std::string message;
   mutable const char *last_output_pos = nullptr;
@@ -662,81 +677,14 @@ struct ErrorInfo {
     message.clear();
   }
 
-  void add(const char *token, bool is_literal) {
-    for (const auto &[t, l] : expected_tokens) {
-      if (t == token && l == is_literal) { return; }
+  void add(const char *error_literal, const Definition *error_rule) {
+    for (const auto &[t, r] : expected_tokens) {
+      if (t == error_literal && r == error_rule) { return; }
     }
-    expected_tokens.push_back(std::make_pair(token, is_literal));
+    expected_tokens.emplace_back(error_literal, error_rule);
   }
 
-  void output_log(const Log &log, const char *s, size_t n) const {
-    if (message_pos) {
-      if (message_pos > last_output_pos) {
-        last_output_pos = message_pos;
-        auto line = line_info(s, message_pos);
-        std::string msg;
-        if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
-            !unexpected_token.empty()) {
-          msg = replace_all(message, "%t", unexpected_token);
-
-          auto unexpected_char = unexpected_token.substr(
-              0, codepoint_length(unexpected_token.data(),
-                                  unexpected_token.size()));
-
-          msg = replace_all(msg, "%c", unexpected_char);
-        } else {
-          msg = message;
-        }
-        log(line.first, line.second, msg);
-      }
-    } else if (error_pos) {
-      if (error_pos > last_output_pos) {
-        last_output_pos = error_pos;
-        auto line = line_info(s, error_pos);
-
-        std::string msg;
-        if (expected_tokens.empty()) {
-          msg = "syntax error.";
-        } else {
-          msg = "syntax error";
-
-          // unexpected token
-          if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
-              !unexpected_token.empty()) {
-            msg += ", unexpected '";
-            msg += unexpected_token;
-            msg += "'";
-          }
-
-          auto first_item = true;
-          size_t i = 0;
-          while (i < expected_tokens.size()) {
-            auto [token, is_literal] = expected_tokens[i];
-
-            // Skip rules start with '_'
-            if (!is_literal || token[0] != '_') {
-              msg += (first_item ? ", expecting " : ", ");
-              if (is_literal) {
-                msg += "'";
-                msg += token;
-                msg += "'";
-              } else {
-                msg += "<";
-                msg += token;
-                msg += ">";
-              }
-              first_item = false;
-            }
-
-            i++;
-          }
-          msg += ".";
-        }
-
-        log(line.first, line.second, msg);
-      }
-    }
-  }
+  void output_log(const Log &log, const char *s, size_t n) const;
 
 private:
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
@@ -781,7 +729,6 @@ private:
  * Context
  */
 class Ope;
-class Definition;
 
 using TracerEnter = std::function<void(
     const Ope &name, const char *s, size_t n, const SemanticValues &vs,
@@ -819,11 +766,11 @@ public:
   std::vector<std::map<std::string_view, std::string>> capture_scope_stack;
   size_t capture_scope_stack_size = 0;
 
+  std::vector<bool> cut_stack;
+
   std::vector<std::map<std::string, std::unordered_set<std::string>>>
       symbol_tables_stack;
   size_t symbol_tables_stack_size = 0;
-
-  std::vector<bool> cut_stack;
 
   const size_t def_count;
   const bool enablePackratParsing;
@@ -852,19 +799,21 @@ public:
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
         trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
 
-    args_stack.resize(1);
+    push_args({});
     push_capture_scope();
+
     push_symbol_tables();
   }
 
   ~Context() {
     pop_capture_scope();
-    pop_symbol_tables();
 
     assert(!value_stack_size);
     assert(!capture_scope_stack_size);
-    assert(!symbol_tables_stack_size);
     assert(cut_stack.empty());
+
+    pop_symbol_tables();
+    assert(!symbol_tables_stack_size);
   }
 
   Context(const Context &) = delete;
@@ -903,6 +852,19 @@ public:
     }
   }
 
+  SemanticValues &push() {
+    push_capture_scope();
+    push_symbol_tables();
+    return push_semantic_values_scope();
+  }
+
+  void pop() {
+    pop_capture_scope();
+    pop_semantic_values_scope();
+    pop_symbol_tables();
+  }
+
+  // Semantic values
   SemanticValues &push_semantic_values_scope() {
     assert(value_stack_size <= value_stack.size());
     if (value_stack_size == value_stack.size()) {
@@ -927,6 +889,7 @@ public:
 
   void pop_semantic_values_scope() { value_stack_size--; }
 
+  // Arguments
   void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
     args_stack.emplace_back(args);
   }
@@ -937,6 +900,7 @@ public:
     return args_stack[args_stack.size() - 1];
   }
 
+  // Capture scope
   void push_capture_scope() {
     assert(capture_scope_stack_size <= capture_scope_stack.size());
     if (capture_scope_stack_size == capture_scope_stack.size()) {
@@ -960,6 +924,7 @@ public:
     }
   }
 
+  // Symbol tables
   void push_symbol_tables() {
     assert(symbol_tables_stack_size <= symbol_tables_stack.size());
     if (symbol_tables_stack_size == symbol_tables_stack.size()) {
@@ -1004,8 +969,10 @@ public:
     return false;
   }
 
+  // Error
   void set_error_pos(const char *a_s, const char *literal = nullptr);
 
+  // Trace
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
                    const SemanticValues &vs, std::any &dt);
   void trace_leave(const Ope &ope, const char *a_s, size_t n,
@@ -1050,16 +1017,7 @@ public:
       if (fail(len)) { return len; }
       i += len;
     }
-    vs.sv_ = chvs.sv_;
-    for (auto &v : chvs) {
-      vs.emplace_back(std::move(v));
-    }
-    for (auto &tag : chvs.tags) {
-      vs.tags.emplace_back(std::move(tag));
-    }
-    for (auto &tok : chvs.tokens) {
-      vs.tokens.emplace_back(std::move(tok));
-    }
+    vs.append(chvs);
     return i;
   }
 
@@ -1088,32 +1046,19 @@ public:
     for (const auto &ope : opes_) {
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
-      auto &chvs = c.push_semantic_values_scope();
-      c.push_capture_scope();
-      c.push_symbol_tables();
+      auto &chvs = c.push();
       c.error_info.keep_previous_token = id > 0;
       auto se = scope_exit([&]() {
-        c.pop_semantic_values_scope();
-        c.pop_capture_scope();
-        c.pop_symbol_tables();
+        c.pop();
         c.error_info.keep_previous_token = false;
       });
 
       len = ope->parse(s, n, chvs, c, dt);
 
       if (success(len)) {
-        vs.sv_ = chvs.sv_;
+        vs.append(chvs);
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        for (auto &v : chvs) {
-          vs.emplace_back(std::move(v));
-        }
-        for (auto &tag : chvs.tags) {
-          vs.tags.emplace_back(std::move(tag));
-        }
-        for (auto &tok : chvs.tokens) {
-          vs.tokens.emplace_back(std::move(tok));
-        }
         c.shift_capture_values();
         c.shift_symbol_tables();
         break;
@@ -1147,28 +1092,13 @@ public:
     size_t count = 0;
     size_t i = 0;
     while (count < min_) {
-      auto &chvs = c.push_semantic_values_scope();
-      c.push_capture_scope();
-      c.push_symbol_tables();
-      auto se = scope_exit([&]() {
-        c.pop_semantic_values_scope();
-        c.pop_capture_scope();
-        c.pop_symbol_tables();
-      });
+      auto &chvs = c.push();
+      auto se = scope_exit([&]() { c.pop(); });
 
       auto len = ope_->parse(s + i, n - i, chvs, c, dt);
 
       if (success(len)) {
-        vs.sv_ = chvs.sv_;
-        for (auto &v : chvs) {
-          vs.emplace_back(std::move(v));
-        }
-        for (auto &tag : chvs.tags) {
-          vs.tags.emplace_back(std::move(tag));
-        }
-        for (auto &tok : chvs.tokens) {
-          vs.tokens.emplace_back(std::move(tok));
-        }
+        vs.append(chvs);
         c.shift_capture_values();
         c.shift_symbol_tables();
       } else {
@@ -1179,28 +1109,13 @@ public:
     }
 
     while (count < max_) {
-      auto &chvs = c.push_semantic_values_scope();
-      c.push_capture_scope();
-      c.push_symbol_tables();
-      auto se = scope_exit([&]() {
-        c.pop_semantic_values_scope();
-        c.pop_capture_scope();
-        c.pop_symbol_tables();
-      });
+      auto &chvs = c.push();
+      auto se = scope_exit([&]() { c.pop(); });
 
       auto len = ope_->parse(s + i, n - i, chvs, c, dt);
 
       if (success(len)) {
-        vs.sv_ = chvs.sv_;
-        for (auto &v : chvs) {
-          vs.emplace_back(std::move(v));
-        }
-        for (auto &tag : chvs.tags) {
-          vs.tags.emplace_back(std::move(tag));
-        }
-        for (auto &tok : chvs.tokens) {
-          vs.tokens.emplace_back(std::move(tok));
-        }
+        vs.append(chvs);
         c.shift_capture_values();
         c.shift_symbol_tables();
       } else {
@@ -1243,14 +1158,8 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chvs = c.push_semantic_values_scope();
-    c.push_capture_scope();
-    c.push_symbol_tables();
-    auto se = scope_exit([&]() {
-      c.pop_semantic_values_scope();
-      c.pop_capture_scope();
-      c.pop_symbol_tables();
-    });
+    auto &chvs = c.push();
+    auto se = scope_exit([&]() { c.pop(); });
 
     auto len = ope_->parse(s, n, chvs, c, dt);
 
@@ -1272,14 +1181,8 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chvs = c.push_semantic_values_scope();
-    c.push_capture_scope();
-    c.push_symbol_tables();
-    auto se = scope_exit([&]() {
-      c.pop_semantic_values_scope();
-      c.pop_capture_scope();
-      c.pop_symbol_tables();
-    });
+    auto &chvs = c.push();
+    auto se = scope_exit([&]() { c.pop(); });
     auto len = ope_->parse(s, n, chvs, c, dt);
     if (success(len)) {
       c.set_error_pos(s);
@@ -2493,11 +2396,11 @@ public:
   std::string error_message;
   bool no_ast_opt = false;
 
+  bool eoi_check = true;
+
   bool declare_symbol = false;
   bool check_symbol = false;
   std::string symbol_table_name;
-
-  bool eoi_check = true;
 
 private:
   friend class Reference;
@@ -2650,6 +2553,74 @@ inline const std::vector<size_t> &SemanticValues::source_line_index() const {
   return c_->source_line_index;
 }
 
+inline void ErrorInfo::output_log(const Log &log, const char *s,
+                                  size_t n) const {
+  if (message_pos) {
+    if (message_pos > last_output_pos) {
+      last_output_pos = message_pos;
+      auto line = line_info(s, message_pos);
+      std::string msg;
+      if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
+          !unexpected_token.empty()) {
+        msg = replace_all(message, "%t", unexpected_token);
+
+        auto unexpected_char = unexpected_token.substr(
+            0,
+            codepoint_length(unexpected_token.data(), unexpected_token.size()));
+
+        msg = replace_all(msg, "%c", unexpected_char);
+      } else {
+        msg = message;
+      }
+      log(line.first, line.second, msg);
+    }
+  } else if (error_pos) {
+    if (error_pos > last_output_pos) {
+      last_output_pos = error_pos;
+      auto line = line_info(s, error_pos);
+
+      std::string msg;
+      if (expected_tokens.empty()) {
+        msg = "syntax error.";
+      } else {
+        msg = "syntax error";
+
+        // unexpected token
+        if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
+            !unexpected_token.empty()) {
+          msg += ", unexpected '";
+          msg += unexpected_token;
+          msg += "'";
+        }
+
+        auto first_item = true;
+        size_t i = 0;
+        while (i < expected_tokens.size()) {
+          auto [error_literal, error_rule] = expected_tokens[i];
+
+          // Skip rules start with '_'
+          if (!(error_rule && error_rule->name[0] == '_')) {
+            msg += (first_item ? ", expecting " : ", ");
+            if (error_literal) {
+              msg += "'";
+              msg += error_literal;
+              msg += "'";
+            } else {
+              msg += "<" + error_rule->name + ">";
+            }
+            first_item = false;
+          }
+
+          i++;
+        }
+        msg += ".";
+      }
+
+      log(line.first, line.second, msg);
+    }
+  }
+}
+
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
   if (log) {
     if (error_info.error_pos <= a_s) {
@@ -2657,17 +2628,25 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
         error_info.error_pos = a_s;
         error_info.expected_tokens.clear();
       }
+
+      const char *error_literal = nullptr;
+      const Definition *error_rule = nullptr;
+
       if (literal) {
-        error_info.add(literal, true);
+        error_literal = literal;
       } else if (!rule_stack.empty()) {
         auto rule = rule_stack.back();
         auto ope = rule->get_core_operator();
         if (auto token = FindLiteralToken::token(*ope);
             token && token[0] != '\0') {
-          error_info.add(token, true);
-        } else {
-          error_info.add(rule->name.data(), false);
+          error_literal = token;
         }
+      }
+
+      if (!rule_stack.empty()) { error_rule = rule_stack.back(); }
+
+      if (error_literal || error_rule) {
+        error_info.add(error_literal, error_rule);
       }
     }
   }
@@ -3463,8 +3442,10 @@ private:
                                                   g["InstructionItem"])))),
             g["EndBlacket"]);
     g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
-                                g["NoAstOpt"], g["DeclareSymbol"],
-                                g["CheckSymbol"]);
+                                g["NoAstOpt"]
+                                ,
+                                g["DeclareSymbol"], g["CheckSymbol"]
+                            );
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
