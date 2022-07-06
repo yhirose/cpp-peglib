@@ -4234,12 +4234,12 @@ template <typename Annotation> struct AstBase : public Annotation {
 
   AstBase(const AstBase &ast, const char *original_name, size_t position = 0,
           size_t length = 0, size_t original_choice_count = 0,
-          size_t original_choise = 0)
+          size_t original_choice = 0)
       : path(ast.path), line(ast.line), column(ast.column), name(ast.name),
         position(position), length(length), choice_count(ast.choice_count),
         choice(ast.choice), original_name(original_name),
         original_choice_count(original_choice_count),
-        original_choice(original_choise), tag(ast.tag),
+        original_choice(original_choice), tag(ast.tag),
         original_tag(str2tag(original_name)), is_token(ast.is_token),
         token(ast.token), nodes(ast.nodes), parent(ast.parent) {}
 
