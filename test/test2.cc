@@ -861,6 +861,7 @@ TEST(PredicateTest, Semantic_predicate_test) {
   EXPECT_FALSE(parser.parse("200", val));
 }
 
+#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
 TEST(SymbolTableTest, symbol_instruction_test) {
   parser parser(R"(S            <- (Decl / Ref)*
 Decl         <- 'decl' symbol
@@ -1054,6 +1055,7 @@ decl aaa
     EXPECT_FALSE(parser.parse(source, ast));
   }
 }
+#endif
 
 TEST(UnicodeTest, Japanese_character) {
   peg::parser parser(u8R"(
