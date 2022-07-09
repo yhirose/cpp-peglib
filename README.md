@@ -34,6 +34,9 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
   * `label { message "..." }` (Error message instruction)
   * `{ no_ast_opt }` (No AST node optimazation instruction)
+
+The following syntax is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`.
+
   * `{ declare_symbol "..." }` (Declare symbol instruction)
   * `{ check_symbol "..." }` (Check symbol instruction)
 
@@ -461,6 +464,8 @@ See actual usages in the [AST calculator example](https://github.com/yhirose/cpp
 
 Symbol Table
 ------------
+
+NOTE: This feature is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`.
 
 Simple symbol table support is available with `declare_symbol` and `check_symbol` instructions.
 
