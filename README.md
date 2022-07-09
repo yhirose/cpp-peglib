@@ -465,7 +465,7 @@ See actual usages in the [AST calculator example](https://github.com/yhirose/cpp
 Symbol Table
 ------------
 
-NOTE: This feature is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`.
+NOTE: This feature is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`, and has [some limitations](https://github.com/yhirose/cpp-peglib/issues/231#issuecomment-1173215709).
 
 Simple symbol table support is available with `declare_symbol` and `check_symbol` instructions.
 
