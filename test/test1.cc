@@ -1041,3 +1041,27 @@ TEST(GeneralTest, InvalidCutOperator) {
   ret = parser.parse("b");
   EXPECT_FALSE(ret);
 }
+
+TEST(GeneralTest, HeuristicErrorTokenTest) {
+  auto parser = peg::parser(R"(
+    program      <- enum+
+    enum         <- 'enum' enum_kind^untyped_enum
+    enum_kind    <- 'sequence' / 'bitmask'
+
+    %whitespace  <- [ \r\t\n]*
+    %word        <- [a-zA-Z0-9_]
+
+    untyped_enum <- '' { message "invalid/missing enum type, expected one of 'sequence' or 'bitmask', got '%t'"}
+	)");
+
+  parser.log = [&](size_t ln, size_t col, const std::string &msg) {
+    EXPECT_EQ(1, ln);
+    EXPECT_EQ(6, col);
+    EXPECT_EQ("invalid/missing enum type, expected one of 'sequence' or "
+              "'bitmask', got 'sequencer'",
+              msg);
+  };
+
+  auto ret = parser.parse("enum sequencer");
+  EXPECT_FALSE(ret);
+}

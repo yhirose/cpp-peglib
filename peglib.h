@@ -7,6 +7,14 @@
 
 #pragma once
 
+/*
+ * Configuration
+ */
+
+#ifndef CPPPEGLIB_HEURISTIC_ERROR_TOKEN_MAX_CHAR_COUNT
+#define CPPPEGLIB_HEURISTIC_ERROR_TOKEN_MAX_CHAR_COUNT 32
+#endif
+
 #include <algorithm>
 #include <any>
 #include <cassert>
@@ -702,7 +710,7 @@ private:
         }
       }
 
-      size_t count = 8;
+      size_t count = CPPPEGLIB_HEURISTIC_ERROR_TOKEN_MAX_CHAR_COUNT;
       size_t j = 0;
       while (count > 0 && j < i) {
         j += codepoint_length(&pos[j], i - j);
