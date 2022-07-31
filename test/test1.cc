@@ -1027,3 +1027,17 @@ TEST(GeneralTest, DisableEndOfInputCheckTest) {
   EXPECT_TRUE(ret);
 }
 
+TEST(GeneralTest, InvalidCutOperator) {
+  auto parser = peg::parser(R"(
+    S <- 'a' ↑ 'b'
+	)");
+
+  auto ret = parser.parse("ab");
+  EXPECT_TRUE(ret);
+
+  ret = parser.parse("ac");
+  EXPECT_FALSE(ret);
+
+  ret = parser.parse("b");
+  EXPECT_FALSE(ret);
+}
