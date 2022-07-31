@@ -1576,7 +1576,7 @@ class Cut : public Ope, public std::enable_shared_from_this<Cut> {
 public:
   size_t parse_core(const char * /*s*/, size_t /*n*/, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
-    c.cut_stack.back() = true;
+    if (!c.cut_stack.empty()) { c.cut_stack.back() = true; }
     return 0;
   }
 
