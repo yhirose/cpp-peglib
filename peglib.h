@@ -2671,7 +2671,10 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
         }
       }
 
-      if (!rule_stack.empty()) { error_rule = rule_stack.back(); }
+      for (auto r : rule_stack) {
+        error_rule = r;
+        if (r->is_token()) { break; }
+      }
 
       if (error_literal || error_rule) {
         error_info.add(error_literal, error_rule);
