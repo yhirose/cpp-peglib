@@ -2571,14 +2571,18 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 }
 
 inline const std::vector<size_t> &SemanticValues::source_line_index() const {
-  if (!c_) { std::vector<size_t>(); }
-  if (c_->source_line_index.empty()) {
-    for (size_t pos = 0; pos < c_->l; pos++) {
-      if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
+  if (!c_) {
+    static std::vector<size_t> emptyRes;
+    return emptyRes;
+  } else {
+    if (c_->source_line_index.empty()) {
+      for (size_t pos = 0; pos < c_->l; pos++) {
+        if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
+      }
+      c_->source_line_index.push_back(c_->l);
     }
-    c_->source_line_index.push_back(c_->l);
+    return c_->source_line_index;
   }
-  return c_->source_line_index;
 }
 
 inline void ErrorInfo::output_log(const Log &log, const char *s,
@@ -4868,7 +4872,7 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
                << std::endl;
 
             auto grand_total = total_success + total_fail;
-            sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", grand_total,
+            sprintf(buff, "%4s  %10zu  %5s  %10zu  %10zu  %s", "", grand_total,
                     "", total_success, total_fail, "Total counters");
             os << buff << std::endl;
 
@@ -4882,7 +4886,7 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
             for (auto &[name, success, fail] : stats.items) {
               auto total = success + fail;
               auto ratio = total * 100.0 / stats.total;
-              sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
+              sprintf(buff, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s", id, total,
                       ratio, success, fail, name.c_str());
               os << buff << std::endl;
               id++;
