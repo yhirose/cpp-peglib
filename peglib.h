@@ -778,12 +778,6 @@ public:
 
   std::vector<bool> cut_stack;
 
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-  std::vector<std::map<std::string, std::unordered_set<std::string>>>
-      symbol_tables_stack;
-  size_t symbol_tables_stack_size = 0;
-#endif
-
   const size_t def_count;
   const bool enablePackratParsing;
   std::vector<bool> cache_registered;
@@ -813,10 +807,6 @@ public:
 
     push_args({});
     push_capture_scope();
-
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    push_symbol_tables();
-#endif
   }
 
   ~Context() {
@@ -825,11 +815,6 @@ public:
     assert(!value_stack_size);
     assert(!capture_scope_stack_size);
     assert(cut_stack.empty());
-
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    pop_symbol_tables();
-    assert(!symbol_tables_stack_size);
-#endif
   }
 
   Context(const Context &) = delete;
@@ -870,18 +855,12 @@ public:
 
   SemanticValues &push() {
     push_capture_scope();
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    push_symbol_tables();
-#endif
     return push_semantic_values_scope();
   }
 
   void pop() {
     pop_capture_scope();
     pop_semantic_values_scope();
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    pop_symbol_tables();
-#endif
   }
 
   // Semantic values
@@ -943,53 +922,6 @@ public:
       (*prev)[k] = v;
     }
   }
-
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-  // Symbol tables
-  void push_symbol_tables() {
-    assert(symbol_tables_stack_size <= symbol_tables_stack.size());
-    if (symbol_tables_stack_size == symbol_tables_stack.size()) {
-      symbol_tables_stack.emplace_back(
-          std::map<std::string, std::unordered_set<std::string>>());
-    } else {
-      auto &tables = symbol_tables_stack[symbol_tables_stack_size];
-      if (!tables.empty()) { tables.clear(); }
-    }
-    symbol_tables_stack_size++;
-  }
-
-  void pop_symbol_tables() { symbol_tables_stack_size--; }
-
-  void shift_symbol_tables() {
-    assert(symbol_tables_stack_size >= 2);
-    auto curr = &symbol_tables_stack[symbol_tables_stack_size - 1];
-    auto prev = curr - 1;
-    for (const auto &[k, v] : *curr) {
-      (*prev)[k].insert(v.begin(), v.end());
-    }
-  }
-
-  void declare_symbol(const std::string &table_name,
-                      const std::string &symbol) {
-    assert(symbol_tables_stack_size >= 1);
-    auto &table = symbol_tables_stack[symbol_tables_stack_size - 1][table_name];
-    table.insert(symbol);
-  }
-
-  bool check_symbol(const std::string &table_name, const std::string &symbol) {
-    int i = symbol_tables_stack_size - 1;
-    while (i >= 0) {
-      const auto &tables = symbol_tables_stack[i];
-      if (auto it = tables.find(table_name); it != tables.end()) {
-        if (const auto &table = it->second; table.find(symbol) != table.end()) {
-          return true;
-        }
-      }
-      i--;
-    }
-    return false;
-  }
-#endif
 
   // Error
   void set_error_pos(const char *a_s, const char *literal = nullptr);
@@ -1082,9 +1014,6 @@ public:
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
         c.shift_capture_values();
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-        c.shift_symbol_tables();
-#endif
         break;
       } else if (!c.cut_stack.empty() && c.cut_stack.back()) {
         break;
@@ -1124,9 +1053,6 @@ public:
       if (success(len)) {
         vs.append(chvs);
         c.shift_capture_values();
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-        c.shift_symbol_tables();
-#endif
       } else {
         return len;
       }
@@ -1143,9 +1069,6 @@ public:
       if (success(len)) {
         vs.append(chvs);
         c.shift_capture_values();
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-        c.shift_symbol_tables();
-#endif
       } else {
         break;
       }
@@ -2426,12 +2349,6 @@ public:
 
   bool eoi_check = true;
 
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-  bool declare_symbol = false;
-  bool check_symbol = false;
-  std::string symbol_table_name;
-#endif
-
 private:
   friend class Reference;
   friend class ParserGenerator;
@@ -2808,24 +2725,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           c.error_info.message = msg;
         }
         len = static_cast<size_t>(-1);
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-      } else if (outer_->declare_symbol) {
-        assert(outer_->is_token());
-        auto symbol = chvs.token_to_string();
-        if (c.check_symbol(outer_->symbol_table_name, symbol)) {
-          msg = "'" + symbol + "' already exists.";
-          len = static_cast<size_t>(-1);
-        } else {
-          c.declare_symbol(outer_->symbol_table_name, symbol);
-        }
-      } else if (outer_->check_symbol) {
-        assert(outer_->is_token());
-        auto symbol = chvs.token_to_string();
-        if (!c.check_symbol(outer_->symbol_table_name, symbol)) {
-          msg = "'" + symbol + "' doesn't exist.";
-          len = static_cast<size_t>(-1);
-        }
-#endif
       }
 
       if (success(len)) {
@@ -3485,10 +3384,6 @@ private:
             g["EndBlacket"]);
     g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
                                 g["NoAstOpt"]
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-                                ,
-                                g["DeclareSymbol"], g["CheckSymbol"]
-#endif
                             );
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
@@ -3521,14 +3416,6 @@ private:
 
     // No Ast node optimazation instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
-
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    // Symbol table instruction
-    g["DeclareSymbol"] <= seq(lit("declare_symbol"), g["SpacesZom"],
-                              g["Identifier"], g["SpacesZom"]);
-    g["CheckSymbol"] <= seq(lit("check_symbol"), g["SpacesZom"],
-                            g["Identifier"], g["SpacesZom"]);
-#endif
 
     // Set definition names
     for (auto &x : g) {
@@ -3932,24 +3819,6 @@ private:
       return instruction;
     };
 
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-    g["DeclareSymbol"] = [](const SemanticValues &vs) {
-      Instruction instruction;
-      instruction.type = "declare_symbol";
-      instruction.data = std::string("default");
-      instruction.sv = vs.sv();
-      return instruction;
-    };
-
-    g["CheckSymbol"] = [](const SemanticValues &vs) {
-      Instruction instruction;
-      instruction.type = "check_symbol";
-      instruction.data = std::string("default");
-      instruction.sv = vs.sv();
-      return instruction;
-    };
-#endif
-
     g["Instruction"] = [](const SemanticValues &vs) {
       return vs.transform<Instruction>();
     };
@@ -4200,14 +4069,6 @@ private:
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
           rule.no_ast_opt = true;
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-        } else if (instruction.type == "declare_symbol") {
-          rule.declare_symbol = true;
-          rule.symbol_table_name = std::any_cast<std::string>(instruction.data);
-        } else if (instruction.type == "check_symbol") {
-          rule.check_symbol = true;
-          rule.symbol_table_name = std::any_cast<std::string>(instruction.data);
-#endif
         }
       }
     }

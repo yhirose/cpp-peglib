@@ -35,11 +35,6 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `label { message "..." }` (Error message instruction)
   * `{ no_ast_opt }` (No AST node optimazation instruction)
 
-The following syntax is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`.
-
-  * `{ declare_symbol "..." }` (Declare symbol instruction)
-  * `{ check_symbol "..." }` (Check symbol instruction)
-
 'End of Input' check will be done as default. In order to disable the check, please call `disable_eoi_check`.
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
@@ -461,35 +456,6 @@ if (parser.parse("...", ast)) {
 It internally calls `peg::AstOptimizer` to do the job. You can make your own AST optimizers to fit your needs.
 
 See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc).
-
-Symbol Table
-------------
-
-NOTE: This feature is available with `CPPPEGLIB_SYMBOL_TABLE_SUPPORT`, and has [some limitations](https://github.com/yhirose/cpp-peglib/issues/231#issuecomment-1173215709).
-
-Simple symbol table support is available with `declare_symbol` and `check_symbol` instructions.
-
-```peg
-S            <- (Decl / Ref)*
-Decl         <- 'decl' symbol
-Ref          <- 'ref' is_symbol
-Name         <- < [a-zA-Z]+ >
-%whitespace  <- [ \t\r\n]*
-
-# 'var_table' is a table name.
-symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
-is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
-```
-
-If we parse the following text with the above grammar, it will fail.
-
-```
-decl aaa
-ref aaa
-ref bbb
-```
-
-It is because the line 3 references undeclared 'bbb'.
 
 Make a parser with parser combinators
 -------------------------------------
