@@ -4738,7 +4738,7 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
                << std::endl;
 
             auto grand_total = total_success + total_fail;
-            sprintf(buff, "%4s  %10lu  %5s  %10lu  %10lu  %s", "", grand_total,
+            sprintf(buff, "%4s  %10zu  %5s  %10zu  %10zu  %s", "", grand_total,
                     "", total_success, total_fail, "Total counters");
             os << buff << std::endl;
 
@@ -4752,7 +4752,7 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
             for (auto &[name, success, fail] : stats.items) {
               auto total = success + fail;
               auto ratio = total * 100.0 / stats.total;
-              sprintf(buff, "%4zu  %10lu  %5.2f  %10lu  %10lu  %s", id, total,
+              sprintf(buff, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s", id, total,
                       ratio, success, fail, name.c_str());
               os << buff << std::endl;
               id++;
