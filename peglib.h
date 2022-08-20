@@ -496,6 +496,8 @@ struct SemanticValues : protected std::vector<std::any> {
 
   // Line number and column at which the matched string is
   std::pair<size_t, size_t> line_info() const {
+    if (!c_) { return std::pair(1, 1); }
+
     auto &idx = source_line_index();
 
     auto cur = static_cast<size_t>(std::distance(ss, sv_.data()));
@@ -2571,7 +2573,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 }
 
 inline const std::vector<size_t> &SemanticValues::source_line_index() const {
-  if (!c_) { std::vector<size_t>(); }
+  assert(c_);
   if (c_->source_line_index.empty()) {
     for (size_t pos = 0; pos < c_->l; pos++) {
       if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
