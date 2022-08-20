@@ -1452,6 +1452,7 @@ TEST(ErrorTest, Default_error_handling_1) {
   };
 
   EXPECT_FALSE(pg.parse(" @ aaa typo "));
+  EXPECT_EQ(i, errors.size());
 }
 
 TEST(ErrorTest, Default_error_handling_2) {
@@ -1477,6 +1478,7 @@ TEST(ErrorTest, Default_error_handling_2) {
   };
 
   EXPECT_FALSE(pg.parse(" @ aaa typo "));
+  EXPECT_EQ(i, errors.size());
 }
 
 TEST(ErrorTest, Default_error_handling_fiblang) {
@@ -1525,6 +1527,7 @@ TEST(ErrorTest, Default_error_handling_fiblang) {
 for n frm 1 to 30
   puts(fib(n))
   )"));
+  EXPECT_EQ(i, errors.size());
 }
 
 TEST(ErrorTest, Error_recovery_1) {
@@ -1603,6 +1606,8 @@ rrr | sss
   )",
                         ast));
 
+  EXPECT_EQ(i, errors.size());
+
   ast = pg.optimize_ast(ast);
 
   EXPECT_EQ(R"(+ START
@@ -1655,20 +1660,20 @@ rrr | sss
 
 TEST(ErrorTest, Error_recovery_2) {
   parser pg(R"(
-    START <- ENTRY (',' ENTRY)* _*
+    START <- ENTRY ((',' ENTRY) / %recover((!(',' / Space) .)+))* (_ / %recover(.*))
     ENTRY <- '[' ITEM (',' ITEM)* ']'
     ITEM  <- WORD / NUM / %recover((!(',' / ']') .)+)
     NUM   <- [0-9]+ ![a-z]
     WORD  <- '"' [a-z]+ '"'
 
-    ~_    <- Space
+    ~_    <- Space*
     Space <- [ \n]
   )");
 
   EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-      R"(1:6: syntax error, unexpected ']', expecting <Space>.)",
+      R"(1:6: syntax error, unexpected ']', expecting ','.)",
       R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
       R"(1:24: syntax error, unexpected ',', expecting '"'.)",
       R"(1:31: syntax error, unexpected 'ccc', expecting '"', <NUM>.)",
@@ -1692,6 +1697,7 @@ TEST(ErrorTest, Error_recovery_2) {
       pg.parse(R"([000]],[111],[222z,"aaa,"bbb",ccc"],[ddd",444,555,"eee],[
   )",
                ast));
+  EXPECT_EQ(i, errors.size());
 
   EXPECT_FALSE(ast);
 }
@@ -1761,6 +1767,7 @@ skip_puncs       <- [|=]* _
       R"(21:17: Use of invalid operator)",
       R"(24:10: Use of invalid operator combination)",
       R"(26:10: Missing OR operator (|))",
+      R"(28:3: Missing opening/closing square bracket)",
   };
 
   size_t i = 0;
@@ -1802,6 +1809,8 @@ Section 6]
 sss | ttt
   )",
                         ast));
+
+  EXPECT_EQ(i, errors.size());
 
   ast = pg.optimize_ast(ast);
 

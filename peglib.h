@@ -3045,7 +3045,14 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     len = rule.parse(s, n, dummy_vs, c, dummy_dt);
   }
 
-  if (success(len)) { c.recovered = true; }
+  if (success(len)) {
+    c.recovered = true;
+
+    if (c.log) {
+      c.error_info.output_log(c.log, c.s, c.l);
+      c.error_info.clear();
+    }
+  }
 
   // Cut
   if (!c.cut_stack.empty()) {

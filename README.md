@@ -624,7 +624,7 @@ public class Example {
 }
 
 > peglint java.peg sample.java
-sample.java:5:12: syntax error, unexpected '<', expecting <NAME>, <NUMBER>, <WhileStmt>.
+sample.java:5:12: syntax error, unexpected '<', expecting '(', <NUMBER>, <NAME>.
 sample.java:8:5: missing semicolon in assignment.
 sample.java:8:6: invalid statement
 ```
