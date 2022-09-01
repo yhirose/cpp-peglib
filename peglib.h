@@ -2735,6 +2735,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           c.error_info.message = msg;
         }
       }
+    } else {
+      if (c.log && !outer_->error_message.empty() &&
+          c.error_info.message_pos < s) {
+        c.error_info.message_pos = s;
+        c.error_info.message = outer_->error_message;
+      }
     }
   });
 
@@ -3382,9 +3388,8 @@ private:
             opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
                                                   g["InstructionItem"])))),
             g["EndBlacket"]);
-    g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
-                                g["NoAstOpt"]
-                            );
+    g["InstructionItem"] <=
+        cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);

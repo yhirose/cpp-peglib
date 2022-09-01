@@ -2051,3 +2051,39 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
 )",
             ast_to_s(ast));
 }
+
+TEST(ErrorTest, Error_message_with_rule_instruction) {
+  parser pg(R"(
+START       <- (LINE (ln LINE)*)? ln?
+
+LINE        <- STR '=' CODE
+
+CODE        <- HEX / DEC { message 'code format error...' }
+HEX         <- < [a-f0-9]+ 'h' >
+DEC         <- < [0-9]+ >
+
+STR         <- < [a-z0-9]+ >
+
+~ln         <- [\r\n]+
+%whitespace <- [ \t]*
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  std::vector<std::string> errors{
+      R"(2:5: code format error...)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    EXPECT_EQ(errors[i++], ss.str());
+  };
+
+  EXPECT_FALSE(pg.parse(R"(1 = ah
+2 = b
+3 = ch
+  )"));
+  EXPECT_EQ(i, errors.size());
+}
