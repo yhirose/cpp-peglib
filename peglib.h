@@ -3416,8 +3416,8 @@ private:
     g["PrecedenceAssoc"] <= cls("LR");
 
     // Error message instruction
-    g["ErrorMessage"] <=
-        seq(lit("message"), g["SpacesOom"], g["LiteralD"], g["SpacesZom"]);
+    g["ErrorMessage"] <= seq(lit("error_message"), g["SpacesOom"],
+                             g["LiteralD"], g["SpacesZom"]);
 
     // No Ast node optimazation instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
@@ -3811,7 +3811,7 @@ private:
 
     g["ErrorMessage"] = [](const SemanticValues &vs) {
       Instruction instruction;
-      instruction.type = "message";
+      instruction.type = "error_message";
       instruction.data = std::any_cast<std::string>(vs[0]);
       instruction.sv = vs.sv();
       return instruction;
@@ -4070,7 +4070,7 @@ private:
           if (!apply_precedence_instruction(rule, info, s, log)) {
             return nullptr;
           }
-        } else if (instruction.type == "message") {
+        } else if (instruction.type == "error_message") {
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
           rule.no_ast_opt = true;

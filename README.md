@@ -32,7 +32,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `{ precedence L - + L / * }` (Parsing infix expression)
   * `%recovery(` ... `)` (Error recovery operator)
   * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
-  * `label { message "..." }` (Error message instruction)
+  * `label { error_message "..." }` (Error message instruction)
   * `{ no_ast_opt }` (No AST node optimazation instruction)
 
 'End of Input' check will be done as default. In order to disable the check, please call `disable_eoi_check`.
@@ -566,8 +566,8 @@ NAME        ← < [a-zA-Z_][a-zA-Z_0-9]* >
 %word       ← NAME
 
 # Recovery operator labels
-semia       ← '' { message "missing semicolon in assignment." }
-stmtb       ← (!(Stmt / 'else' / '}') .)* { message "invalid statement" }
+semia       ← '' { error_message "missing semicolon in assignment." }
+stmtb       ← (!(Stmt / 'else' / '}') .)* { error_message "invalid statement" }
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
 ```
 

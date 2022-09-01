@@ -1505,7 +1505,7 @@ TEST(ErrorTest, Default_error_handling_fiblang) {
     %whitespace       ← [ \t\r\n]*
     %word             ← [a-zA-Z]
 
-    col ← '' { message "missing colon." }
+    col ← '' { error_message "missing colon." }
   )");
 
   EXPECT_TRUE(!!pg);
@@ -1558,8 +1558,8 @@ WORD       <- < (![ \t\r\n=|[\]#] .)+ >
 comment    <- ('#' (!nl .)*)
 nl         <- '\r'? '\n'
 
-header <- (!__ .)* { message "invalid section header, missing ']'." }
-entry  <- (!(__ / HEADER) .)+ { message "invalid entry." }
+header <- (!__ .)* { error_message "invalid section header, missing ']'." }
+entry  <- (!(__ / HEADER) .)+ { error_message "invalid entry." }
   )");
 
   EXPECT_TRUE(!!pg);
@@ -1737,14 +1737,14 @@ comment    <- ('#' (!nl .)*)
 nl         <- '\r'? '\n'
 
 # Recovery
-duplicate_or     <- skip_puncs { message "Duplicate OR operator (|)" }
-missing_or       <- '' { message "Missing OR operator (|)" }
-missing_bracket  <- skip_puncs { message "Missing opening/closing square bracket" }
-expect_phrase    <- skip { message "Expect phrase" }
-invalid_ope_comb <- skip_puncs { message "Use of invalid operator combination" }
-invalid_ope      <- skip { message "Use of invalid operator" }
-wildcard         <- '' { message "Wildcard characters (%c) should not be used" }
-vernacular_char  <- '' { message "Section name %c must be in English" }
+duplicate_or     <- skip_puncs { error_message "Duplicate OR operator (|)" }
+missing_or       <- '' { error_message "Missing OR operator (|)" }
+missing_bracket  <- skip_puncs { error_message "Missing opening/closing square bracket" }
+expect_phrase    <- skip { error_message "Expect phrase" }
+invalid_ope_comb <- skip_puncs { error_message "Use of invalid operator combination" }
+invalid_ope      <- skip { error_message "Use of invalid operator" }
+wildcard         <- '' { error_message "Wildcard characters (%c) should not be used" }
+vernacular_char  <- '' { error_message "Section name %c must be in English" }
 
 skip             <- (!(__) .)*
 skip_puncs       <- [|=]* _
@@ -1972,8 +1972,8 @@ PRINTLN    ← 'System.out.println'
 %word       ← NAME
 
 # Throw operator labels
-rcblk      ← SkipToRCUR { message "missing end of block." }
-semia      ← '' { message "missing simicolon in assignment." }
+rcblk      ← SkipToRCUR { error_message "missing end of block." }
+semia      ← '' { error_message "missing simicolon in assignment." }
 
 # Recovery expressions
 SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
@@ -2058,7 +2058,7 @@ START       <- (LINE (ln LINE)*)? ln?
 
 LINE        <- STR '=' CODE
 
-CODE        <- HEX / DEC { message 'code format error...' }
+CODE        <- HEX / DEC { error_message 'code format error...' }
 HEX         <- < [a-f0-9]+ 'h' >
 DEC         <- < [0-9]+ >
 
