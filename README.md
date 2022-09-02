@@ -597,6 +597,27 @@ sample.java:8:6: invalid statement
 
 As you can see, it can now show more than one error, and provide more meaningful error messages than the default messages.
 
+### Custom error message for definitions
+
+We can associate custom error messages to definitions.
+
+```peg
+# custom_message.peg
+START       <- CODE (',' CODE)*
+CODE        <- < '0x' [a-fA-F0-9]+ > { error_message 'code format error...' }
+%whitespace <- [ \t]*
+```
+
+```
+> cat custom_message.txt
+0x1234,0x@@@@,0xABCD
+
+> peglint custom_message.peg custom_message.txt
+custom_message.txt:1:8: code format error...
+```
+
+NOTE: If there are more than one elements with error message instruction in a prioritized choice, this feature may not work as you expect.
+
 peglint - PEG syntax lint utility
 ---------------------------------
 
