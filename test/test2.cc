@@ -853,7 +853,8 @@ TEST(PredicateTest, Semantic_predicate_test) {
   EXPECT_TRUE(parser.parse("100", val));
   EXPECT_EQ(100, val);
 
-  parser.log = [](size_t line, size_t col, const std::string &msg) {
+  parser.log = [](size_t line, size_t col, const std::string &msg,
+                  const std::string & /*rule*/) {
     EXPECT_EQ(1, line);
     EXPECT_EQ(1, col);
     EXPECT_EQ("value error!!", msg);
@@ -878,7 +879,8 @@ is_symbol    <- Name { check_symbol var_table }
 ref aaa
 ref bbb
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(5, col);
       EXPECT_EQ("'bbb' doesn't exist.", msg);
@@ -891,7 +893,8 @@ ref bbb
 ref aaa
 decl aaa
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(6, col);
       EXPECT_EQ("'aaa' already exists.", msg);
@@ -963,7 +966,8 @@ typedef __off64_t __loff_t;
 typedef long __off64_t;
 typedef __off64_T __loff_t;
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(9, col);
       EXPECT_EQ("'__off64_T' doesn't exist.", msg);
@@ -977,7 +981,8 @@ typedef long __off64_t;
 typedef __off64_t __loff_t;
 typedef __off64_t __loff_t;
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       EXPECT_EQ(4, line);
       EXPECT_EQ(19, col);
       EXPECT_EQ("'__loff_t' already exists.", msg);
@@ -1029,7 +1034,8 @@ is_symbol    <- < Name >
 ref aaa
 ref bbb
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(5, col);
       EXPECT_EQ("'bbb' doesn't exist.", msg);
@@ -1044,7 +1050,8 @@ ref bbb
 ref aaa
 decl aaa
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg) {
+    parser.log = [](size_t line, size_t col, const std::string &msg,
+                    const std::string & /*rule*/) {
       std::cerr << line << ":" << col << ": " << msg << "\n";
       EXPECT_EQ(3, line);
       EXPECT_EQ(6, col);
@@ -1445,7 +1452,8 @@ TEST(ErrorTest, Default_error_handling_1) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1471,7 +1479,8 @@ TEST(ErrorTest, Default_error_handling_2) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1515,7 +1524,8 @@ TEST(ErrorTest, Default_error_handling_fiblang) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1572,7 +1582,8 @@ entry  <- (!(__ / HEADER) .)+ { error_message "invalid entry." }
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1684,7 +1695,8 @@ TEST(ErrorTest, Error_recovery_2) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1771,7 +1783,8 @@ skip_puncs       <- [|=]* _
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -1987,7 +2000,8 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -2075,7 +2089,8 @@ STR         <- < [a-z0-9]+ >
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg) {
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -2087,3 +2102,138 @@ STR         <- < [a-z0-9]+ >
   )"));
   EXPECT_EQ(i, errors.size());
 }
+
+TEST(StateTest, Indent) {
+  parser pg(R"(Start <- Statements {}
+Statements <- Statement*
+Statement <- Samedent (S / I)
+
+S <- 'S' EOS { no_ast_opt }
+I <- 'I' EOL Block / 'I' EOS { no_ast_opt }
+
+Block <- Statements {}
+
+~Samedent <- ' '* {}
+
+~EOS <- EOL / EOF
+~EOL <- '\n'
+~EOF <- !.
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  size_t indent = 0;
+
+  pg["Block"].enter = [&](const Context & /*c*/, const char * /*s*/,
+                          size_t /*n*/, std::any & /*dt*/) { indent += 2; };
+
+  pg["Block"].leave = [&](const Context & /*c*/, const char * /*s*/,
+                          size_t /*n*/, size_t /*matchlen*/,
+                          std::any & /*value*/,
+                          std::any & /*dt*/) { indent -= 2; };
+
+  pg["Samedent"].predicate = [&](const SemanticValues &vs,
+                                 const std::any & /*dt*/, std::string &msg) {
+    if (indent != vs.sv().size()) {
+      msg = "different indent...";
+      return false;
+    }
+    return true;
+  };
+
+  pg.enable_ast();
+
+  const auto source = R"(I
+  S
+  I
+    I
+      S
+      S
+    S
+  S
+)";
+
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse(source, ast));
+
+  ast = pg.optimize_ast(ast);
+  auto s = ast_to_s(ast);
+
+  EXPECT_EQ(R"(+ Start/0[I]
+  + Block/0[Statements]
+    + Statement/0[S]
+    + Statement/0[I]
+      + Block/0[Statements]
+        + Statement/0[I]
+          + Block/0[Statements]
+            + Statement/0[S]
+            + Statement/0[S]
+        + Statement/0[S]
+    + Statement/0[S]
+)", s);
+}
+
+TEST(StateTest, NestedBlocks) {
+  parser pg(R"(
+program <- (~NL / expr)*
+
+~BLOCK_COMMENT  <- '/*' ('/'+[^*/]+ / BLOCK_COMMENT / '*'+[^*/]+ / [^*/] )* ('*/'^unterminated_comment)
+~LINE_COMMENT   <- '//' [^\n]*
+~NOISE          <- [ \f\r\t] / BLOCK_COMMENT
+
+NL              <- NOISE* LINE_COMMENT? '\n'
+
+# error recovery
+unterminated_comment <- '' { error_message "unterminated block comment" }
+
+expr <- 'hello'
+  )");
+
+  EXPECT_TRUE(!!pg);
+
+  std::vector<std::pair<size_t, size_t>> locations;
+
+  pg["BLOCK_COMMENT"].enter = [&](const Context &c, const char *s, size_t /*n*/,
+                                  std::any & /*dt*/) {
+    locations.push_back(c.line_info(s));
+  };
+
+  pg["BLOCK_COMMENT"].leave = [&](const Context & /*c*/, const char * /*s*/,
+                                  size_t /*n*/, size_t /*matchlen*/,
+                                  std::any & /*value*/,
+                                  std::any & /*dt*/) { locations.pop_back(); };
+
+  std::vector<std::string> errors{
+      R"(7:1: unterminated block comment)",
+  };
+
+  size_t i = 0;
+  pg.log = [&](size_t ln, size_t col, const std::string &msg,
+               const std::string & /*rule*/) {
+    std::stringstream ss;
+    ss << ln << ":" << col << ": " << msg;
+    EXPECT_EQ(errors[i++], ss.str());
+
+    EXPECT_EQ(4, locations.size());
+    EXPECT_EQ(1, locations[0].first);
+    EXPECT_EQ(1, locations[0].second);
+    EXPECT_EQ(2, locations[1].first);
+    EXPECT_EQ(2, locations[1].second);
+    EXPECT_EQ(3, locations[2].first);
+    EXPECT_EQ(3, locations[2].second);
+    EXPECT_EQ(4, locations[3].first);
+    EXPECT_EQ(4, locations[3].second);
+  };
+
+  EXPECT_FALSE(pg.parse(R"(/* line 1:1 is the first comment open
+ /* line 2:2 is the second
+  /* line 3:3 and so on
+   /* line 4:4
+    /* line 5:5
+*/
+)"));
+
+  EXPECT_EQ(i, errors.size());
+}
+

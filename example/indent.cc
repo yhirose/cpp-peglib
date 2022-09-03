@@ -32,11 +32,12 @@ Block <- Statements {}
 
   size_t indent = 0;
 
-  parser["Block"].enter = [&](const char * /*s*/, size_t /*n*/,
-                              std::any & /*dt*/) { indent += 2; };
+  parser["Block"].enter = [&](const Context & /*c*/, const char * /*s*/,
+                              size_t /*n*/, std::any & /*dt*/) { indent += 2; };
 
-  parser["Block"].leave = [&](const char * /*s*/, size_t /*n*/,
-                              size_t /*matchlen*/, std::any & /*value*/,
+  parser["Block"].leave = [&](const Context & /*c*/, const char * /*s*/,
+                              size_t /*n*/, size_t /*matchlen*/,
+                              std::any & /*value*/,
                               std::any & /*dt*/) { indent -= 2; };
 
   parser["Samedent"].predicate =

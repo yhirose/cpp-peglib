@@ -495,20 +495,7 @@ struct SemanticValues : protected std::vector<std::any> {
   std::vector<unsigned int> tags;
 
   // Line number and column at which the matched string is
-  std::pair<size_t, size_t> line_info() const {
-    if (!c_) { return std::pair(1, 1); }
-
-    auto &idx = source_line_index();
-
-    auto cur = static_cast<size_t>(std::distance(ss, sv_.data()));
-    auto it = std::lower_bound(
-        idx.begin(), idx.end(), cur,
-        [](size_t element, size_t value) { return element < value; });
-
-    auto id = static_cast<size_t>(std::distance(idx.begin(), it));
-    auto off = cur - (id == 0 ? 0 : idx[id - 1] + 1);
-    return std::pair(id + 1, off + 1);
-  }
+  std::pair<size_t, size_t> line_info() const;
 
   // Choice count
   size_t choice_count() const { return choice_count_; }
@@ -590,8 +577,6 @@ private:
   friend class Holder;
   friend class PrecedenceClimbing;
 
-  const std::vector<size_t> &source_line_index() const;
-
   Context *c_ = nullptr;
   std::string_view sv_;
   size_t choice_count_ = 0;
@@ -665,7 +650,8 @@ inline bool fail(size_t len) { return len == static_cast<size_t>(-1); }
 /*
  * Log
  */
-using Log = std::function<void(size_t, size_t, const std::string &)>;
+using Log = std::function<void(size_t line, size_t col, const std::string &msg,
+                               const std::string &rule)>;
 
 /*
  * ErrorInfo
@@ -677,7 +663,8 @@ struct ErrorInfo {
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
   const char *message_pos = nullptr;
   std::string message;
-  mutable const char *last_output_pos = nullptr;
+  std::string label;
+  mutable const char *last_output_pos = nullptr; // TODO: protect...
   bool keep_previous_token = false;
 
   void clear() {
@@ -755,7 +742,6 @@ public:
   const char *path;
   const char *s;
   const size_t l;
-  std::vector<size_t> source_line_index;
 
   ErrorInfo error_info;
   bool recovered = false;
@@ -933,9 +919,30 @@ public:
                    const SemanticValues &vs, std::any &dt, size_t len);
   bool is_traceable(const Ope &ope) const;
 
-  mutable size_t next_trace_id = 0;
-  mutable std::vector<size_t> trace_ids;
+  // Line info
+  std::pair<size_t, size_t> line_info(const char *cur) const {
+    if (source_line_index.empty()) {
+      for (size_t pos = 0; pos < l; pos++) {
+        if (s[pos] == '\n') { source_line_index.push_back(pos); }
+      }
+      source_line_index.push_back(l);
+    }
+
+    auto pos = static_cast<size_t>(std::distance(s, cur));
+
+    auto it = std::lower_bound(
+        source_line_index.begin(), source_line_index.end(), pos,
+        [](size_t element, size_t value) { return element < value; });
+
+    auto id = static_cast<size_t>(std::distance(source_line_index.begin(), it));
+    auto off = pos - (id == 0 ? 0 : source_line_index[id - 1] + 1);
+    return std::pair(id + 1, off + 1);
+  }
+
+  size_t next_trace_id = 0;
+  std::vector<size_t> trace_ids;
   bool ignore_trace_state = false;
+  mutable std::vector<size_t> source_line_index; // TODO: protect...
 };
 
 /*
@@ -1402,7 +1409,7 @@ public:
 
   std::shared_ptr<Ope> ope_;
   Definition *outer_;
-  mutable std::string trace_name_;
+  mutable std::string trace_name_; // TODO: protect...
 
   friend class Definition;
 };
@@ -2326,9 +2333,10 @@ public:
 
   size_t id = 0;
   Action action;
-  std::function<void(const char *s, size_t n, std::any &dt)> enter;
-  std::function<void(const char *s, size_t n, size_t matchlen, std::any &value,
-                     std::any &dt)>
+  std::function<void(const Context &c, const char *s, size_t n, std::any &dt)>
+      enter;
+  std::function<void(const Context &c, const char *s, size_t n, size_t matchlen,
+                     std::any &value, std::any &dt)>
       leave;
   bool ignoreSemanticValue = false;
   std::shared_ptr<Ope> whitespaceOpe;
@@ -2489,15 +2497,9 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   return i;
 }
 
-inline const std::vector<size_t> &SemanticValues::source_line_index() const {
+inline std::pair<size_t, size_t> SemanticValues::line_info() const {
   assert(c_);
-  if (c_->source_line_index.empty()) {
-    for (size_t pos = 0; pos < c_->l; pos++) {
-      if (c_->s[pos] == '\n') { c_->source_line_index.push_back(pos); }
-    }
-    c_->source_line_index.push_back(c_->l);
-  }
-  return c_->source_line_index;
+  return c_->line_info(sv_.data());
 }
 
 inline void ErrorInfo::output_log(const Log &log, const char *s,
@@ -2519,7 +2521,7 @@ inline void ErrorInfo::output_log(const Log &log, const char *s,
       } else {
         msg = message;
       }
-      log(line.first, line.second, msg);
+      log(line.first, line.second, msg, label);
     }
   } else if (error_pos) {
     if (error_pos > last_output_pos) {
@@ -2562,8 +2564,7 @@ inline void ErrorInfo::output_log(const Log &log, const char *s,
         }
         msg += ".";
       }
-
-      log(line.first, line.second, msg);
+      log(line.first, line.second, msg, label);
     }
   }
 }
@@ -2697,11 +2698,11 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   std::any val;
 
   c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
-    if (outer_->enter) { outer_->enter(s, n, dt); }
+    if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
-      if (outer_->leave) { outer_->leave(s, n, len, a_val, dt); }
+      if (outer_->leave) { outer_->leave(c, s, n, len, a_val, dt); }
     });
 
     c.rule_stack.push_back(outer_);
@@ -2723,6 +2724,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
           c.error_info.message = msg;
+          c.error_info.label = outer_->name;
         }
         len = static_cast<size_t>(-1);
       }
@@ -2733,6 +2735,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
           c.error_info.message = msg;
+          c.error_info.label = outer_->name;
         }
       }
     } else {
@@ -2740,6 +2743,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           c.error_info.message_pos < s) {
         c.error_info.message_pos = s;
         c.error_info.message = outer_->error_message;
+        c.error_info.label = outer_->name;
       }
     }
   });
@@ -2935,6 +2939,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
       if (!label->rule_->error_message.empty()) {
         c.error_info.message_pos = s;
         c.error_info.message = label->rule_->error_message;
+        c.error_info.label = label->rule_->name;
       }
     }
   }
@@ -3487,7 +3492,8 @@ private:
       }
     };
 
-    g["Definition"].enter = [](const char * /*s*/, size_t /*n*/, std::any &dt) {
+    g["Definition"].enter = [](const Context & /*c*/, const char * /*s*/,
+                               size_t /*n*/, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
       data.captures_in_current_definition.clear();
     };
@@ -3723,13 +3729,14 @@ private:
       return vs.token_to_number<size_t>();
     };
 
-    g["CapScope"].enter = [](const char * /*s*/, size_t /*n*/, std::any &dt) {
+    g["CapScope"].enter = [](const Context & /*c*/, const char * /*s*/,
+                             size_t /*n*/, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
       data.captures_stack.emplace_back();
     };
-    g["CapScope"].leave = [](const char * /*s*/, size_t /*n*/,
-                             size_t /*matchlen*/, std::any & /*value*/,
-                             std::any &dt) {
+    g["CapScope"].leave = [](const Context & /*c*/, const char * /*s*/,
+                             size_t /*n*/, size_t /*matchlen*/,
+                             std::any & /*value*/, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
       data.captures_stack.pop_back();
     };
@@ -3849,7 +3856,8 @@ private:
           auto line = line_info(s, rule.s_);
           log(line.first, line.second,
               "'precedence' instruction cannot be applied to '" + rule.name +
-                  "'.");
+                  "'.",
+              "");
         }
         return false;
       }
@@ -3861,7 +3869,8 @@ private:
         auto line = line_info(s, rule.s_);
         log(line.first, line.second,
             "'precedence' instruction cannot be applied to '" + rule.name +
-                "'.");
+                "'.",
+            "");
       }
       return false;
     }
@@ -3895,10 +3904,11 @@ private:
       if (log) {
         if (r.error_info.message_pos) {
           auto line = line_info(s, r.error_info.message_pos);
-          log(line.first, line.second, r.error_info.message);
+          log(line.first, line.second, r.error_info.message,
+              r.error_info.label);
         } else {
           auto line = line_info(s, r.error_info.error_pos);
-          log(line.first, line.second, "syntax error");
+          log(line.first, line.second, "syntax error", r.error_info.label);
         }
       }
       return nullptr;
@@ -3928,7 +3938,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The definition '" + name + "' is already defined.");
+              "The definition '" + name + "' is already defined.", "");
         }
       }
       ret = false;
@@ -3940,7 +3950,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The instruction '" + type + "' is already defined.");
+              "The instruction '" + type + "' is already defined.", "");
         }
       }
       ret = false;
@@ -3952,7 +3962,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The back reference '" + name + "' is undefined.");
+              "The back reference '" + name + "' is undefined.", "");
         }
       }
       ret = false;
@@ -3967,8 +3977,8 @@ private:
         if (log) {
           auto line = line_info(s, start_rule.s_);
           log(line.first, line.second,
-              "Ignore operator cannot be applied to '" + start_rule.name +
-                  "'.");
+              "Ignore operator cannot be applied to '" + start_rule.name + "'.",
+              "");
         }
         ret = false;
       }
@@ -3991,7 +4001,7 @@ private:
       for (const auto &[name, ptr] : vis.error_s) {
         if (log) {
           auto line = line_info(s, ptr);
-          log(line.first, line.second, vis.error_message[name]);
+          log(line.first, line.second, vis.error_message[name], "");
         }
         ret = false;
       }
@@ -4002,7 +4012,7 @@ private:
         if (log) {
           auto line = line_info(s, rule.s_);
           auto msg = "'" + name + "' is not referenced.";
-          log(line.first, line.second, msg);
+          log(line.first, line.second, msg, "");
         }
       }
     }
@@ -4025,7 +4035,7 @@ private:
       if (vis.error_s) {
         if (log) {
           auto line = line_info(s, vis.error_s);
-          log(line.first, line.second, "'" + name + "' is left recursive.");
+          log(line.first, line.second, "'" + name + "' is left recursive.", "");
         }
         ret = false;
       }
@@ -4095,7 +4105,7 @@ private:
       if (log) {
         auto line = line_info(s, vis.error_s);
         log(line.first, line.second,
-            "infinite loop is detected in '" + vis.error_name + "'.");
+            "infinite loop is detected in '" + vis.error_name + "'.", "");
       }
       return true;
     }
