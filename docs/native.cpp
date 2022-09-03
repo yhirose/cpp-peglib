@@ -18,10 +18,11 @@ std::string escape_json(const std::string &s) {
   return o.str();
 }
 
-std::function<void(size_t, size_t, const std::string &)>
+std::function<void(size_t, size_t, const std::string &, const std::string &)>
 makeJSONFormatter(std::string &json, bool &init) {
   init = true;
-  return [&](size_t ln, size_t col, const std::string &msg) mutable {
+  return [&](size_t ln, size_t col, const std::string &msg,
+             const std::string &) mutable {
     if (!init) { json += ","; }
     json += "{";
     json += R"("ln":)" + std::to_string(ln) + ",";
@@ -54,7 +55,8 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
   return ret;
 }
 
-std::string lint(const std::string &grammarText, const std::string &codeText, bool opt_mode, bool packrat) {
+std::string lint(const std::string &grammarText, const std::string &codeText,
+                 bool opt_mode, bool packrat) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -69,9 +71,7 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
     std::stringstream ss;
     peg::enable_profiling(peg, ss);
 
-    if (packrat) {
-      peg.enable_packrat_parsing();
-    }
+    if (packrat) { peg.enable_packrat_parsing(); }
 
     std::shared_ptr<peg::Ast> ast;
     is_source_valid = parse_code(codeText, peg, codeResult, ast);
@@ -80,16 +80,18 @@ std::string lint(const std::string &grammarText, const std::string &codeText, bo
 
     if (ast) {
       astResult = escape_json(peg::ast_to_s(ast));
-      astResultOptimized = escape_json(
-          peg::ast_to_s(peg.optimize_ast(ast, opt_mode)));
+      astResultOptimized =
+          escape_json(peg::ast_to_s(peg.optimize_ast(ast, opt_mode)));
     }
   }
 
   std::string json;
   json += "{";
-  json += std::string("\"grammar_valid\":") + (is_grammar_valid ? "true" : "false");
+  json +=
+      std::string("\"grammar_valid\":") + (is_grammar_valid ? "true" : "false");
   json += ",\"grammar\":" + grammarResult;
-  json += std::string(",\"source_valid\":") + (is_source_valid ? "true" : "false");
+  json +=
+      std::string(",\"source_valid\":") + (is_source_valid ? "true" : "false");
   if (!codeResult.empty()) {
     json += ",\"code\":" + codeResult;
     json += ",\"ast\":\"" + astResult + "\"";
