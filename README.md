@@ -115,7 +115,7 @@ auto grammar = R"(
 
 parser parser;
 
-parser.log = [](size_t line, size_t col, const string& msg) {
+parser.log = [](size_t line, size_t col, const string& msg, const string &rule) {
   cerr << line << ":" << col << ": " << msg << "\n";
 };
 
