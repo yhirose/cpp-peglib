@@ -4616,8 +4616,8 @@ public:
   void set_logger(
       std::function<void(size_t line, size_t col, const std::string &msg)>
           log) {
-    log_ = [&](size_t line, size_t col, const std::string &msg,
-              const std::string & /*rule*/) { log(line, col, msg); };
+    log_ = [log](size_t line, size_t col, const std::string &msg,
+                 const std::string & /*rule*/) { log(line, col, msg); };
   }
 
 private:
