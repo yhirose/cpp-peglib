@@ -664,7 +664,7 @@ struct ErrorInfo {
   const char *message_pos = nullptr;
   std::string message;
   std::string label;
-  mutable const char *last_output_pos = nullptr; // TODO: protect...
+  const char *last_output_pos = nullptr;
   bool keep_previous_token = false;
 
   void clear() {
@@ -681,7 +681,7 @@ struct ErrorInfo {
     expected_tokens.emplace_back(error_literal, error_rule);
   }
 
-  void output_log(const Log &log, const char *s, size_t n) const;
+  void output_log(const Log &log, const char *s, size_t n);
 
 private:
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
@@ -921,12 +921,12 @@ public:
 
   // Line info
   std::pair<size_t, size_t> line_info(const char *cur) const {
-    if (source_line_index.empty()) {
+    std::call_once(source_line_index_init_, [this]() {
       for (size_t pos = 0; pos < l; pos++) {
         if (s[pos] == '\n') { source_line_index.push_back(pos); }
       }
       source_line_index.push_back(l);
-    }
+    });
 
     auto pos = static_cast<size_t>(std::distance(s, cur));
 
@@ -942,7 +942,8 @@ public:
   size_t next_trace_id = 0;
   std::vector<size_t> trace_ids;
   bool ignore_trace_state = false;
-  mutable std::vector<size_t> source_line_index; // TODO: protect...
+  mutable std::once_flag source_line_index_init_;
+  mutable std::vector<size_t> source_line_index;
 };
 
 /*
@@ -1409,7 +1410,8 @@ public:
 
   std::shared_ptr<Ope> ope_;
   Definition *outer_;
-  mutable std::string trace_name_; // TODO: protect...
+  mutable std::once_flag trace_name_init_;
+  mutable std::string trace_name_;
 
   friend class Definition;
 };
@@ -2503,7 +2505,7 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
 }
 
 inline void ErrorInfo::output_log(const Log &log, const char *s,
-                                  size_t n) const {
+                                  size_t n) {
   if (message_pos) {
     if (message_pos > last_output_pos) {
       last_output_pos = message_pos;
@@ -2771,7 +2773,8 @@ inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
 inline const std::string &Holder::name() const { return outer_->name; }
 
 inline const std::string &Holder::trace_name() const {
-  if (trace_name_.empty()) { trace_name_ = "[" + outer_->name + "]"; }
+  std::call_once(trace_name_init_,
+                 [this]() { trace_name_ = "[" + outer_->name + "]"; });
   return trace_name_;
 }
 
@@ -4460,7 +4463,8 @@ public:
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      return post_process(s, n, rule.parse(s, n, path, log));
+      auto result = rule.parse(s, n, path, log);
+      return post_process(s, n, result);
     }
     return false;
   }
@@ -4469,7 +4473,8 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      return post_process(s, n, rule.parse(s, n, dt, path, log));
+      auto result = rule.parse(s, n, dt, path, log);
+      return post_process(s, n, result);
     }
     return false;
   }
@@ -4479,7 +4484,8 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      return post_process(s, n, rule.parse_and_get_value(s, n, val, path, log));
+      auto result = rule.parse_and_get_value(s, n, val, path, log);
+      return post_process(s, n, result);
     }
     return false;
   }
@@ -4610,7 +4616,7 @@ public:
 
 private:
   bool post_process(const char *s, size_t n,
-                    const Definition::Result &r) const {
+                    Definition::Result &r) const {
     if (log && !r.ret) { r.error_info.output_log(log, s, n); }
     return r.ret && !r.recovered;
   }
