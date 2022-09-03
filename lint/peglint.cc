@@ -105,7 +105,8 @@ int main(int argc, const char **argv) {
 
   peg::parser parser;
 
-  parser.log = [&](size_t ln, size_t col, const string &msg) {
+  parser.log = [&](size_t ln, size_t col, const string &msg,
+                   const string & /*rule*/) {
     cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
   };
 
@@ -123,19 +124,16 @@ int main(int argc, const char **argv) {
     source_path = path_list[1];
   }
 
-  parser.log = [&](size_t ln, size_t col, const string &msg) {
+  parser.log = [&](size_t ln, size_t col, const string &msg,
+                   const string & /*rule*/) {
     cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
   };
 
   if (opt_packrat) { parser.enable_packrat_parsing(); }
 
-  if (opt_trace) {
-    enable_tracing(parser, std::cout);
-  }
+  if (opt_trace) { enable_tracing(parser, std::cout); }
 
-  if (opt_profile) {
-    enable_profiling(parser, std::cout);
-  }
+  if (opt_profile) { enable_profiling(parser, std::cout); }
 
   parser.set_verbose_trace(opt_verbose);
 

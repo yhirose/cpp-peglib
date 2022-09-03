@@ -214,12 +214,13 @@ TEST(GeneralTest, enter_leave_handlers_test) {
         TOKEN  <- [A-Za-z]+
     )");
 
-  parser["LTOKEN"].enter = [&](const char *, size_t, std::any &dt) {
+  parser["LTOKEN"].enter = [&](const Context & /*c*/, const char *, size_t,
+                               std::any &dt) {
     auto &require_upper_case = *std::any_cast<bool *>(dt);
     require_upper_case = false;
   };
-  parser["LTOKEN"].leave = [&](const char *, size_t, size_t, std::any &,
-                               std::any &dt) {
+  parser["LTOKEN"].leave = [&](const Context & /*c*/, const char *, size_t,
+                               size_t, std::any &, std::any &dt) {
     auto &require_upper_case = *std::any_cast<bool *>(dt);
     require_upper_case = true;
   };
@@ -246,7 +247,8 @@ TEST(GeneralTest, enter_leave_handlers_test) {
   EXPECT_TRUE(parser.parse("hello=WORLD", dt));
   EXPECT_TRUE(parser.parse("HELLO=WORLD", dt));
 
-  parser.log = [&](size_t ln, size_t col, const std::string &msg) {
+  parser.log = [&](size_t ln, size_t col, const std::string &msg,
+                   const std::string & /*rule*/) {
     EXPECT_EQ(1, ln);
     EXPECT_EQ(7, col);
     EXPECT_EQ(message, msg);
@@ -1054,7 +1056,7 @@ TEST(GeneralTest, HeuristicErrorTokenTest) {
     untyped_enum <- '' { message "invalid/missing enum type, expected one of 'sequence' or 'bitmask', got '%t'"}
 	)");
 
-  parser.log = [&](size_t ln, size_t col, const std::string &msg) {
+  parser.log = [&](size_t ln, size_t col, const std::string &msg, const std::string & /*rule*/) {
     EXPECT_EQ(1, ln);
     EXPECT_EQ(6, col);
     EXPECT_EQ("invalid/missing enum type, expected one of 'sequence' or "
