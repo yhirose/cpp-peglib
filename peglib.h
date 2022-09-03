@@ -2504,8 +2504,7 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
   return c_->line_info(sv_.data());
 }
 
-inline void ErrorInfo::output_log(const Log &log, const char *s,
-                                  size_t n) {
+inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
   if (message_pos) {
     if (message_pos > last_output_pos) {
       last_output_pos = message_pos;
@@ -4443,8 +4442,8 @@ public:
   operator bool() { return grammar_ != nullptr; }
 
   bool load_grammar(const char *s, size_t n, const Rules &rules) {
-    grammar_ =
-        ParserGenerator::parse(s, n, rules, start_, enablePackratParsing_, log);
+    grammar_ = ParserGenerator::parse(s, n, rules, start_,
+                                      enablePackratParsing_, log_);
     return grammar_ != nullptr;
   }
 
@@ -4463,7 +4462,7 @@ public:
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse(s, n, path, log);
+      auto result = rule.parse(s, n, path, log_);
       return post_process(s, n, result);
     }
     return false;
@@ -4473,7 +4472,7 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse(s, n, dt, path, log);
+      auto result = rule.parse(s, n, dt, path, log_);
       return post_process(s, n, result);
     }
     return false;
@@ -4484,7 +4483,7 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse_and_get_value(s, n, val, path, log);
+      auto result = rule.parse_and_get_value(s, n, val, path, log_);
       return post_process(s, n, result);
     }
     return false;
@@ -4496,7 +4495,7 @@ public:
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
       return post_process(s, n,
-                          rule.parse_and_get_value(s, n, dt, val, path, log));
+                          rule.parse_and_get_value(s, n, dt, val, path, log_));
     }
     return false;
   }
@@ -4612,12 +4611,18 @@ public:
     return AstOptimizer(opt_mode, get_no_ast_opt_rules()).optimize(ast);
   }
 
-  Log log;
+  void set_logger(Log log) { log_ = log; }
+
+  void set_logger(
+      std::function<void(size_t line, size_t col, const std::string &msg)>
+          log) {
+    log_ = [&](size_t line, size_t col, const std::string &msg,
+              const std::string & /*rule*/) { log(line, col, msg); };
+  }
 
 private:
-  bool post_process(const char *s, size_t n,
-                    Definition::Result &r) const {
-    if (log && !r.ret) { r.error_info.output_log(log, s, n); }
+  bool post_process(const char *s, size_t n, Definition::Result &r) const {
+    if (log_ && !r.ret) { r.error_info.output_log(log_, s, n); }
     return r.ret && !r.recovered;
   }
 
@@ -4632,6 +4637,7 @@ private:
   std::shared_ptr<Grammar> grammar_;
   std::string start_;
   bool enablePackratParsing_ = false;
+  Log log_;
 };
 
 /*-----------------------------------------------------------------------------

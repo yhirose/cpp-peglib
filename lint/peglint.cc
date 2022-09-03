@@ -105,10 +105,9 @@ int main(int argc, const char **argv) {
 
   peg::parser parser;
 
-  parser.log = [&](size_t ln, size_t col, const string &msg,
-                   const string & /*rule*/) {
+  parser.set_logger([&](size_t ln, size_t col, const string &msg) {
     cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
-  };
+  });
 
   if (!parser.load_grammar(syntax.data(), syntax.size())) { return -1; }
 
@@ -124,10 +123,9 @@ int main(int argc, const char **argv) {
     source_path = path_list[1];
   }
 
-  parser.log = [&](size_t ln, size_t col, const string &msg,
-                   const string & /*rule*/) {
+  parser.set_logger([&](size_t ln, size_t col, const string &msg) {
     cerr << source_path << ":" << ln << ":" << col << ": " << msg << endl;
-  };
+  });
 
   if (opt_packrat) { parser.enable_packrat_parsing(); }
 

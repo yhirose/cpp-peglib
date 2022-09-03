@@ -853,12 +853,11 @@ TEST(PredicateTest, Semantic_predicate_test) {
   EXPECT_TRUE(parser.parse("100", val));
   EXPECT_EQ(100, val);
 
-  parser.log = [](size_t line, size_t col, const std::string &msg,
-                  const std::string & /*rule*/) {
+  parser.set_logger([](size_t line, size_t col, const std::string &msg) {
     EXPECT_EQ(1, line);
     EXPECT_EQ(1, col);
     EXPECT_EQ("value error!!", msg);
-  };
+  });
   EXPECT_FALSE(parser.parse("200", val));
 }
 
@@ -879,12 +878,11 @@ is_symbol    <- Name { check_symbol var_table }
 ref aaa
 ref bbb
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(5, col);
       EXPECT_EQ("'bbb' doesn't exist.", msg);
-    };
+    });
     EXPECT_FALSE(parser.parse(source));
   }
 
@@ -893,12 +891,11 @@ ref bbb
 ref aaa
 decl aaa
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(6, col);
       EXPECT_EQ("'aaa' already exists.", msg);
-    };
+    });
     EXPECT_FALSE(parser.parse(source));
   }
 }
@@ -966,12 +963,11 @@ typedef __off64_t __loff_t;
 typedef long __off64_t;
 typedef __off64_T __loff_t;
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(9, col);
       EXPECT_EQ("'__off64_T' doesn't exist.", msg);
-    };
+    });
     EXPECT_FALSE(parser.parse(source));
   }
 
@@ -981,12 +977,11 @@ typedef long __off64_t;
 typedef __off64_t __loff_t;
 typedef __off64_t __loff_t;
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       EXPECT_EQ(4, line);
       EXPECT_EQ(19, col);
       EXPECT_EQ("'__loff_t' already exists.", msg);
-    };
+    });
     EXPECT_FALSE(parser.parse(source));
   }
 }
@@ -1034,12 +1029,11 @@ is_symbol    <- < Name >
 ref aaa
 ref bbb
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       EXPECT_EQ(3, line);
       EXPECT_EQ(5, col);
       EXPECT_EQ("'bbb' doesn't exist.", msg);
-    };
+    });
     std::shared_ptr<Ast> ast;
     dic.clear();
     EXPECT_FALSE(parser.parse(source, ast));
@@ -1050,13 +1044,12 @@ ref bbb
 ref aaa
 decl aaa
 )";
-    parser.log = [](size_t line, size_t col, const std::string &msg,
-                    const std::string & /*rule*/) {
+    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
       std::cerr << line << ":" << col << ": " << msg << "\n";
       EXPECT_EQ(3, line);
       EXPECT_EQ(6, col);
       EXPECT_EQ("'aaa' already exists.", msg);
-    };
+    });
     std::shared_ptr<Ast> ast;
     dic.clear();
     EXPECT_FALSE(parser.parse(source, ast));
@@ -1452,12 +1445,11 @@ TEST(ErrorTest, Default_error_handling_1) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   EXPECT_FALSE(pg.parse(" @ aaa typo "));
   EXPECT_EQ(i, errors.size());
@@ -1479,12 +1471,11 @@ TEST(ErrorTest, Default_error_handling_2) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   EXPECT_FALSE(pg.parse(" @ aaa typo "));
   EXPECT_EQ(i, errors.size());
@@ -1524,12 +1515,11 @@ TEST(ErrorTest, Default_error_handling_fiblang) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   EXPECT_FALSE(pg.parse(R"(def fib(x)
   x < 2 ? 1 : fib(x - 2) + fib(x - 1)
@@ -1582,12 +1572,11 @@ entry  <- (!(__ / HEADER) .)+ { error_message "invalid entry." }
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   pg.enable_ast();
 
@@ -1647,12 +1636,11 @@ TEST(ErrorTest, Error_recovery_2) {
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   pg.enable_ast();
 
@@ -1735,12 +1723,11 @@ skip_puncs       <- [|=]* _
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   pg.enable_ast();
 
@@ -1849,12 +1836,11 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   pg.enable_ast();
 
@@ -1899,12 +1885,11 @@ STR         <- < [a-z0-9]+ >
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
-  };
+  });
 
   EXPECT_FALSE(pg.parse(R"(1 = ah
 2 = b
@@ -2019,12 +2004,12 @@ expr <- 'hello'
   };
 
   size_t i = 0;
-  pg.log = [&](size_t ln, size_t col, const std::string &msg,
-               const std::string & /*rule*/) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg, const std::string &rule) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
 
+    EXPECT_EQ("unterminated_comment", rule);
     EXPECT_EQ(4, locations.size());
     EXPECT_EQ(1, locations[0].first);
     EXPECT_EQ(1, locations[0].second);
@@ -2034,7 +2019,7 @@ expr <- 'hello'
     EXPECT_EQ(3, locations[2].second);
     EXPECT_EQ(4, locations[3].first);
     EXPECT_EQ(4, locations[3].second);
-  };
+  });
 
   EXPECT_FALSE(pg.parse(R"(/* line 1:1 is the first comment open
  /* line 2:2 is the second

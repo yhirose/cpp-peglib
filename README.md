@@ -115,9 +115,9 @@ auto grammar = R"(
 
 parser parser;
 
-parser.log = [](size_t line, size_t col, const string& msg, const string &rule) {
+parser.set_logger([](size_t line, size_t col, const string& msg, const string &rule) {
   cerr << line << ":" << col << ": " << msg << "\n";
-};
+});
 
 auto ok = parser.load_grammar(grammar);
 assert(ok);
@@ -258,6 +258,18 @@ parser["RULE"] = [](const SemanticValues& vs, any& dt) {
 parser["RULE"].leave = [](const char* s, size_t n, size_t matchlen, any& value, any& dt) {
   std::cout << "leave" << std::endl;
 };
+```
+
+You can receive error information via a logger:
+
+```cpp
+parser.set_logger([](size_t line, size_t col, const string& msg) {
+  ...
+});
+
+parser.set_logger([](size_t line, size_t col, const string& msg, const string &rule) {
+  ...
+});
 ```
 
 Ignoring Whitespaces

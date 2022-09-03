@@ -247,12 +247,11 @@ TEST(GeneralTest, enter_leave_handlers_test) {
   EXPECT_TRUE(parser.parse("hello=WORLD", dt));
   EXPECT_TRUE(parser.parse("HELLO=WORLD", dt));
 
-  parser.log = [&](size_t ln, size_t col, const std::string &msg,
-                   const std::string & /*rule*/) {
+  parser.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     EXPECT_EQ(1, ln);
     EXPECT_EQ(7, col);
     EXPECT_EQ(message, msg);
-  };
+  });
   parser.parse("hello=world", dt);
 }
 
@@ -1091,13 +1090,13 @@ TEST(GeneralTest, HeuristicErrorTokenTest) {
     untyped_enum <- '' { message "invalid/missing enum type, expected one of 'sequence' or 'bitmask', got '%t'"}
 	)");
 
-  parser.log = [&](size_t ln, size_t col, const std::string &msg, const std::string & /*rule*/) {
+  parser.set_logger([&](size_t ln, size_t col, const std::string &msg) {
     EXPECT_EQ(1, ln);
     EXPECT_EQ(6, col);
     EXPECT_EQ("invalid/missing enum type, expected one of 'sequence' or "
               "'bitmask', got 'sequencer'",
               msg);
-  };
+  });
 
   auto ret = parser.parse("enum sequencer");
   EXPECT_FALSE(ret);
