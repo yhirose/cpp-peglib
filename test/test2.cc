@@ -1618,55 +1618,7 @@ rrr | sss
                         ast));
 
   EXPECT_EQ(i, errors.size());
-
-  ast = pg.optimize_ast(ast);
-
-  EXPECT_EQ(R"(+ START
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 1)
-    + ENTRIES
-      + ENTRY/0
-        - ONE_WAY/0[WORD] (111)
-        - PHRASE/0[WORD] (222)
-        - PHRASE/0[WORD] (333)
-      + ENTRY/2
-      + ENTRY/0
-        - ONE_WAY/0[WORD] (ccc)
-        - PHRASE/0[WORD] (ddd)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 2)
-    + ENTRIES
-      + ENTRY/2
-      + ENTRY/1
-        - PHRASE/0[WORD] (fff)
-        - PHRASE/0[WORD] (ggg)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 3)
-    + ENTRIES
-      + ENTRY/1
-        - PHRASE/0[WORD] (hhh)
-        - PHRASE/0[WORD] (iii)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 日本語)
-    + ENTRIES
-      + ENTRY/1
-        - PHRASE/0[WORD] (ppp)
-        - PHRASE/0[WORD] (qqq)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 4)
-    + ENTRIES
-      + ENTRY/1
-        - PHRASE/0[WORD] (jjj)
-        - PHRASE/0[WORD] (kkk)
-      + ENTRY/2
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 5)
-    + ENTRIES
-      + ENTRY/1
-        - PHRASE/0[WORD] (rrr)
-        - PHRASE/0[WORD] (sss)
-)",
-            ast_to_s(ast));
+  EXPECT_FALSE(ast);
 }
 
 TEST(ErrorTest, Error_recovery_2) {
@@ -1824,110 +1776,7 @@ sss | ttt
                         ast));
 
   EXPECT_EQ(i, errors.size());
-
-  ast = pg.optimize_ast(ast);
-
-  EXPECT_EQ(R"(+ START
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 1)
-    + ENTRIES
-      + ENTRY/0
-        + ONE_WAY/0[PHRASE]
-          - WORD (111)
-        + PHRASE
-          - WORD (222)
-        + PHRASE
-          - WORD (333)
-      + ENTRY/1
-        + PHRASE
-          - WORD (AAA)
-          - WORD (BB*)
-        + PHRASE
-          - WORD (CCC)
-      + ENTRY/1
-        + PHRASE
-          - WORD (AAA)
-          - WORD (B?B)
-        + PHRASE
-          - WORD (CCC)
-      + ENTRY/1
-        + PHRASE
-          - WORD (aaa)
-        + PHRASE
-          - WORD (bbb)
-      + ENTRY/0
-        + ONE_WAY/0[PHRASE]
-          - WORD (ccc)
-        + PHRASE
-          - WORD (ddd)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 2)
-    + ENTRIES
-      + ENTRY/1
-        + PHRASE
-          - WORD (eee)
-      + ENTRY/1
-        + PHRASE
-          - WORD (fff)
-        + PHRASE
-          - WORD (ggg)
-      + ENTRY/1
-        + PHRASE
-          - WORD (fff)
-        + PHRASE
-          - WORD (ggg)
-          - WORD (111)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 3)
-    + ENTRIES
-      + ENTRY/1
-        + PHRASE
-          - WORD (hhh)
-        + PHRASE
-          - WORD (iii)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 日本語です)
-    + ENTRIES
-      + ENTRY/1
-        + PHRASE
-          - WORD (ppp)
-        + PHRASE
-          - WORD (qqq)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 4)
-    + ENTRIES
-      + ENTRY/1
-        + PHRASE
-          - WORD (jjj)
-        + PHRASE
-          - WORD (kkk)
-      + ENTRY/0
-        + ONE_WAY/0[PHRASE]
-          - WORD (lll)
-        + PHRASE
-          - WORD (mmm)
-        + PHRASE
-          - WORD (nnn)
-  + SECTION
-    - HEADER/0[CATEGORY] (Section 5)
-    + ENTRIES
-      + ENTRY/1
-        + PHRASE
-          - WORD (ppp)
-          - WORD (qqq)
-        + PHRASE
-          - WORD (rrr)
-      + ENTRY/1
-        + PHRASE
-          - WORD (Section)
-          - WORD (6)
-      + ENTRY/1
-        + PHRASE
-          - WORD (sss)
-        + PHRASE
-          - WORD (ttt)
-)",
-            ast_to_s(ast));
+  EXPECT_FALSE(ast);
 }
 
 TEST(ErrorTest, Error_recovery_Java) {
@@ -2024,46 +1873,7 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   )",
                         ast));
 
-  ast = pg.optimize_ast(ast);
-
-  EXPECT_EQ(R"(+ Prog
-  - PUBLIC (public)
-  - CLASS (class)
-  - NAME (Example)
-  - PUBLIC (public)
-  - STATIC (static)
-  - VOID (void)
-  - MAIN (main)
-  - STRING (String)
-  - NAME (args)
-  + BlockStmt
-    + Stmt/3[DecStmt]
-      - INT (int)
-      - NAME (n)
-      - Exp/0[NUMBER] (5)
-    + Stmt/3[DecStmt]
-      - INT (int)
-      - NAME (f)
-      - Exp/0[NUMBER] (1)
-    + Stmt/1[WhileStmt]
-      + Exp/0[RelExp]
-        - AddExp/0[NUMBER] (0)
-        - AddExp/0[NAME] (n)
-      + Stmt/5[BlockStmt]
-        + Stmt/4[AssignStmt]
-          - NAME (f)
-          + Exp/0[MulExp]
-            - AtomExp/2[NAME] (f)
-            - TIMES (*)
-            - AtomExp/2[NAME] (n)
-        + Stmt/4[AssignStmt]
-          - NAME (n)
-          + Exp/0[AddExp]
-            - MulExp/0[NAME] (n)
-            - MINUS (-)
-            - MulExp/0[NUMBER] (1)
-)",
-            ast_to_s(ast));
+  EXPECT_FALSE(ast);
 }
 
 TEST(ErrorTest, Error_message_with_rule_instruction) {

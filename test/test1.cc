@@ -516,6 +516,41 @@ TEST(GeneralTest, Simple_calculator_test) {
   EXPECT_EQ(9, val);
 }
 
+TEST(GeneralTest, Simple_calculator_with_recovery_test) {
+  parser parser(R"(
+        Additive    <- Multitive '+' Additive / Multitive
+        Multitive   <- Primary '*' Multitive^cond / Primary
+        Primary     <- '(' Additive ')' / Number
+        Number      <- < [0-9]+ >
+        %whitespace <- [ \t]*
+        cond <- '' { error_message "missing multitative" }
+    )");
+
+  parser["Additive"] = [](const SemanticValues &vs) {
+    switch (vs.choice()) {
+    case 0: return std::any_cast<int>(vs[0]) + std::any_cast<int>(vs[1]);
+    default: return std::any_cast<int>(vs[0]);
+    }
+  };
+
+  parser["Multitive"] = [](const SemanticValues &vs) {
+    switch (vs.choice()) {
+    case 0: return std::any_cast<int>(vs[0]) * std::any_cast<int>(vs[1]);
+    default: return std::any_cast<int>(vs[0]);
+    }
+  };
+
+  parser["Number"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<int>();
+  };
+
+  int val = 0;
+  auto ret = parser.parse(" (1 + 2) * ", val);
+
+  EXPECT_FALSE(ret);
+  EXPECT_EQ(0, val);
+}
+
 TEST(GeneralTest, Calculator_test) {
   // Construct grammer
   Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;

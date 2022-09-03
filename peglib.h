@@ -2730,7 +2730,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       if (success(len)) {
-        a_val = reduce(chvs, dt);
+        if (!c.recovered) { a_val = reduce(chvs, dt); }
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -2945,7 +2945,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   }
 
   // Recovery
-  size_t len = static_cast<size_t>(-1);
+  auto len = static_cast<size_t>(-1);
   {
     auto save_log = c.log;
     c.log = nullptr;

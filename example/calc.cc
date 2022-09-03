@@ -10,10 +10,11 @@ int main(void) {
   parser parser(R"(
         # Grammar for Calculator...
         Additive    <- Multitive '+' Additive / Multitive
-        Multitive   <- Primary '*' Multitive / Primary
+        Multitive   <- Primary '*' Multitive^cond / Primary
         Primary     <- '(' Additive ')' / Number
         Number      <- < [0-9]+ >
         %whitespace <- [ \t]*
+        cond <- '' { error_message "missing multitative" }
     )");
 
   assert(static_cast<bool>(parser) == true);
@@ -44,8 +45,9 @@ int main(void) {
   // (4) Parse
   parser.enable_packrat_parsing(); // Enable packrat parsing.
 
-  int val;
-  parser.parse(" (1 + 2) * 3 ", val);
+  int val = 0;
+  parser.parse(" (1 + 2) * ", val);
 
-  assert(val == 9);
+  // assert(val == 9);
+  assert(val == 0);
 }
