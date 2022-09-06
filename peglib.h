@@ -2484,17 +2484,15 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   // Skip whiltespace
-  if (!c.in_token_boundary_count) {
-    if (c.whitespaceOpe) {
-      auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.verbose_trace;
-      auto se =
-          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+  if (!c.in_token_boundary_count && c.whitespaceOpe) {
+    auto save_ignore_trace_state = c.ignore_trace_state;
+    c.ignore_trace_state = !c.verbose_trace;
+    auto se =
+        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
-      auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
-      if (fail(len)) { return len; }
-      i += len;
-    }
+    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
+    if (fail(len)) { return len; }
+    i += len;
   }
 
   return i;
@@ -2558,9 +2556,7 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
               msg += "'";
             } else {
               msg += "<" + error_rule->name + ">";
-              if (label.empty()) {
-                label = error_rule->name;
-              }
+              if (label.empty()) { label = error_rule->name; }
             }
             first_item = false;
           }
@@ -2641,12 +2637,50 @@ inline size_t Ope::parse(const char *s, size_t n, SemanticValues &vs,
 }
 
 inline size_t Dictionary::parse_core(const char *s, size_t n,
-                                     SemanticValues & /*vs*/, Context &c,
-                                     std::any & /*dt*/) const {
-  auto len = trie_.match(s, n);
-  if (len > 0) { return len; }
-  c.set_error_pos(s);
-  return static_cast<size_t>(-1);
+                                     SemanticValues &vs, Context &c,
+                                     std::any &dt) const {
+  auto i = trie_.match(s, n);
+  if (i == 0) {
+    c.set_error_pos(s);
+    return static_cast<size_t>(-1);
+  }
+
+  // Word check
+  if (c.wordOpe) {
+    auto save_ignore_trace_state = c.ignore_trace_state;
+    c.ignore_trace_state = !c.verbose_trace;
+    auto se =
+        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
+    {
+      SemanticValues dummy_vs;
+      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
+                      nullptr, nullptr, false, nullptr);
+      std::any dummy_dt;
+
+      NotPredicate ope(c.wordOpe);
+      auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
+      if (fail(len)) {
+        c.set_error_pos(s);
+        return len;
+      }
+      i += len;
+    }
+  }
+
+  // Skip whiltespace
+  if (!c.in_token_boundary_count && c.whitespaceOpe) {
+    auto save_ignore_trace_state = c.ignore_trace_state;
+    c.ignore_trace_state = !c.verbose_trace;
+    auto se =
+        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
+    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
+    if (fail(len)) { return len; }
+    i += len;
+  }
+
+  return i;
 }
 
 inline size_t LiteralString::parse_core(const char *s, size_t n,

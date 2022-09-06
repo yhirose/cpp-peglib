@@ -352,6 +352,28 @@ TEST(GeneralTest, Word_expression_test) {
   EXPECT_TRUE(parser.parse("hello , world"));
 }
 
+TEST(GeneralTest, Word_expression_test_PrioritizedChoice) {
+  parser parser(R"(
+    Identifier  ← < !Keyword [a-z][a-z]* >
+    Keyword     ← 'def' / 'to'
+    %whitespace ← [ \t\r\n]*
+    %word       ← [a-z]+
+  )");
+
+  EXPECT_TRUE(parser.parse("toa"));
+}
+
+TEST(GeneralTest, Word_expression_test_Dictionary) {
+  parser parser(R"(
+    Identifier  ← < !Keyword [a-z][a-z]* >
+    Keyword     ← 'def' | 'to'
+    %whitespace ← [ \t\r\n]*
+    %word       ← [a-z]+
+  )");
+
+  EXPECT_TRUE(parser.parse("toa"));
+}
+
 TEST(GeneralTest, Skip_token_test) {
   parser parser("  ROOT  <-  _ ITEM (',' _ ITEM _)* "
                 "  ITEM  <-  ([a-z0-9])+  "
@@ -875,6 +897,23 @@ TEST(GeneralTest, Literal_token_on_AST_test3) {
   EXPECT_TRUE(ast->nodes.empty());
 }
 
+TEST(GeneralTest, Literal_token_on_AST_test4) {
+  parser parser(R"(
+        STRING_LITERAL  <-  < '"' < (ESC / CHAR)* > '"' >
+        ESC             <-  ('\\"' / '\\t' / '\\n')
+        CHAR            <-  (!["] .)
+    )");
+  parser.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  auto ret = parser.parse(R"("a\tb")", ast);
+
+  EXPECT_TRUE(ret);
+  EXPECT_TRUE(ast->is_token);
+  EXPECT_EQ(R"(a\tb)", ast->token);
+  EXPECT_TRUE(ast->nodes.empty());
+}
+
 TEST(GeneralTest, Missing_missing_definitions_test) {
   parser parser(R"(
         A <- B C
@@ -1102,3 +1141,95 @@ TEST(GeneralTest, HeuristicErrorTokenTest) {
   auto ret = parser.parse("enum sequencer");
   EXPECT_FALSE(ret);
 }
+
+TEST(GeneralTest, LiteralContentInAST) {
+  parser parser(R"(
+PROGRAM                <-  STATEMENTS
+
+STATEMENTS             <-  (STATEMENT ';'?)*
+STATEMENT              <-  ASSIGNMENT / RETURN / EXPRESSION_STATEMENT
+
+ASSIGNMENT             <-  'let' IDENTIFIER '=' EXPRESSION
+RETURN                 <-  'return' EXPRESSION
+EXPRESSION_STATEMENT   <-  EXPRESSION
+
+EXPRESSION             <-  INFIX_EXPR(PREFIX_EXPR, INFIX_OPE)
+INFIX_EXPR(ATOM, OPE)  <-  ATOM (OPE ATOM)* {
+                             precedence
+                               L == !=
+                               L < >
+                               L + -
+                               L * /
+                           }
+
+IF                     <-  'if' '(' EXPRESSION ')' BLOCK ('else' BLOCK)?
+
+FUNCTION               <-  'fn' '(' PARAMETERS ')' BLOCK
+PARAMETERS             <-  LIST(IDENTIFIER, ',')
+
+BLOCK                  <-  '{' STATEMENTS '}'
+
+CALL                   <-  PRIMARY (ARGUMENTS / INDEX)*
+ARGUMENTS              <-  '(' LIST(EXPRESSION, ',') ')'
+INDEX                  <-   '[' EXPRESSION ']'
+
+PREFIX_EXPR            <-  PREFIX_OPE* CALL
+PRIMARY                <-  IF / FUNCTION / ARRAY / HASH / INTEGER / BOOLEAN / NULL / IDENTIFIER / STRING / '(' EXPRESSION ')'
+
+ARRAY                  <-  '[' LIST(EXPRESSION, ',') ']'
+
+HASH                   <-  '{' LIST(HASH_PAIR, ',') '}'
+HASH_PAIR              <-  EXPRESSION ':' EXPRESSION
+
+IDENTIFIER             <-  < !KEYWORD [a-zA-Z]+ >
+INTEGER                <-  < [0-9]+ >
+STRING                 <-  < ["] < (!["] .)* > ["] >
+BOOLEAN                <-  'true' / 'false'
+NULL                   <-  'null'
+PREFIX_OPE             <-  < [-!] >
+INFIX_OPE              <-  < [-+/*<>] / '==' / '!=' >
+
+KEYWORD                <-  ('null' | 'true' | 'false' | 'let' | 'return' | 'if' | 'else' | 'fn') ![a-zA-Z]
+
+LIST(ITEM, DELM)       <-  (ITEM (~DELM ITEM)*)?
+
+LINE_COMMENT           <-  '//' (!LINE_END .)* &LINE_END
+LINE_END               <-  '\r\n' / '\r' / '\n' / !.
+
+%whitespace            <-  ([ \t\r\n]+ / LINE_COMMENT)*
+%word                  <-  [a-zA-Z]+
+  )");
+  parser.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  auto ret = parser.parse(R"({1: 1, 2: 2, 3: 3})", ast);
+
+  EXPECT_TRUE(ret);
+
+  auto opt =
+      AstOptimizer(true, {"EXPRESSION_STATEMENT", "PARAMETERS", "ARGUMENTS",
+                          "INDEX", "RETURN", "BLOCK", "ARRAY", "HASH"});
+  ast = opt.optimize(ast);
+
+  EXPECT_EQ("EXPRESSION_STATEMENT", ast->name);
+
+  auto node = ast->nodes[0];
+  EXPECT_EQ("HASH", node->name);
+
+  std::map<std::string, int64_t> expected = {
+      {"1", 1},
+      {"2", 2},
+      {"3", 3},
+  };
+
+  for (auto node : node->nodes) {
+    auto key = node->nodes[0];
+    auto val = node->nodes[1];
+    EXPECT_EQ("INTEGER", key->name);
+
+    auto expectedValue = expected[key->token_to_string()];
+    EXPECT_EQ("INTEGER", val->name);
+    EXPECT_EQ(expectedValue, val->token_to_number<int64_t>());
+  }
+}
+
