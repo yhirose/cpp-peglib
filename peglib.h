@@ -4676,9 +4676,9 @@ private:
  *---------------------------------------------------------------------------*/
 
 inline void enable_tracing(parser &parser, std::ostream &os) {
-  size_t prev_pos = 0;
   parser.enable_trace(
-      [&](auto &ope, auto s, auto, auto &, auto &c, auto &, auto &) {
+      [&](auto &ope, auto s, auto, auto &, auto &c, auto &, auto &trace_data) {
+	auto prev_pos = std::any_cast<size_t>(trace_data);
         auto pos = static_cast<size_t>(s - c.s);
         auto backtrack = (pos < prev_pos ? "*" : "");
         std::string indent;
@@ -4695,7 +4695,7 @@ inline void enable_tracing(parser &parser, std::ostream &os) {
         }
         os << "E " << pos + 1 << backtrack << "\t" << indent << "┌" << name
            << " #" << c.trace_ids.back() << std::endl;
-        prev_pos = static_cast<size_t>(pos);
+        trace_data = static_cast<size_t>(pos);
       },
       [&](auto &ope, auto s, auto, auto &sv, auto &c, auto &, auto len,
           auto &) {
@@ -4727,7 +4727,8 @@ inline void enable_tracing(parser &parser, std::ostream &os) {
            << c.trace_ids.back() << choice.str() << token << matched
            << std::endl;
       },
-      [&](auto &) {}, [&](auto &) {});
+      [&](auto &trace_data) { trace_data = static_cast<size_t>(0); },
+      [&](auto &) {});
 }
 
 /*-----------------------------------------------------------------------------
