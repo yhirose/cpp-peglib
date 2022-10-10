@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(test)
 
+if(POLICY CMP0135)
+  	# CMake Policy 0135 cares about how fetchcontent handles timestamps, and we
+	# want the new behavior (use extraction timestamps) when possible.
+	cmake_policy(SET CMP0135 NEW)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
