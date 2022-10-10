@@ -1,32 +1,60 @@
+# Peglib is a header-only library with zero dependencies (pthreads on Linux).
+#
+# To build with it, add the CppPegLib INTERFACE in your cmake lists, this will
+# provide the neccessary include paths, linkage, etc.
+#
+# Then your code simply needs to #include <peglib.h>
+
 cmake_minimum_required(VERSION 3.14)
-project(cpp-peglib)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
+project(cpp-peglib DESCRIPTION "C++17 header-only PEG library" LANGUAGES CXX)
 
-if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus /utf-8 /D_CRT_SECURE_NO_DEPRECATE")
+include(cmake/PeglibCXXStandard.cmake)
+include(cmake/PeglibOptions.cmake)
+
+add_library(
+  CppPegLib
+
+  INTERFACE
+
+  peglib.h
+)
+
+# Tag the library with the path to the top of it's source tree.
+set_target_properties(CppPegLib PROPERTIES SOURCE_FOLDER ${CMAKE_CURRENT_LIST_DIR})
+
+# Include cmake helpers that attach other properties to the target.
+include(cmake/PeglibCompileOptions.cmake)
+include(cmake/PeglibIncludePaths.cmake)
+include(cmake/PeglibThreads.cmake)
+
+
+if(PEGLIB_BUILD_LINTER)
+  add_subdirectory(lint)
 else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+  message(STATUS "PEGLIB_BUILD_LINTER is OFF: Not building linter")
 endif()
 
-option(PEGLIB_BUILD_TESTS "Build cpp-peglib tests" ON)
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads)
+if(PEGLIB_BUILD_EXAMPLES)
+  add_subdirectory(example)
+else()
+  message(STATUS "PEGLIB_BUILD_EXAMPLES is OFF: Not building examples")
+endif ()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(add_link_deps Threads::Threads)
-endif()
-
-add_subdirectory(lint)
-
-add_subdirectory(example)
 # add_subdirectory(cymbol)
 
-if (${PEGLIB_BUILD_TESTS})
+
+if (PEGLIB_BUILD_TESTS)
+  include(CTest)
   add_subdirectory(test)
   enable_testing()
+else()
+  message(STATUS "PEGLIB_BUILD_TESTS is OFF: Skipping tests")
 endif()
 
+
+# This facilitates users who want to install this system-wide, but they'll have the
+# complication of needing to set the compile flags and potentially link flag.
+# Might be worth telling CMake how to generate a config when installing.
 install(FILES peglib.h DESTINATION include)

@@ -14,8 +14,7 @@ enable_testing()
 
 add_executable(test-main test1.cc test2.cc test3.cc)
 
-target_include_directories(test-main PRIVATE ..)
-
 include(GoogleTest)
 gtest_discover_tests(test-main)
+target_link_libraries(test-main PUBLIC CppPegLib)
 target_link_libraries(test-main PRIVATE gtest_main)
