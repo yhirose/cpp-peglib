@@ -7,7 +7,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
   find_package(Threads REQUIRED)
 
-  target_compile_options(CppPegLib "-pthread")
-  target_link_libraries(CppPegLib Threads::Threads)
+  target_compile_options(CppPegLib INTERFACE -pthread)
+  target_link_libraries(CppPegLib  INTERFACE Threads::Threads)
 endif()
 
