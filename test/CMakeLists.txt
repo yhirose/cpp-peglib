@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(test)
 
+# Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
+# Fix found at https://github.com/ethereum/solidity/pull/13429
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
