@@ -44,6 +44,23 @@
 namespace peg {
 
 /*-----------------------------------------------------------------------------
+ *  call_once / once_flag
+ *---------------------------------------------------------------------------*/
+
+// This is to avoid a bug where the exception `std::system_error` is thrown when the code is not linked with pthread.
+// See issues #23, #46, #62.
+
+using once_flag = bool;
+
+template <class Callable, class... Args>
+void call_once(once_flag& flag, Callable&& f) {
+  if(!flag) {
+    flag = true;
+    f();
+  }
+}
+
+/*-----------------------------------------------------------------------------
  *  scope_exit
  *---------------------------------------------------------------------------*/
 
@@ -921,7 +938,7 @@ public:
 
   // Line info
   std::pair<size_t, size_t> line_info(const char *cur) const {
-    std::call_once(source_line_index_init_, [this]() {
+    call_once(source_line_index_init_, [this]() {
       for (size_t pos = 0; pos < l; pos++) {
         if (s[pos] == '\n') { source_line_index.push_back(pos); }
       }
@@ -942,7 +959,7 @@ public:
   size_t next_trace_id = 0;
   std::vector<size_t> trace_ids;
   bool ignore_trace_state = false;
-  mutable std::once_flag source_line_index_init_;
+  mutable once_flag source_line_index_init_;
   mutable std::vector<size_t> source_line_index;
 };
 
@@ -1184,7 +1201,7 @@ public:
 
   std::string lit_;
   bool ignore_case_;
-  mutable std::once_flag init_is_word_;
+  mutable once_flag init_is_word_;
   mutable bool is_word_;
 };
 
@@ -1410,7 +1427,7 @@ public:
 
   std::shared_ptr<Ope> ope_;
   Definition *outer_;
-  mutable std::once_flag trace_name_init_;
+  mutable once_flag trace_name_init_;
   mutable std::string trace_name_;
 
   friend class Definition;
@@ -2320,7 +2337,7 @@ public:
   std::shared_ptr<Ope> get_core_operator() const { return holder_->ope_; }
 
   bool is_token() const {
-    std::call_once(is_token_init_, [this]() {
+    call_once(is_token_init_, [this]() {
       is_token_ = TokenChecker::is_token(*get_core_operator());
     });
     return is_token_;
@@ -2368,7 +2385,7 @@ private:
   Definition &operator=(Definition &&rhs);
 
   void initialize_definition_ids() const {
-    std::call_once(definition_ids_init_, [&]() {
+    call_once(definition_ids_init_, [&]() {
       AssignIDToDefinition vis;
       holder_->accept(vis);
       if (whitespaceOpe) { whitespaceOpe->accept(vis); }
@@ -2425,10 +2442,10 @@ private:
   }
 
   std::shared_ptr<Holder> holder_;
-  mutable std::once_flag is_token_init_;
+  mutable once_flag is_token_init_;
   mutable bool is_token_ = false;
-  mutable std::once_flag assign_id_to_definition_init_;
-  mutable std::once_flag definition_ids_init_;
+  mutable once_flag assign_id_to_definition_init_;
+  mutable once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
 };
 
@@ -2438,7 +2455,7 @@ private:
 
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
-                            std::once_flag &init_is_word, bool &is_word,
+                            once_flag &init_is_word, bool &is_word,
                             bool ignore_case) {
   size_t i = 0;
   for (; i < lit.size(); i++) {
@@ -2456,7 +2473,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     auto se =
         scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
-    std::call_once(init_is_word, [&]() {
+    call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
       Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
                       nullptr, nullptr, false, nullptr);
@@ -2810,7 +2827,7 @@ inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
 inline const std::string &Holder::name() const { return outer_->name; }
 
 inline const std::string &Holder::trace_name() const {
-  std::call_once(trace_name_init_,
+  call_once(trace_name_init_,
                  [this]() { trace_name_ = "[" + outer_->name + "]"; });
   return trace_name_;
 }
@@ -2868,7 +2885,7 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     const auto &cs = c.capture_scope_stack[index];
     if (cs.find(name_) != cs.end()) {
       const auto &lit = cs.at(name_);
-      std::once_flag init_is_word;
+      once_flag init_is_word;
       auto is_word = false;
       return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false);
     }
