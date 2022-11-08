@@ -52,7 +52,7 @@ namespace peg {
 
 using once_flag = bool;
 
-template <class Callable, class... Args>
+template <class Callable>
 void call_once(once_flag& flag, Callable&& f) {
   if(!flag) {
     flag = true;
