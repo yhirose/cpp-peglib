@@ -2753,7 +2753,14 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       chvs.sv_ = std::string_view(s, len);
       chvs.name_ = outer_->name;
 
-      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_.get())) {
+      auto ope_ptr = ope_.get();
+      {
+        auto tok_ptr = dynamic_cast<const peg::TokenBoundary *>(ope_ptr);
+        if (tok_ptr) {
+          ope_ptr = tok_ptr->ope_.get();
+        }
+      }
+      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_ptr)) {
         chvs.choice_count_ = 0;
         chvs.choice_ = 0;
       }

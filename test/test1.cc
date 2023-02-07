@@ -1233,3 +1233,18 @@ LINE_END               <-  '\r\n' / '\r' / '\n' / !.
   }
 }
 
+TEST(GeneralTest, ChoiceWithWhitespace) {
+  auto parser = peg::parser(R"(
+    type <- 'string' / 'int' / 'double'
+    %whitespace <- ' '*
+  )");
+
+  parser["type"] = [](const SemanticValues& vs) {
+    auto n = vs.choice();
+    EXPECT_EQ(1, n);
+  };
+
+  auto ret = parser.parse("int");
+  EXPECT_TRUE(ret);
+}
+
