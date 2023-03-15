@@ -1239,7 +1239,7 @@ TEST(GeneralTest, ChoiceWithWhitespace) {
     %whitespace <- ' '*
   )");
 
-  parser["type"] = [](const SemanticValues& vs) {
+  parser["type"] = [](const SemanticValues &vs) {
     auto n = vs.choice();
     EXPECT_EQ(1, n);
   };
@@ -1248,3 +1248,18 @@ TEST(GeneralTest, ChoiceWithWhitespace) {
   EXPECT_TRUE(ret);
 }
 
+TEST(GeneralTest, PassingContextAndOutputParameter) {
+  parser parser(R"(
+        START  <- TOKEN
+        TOKEN  <- [0-9]+
+    )");
+
+  parser["TOKEN"] = [&](const peg::SemanticValues &vs, std::any & /*dt*/) {
+    return vs.token_to_number<int>();
+  };
+
+  int output = 0;
+  std::any dt = std::string{"context"};
+  parser.parse<int>("42", dt, output);
+  EXPECT_EQ(42, output);
+}

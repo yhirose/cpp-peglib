@@ -2756,9 +2756,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       auto ope_ptr = ope_.get();
       {
         auto tok_ptr = dynamic_cast<const peg::TokenBoundary *>(ope_ptr);
-        if (tok_ptr) {
-          ope_ptr = tok_ptr->ope_.get();
-        }
+        if (tok_ptr) { ope_ptr = tok_ptr->ope_.get(); }
       }
       if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_ptr)) {
         chvs.choice_count_ = 0;
@@ -4538,8 +4536,8 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      return post_process(s, n,
-                          rule.parse_and_get_value(s, n, dt, val, path, log_));
+      auto result = rule.parse_and_get_value(s, n, dt, val, path, log_);
+      return post_process(s, n, result);
     }
     return false;
   }
@@ -4685,7 +4683,7 @@ private:
 inline void enable_tracing(parser &parser, std::ostream &os) {
   parser.enable_trace(
       [&](auto &ope, auto s, auto, auto &, auto &c, auto &, auto &trace_data) {
-	auto prev_pos = std::any_cast<size_t>(trace_data);
+        auto prev_pos = std::any_cast<size_t>(trace_data);
         auto pos = static_cast<size_t>(s - c.s);
         auto backtrack = (pos < prev_pos ? "*" : "");
         std::string indent;
@@ -4809,8 +4807,8 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
                      "Total counters");
             os << buff << std::endl;
 
-            snprintf(buff, BUFSIZ, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "",
-                     "", "", total_success * 100.0 / grand_total,
+            snprintf(buff, BUFSIZ, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "",
+                     "", total_success * 100.0 / grand_total,
                      total_fail * 100.0 / grand_total, "% success/fail");
             os << buff << std::endl << std::endl;
             ;
@@ -4819,8 +4817,8 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
             for (auto &[name, success, fail] : stats.items) {
               auto total = success + fail;
               auto ratio = total * 100.0 / stats.total;
-              snprintf(buff, BUFSIZ, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s",
-                       id, total, ratio, success, fail, name.c_str());
+              snprintf(buff, BUFSIZ, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s", id,
+                       total, ratio, success, fail, name.c_str());
               os << buff << std::endl;
               id++;
             }
