@@ -401,7 +401,7 @@ TEST(GeneralTest, Skip_token_test2) {
 }
 
 TEST(GeneralTest, Custom_AST_test) {
-  struct CustomType {};
+  struct CustomType { bool dummy = false; };
   using CustomAst = AstBase<CustomType>;
 
   parser parser(R"(
