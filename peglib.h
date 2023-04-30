@@ -1003,6 +1003,9 @@ public:
     size_t len = static_cast<size_t>(-1);
 
     if (!for_label_) { c.cut_stack.push_back(false); }
+    auto se = scope_exit([&]() {
+      if (!for_label_) { c.cut_stack.pop_back(); }
+    });
 
     size_t id = 0;
     for (const auto &ope : opes_) {
@@ -1029,8 +1032,6 @@ public:
 
       id++;
     }
-
-    if (!for_label_) { c.cut_stack.pop_back(); }
 
     return len;
   }
