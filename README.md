@@ -755,6 +755,37 @@ Sample codes
   * [A tiny PL/0 JIT compiler in less than 900 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
   * [A Programming Language just for writing Fizz Buzz program. :)](https://github.com/yhirose/fizzbuzzlang)
 
+CMake integration
+------------
+
+To build tests, examples or lint utility, pass `-DPEGLIB_BUILD_TESTS=ON`, 
+`-DPEGLIB_BUILD_EXAMPLES=ON` or `-DPEGLIB_BUILD_LINT=ON` to cmake 
+configuration command respectively.
+
+
+### Using with FetchContent
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+    Peglib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-peglib
+    GIT_TAG v1.8.3
+)
+
+FetchContent_MakeAvailable(Peglib)
+
+target_include_directories(<Your-Target> Peglib)
+```
+
+### Installation
+
+```sh
+cmake -S . -B build
+cmake --build build --target install
+```
+
 License
 -------
 
