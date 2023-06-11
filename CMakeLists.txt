@@ -32,7 +32,7 @@ if(${PEGLIB_BUILD_EXAMPLES})
   add_subdirectory(example)
 endif()
 
-if (${BUILD_TESTS})
+if (${PEGLIB_BUILD_TESTS})
   add_subdirectory(test)
   enable_testing()
 endif()
