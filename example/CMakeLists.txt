@@ -20,3 +20,15 @@ target_link_libraries(calc5 ${add_link_deps})
 
 add_executable(indent indent.cc)
 target_link_libraries(indent ${add_link_deps})
+
+add_executable(docx docx.cc)
+target_link_libraries(docx ${add_link_deps})
+
+add_executable(sequence sequence.cc)
+target_link_libraries(sequence ${add_link_deps})
+
+add_executable(enter_leave enter_leave.cc)
+target_link_libraries(enter_leave ${add_link_deps})
+
+add_executable(choice choice.cc)
+target_link_libraries(choice ${add_link_deps})
