@@ -3325,7 +3325,7 @@ private:
             g["NegatedClass"], g["ClassI"], g["Class"], g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
-    g["IdentCont"] <= seq(g["IdentStart"], zom(g["IdentRest"]));
+    g["IdentCont"] <= tok(seq(g["IdentStart"], zom(g["IdentRest"])));
 
     const static std::vector<std::pair<char32_t, char32_t>> range = {
         {0x0080, 0xFFFF}};
