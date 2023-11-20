@@ -1688,6 +1688,8 @@ struct Ope::Visitor {
 };
 
 struct TraceOpeName : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(Sequence &) override { name_ = "Sequence"; }
   void visit(PrioritizedChoice &) override { name_ = "PrioritizedChoice"; }
   void visit(Repetition &) override { name_ = "Repetition"; }
@@ -1723,6 +1725,8 @@ private:
 };
 
 struct AssignIDToDefinition : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -1751,6 +1755,8 @@ struct AssignIDToDefinition : public Ope::Visitor {
 };
 
 struct IsLiteralToken : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(PrioritizedChoice &ope) override {
     for (auto op : ope.opes_) {
       if (!IsLiteralToken::check(*op)) { return; }
@@ -1772,6 +1778,8 @@ private:
 };
 
 struct TokenChecker : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -1808,6 +1816,8 @@ private:
 };
 
 struct FindLiteralToken : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   void visit(LiteralString &ope) override { token_ = ope.lit_.data(); }
   void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
   void visit(Ignore &ope) override { ope.ope_->accept(*this); }
@@ -1825,6 +1835,8 @@ private:
 };
 
 struct DetectLeftRecursion : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
   void visit(Sequence &ope) override {
@@ -1887,6 +1899,8 @@ private:
 };
 
 struct HasEmptyElement : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs,
                   std::unordered_map<std::string, bool> &has_error_cache)
       : refs_(refs), has_error_cache_(has_error_cache) {}
@@ -1935,6 +1949,8 @@ private:
 };
 
 struct DetectInfiniteLoop : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   DetectInfiniteLoop(const char *s, const std::string &name,
                      std::vector<std::pair<const char *, std::string>> &refs,
                      std::unordered_map<std::string, bool> &has_error_cache)
@@ -1994,6 +2010,8 @@ private:
 };
 
 struct ReferenceChecker : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   ReferenceChecker(const Grammar &grammar,
                    const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
@@ -2032,6 +2050,8 @@ private:
 };
 
 struct LinkReferences : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   LinkReferences(Grammar &grammar, const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
@@ -2065,6 +2085,8 @@ private:
 };
 
 struct FindReference : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
   FindReference(const std::vector<std::shared_ptr<Ope>> &args,
                 const std::vector<std::string> &params)
       : args_(args), params_(params) {}
