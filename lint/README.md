@@ -67,7 +67,7 @@ Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --source "1 + a * 3" a.peg
-[commendline]:1:3: syntax error
+[commandline]:1:3: syntax error
 ```
 
 ### AST

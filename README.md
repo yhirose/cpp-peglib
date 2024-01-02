@@ -665,7 +665,7 @@ Primary     <- '(' Additive ')' / Number
 %whitespace <- [ \t\r\n]*
 
 > peglint a.peg
-[commendline]:3:35: 'Number' is not defined.
+[commandline]:3:35: 'Number' is not defined.
 ```
 
 ### Source check
@@ -679,7 +679,7 @@ Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --source "1 + a * 3" a.peg
-[commendline]:1:3: syntax error
+[commandline]:1:3: syntax error
 ```
 
 ### AST
