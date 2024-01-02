@@ -2506,7 +2506,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     }
   }
 
-  // Skip whiltespace
+  // Skip whitespace
   if (!c.in_token_boundary_count && c.whitespaceOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
     c.ignore_trace_state = !c.verbose_trace;
@@ -2691,7 +2691,7 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
     }
   }
 
-  // Skip whiltespace
+  // Skip whitespace
   if (!c.in_token_boundary_count && c.whitespaceOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
     c.ignore_trace_state = !c.verbose_trace;
