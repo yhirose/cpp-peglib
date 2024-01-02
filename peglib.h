@@ -3281,7 +3281,7 @@ public:
     return parse(s, n, dummy, start, enablePackratParsing, log);
   }
 
-  // For debuging purpose
+  // For debugging purpose
   static Grammar &grammar() { return get_instance().g; }
 
 private:
