@@ -72,7 +72,7 @@ Char <-
 	/ "\\u" (((('0' [0-9a-fA-F]) / "10") [0-9a-fA-F]{4,4}) / [0-9a-fA-F]{4,5})
 	/ !'\\'   .
 
-Repetition <- BeginBlacket  RepetitionRange  EndBlacket
+Repetition <- BeginBracket  RepetitionRange  EndBracket
 
 RepetitionRange <-
 	Number  COMMA  Number
@@ -124,14 +124,14 @@ Arguments <-  OPEN  Expression (COMMA  Expression)*  CLOSE
 
 # Instruction grammars
 Instruction <-
-	BeginBlacket (InstructionItem  (InstructionItemSeparator InstructionItem)*)? EndBlacket
+	BeginBracket (InstructionItem  (InstructionItemSeparator InstructionItem)*)? EndBracket
 InstructionItem <- PrecedenceClimbing /  ErrorMessage /  NoAstOpt
 ~InstructionItemSeparator <-  ';'  Spacing
 
 ~SpacesZom <-  Space*
 ~SpacesOom <-  Space+
-~BeginBlacket <-  '{'  Spacing
-~EndBlacket <-  '}'  Spacing
+~BeginBracket <-  '{'  Spacing
+~EndBracket <-  '}'  Spacing
 
 # PrecedenceClimbing instruction
 PrecedenceClimbing <- "precedence"  SpacesOom  PrecedenceInfo (SpacesOom  PrecedenceInfo)*  SpacesZom
@@ -145,5 +145,5 @@ PrecedenceAssoc <-  [LR]
 # Error message instruction
 ErrorMessage <- "message"  SpacesOom  LiteralD  SpacesZom
 
-# No Ast node optimazation instruction
+# No Ast node optimization instruction
 NoAstOpt <-  "no_ast_opt"  SpacesZom

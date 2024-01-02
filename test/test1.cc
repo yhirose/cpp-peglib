@@ -152,7 +152,7 @@ TEST(GeneralTest, String_capture_test3) {
   EXPECT_EQ("tag-3", tags[2]);
 }
 
-TEST(GeneralTest, Cyclic_grammer_test) {
+TEST(GeneralTest, Cyclic_grammar_test) {
   Definition PARENT;
   Definition CHILD;
 
@@ -507,8 +507,8 @@ TEST(GeneralTest, mutable_lambda_test) {
 
 TEST(GeneralTest, Simple_calculator_test) {
   parser parser(R"(
-        Additive  <- Multitive '+' Additive / Multitive
-        Multitive <- Primary '*' Multitive / Primary
+        Additive  <- Multiplicative '+' Additive / Multiplicative
+        Multiplicative <- Primary '*' Multiplicative / Primary
         Primary   <- '(' Additive ')' / Number
         Number    <- [0-9]+
     )");
@@ -520,7 +520,7 @@ TEST(GeneralTest, Simple_calculator_test) {
     }
   };
 
-  parser["Multitive"] = [](const SemanticValues &vs) {
+  parser["Multiplicative"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
     case 0: return std::any_cast<int>(vs[0]) * std::any_cast<int>(vs[1]);
     default: return std::any_cast<int>(vs[0]);
@@ -539,12 +539,12 @@ TEST(GeneralTest, Simple_calculator_test) {
 
 TEST(GeneralTest, Simple_calculator_with_recovery_test) {
   parser parser(R"(
-        Additive    <- Multitive '+' Additive / Multitive
-        Multitive   <- Primary '*' Multitive^cond / Primary
+        Additive    <- Multiplicative '+' Additive / Multiplicative
+        Multiplicative   <- Primary '*' Multiplicative^cond / Primary
         Primary     <- '(' Additive ')' / Number
         Number      <- < [0-9]+ >
         %whitespace <- [ \t]*
-        cond <- '' { error_message "missing multitative" }
+        cond <- '' { error_message "missing multiplicative" }
     )");
 
   parser["Additive"] = [](const SemanticValues &vs) {
@@ -554,7 +554,7 @@ TEST(GeneralTest, Simple_calculator_with_recovery_test) {
     }
   };
 
-  parser["Multitive"] = [](const SemanticValues &vs) {
+  parser["Multiplicative"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
     case 0: return std::any_cast<int>(vs[0]) * std::any_cast<int>(vs[1]);
     default: return std::any_cast<int>(vs[0]);
@@ -573,7 +573,7 @@ TEST(GeneralTest, Simple_calculator_with_recovery_test) {
 }
 
 TEST(GeneralTest, Calculator_test) {
-  // Construct grammer
+  // Construct grammar
   Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
   EXPRESSION <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
@@ -753,7 +753,7 @@ TEST(GeneralTest, Calculator_test_with_AST) {
 }
 
 TEST(GeneralTest, Calculator_test_with_combinators_and_AST) {
-  // Construct grammer
+  // Construct grammar
   AST_DEFINITIONS(EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR,
                   NUMBER);
 

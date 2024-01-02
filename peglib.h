@@ -2506,7 +2506,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     }
   }
 
-  // Skip whiltespace
+  // Skip whitespace
   if (!c.in_token_boundary_count && c.whitespaceOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
     c.ignore_trace_state = !c.verbose_trace;
@@ -2691,7 +2691,7 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
     }
   }
 
-  // Skip whiltespace
+  // Skip whitespace
   if (!c.in_token_boundary_count && c.whitespaceOpe) {
     auto save_ignore_trace_state = c.ignore_trace_state;
     c.ignore_trace_state = !c.verbose_trace;
@@ -3281,7 +3281,7 @@ public:
     return parse(s, n, dummy, start, enablePackratParsing, log);
   }
 
-  // For debuging purpose
+  // For debugging purpose
   static Grammar &grammar() { return get_instance().g; }
 
 private:
@@ -3403,7 +3403,7 @@ private:
             seq(npd(chr('\\')), dot()));
 
     g["Repetition"] <=
-        seq(g["BeginBlacket"], g["RepetitionRange"], g["EndBlacket"]);
+        seq(g["BeginBracket"], g["RepetitionRange"], g["EndBracket"]);
     g["RepetitionRange"] <= cho(seq(g["Number"], g["COMMA"], g["Number"]),
                                 seq(g["Number"], g["COMMA"]), g["Number"],
                                 seq(g["COMMA"], g["Number"]));
@@ -3455,18 +3455,18 @@ private:
 
     // Instruction grammars
     g["Instruction"] <=
-        seq(g["BeginBlacket"],
+        seq(g["BeginBracket"],
             opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
                                                   g["InstructionItem"])))),
-            g["EndBlacket"]);
+            g["EndBracket"]);
     g["InstructionItem"] <=
         cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
     ~g["SpacesOom"] <= oom(g["Space"]);
-    ~g["BeginBlacket"] <= seq(chr('{'), g["Spacing"]);
-    ~g["EndBlacket"] <= seq(chr('}'), g["Spacing"]);
+    ~g["BeginBracket"] <= seq(chr('{'), g["Spacing"]);
+    ~g["EndBracket"] <= seq(chr('}'), g["Spacing"]);
 
     // PrecedenceClimbing instruction
     g["PrecedenceClimbing"] <=
@@ -3490,7 +3490,7 @@ private:
     g["ErrorMessage"] <= seq(lit("error_message"), g["SpacesOom"],
                              g["LiteralD"], g["SpacesZom"]);
 
-    // No Ast node optimazation instruction
+    // No Ast node optimization instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
 
     // Set definition names

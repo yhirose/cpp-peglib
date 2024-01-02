@@ -1822,7 +1822,7 @@ PRINTLN    ← 'System.out.println'
 
 # Throw operator labels
 rcblk      ← SkipToRCUR { error_message "missing end of block." }
-semia      ← '' { error_message "missing simicolon in assignment." }
+semia      ← '' { error_message "missing semicolon in assignment." }
 
 # Recovery expressions
 SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
@@ -1831,7 +1831,7 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   EXPECT_TRUE(!!pg);
 
   std::vector<std::string> errors{
-      R"(8:5: missing simicolon in assignment.)",
+      R"(8:5: missing semicolon in assignment.)",
       R"(8:6: missing end of block.)",
   };
 
