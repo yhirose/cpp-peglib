@@ -1,4 +1,4 @@
-// Setup editros
+// Setup editors
 function setupInfoArea(id) {
   const e = ace.edit(id);
   e.setShowPrintMargin(false);
