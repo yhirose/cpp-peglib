@@ -132,7 +132,7 @@ function parse() {
   }, 0);
 }
 
-// Event handing for text editiing
+// Event handing for text editing
 let timer;
 function setupTimer() {
   clearTimeout(timer);
