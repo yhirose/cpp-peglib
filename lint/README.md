@@ -60,8 +60,8 @@ a.peg:3:6: 'A' is left recursive.
 
 ```
 > cat a.peg
-Additive    <- Multitive '+' Additive / Multitive
-Multitive   <- Primary '*' Multitive / Primary
+Additive    <- Multiplicative '+' Additive / Multiplicative
+Multiplicative   <- Primary '*' Multiplicative / Primary
 Primary     <- '(' Additive ')' / Number
 Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
@@ -78,14 +78,14 @@ Number      <- < [0-9]+ >
 
 > peglint --ast a.peg a.txt
 + Additive
-  + Multitive
+  + Multiplicative
     + Primary
       - Number (1)
   + Additive
-    + Multitive
+    + Multiplicative
       + Primary
         - Number (2)
-      + Multitive
+      + Multiplicative
         + Primary
           - Number (3)
 ```
@@ -95,39 +95,39 @@ Number      <- < [0-9]+ >
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
 + Additive
-  - Multitive[Number] (1)
-  + Additive[Multitive]
+  - Multiplicative[Number] (1)
+  + Additive[Multiplicative]
     - Primary[Number] (2)
-    - Multitive[Number] (3)
+    - Multiplicative[Number] (3)
 ```
 
 ### Adjust AST optimazation with `no_ast_opt` instruction
 
 ```
 > cat a.peg
-Additive    <- Multitive '+' Additive / Multitive
-Multitive   <- Primary '*' Multitive / Primary
+Additive    <- Multiplicative '+' Additive / Multiplicative
+Multiplicative   <- Primary '*' Multiplicative / Primary
 Primary     <- '(' Additive ')' / Number          { no_ast_opt }
 Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
 + Additive/0
-  + Multitive/1[Primary]
+  + Multiplicative/1[Primary]
     - Number (1)
-  + Additive/1[Multitive]
+  + Additive/1[Multiplicative]
     + Primary/1
       - Number (2)
-    + Multitive/1[Primary]
+    + Multiplicative/1[Primary]
       - Number (3)
 
 > peglint --ast --opt-only --source "1 + 2 * 3" a.peg
 + Additive/0
-  + Multitive/1
+  + Multiplicative/1
     - Primary/1[Number] (1)
   + Additive/1
-    + Multitive/0
+    + Multiplicative/0
       - Primary/1[Number] (2)
-      + Multitive/1
+      + Multiplicative/1
         - Primary/1[Number] (3)
 ```

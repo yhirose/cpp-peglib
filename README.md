@@ -59,8 +59,8 @@ int main(void) {
   // (2) Make a parser
   parser parser(R"(
     # Grammar for Calculator...
-    Additive    <- Multitive '+' Additive / Multitive
-    Multitive   <- Primary '*' Multitive / Primary
+    Additive    <- Multiplicative '+' Additive / Multiplicative
+    Multiplicative   <- Primary '*' Multiplicative / Primary
     Primary     <- '(' Additive ')' / Number
     Number      <- < [0-9]+ >
     %whitespace <- [ \t]*
@@ -71,16 +71,16 @@ int main(void) {
   // (3) Setup actions
   parser["Additive"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
-    case 0: // "Multitive '+' Additive"
+    case 0: // "Multiplicative '+' Additive"
       return any_cast<int>(vs[0]) + any_cast<int>(vs[1]);
-    default: // "Multitive"
+    default: // "Multiplicative"
       return any_cast<int>(vs[0]);
     }
   };
 
-  parser["Multitive"] = [](const SemanticValues &vs) {
+  parser["Multiplicative"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
-    case 0: // "Primary '*' Multitive"
+    case 0: // "Primary '*' Multiplicative"
       return any_cast<int>(vs[0]) * any_cast<int>(vs[1]);
     default: // "Primary"
       return any_cast<int>(vs[0]);
@@ -106,8 +106,8 @@ To show syntax errors in grammar text:
 ```cpp
 auto grammar = R"(
   # Grammar for Calculator...
-  Additive    <- Multitive '+' Additive / Multitive
-  Multitive   <- Primary '*' Multitive / Primary
+  Additive    <- Multiplicative '+' Additive / Multiplicative
+  Multiplicative   <- Primary '*' Multiplicative / Primary
   Primary     <- '(' Additive ')' / Number
   Number      <- < [0-9]+ >
   %whitespace <- [ \t]*
@@ -659,8 +659,8 @@ usage: grammar_file_path [source_file_path]
 
 ```
 > cat a.peg
-Additive    <- Multitive '+' Additive / Multitive
-Multitive   <- Primary '*' Multitive / Primary
+Additive    <- Multiplicative '+' Additive / Multiplicative
+Multiplicative   <- Primary '*' Multiplicative / Primary
 Primary     <- '(' Additive ')' / Number
 %whitespace <- [ \t\r\n]*
 
@@ -672,8 +672,8 @@ Primary     <- '(' Additive ')' / Number
 
 ```
 > cat a.peg
-Additive    <- Multitive '+' Additive / Multitive
-Multitive   <- Primary '*' Multitive / Primary
+Additive    <- Multiplicative '+' Additive / Multiplicative
+Multiplicative   <- Primary '*' Multiplicative / Primary
 Primary     <- '(' Additive ')' / Number
 Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
@@ -690,14 +690,14 @@ Number      <- < [0-9]+ >
 
 > peglint --ast a.peg a.txt
 + Additive
-  + Multitive
+  + Multiplicative
     + Primary
       - Number (1)
   + Additive
-    + Multitive
+    + Multiplicative
       + Primary
         - Number (2)
-      + Multitive
+      + Multiplicative
         + Primary
           - Number (3)
 ```
@@ -707,40 +707,40 @@ Number      <- < [0-9]+ >
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
 + Additive
-  - Multitive[Number] (1)
-  + Additive[Multitive]
+  - Multiplicative[Number] (1)
+  + Additive[Multiplicative]
     - Primary[Number] (2)
-    - Multitive[Number] (3)
+    - Multiplicative[Number] (3)
 ```
 
 ### Adjust AST optimazation with `no_ast_opt` instruction
 
 ```
 > cat a.peg
-Additive    <- Multitive '+' Additive / Multitive
-Multitive   <- Primary '*' Multitive / Primary
+Additive    <- Multiplicative '+' Additive / Multiplicative
+Multiplicative   <- Primary '*' Multiplicative / Primary
 Primary     <- '(' Additive ')' / Number          { no_ast_opt }
 Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
 + Additive/0
-  + Multitive/1[Primary]
+  + Multiplicative/1[Primary]
     - Number (1)
-  + Additive/1[Multitive]
+  + Additive/1[Multiplicative]
     + Primary/1
       - Number (2)
-    + Multitive/1[Primary]
+    + Multiplicative/1[Primary]
       - Number (3)
 
 > peglint --ast --opt-only --source "1 + 2 * 3" a.peg
 + Additive/0
-  + Multitive/1
+  + Multiplicative/1
     - Primary/1[Number] (1)
   + Additive/1
-    + Multitive/0
+    + Multiplicative/0
       - Primary/1[Number] (2)
-      + Multitive/1
+      + Multiplicative/1
         - Primary/1[Number] (3)
 ```
 

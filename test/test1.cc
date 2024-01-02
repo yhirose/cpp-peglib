@@ -507,8 +507,8 @@ TEST(GeneralTest, mutable_lambda_test) {
 
 TEST(GeneralTest, Simple_calculator_test) {
   parser parser(R"(
-        Additive  <- Multitive '+' Additive / Multitive
-        Multitive <- Primary '*' Multitive / Primary
+        Additive  <- Multiplicative '+' Additive / Multiplicative
+        Multiplicative <- Primary '*' Multiplicative / Primary
         Primary   <- '(' Additive ')' / Number
         Number    <- [0-9]+
     )");
@@ -520,7 +520,7 @@ TEST(GeneralTest, Simple_calculator_test) {
     }
   };
 
-  parser["Multitive"] = [](const SemanticValues &vs) {
+  parser["Multiplicative"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
     case 0: return std::any_cast<int>(vs[0]) * std::any_cast<int>(vs[1]);
     default: return std::any_cast<int>(vs[0]);
@@ -539,12 +539,12 @@ TEST(GeneralTest, Simple_calculator_test) {
 
 TEST(GeneralTest, Simple_calculator_with_recovery_test) {
   parser parser(R"(
-        Additive    <- Multitive '+' Additive / Multitive
-        Multitive   <- Primary '*' Multitive^cond / Primary
+        Additive    <- Multiplicative '+' Additive / Multiplicative
+        Multiplicative   <- Primary '*' Multiplicative^cond / Primary
         Primary     <- '(' Additive ')' / Number
         Number      <- < [0-9]+ >
         %whitespace <- [ \t]*
-        cond <- '' { error_message "missing multitative" }
+        cond <- '' { error_message "missing multiplicative" }
     )");
 
   parser["Additive"] = [](const SemanticValues &vs) {
@@ -554,7 +554,7 @@ TEST(GeneralTest, Simple_calculator_with_recovery_test) {
     }
   };
 
-  parser["Multitive"] = [](const SemanticValues &vs) {
+  parser["Multiplicative"] = [](const SemanticValues &vs) {
     switch (vs.choice()) {
     case 0: return std::any_cast<int>(vs[0]) * std::any_cast<int>(vs[1]);
     default: return std::any_cast<int>(vs[0]);
