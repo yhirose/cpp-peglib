@@ -9,8 +9,8 @@ usage: grammar_file_path [source_file_path]
   options:
     --ast: show AST tree
     --packrat: enable packrat memoise
-    --opt, --opt-all: optimaze all AST nodes except nodes selected with `no_ast_opt` instruction
-    --opt-only: optimaze only AST nodes selected with `no_ast_opt` instruction
+    --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
+    --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
     --source: source text
     --trace: show concise trace messages
     --profile: show profile report
