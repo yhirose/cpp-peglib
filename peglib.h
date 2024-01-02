@@ -3403,7 +3403,7 @@ private:
             seq(npd(chr('\\')), dot()));
 
     g["Repetition"] <=
-        seq(g["BeginBlacket"], g["RepetitionRange"], g["EndBlacket"]);
+        seq(g["BeginBracket"], g["RepetitionRange"], g["EndBracket"]);
     g["RepetitionRange"] <= cho(seq(g["Number"], g["COMMA"], g["Number"]),
                                 seq(g["Number"], g["COMMA"]), g["Number"],
                                 seq(g["COMMA"], g["Number"]));
@@ -3455,18 +3455,18 @@ private:
 
     // Instruction grammars
     g["Instruction"] <=
-        seq(g["BeginBlacket"],
+        seq(g["BeginBracket"],
             opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
                                                   g["InstructionItem"])))),
-            g["EndBlacket"]);
+            g["EndBracket"]);
     g["InstructionItem"] <=
         cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
     ~g["SpacesOom"] <= oom(g["Space"]);
-    ~g["BeginBlacket"] <= seq(chr('{'), g["Spacing"]);
-    ~g["EndBlacket"] <= seq(chr('}'), g["Spacing"]);
+    ~g["BeginBracket"] <= seq(chr('{'), g["Spacing"]);
+    ~g["EndBracket"] <= seq(chr('}'), g["Spacing"]);
 
     // PrecedenceClimbing instruction
     g["PrecedenceClimbing"] <=
