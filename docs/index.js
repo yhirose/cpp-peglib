@@ -26,7 +26,7 @@ const codeAst = setupInfoArea("code-ast");
 const codeAstOptimized = setupInfoArea("code-ast-optimized");
 const codeProfile = setupInfoArea("code-profile");
 
-$('#opt-mode').val(localStorage.getItem('optimazationMode') || 'all');
+$('#opt-mode').val(localStorage.getItem('optimizationMode') || 'all');
 $('#packrat').prop('checked', localStorage.getItem('packrat') === 'true');
 $('#auto-refresh').prop('checked', localStorage.getItem('autoRefresh') === 'true');
 $('#parse').prop('disabled', $('#auto-refresh').prop('checked'));
@@ -60,7 +60,7 @@ function generateErrorListHTML(errors) {
 function updateLocalStorage() {
   localStorage.setItem('grammarText', grammar.getValue());
   localStorage.setItem('codeText', code.getValue());
-  localStorage.setItem('optimazationMode', $('#opt-mode').val());
+  localStorage.setItem('optimizationMode', $('#opt-mode').val());
   localStorage.setItem('packrat', $('#packrat').prop('checked'));
   localStorage.setItem('autoRefresh', $('#auto-refresh').prop('checked'));
 }
@@ -74,7 +74,7 @@ function parse() {
   const $codeInfo = $('#code-info');
   const codeText = code.getValue();
 
-  const optimazationMode = $('#opt-mode').val();
+  const optimizationMode = $('#opt-mode').val();
   const packrat = $('#packrat').prop('checked');
 
   $grammarInfo.html('');
@@ -89,7 +89,7 @@ function parse() {
    return;
   }
 
-  const mode = optimazationMode == 'all';
+  const mode = optimizationMode == 'all';
 
   $('#overlay').css({
     'z-index': '1',
@@ -163,7 +163,7 @@ function makeOnClickInInfo(editor) {
 $('#grammar-info').on('click', 'li', makeOnClickInInfo(grammar));
 $('#code-info').on('click', 'li', makeOnClickInInfo(code));
 
-// Event handing in the AST optimazation
+// Event handing in the AST optimization
 $('#opt-mode').on('change', setupTimer);
 $('#packrat').on('change', setupTimer);
 $('#auto-refresh').on('change', () => {

@@ -145,5 +145,5 @@ PrecedenceAssoc <-  [LR]
 # Error message instruction
 ErrorMessage <- "message"  SpacesOom  LiteralD  SpacesZom
 
-# No Ast node optimazation instruction
+# No Ast node optimization instruction
 NoAstOpt <-  "no_ast_opt"  SpacesZom

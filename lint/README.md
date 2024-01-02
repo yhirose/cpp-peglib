@@ -90,7 +90,7 @@ Number      <- < [0-9]+ >
           - Number (3)
 ```
 
-### AST optimazation
+### AST optimization
 
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
@@ -101,7 +101,7 @@ Number      <- < [0-9]+ >
     - Multiplicative[Number] (3)
 ```
 
-### Adjust AST optimazation with `no_ast_opt` instruction
+### Adjust AST optimization with `no_ast_opt` instruction
 
 ```
 > cat a.peg

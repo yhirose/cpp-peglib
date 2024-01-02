@@ -3490,7 +3490,7 @@ private:
     g["ErrorMessage"] <= seq(lit("error_message"), g["SpacesOom"],
                              g["LiteralD"], g["SpacesZom"]);
 
-    // No Ast node optimazation instruction
+    // No Ast node optimization instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
 
     // Set definition names
