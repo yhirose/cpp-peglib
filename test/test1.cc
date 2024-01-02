@@ -152,7 +152,7 @@ TEST(GeneralTest, String_capture_test3) {
   EXPECT_EQ("tag-3", tags[2]);
 }
 
-TEST(GeneralTest, Cyclic_grammer_test) {
+TEST(GeneralTest, Cyclic_grammar_test) {
   Definition PARENT;
   Definition CHILD;
 
@@ -573,7 +573,7 @@ TEST(GeneralTest, Simple_calculator_with_recovery_test) {
 }
 
 TEST(GeneralTest, Calculator_test) {
-  // Construct grammer
+  // Construct grammar
   Definition EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR, NUMBER;
 
   EXPRESSION <= seq(TERM, zom(seq(TERM_OPERATOR, TERM)));
@@ -753,7 +753,7 @@ TEST(GeneralTest, Calculator_test_with_AST) {
 }
 
 TEST(GeneralTest, Calculator_test_with_combinators_and_AST) {
-  // Construct grammer
+  // Construct grammar
   AST_DEFINITIONS(EXPRESSION, TERM, FACTOR, TERM_OPERATOR, FACTOR_OPERATOR,
                   NUMBER);
 
