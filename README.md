@@ -447,8 +447,8 @@ NOTE: An AST node holds a corresponding token as `std::string_vew` for performan
 ```
 peg::parser parser(R"(
   ...
-  defenition1 <- ... { no_ast_opt }
-  defenition2 <- ... { no_ast_opt }
+  definition1 <- ... { no_ast_opt }
+  definition2 <- ... { no_ast_opt }
   ...
 )");
 
