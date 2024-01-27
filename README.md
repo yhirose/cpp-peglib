@@ -347,6 +347,13 @@ START <- 'This month is ' MONTH '.'
 MONTH <- 'Jan' | 'January' | 'Feb' | 'February' | '...'
 ```
 
+It supports the case insensitive mode.
+
+```peg
+START <- 'This month is ' MONTH '.'
+MONTH <- 'Jan'i | 'January'i | 'Feb'i | 'February'i | '...'i
+```
+
 Cut operator
 ------------
 

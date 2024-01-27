@@ -377,14 +377,13 @@ template <typename T> T token_to_number_(std::string_view sv) {
 
 class Trie {
 public:
-  Trie() = default;
-  Trie(const Trie &) = default;
-
-  Trie(const std::vector<std::string> &items) {
+  Trie(const std::vector<std::string> &items, bool ignore_case)
+      : ignore_case_(ignore_case) {
     for (const auto &item : items) {
       for (size_t len = 1; len <= item.size(); len++) {
         auto last = len == item.size();
-        std::string_view sv(item.data(), len);
+        const auto &s = ignore_case ? to_lower(item) : item;
+        std::string_view sv(s.data(), len);
         auto it = dic_.find(sv);
         if (it == dic_.end()) {
           dic_.emplace(sv, Info{last, last});
@@ -402,7 +401,8 @@ public:
     auto done = false;
     size_t len = 1;
     while (!done && len <= text_len) {
-      std::string_view sv(text, len);
+      const auto &s = ignore_case_ ? to_lower(text) : std::string(text);
+      std::string_view sv(s.data(), len);
       auto it = dic_.find(sv);
       if (it == dic_.end()) {
         done = true;
@@ -416,6 +416,13 @@ public:
   }
 
 private:
+  std::string to_lower(std::string s) const {
+    for (char &c : s) {
+      c = std::tolower(c);
+    }
+    return s;
+  }
+
   struct Info {
     bool done;
     bool match;
@@ -424,6 +431,8 @@ private:
   // TODO: Use unordered_map when heterogeneous lookup is supported in C++20
   // std::unordered_map<std::string, Info> dic_;
   std::map<std::string, Info, std::less<>> dic_;
+
+  bool ignore_case_;
 };
 
 /*-----------------------------------------------------------------------------
@@ -1159,7 +1168,8 @@ public:
 
 class Dictionary : public Ope, public std::enable_shared_from_this<Dictionary> {
 public:
-  Dictionary(const std::vector<std::string> &v) : trie_(v) {}
+  Dictionary(const std::vector<std::string> &v, bool ignore_case)
+      : trie_(v, ignore_case) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
@@ -1568,8 +1578,9 @@ inline std::shared_ptr<Ope> npd(const std::shared_ptr<Ope> &ope) {
   return std::make_shared<NotPredicate>(ope);
 }
 
-inline std::shared_ptr<Ope> dic(const std::vector<std::string> &v) {
-  return std::make_shared<Dictionary>(v);
+inline std::shared_ptr<Ope> dic(const std::vector<std::string> &v,
+                                bool ignore_case) {
+  return std::make_shared<Dictionary>(v, ignore_case);
 }
 
 inline std::shared_ptr<Ope> lit(std::string &&s) {
@@ -3335,16 +3346,17 @@ private:
         seq(g["Suffix"], opt(seq(g["LABEL"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
-    g["Primary"] <=
-        cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
-                npd(g["LEFTARROW"])),
-            seq(g["Ignore"], g["Identifier"],
-                npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
-            seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-            seq(g["BeginTok"], g["Expression"], g["EndTok"]), g["CapScope"],
-            seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
-            g["LiteralI"], g["Dictionary"], g["Literal"], g["NegatedClassI"],
-            g["NegatedClass"], g["ClassI"], g["Class"], g["DOT"]);
+    g["Primary"] <= cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
+                            npd(g["LEFTARROW"])),
+                        seq(g["Ignore"], g["Identifier"],
+                            npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
+                        seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+                        seq(g["BeginTok"], g["Expression"], g["EndTok"]),
+                        g["CapScope"],
+                        seq(g["BeginCap"], g["Expression"], g["EndCap"]),
+                        g["BackRef"], g["DictionaryI"], g["LiteralI"],
+                        g["Dictionary"], g["Literal"], g["NegatedClassI"],
+                        g["NegatedClass"], g["ClassI"], g["Class"], g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
     g["IdentCont"] <= tok(seq(g["IdentStart"], zom(g["IdentRest"])));
@@ -3358,6 +3370,9 @@ private:
 
     g["Dictionary"] <= seq(g["LiteralD"], oom(seq(g["PIPE"], g["LiteralD"])));
 
+    g["DictionaryI"] <=
+        seq(g["LiteralID"], oom(seq(g["PIPE"], g["LiteralID"])));
+
     auto lit_ope = cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))),
                            cls("'"), g["Spacing"]),
                        seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))),
@@ -3365,11 +3380,13 @@ private:
     g["Literal"] <= lit_ope;
     g["LiteralD"] <= lit_ope;
 
-    g["LiteralI"] <=
+    auto lit_case_ignore_ope =
         cho(seq(cls("'"), tok(zom(seq(npd(cls("'")), g["Char"]))), lit("'i"),
                 g["Spacing"]),
             seq(cls("\""), tok(zom(seq(npd(cls("\"")), g["Char"]))), lit("\"i"),
                 g["Spacing"]));
+    g["LiteralI"] <= lit_case_ignore_ope;
+    g["LiteralID"] <= lit_case_ignore_ope;
 
     // NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
     g["Class"] <= seq(chr('['), npd(chr('^')),
@@ -3720,7 +3737,11 @@ private:
 
     g["Dictionary"] = [](const SemanticValues &vs) {
       auto items = vs.transform<std::string>();
-      return dic(items);
+      return dic(items, false);
+    };
+    g["DictionaryI"] = [](const SemanticValues &vs) {
+      auto items = vs.transform<std::string>();
+      return dic(items, true);
     };
 
     g["Literal"] = [](const SemanticValues &vs) {
@@ -3732,6 +3753,10 @@ private:
       return liti(resolve_escape_sequence(tok.data(), tok.size()));
     };
     g["LiteralD"] = [](const SemanticValues &vs) {
+      auto &tok = vs.tokens.front();
+      return resolve_escape_sequence(tok.data(), tok.size());
+    };
+    g["LiteralID"] = [](const SemanticValues &vs) {
       auto &tok = vs.tokens.front();
       return resolve_escape_sequence(tok.data(), tok.size());
     };

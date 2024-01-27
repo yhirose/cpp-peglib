@@ -374,6 +374,28 @@ TEST(GeneralTest, Word_expression_test_Dictionary) {
   EXPECT_TRUE(parser.parse("toa"));
 }
 
+TEST(GeneralTest, Word_expression_case_ignore_test_Dictionary) {
+  parser parser(R"(
+    Identifier  ← < !Keyword [a-z][a-z]* >
+    Keyword     ← 'def'i | 'to'i
+    %whitespace ← [ \t\r\n]*
+    %word       ← [a-z]+
+  )");
+
+  EXPECT_TRUE(parser.parse("toa"));
+}
+
+TEST(GeneralTest, Word_expression_syntax_error_test_Dictionary) {
+  parser parser(R"(
+    Identifier  ← < !Keyword [a-z][a-z]* >
+    Keyword     ← 'def' | 'to'i
+    %whitespace ← [ \t\r\n]*
+    %word       ← [a-z]+
+  )");
+
+  EXPECT_FALSE(parser);
+}
+
 TEST(GeneralTest, Skip_token_test) {
   parser parser("  ROOT  <-  _ ITEM (',' _ ITEM _)* "
                 "  ITEM  <-  ([a-z0-9])+  "
