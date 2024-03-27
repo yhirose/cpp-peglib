@@ -379,6 +379,7 @@ class Trie {
 public:
   Trie(const std::vector<std::string> &items, bool ignore_case)
       : ignore_case_(ignore_case) {
+    size_t id = 0;
     for (const auto &item : items) {
       for (size_t len = 1; len <= item.size(); len++) {
         auto last = len == item.size();
@@ -386,17 +387,18 @@ public:
         std::string_view sv(s.data(), len);
         auto it = dic_.find(sv);
         if (it == dic_.end()) {
-          dic_.emplace(sv, Info{last, last});
+          dic_.emplace(sv, Info{last, last, id});
         } else if (last) {
           it->second.match = true;
         } else {
           it->second.done = false;
         }
       }
+      id++;
     }
   }
 
-  size_t match(const char *text, size_t text_len) const {
+  size_t match(const char *text, size_t text_len, size_t &id) const {
     size_t match_len = 0;
     auto done = false;
     size_t len = 1;
@@ -407,13 +409,18 @@ public:
       if (it == dic_.end()) {
         done = true;
       } else {
-        if (it->second.match) { match_len = len; }
+        if (it->second.match) {
+          match_len = len;
+          id = it->second.id;
+        }
         if (it->second.done) { done = true; }
       }
       len += 1;
     }
     return match_len;
   }
+
+  size_t size() const { return dic_.size(); }
 
 private:
   std::string to_lower(std::string s) const {
@@ -426,6 +433,7 @@ private:
   struct Info {
     bool done;
     bool match;
+    size_t id;
   };
 
   // TODO: Use unordered_map when heterogeneous lookup is supported in C++20
@@ -580,6 +588,7 @@ struct SemanticValues : protected std::vector<std::any> {
 
 private:
   friend class Context;
+  friend class Dictionary;
   friend class Sequence;
   friend class PrioritizedChoice;
   friend class Repetition;
@@ -2673,11 +2682,16 @@ inline size_t Ope::parse(const char *s, size_t n, SemanticValues &vs,
 inline size_t Dictionary::parse_core(const char *s, size_t n,
                                      SemanticValues &vs, Context &c,
                                      std::any &dt) const {
-  auto i = trie_.match(s, n);
+  size_t id;
+  auto i = trie_.match(s, n, id);
+
   if (i == 0) {
     c.set_error_pos(s);
     return static_cast<size_t>(-1);
   }
+
+  vs.choice_count_ = trie_.size();
+  vs.choice_ = id;
 
   // Word check
   if (c.wordOpe) {
@@ -2792,7 +2806,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         auto tok_ptr = dynamic_cast<const peg::TokenBoundary *>(ope_ptr);
         if (tok_ptr) { ope_ptr = tok_ptr->ope_.get(); }
       }
-      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_ptr)) {
+      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_ptr) &&
+          !dynamic_cast<const peg::Dictionary *>(ope_ptr)) {
         chvs.choice_count_ = 0;
         chvs.choice_ = 0;
       }

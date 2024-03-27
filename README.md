@@ -347,6 +347,14 @@ START <- 'This month is ' MONTH '.'
 MONTH <- 'Jan' | 'January' | 'Feb' | 'February' | '...'
 ```
 
+We are able to find which item is matched with `choice()`.
+
+```cpp
+parser["MONTH"] = [](const SemanticValues &vs) {
+  auto id = vs.choice();
+};
+```
+
 It supports the case insensitive mode.
 
 ```peg

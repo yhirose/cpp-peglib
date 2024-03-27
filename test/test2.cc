@@ -1429,6 +1429,20 @@ TEST(DicTest, Dictionary_invalid) {
   EXPECT_FALSE(ret);
 }
 
+TEST(DicTest, Dictionary_index) {
+  parser parser(R"(
+        START <- 'This month is ' MONTH '.'
+        MONTH <- 'Jan' | 'January' | 'Feb' | 'February'
+	)");
+
+  parser["MONTH"] = [](const SemanticValues &vs) {
+    EXPECT_EQ("Feb", vs.token());
+    EXPECT_EQ(2, vs.choice());
+  };
+
+  EXPECT_TRUE(parser.parse("This month is Feb."));
+}
+
 TEST(ErrorTest, Default_error_handling_1) {
   parser pg(R"(
     S <- '@' A B
