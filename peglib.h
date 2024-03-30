@@ -402,9 +402,10 @@ public:
     size_t match_len = 0;
     auto done = false;
     size_t len = 1;
+    std::string s_low = ignore_case_ ? to_lower(text) : "";
+    auto s = ignore_case_ ? std::string_view(s_low) : std::string_view(text);
     while (!done && len <= text_len) {
-      const auto &s = ignore_case_ ? to_lower(text) : std::string(text);
-      std::string_view sv(s.data(), len);
+      std::string_view sv = s.substr(0, len);
       auto it = dic_.find(sv);
       if (it == dic_.end()) {
         done = true;
