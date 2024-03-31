@@ -381,9 +381,9 @@ public:
       : ignore_case_(ignore_case) {
     size_t id = 0;
     for (const auto &item : items) {
+      const auto &s = ignore_case ? to_lower(item) : item;
       for (size_t len = 1; len <= item.size(); len++) {
         auto last = len == item.size();
-        const auto &s = ignore_case ? to_lower(item) : item;
         std::string_view sv(s.data(), len);
         auto it = dic_.find(sv);
         if (it == dic_.end()) {
@@ -399,12 +399,17 @@ public:
   }
 
   size_t match(const char *text, size_t text_len, size_t &id) const {
+    std::string lower_text;
+    if (ignore_case_) {
+      lower_text = to_lower(text);
+      text = lower_text.data();
+    }
+
     size_t match_len = 0;
     auto done = false;
     size_t len = 1;
     while (!done && len <= text_len) {
-      const auto &s = ignore_case_ ? to_lower(text) : std::string(text);
-      std::string_view sv(s.data(), len);
+      std::string_view sv(text, len);
       auto it = dic_.find(sv);
       if (it == dic_.end()) {
         done = true;
