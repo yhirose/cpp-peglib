@@ -41,6 +41,8 @@ This library supports the linear-time parsing known as the [*Packrat*](http://pd
 
   IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
+I am sure that you will enjoy this excellent ["Practical parsing with PEG and cpp-peglib"](https://berthub.eu/articles/posts/practical-peg-parsing/) article by [bert hubert](https://berthub.eu/)!
+
 How to use
 ----------
 
