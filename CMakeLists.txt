@@ -18,7 +18,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 add_library(peglib INTERFACE)
-target_include_directories(peglib INTERFACE ${CMAKE_SOURCE_DIR})
+target_include_directories(peglib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 option(BUILD_TESTS "Build cpp-peglib tests" ON)
 option(PEGLIB_BUILD_LINT "Build cpp-peglib lint utility" OFF)
