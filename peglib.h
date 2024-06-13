@@ -37,7 +37,13 @@
 #include <unordered_set>
 #include <vector>
 
-#if !defined(__cplusplus) || __cplusplus < 201703L
+#if defined(_MSVC_LANG)
+#define PEG_CPLUSPLUS_VERSION _MSVC_LANG
+#elif defined(__cplusplus)
+#define PEG_CPLUSPLUS_VERSION __cplusplus
+#endif
+
+#if !defined(PEG_CPLUSPLUS_VERSION) || PEG_CPLUSPLUS_VERSION < 201703L
 #error "Requires complete C++17 support"
 #endif
 
