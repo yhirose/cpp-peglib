@@ -23,6 +23,7 @@ target_include_directories(peglib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 option(BUILD_TESTS "Build cpp-peglib tests" ON)
 option(PEGLIB_BUILD_LINT "Build cpp-peglib lint utility" OFF)
 option(PEGLIB_BUILD_EXAMPLES "Build cpp-peglib examples" OFF)
+option(PEGLIB_BUILD_PL0 "Build pl0 interpreter" OFF)
 
 if (${BUILD_TESTS})
   add_subdirectory(test)
@@ -35,6 +36,10 @@ endif()
 
 if (${PEGLIB_BUILD_EXAMPLES})
   add_subdirectory(example)
+endif()
+
+if (${PEGLIB_BUILD_PL0})
+  add_subdirectory(pl0)
 endif()
 
 install(FILES peglib.h DESTINATION include)
