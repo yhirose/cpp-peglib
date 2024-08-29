@@ -4569,9 +4569,9 @@ public:
     return load_grammar(sv.data(), sv.size());
   }
 
-  bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
+  bool parse_n(const char *s, size_t n, const char *path = nullptr, std::string_view start = "") const {
     if (grammar_ != nullptr) {
-      const auto &rule = (*grammar_)[start_];
+      const auto &rule = (*grammar_)[!start.empty() ? std::string(start) : start_];
       auto result = rule.parse(s, n, path, log_);
       return post_process(s, n, result);
     }
@@ -4579,9 +4579,9 @@ public:
   }
 
   bool parse_n(const char *s, size_t n, std::any &dt,
-               const char *path = nullptr) const {
+               const char *path = nullptr, std::string_view start = "") const {
     if (grammar_ != nullptr) {
-      const auto &rule = (*grammar_)[start_];
+      const auto &rule = (*grammar_)[!start.empty() ? std::string(start) : start_];
       auto result = rule.parse(s, n, dt, path, log_);
       return post_process(s, n, result);
     }
@@ -4590,9 +4590,9 @@ public:
 
   template <typename T>
   bool parse_n(const char *s, size_t n, T &val,
-               const char *path = nullptr) const {
+               const char *path = nullptr, std::string_view start = "") const {
     if (grammar_ != nullptr) {
-      const auto &rule = (*grammar_)[start_];
+      const auto &rule = (*grammar_)[!start.empty() ? std::string(start) : start_];
       auto result = rule.parse_and_get_value(s, n, val, path, log_);
       return post_process(s, n, result);
     }
@@ -4601,57 +4601,57 @@ public:
 
   template <typename T>
   bool parse_n(const char *s, size_t n, std::any &dt, T &val,
-               const char *path = nullptr) const {
+               const char *path = nullptr, std::string_view start = "") const {
     if (grammar_ != nullptr) {
-      const auto &rule = (*grammar_)[start_];
+      const auto &rule = (*grammar_)[!start.empty() ? std::string(start) : start_];
       auto result = rule.parse_and_get_value(s, n, dt, val, path, log_);
       return post_process(s, n, result);
     }
     return false;
   }
 
-  bool parse(std::string_view sv, const char *path = nullptr) const {
+  bool parse(std::string_view sv, const char *path = nullptr, std::string_view start = "") const {
     return parse_n(sv.data(), sv.size(), path);
   }
 
   bool parse(std::string_view sv, std::any &dt,
-             const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), dt, path);
+             const char *path = nullptr, std::string_view start = "") const {
+    return parse_n(sv.data(), sv.size(), dt, path, start);
   }
 
   template <typename T>
-  bool parse(std::string_view sv, T &val, const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), val, path);
+  bool parse(std::string_view sv, T &val, const char *path = nullptr, std::string_view start = "") const {
+    return parse_n(sv.data(), sv.size(), val, path, start);
   }
 
   template <typename T>
   bool parse(std::string_view sv, std::any &dt, T &val,
-             const char *path = nullptr) const {
-    return parse_n(sv.data(), sv.size(), dt, val, path);
+             const char *path = nullptr, std::string_view start = "") const {
+    return parse_n(sv.data(), sv.size(), dt, val, path, start);
   }
 
 #if defined(__cpp_lib_char8_t)
-  bool parse(std::u8string_view sv, const char *path = nullptr) const {
-    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), path);
+  bool parse(std::u8string_view sv, const char *path = nullptr, std::string_view start = "") const {
+    return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), path, start);
   }
 
   bool parse(std::u8string_view sv, std::any &dt,
-             const char *path = nullptr) const {
+             const char *path = nullptr, std::string_view start = "") const {
     return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), dt,
                    path);
   }
 
   template <typename T>
-  bool parse(std::u8string_view sv, T &val, const char *path = nullptr) const {
+  bool parse(std::u8string_view sv, T &val, const char *path = nullptr, std::string_view start = "") const {
     return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), val,
-                   path);
+                   path, start);
   }
 
   template <typename T>
   bool parse(std::u8string_view sv, std::any &dt, T &val,
-             const char *path = nullptr) const {
+             const char *path = nullptr, std::string_view start = "") const {
     return parse_n(reinterpret_cast<const char *>(sv.data()), sv.size(), dt,
-                   val, path);
+                   val, path, start);
   }
 #endif
 
