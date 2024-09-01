@@ -24,7 +24,9 @@ Primary <-
 	/ BeginTok  Expression  EndTok
 	/ BeginCapScope  Expression  EndCapScope
 	/ BeginCap  Expression  EndCap
+	/ CapScope
 	/ BackRef
+	/ DictionaryI
 	/ LiteralI
 	/ Dictionary
 	/ Literal
@@ -32,17 +34,19 @@ Primary <-
 	/ NegatedClass
 	/ ClassI
 	/ Class
-	/  DOT
+	/ DOT
 
 Identifier <-  IdentCont  Spacing
 
-IdentCont <- IdentStart  IdentRest*
+IdentCont <- <IdentStart  IdentRest*>
 
 IdentStart <-  !"↑"  !"⇑" ([a-zA-Z_%] /  [\u0080-\uFFFF])
 
 IdentRest <-  IdentStart /  [0-9]
 
 Dictionary <-  LiteralD  (PIPE  LiteralD)+
+
+DictionaryI <- LiteralID (PIPE LiteralID)*
 
 lit_ope <-
 	[']  <(![']  Char)*> [']  Spacing
@@ -52,9 +56,13 @@ Literal <-  lit_ope
 
 LiteralD <-  lit_ope
 
-LiteralI <-
+lit_case_ignore_ope <-
 	[']  <(![']  Char)*>  "'i" Spacing
 	/ ["]  <(!["]  Char)*>  '"i' Spacing
+
+LiteralI <- lit_case_ignore_ope
+
+LiteralID <- lit_case_ignore_ope
 
 # NOTE: The original Brian Ford's paper uses 'zom' instead of 'oom'.
 Class <-  '['  !'^' <(!']'  Range)+>  ']' Spacing
@@ -81,6 +89,8 @@ RepetitionRange <-
 	/ COMMA  Number
 
 Number <-  [0-9]+  Spacing
+
+CapScope <- BeginCapScope Expression EndCapScope
 
 LEFTARROW <-  ("<-" / "←")  Spacing
 
