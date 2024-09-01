@@ -27,6 +27,7 @@ const codeAstOptimized = setupInfoArea("code-ast-optimized");
 const codeProfile = setupInfoArea("code-profile");
 
 $('#opt-mode').val(localStorage.getItem('optimizationMode') || 'all');
+$('#start-rule').val(localStorage.getItem('startRule') || '');
 $('#packrat').prop('checked', localStorage.getItem('packrat') === 'true');
 $('#auto-refresh').prop('checked', localStorage.getItem('autoRefresh') === 'true');
 $('#parse').prop('disabled', $('#auto-refresh').prop('checked'));
@@ -61,6 +62,7 @@ function updateLocalStorage() {
   localStorage.setItem('grammarText', grammar.getValue());
   localStorage.setItem('codeText', code.getValue());
   localStorage.setItem('optimizationMode', $('#opt-mode').val());
+  localStorage.setItem('startRule', $('#start-rule').val());
   localStorage.setItem('packrat', $('#packrat').prop('checked'));
   localStorage.setItem('autoRefresh', $('#auto-refresh').prop('checked'));
 }
@@ -75,6 +77,7 @@ function parse() {
   const codeText = code.getValue();
 
   const optimizationMode = $('#opt-mode').val();
+  const startRule = $('#start-rule').val();
   const packrat = $('#packrat').prop('checked');
 
   $grammarInfo.html('');
@@ -97,7 +100,7 @@ function parse() {
     'background-color': 'rgba(0, 0, 0, 0.1)'
   });
   window.setTimeout(() => {
-    const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat));
+    const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat, startRule));
       $('#overlay').css({
         'z-index': '-1',
         'display': 'none',
@@ -165,6 +168,7 @@ $('#code-info').on('click', 'li', makeOnClickInInfo(code));
 
 // Event handing in the AST optimization
 $('#opt-mode').on('change', setupTimer);
+$('#start-rule').on('keydown', setupTimer);
 $('#packrat').on('change', setupTimer);
 $('#auto-refresh').on('change', () => {
   updateLocalStorage();

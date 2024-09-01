@@ -21,7 +21,8 @@ std::string escape_json(const std::string &s) {
 std::function<void(size_t, size_t, const std::string &, const std::string &)>
 makeJSONFormatter(peg::parser &peg, std::string &json, bool &init) {
   init = true;
-  return [&](size_t ln, size_t col, const std::string &msg, const std::string &rule) mutable {
+  return [&](size_t ln, size_t col, const std::string &msg,
+             const std::string &rule) mutable {
     if (!init) { json += ","; }
     json += "{";
     json += R"("ln":)" + std::to_string(ln) + ",";
@@ -43,11 +44,11 @@ makeJSONFormatter(peg::parser &peg, std::string &json, bool &init) {
 }
 
 bool parse_grammar(const std::string &text, peg::parser &peg,
-                   std::string &json) {
+                   const std::string &startRule, std::string &json) {
   bool init;
   peg.set_logger(makeJSONFormatter(peg, json, init));
   json += "[";
-  auto ret = peg.load_grammar(text.data(), text.size());
+  auto ret = peg.load_grammar(text.data(), text.size(), startRule);
   json += "]";
   return ret;
 }
@@ -64,7 +65,7 @@ bool parse_code(const std::string &text, peg::parser &peg, std::string &json,
 }
 
 std::string lint(const std::string &grammarText, const std::string &codeText,
-                 bool opt_mode, bool packrat) {
+                 bool opt_mode, bool packrat, const std::string &startRule) {
   std::string grammarResult;
   std::string codeResult;
   std::string astResult;
@@ -72,7 +73,8 @@ std::string lint(const std::string &grammarText, const std::string &codeText,
   std::string profileResult;
 
   peg::parser peg;
-  auto is_grammar_valid = parse_grammar(grammarText, peg, grammarResult);
+  auto is_grammar_valid =
+      parse_grammar(grammarText, peg, startRule, grammarResult);
   auto is_source_valid = false;
 
   if (is_grammar_valid && peg) {
