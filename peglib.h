@@ -3298,18 +3298,15 @@ using Rules = std::unordered_map<std::string, std::shared_ptr<Ope>>;
 
 class ParserGenerator {
 public:
-  static std::shared_ptr<Grammar> parse(const char *s, size_t n,
-                                        const Rules &rules, std::string &start,
-                                        bool &enablePackratParsing, Log log) {
-    return get_instance().perform_core(s, n, rules, start, enablePackratParsing,
-                                       log);
-  }
+  struct ParserContext {
+    std::shared_ptr<Grammar> grammar;
+    std::string start;
+    bool enablePackratParsing = false;
+  };
 
-  static std::shared_ptr<Grammar> parse(const char *s, size_t n,
-                                        std::string &start,
-                                        bool &enablePackratParsing, Log log) {
-    Rules dummy;
-    return parse(s, n, dummy, start, enablePackratParsing, log);
+  static ParserContext parse(const char *s, size_t n, const Rules &rules,
+                             Log log, std::string_view start) {
+    return get_instance().perform_core(s, n, rules, log, std::string(start));
   }
 
   // For debugging purpose
@@ -3989,9 +3986,8 @@ private:
     return true;
   }
 
-  std::shared_ptr<Grammar> perform_core(const char *s, size_t n,
-                                        const Rules &rules, std::string &start,
-                                        bool &enablePackratParsing, Log log) {
+  ParserContext perform_core(const char *s, size_t n, const Rules &rules,
+                             Log log, std::string requested_start) {
     Data data;
     auto &grammar = *data.grammar;
 
@@ -4023,7 +4019,7 @@ private:
           log(line.first, line.second, "syntax error", r.error_info.label);
         }
       }
-      return nullptr;
+      return {};
     }
 
     // User provided rules
@@ -4081,7 +4077,25 @@ private:
     }
 
     // Set root definition
-    auto &start_rule = grammar[data.start];
+    auto start = data.start;
+
+    if (!requested_start.empty()) {
+      if (grammar.count(requested_start)) {
+        start = requested_start;
+      } else {
+        if (log) {
+          auto line = line_info(s, s);
+          log(line.first, line.second,
+              "The specified start rule '" + requested_start + "' is undefined.",
+              "");
+        }
+        ret = false;
+      }
+    }
+
+    if (!ret) { return {}; }
+
+    auto &start_rule = grammar[start];
 
     // Check if the start rule has ignore operator
     {
@@ -4096,7 +4110,7 @@ private:
       }
     }
 
-    if (!ret) { return nullptr; }
+    if (!ret) { return {}; }
 
     // Check missing definitions
     auto referenced = std::unordered_set<std::string>{
@@ -4129,7 +4143,7 @@ private:
       }
     }
 
-    if (!ret) { return nullptr; }
+    if (!ret) { return {}; }
 
     // Link references
     for (auto &x : grammar) {
@@ -4153,10 +4167,10 @@ private:
       }
     }
 
-    if (!ret) { return nullptr; }
+    if (!ret) { return {}; }
 
     // Check infinite loop
-    if (detect_infiniteLoop(data, start_rule, log, s)) { return nullptr; }
+    if (detect_infiniteLoop(data, start_rule, log, s)) { return {}; }
 
     // Automatic whitespace skipping
     if (grammar.count(WHITESPACE_DEFINITION_NAME)) {
@@ -4169,7 +4183,7 @@ private:
       auto &rule = grammar[WHITESPACE_DEFINITION_NAME];
       start_rule.whitespaceOpe = wsp(rule.get_core_operator());
 
-      if (detect_infiniteLoop(data, rule, log, s)) { return nullptr; }
+      if (detect_infiniteLoop(data, rule, log, s)) { return {}; }
     }
 
     // Word expression
@@ -4177,7 +4191,7 @@ private:
       auto &rule = grammar[WORD_DEFINITION_NAME];
       start_rule.wordOpe = rule.get_core_operator();
 
-      if (detect_infiniteLoop(data, rule, log, s)) { return nullptr; }
+      if (detect_infiniteLoop(data, rule, log, s)) { return {}; }
     }
 
     // Apply instructions
@@ -4189,9 +4203,7 @@ private:
           const auto &info =
               std::any_cast<PrecedenceClimbing::BinOpeInfo>(instruction.data);
 
-          if (!apply_precedence_instruction(rule, info, s, log)) {
-            return nullptr;
-          }
+          if (!apply_precedence_instruction(rule, info, s, log)) { return {}; }
         } else if (instruction.type == "error_message") {
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
@@ -4200,11 +4212,7 @@ private:
       }
     }
 
-    // Set root definition
-    start = data.start;
-    enablePackratParsing = data.enablePackratParsing;
-
-    return data.grammar;
+    return {data.grammar, start, data.enablePackratParsing};
   }
 
   bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log,
@@ -4530,43 +4538,52 @@ class parser {
 public:
   parser() = default;
 
-  parser(const char *s, size_t n, const Rules &rules) {
-    load_grammar(s, n, rules);
+  parser(const char *s, size_t n, const Rules &rules,
+         std::string_view start = {}) {
+    load_grammar(s, n, rules, start);
   }
 
-  parser(const char *s, size_t n) : parser(s, n, Rules()) {}
+  parser(const char *s, size_t n, std::string_view start = {})
+      : parser(s, n, Rules(), start) {}
 
-  parser(std::string_view sv, const Rules &rules)
-      : parser(sv.data(), sv.size(), rules) {}
+  parser(std::string_view sv, const Rules &rules, std::string_view start = {})
+      : parser(sv.data(), sv.size(), rules, start) {}
 
-  parser(std::string_view sv) : parser(sv.data(), sv.size(), Rules()) {}
+  parser(std::string_view sv, std::string_view start = {})
+      : parser(sv.data(), sv.size(), Rules(), start) {}
 
 #if defined(__cpp_lib_char8_t)
-  parser(std::u8string_view sv, const Rules &rules)
-      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), rules) {}
+  parser(std::u8string_view sv, const Rules &rules, std::string_view start = {})
+      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), rules,
+               start) {}
 
-  parser(std::u8string_view sv)
-      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), Rules()) {}
+  parser(std::u8string_view sv, std::string_view start = {})
+      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), Rules(),
+               start) {}
 #endif
 
   operator bool() { return grammar_ != nullptr; }
 
-  bool load_grammar(const char *s, size_t n, const Rules &rules) {
-    grammar_ = ParserGenerator::parse(s, n, rules, start_,
-                                      enablePackratParsing_, log_);
+  bool load_grammar(const char *s, size_t n, const Rules &rules,
+                    std::string_view start = {}) {
+    auto cxt = ParserGenerator::parse(s, n, rules, log_, start);
+    grammar_ = cxt.grammar;
+    start_ = cxt.start;
+    enablePackratParsing_ = cxt.enablePackratParsing;
     return grammar_ != nullptr;
   }
 
-  bool load_grammar(const char *s, size_t n) {
-    return load_grammar(s, n, Rules());
+  bool load_grammar(const char *s, size_t n, std::string_view start = {}) {
+    return load_grammar(s, n, Rules(), start);
   }
 
-  bool load_grammar(std::string_view sv, const Rules &rules) {
-    return load_grammar(sv.data(), sv.size(), rules);
+  bool load_grammar(std::string_view sv, const Rules &rules,
+                    std::string_view start = {}) {
+    return load_grammar(sv.data(), sv.size(), rules, start);
   }
 
-  bool load_grammar(std::string_view sv) {
-    return load_grammar(sv.data(), sv.size());
+  bool load_grammar(std::string_view sv, std::string_view start = {}) {
+    return load_grammar(sv.data(), sv.size(), start);
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
@@ -4671,7 +4688,7 @@ public:
   void enable_packrat_parsing() {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
-      rule.enablePackratParsing = enablePackratParsing_ && true;
+      rule.enablePackratParsing = enablePackratParsing_;
     }
   }
 

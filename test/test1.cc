@@ -423,7 +423,9 @@ TEST(GeneralTest, Skip_token_test2) {
 }
 
 TEST(GeneralTest, Custom_AST_test) {
-  struct CustomType { bool dummy = false; };
+  struct CustomType {
+    bool dummy = false;
+  };
   using CustomAst = AstBase<CustomType>;
 
   parser parser(R"(
@@ -646,11 +648,8 @@ TEST(GeneralTest, Calculator_test2) {
         NUMBER           <-  [0-9]+
     )";
 
-  std::string start;
-  bool enablePackratParsing = false;
-  auto grammar = ParserGenerator::parse(syntax, strlen(syntax), start,
-                                        enablePackratParsing, nullptr);
-  auto &g = *grammar;
+  auto cxt = ParserGenerator::parse(syntax, strlen(syntax), {}, nullptr, {});
+  auto &g = *cxt.grammar;
 
   // Setup actions
   auto reduce = [](const SemanticValues &vs) -> long {
@@ -679,7 +678,7 @@ TEST(GeneralTest, Calculator_test2) {
 
   // Parse
   long val;
-  auto r = g[start].parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
+  auto r = g[cxt.start].parse_and_get_value("1+2*3*(4-5+6)/7-8", val);
 
   EXPECT_TRUE(r.ret);
   EXPECT_EQ(-3, val);
@@ -1284,4 +1283,41 @@ TEST(GeneralTest, PassingContextAndOutputParameter) {
   std::any dt = std::string{"context"};
   parser.parse<int>("42", dt, output);
   EXPECT_EQ(42, output);
+}
+
+TEST(GeneralTest, SpecifyStartRule) {
+  auto grammar = R"(
+    Start       <- A
+    A           <- B (',' B)*
+    B           <- '[one]' / '[two]'
+    %whitespace <- [ \t\n]*
+  )";
+
+  {
+    parser peg(grammar, "AAA");
+    EXPECT_FALSE(peg);
+  }
+
+  {
+    parser peg(grammar, "A");
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+  }
+
+  {
+    parser peg(grammar);
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+
+    peg.load_grammar(grammar, "A");
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+  }
+
+  {
+    parser peg;
+
+    peg.load_grammar(grammar);
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+
+    peg.load_grammar(grammar, "A");
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+  }
 }

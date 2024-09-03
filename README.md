@@ -647,6 +647,29 @@ custom_message.txt:1:8: code format error...
 
 NOTE: If there are more than one elements with error message instruction in a prioritized choice, this feature may not work as you expect.
 
+Change the Start Definition Rule
+--------------------------------
+
+We can change the start definition rule as below.
+
+```cpp
+auto grammar = R"(
+  Start       <- A
+  A           <- B (',' B)*
+  B           <- '[one]' / '[two]'
+  %whitespace <- [ \t\n]*
+)";
+
+peg::parser parser(grammar, "A"); // Start Rule is "A"
+
+  or
+
+peg::parser parser;
+parser.load_grammar(grammar, "A"); // Start Rule is "A"
+
+parser.parse(" [one] , [two] "); // OK
+```
+
 peglint - PEG syntax lint utility
 ---------------------------------
 
