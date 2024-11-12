@@ -3310,7 +3310,20 @@ public:
   }
 
   // For debugging purpose
-  static Grammar &grammar() { return get_instance().g; }
+  static bool parse_test(const char *d, const char *s) {
+    Data data;
+    std::any dt = &data;
+
+    auto n = strlen(s);
+    auto r = get_instance().g[d].parse(s, n, dt);
+    return r.ret && r.len == n;
+  }
+
+#if defined(__cpp_lib_char8_t)
+  static bool parse_test(const char8_t *d, const char8_t *s) {
+    reutnr parse_test(reinterpret_cast<const char *>(s), s);
+  }
+#endif
 
 private:
   static ParserGenerator &get_instance() {
@@ -4086,7 +4099,8 @@ private:
         if (log) {
           auto line = line_info(s, s);
           log(line.first, line.second,
-              "The specified start rule '" + requested_start + "' is undefined.",
+              "The specified start rule '" + requested_start +
+                  "' is undefined.",
               "");
         }
         ret = false;
