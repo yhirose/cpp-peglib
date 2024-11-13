@@ -5,7 +5,8 @@ cpp-peglib
 
 C++17 header-only [PEG](http://en.wikipedia.org/wiki/Parsing_expression_grammar) (Parsing Expression Grammars) library. You can start using it right away just by including `peglib.h` in your project.
 
-Since this library only supports C++17 compilers, please make sure that compiler the option `-std=c++17` is enabled. (`/std:c++17 /Zc:__cplusplus` for MSVC)
+Since this library only supports C++17 compilers, please make sure that the compiler option `-std=c++17` is enabled.
+(`/std:c++17 /Zc:__cplusplus` for MSVC)
 
 You can also try the online version, PEG Playground at https://yhirose.github.io/cpp-peglib.
 
@@ -34,11 +35,11 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
   * `label { error_message "..." }` (Error message instruction)
   * `{ no_ast_opt }` (No AST node optimization instruction)
 
-'End of Input' check will be done as default. In order to disable the check, please call `disable_eoi_check`.
+'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
 
-  IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
+IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
 I am sure that you will enjoy this excellent ["Practical parsing with PEG and cpp-peglib"](https://berthub.eu/articles/posts/practical-peg-parsing/) article by [bert hubert](https://berthub.eu/)!
 
@@ -208,7 +209,7 @@ parser["ROOT"] = [&](const SemanticValues& vs) {
 auto ret = parser.parse(" item1, item2 ");
 ```
 
-The following grammar is same as the above.
+The following grammar is the same as the above.
 
 ```cpp
 peg::parser parser(R"(
@@ -356,7 +357,7 @@ parser["MONTH"] = [](const SemanticValues &vs) {
 };
 ```
 
-It supports the case insensitive mode.
+It supports the case-insensitive mode.
 
 ```peg
 START <- 'This month is ' MONTH '.'
@@ -366,7 +367,7 @@ MONTH <- 'Jan'i | 'January'i | 'Feb'i | 'February'i | '...'i
 Cut operator
 ------------
 
-`↑` operator could mitigate backtrack performance problem, but has a risk to change the meaning of grammar.
+`↑` operator could mitigate the backtrack performance problem, but has a risk to change the meaning of grammar.
 
 ```peg
 S <- '(' ↑ P ')' / '"' ↑ P '"' / P
@@ -479,7 +480,7 @@ if (parser.parse("...", ast)) {
 }
 ```
 
-`optimize_ast` removes redundant nodes to make a AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used.
+`optimize_ast` removes redundant nodes to make an AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used.
 
 It internally calls `peg::AstOptimizer` to do the job. You can make your own AST optimizers to fit your needs.
 
@@ -508,20 +509,20 @@ auto ret = ROOT.parse(" [tag1] [tag:2] [tag-3] ");
 
 The following are available operators:
 
-| Operator |     Description                 | Operator |     Description      |
-| :------- | :------------------------------ | :------- | :------------------- |
-| seq      | Sequence                        | cho      | Prioritized Choice   |
-| zom      | Zero or More                    | oom      | One or More          |
-| opt      | Optional                        | apd      | And predicate        |
-| npd      | Not predicate                   | lit      | Literal string       |
-| liti     | Case-insensitive Literal string | cls      | Character class      |
-| ncls     | Negated Character class         | chr      | Character            |
-| dot      | Any character                   | tok      | Token boundary       |
-| ign      | Ignore semantic value           | csc      | Capture scope        |
-| cap      | Capture                         | bkr      | Back reference       |
-| dic      | Dictionary                      | pre      | Infix expression     |
-| rec      | Infix expression                | usr      | User defined parser  |
-| rep      | Repetition                      |          |                      |
+| Operator | Description                     | Operator | Description         |
+|:---------|:--------------------------------|:---------|:--------------------|
+| seq      | Sequence                        | cho      | Prioritized Choice  |
+| zom      | Zero or More                    | oom      | One or More         |
+| opt      | Optional                        | apd      | And predicate       |
+| npd      | Not predicate                   | lit      | Literal string      |
+| liti     | Case-insensitive Literal string | cls      | Character class     |
+| ncls     | Negated Character class         | chr      | Character           |
+| dot      | Any character                   | tok      | Token boundary      |
+| ign      | Ignore semantic value           | csc      | Capture scope       |
+| cap      | Capture                         | bkr      | Back reference      |
+| dic      | Dictionary                      | pre      | Infix expression    |
+| rec      | Infix expression                | usr      | User defined parser |
+| rep      | Repetition                      |          |                     |
 
 Adjust definitions
 ------------------
@@ -567,7 +568,7 @@ cpp-peglib supports the furthest failure error position report as described in t
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
-The custom message supports `%t` which is a place holder for the unexpected token, and `%c` for the unexpected Unicode char.
+The custom message supports `%t` which is a placeholder for the unexpected token, and `%c` for the unexpected Unicode char.
 
 Here is an example of Java-like grammar:
 
@@ -599,7 +600,7 @@ stmtb       ← (!(Stmt / 'else' / '}') .)* { error_message "invalid statement" 
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
 ```
 
-For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is associated with a custom message "missing semicolon in assignment.".
+For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is associated with a custom message "missing semicolon in assignment."
 
 Here is the result:
 
@@ -644,7 +645,7 @@ CODE        <- < '0x' [a-fA-F0-9]+ > { error_message 'code format error...' }
 custom_message.txt:1:8: code format error...
 ```
 
-NOTE: If there are more than one elements with error message instruction in a prioritized choice, this feature may not work as you expect.
+NOTE: If there is more than one element with an error message instruction in a prioritized choice, this feature may not work as you expect.
 
 Change the Start Definition Rule
 --------------------------------
