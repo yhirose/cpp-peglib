@@ -3320,8 +3320,8 @@ public:
   }
 
 #if defined(__cpp_lib_char8_t)
-  static bool parse_test(const char8_t *d, const char8_t *s) {
-    reutnr parse_test(reinterpret_cast<const char *>(s), s);
+  static bool parse_test(const char *d, const char8_t *s) {
+    return parse_test(d, reinterpret_cast<const char *>(s));
   }
 #endif
 
