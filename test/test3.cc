@@ -156,6 +156,8 @@ TEST(PEGTest, PEG_Class) {
   EXPECT_TRUE(ParserGenerator::parse_test("Class", "[-+]"));
   EXPECT_TRUE(ParserGenerator::parse_test("Class", "[+-]"));
   EXPECT_TRUE(ParserGenerator::parse_test("Class", "[\\^]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[-]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[\\-]"));
 }
 
 TEST(PEGTest, PEG_Negated_Class) {

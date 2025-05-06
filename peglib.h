@@ -3447,7 +3447,7 @@ private:
         cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
 
     g["Char"] <=
-        cho(seq(chr('\\'), cls("fnrtv'\"[]\\^")),
+        cho(seq(chr('\\'), cls("fnrtv'\"[]\\^-")),
             seq(chr('\\'), cls("0-3"), cls("0-7"), cls("0-7")),
             seq(chr('\\'), cls("0-7"), opt(cls("0-7"))),
             seq(lit("\\x"), cls("0-9a-fA-F"), opt(cls("0-9a-fA-F"))),
