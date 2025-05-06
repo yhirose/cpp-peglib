@@ -1290,20 +1290,28 @@ private:
 
 class Character : public Ope, public std::enable_shared_from_this<Character> {
 public:
-  Character(char ch) : ch_(ch) {}
+  Character(char32_t ch) : ch_(ch) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
-    if (n < 1 || s[0] != ch_) {
+    if (n < 1) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
     }
-    return 1;
+
+    char32_t cp = 0;
+    auto len = decode_codepoint(s, n, cp);
+
+    if (cp != ch_) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
+    }
+    return len;
   }
 
   void accept(Visitor &v) override;
 
-  char ch_;
+  char32_t ch_;
 };
 
 class AnyCharacter : public Ope,
@@ -1625,7 +1633,7 @@ ncls(const std::vector<std::pair<char32_t, char32_t>> &ranges,
   return std::make_shared<CharacterClass>(ranges, true, ignore_case);
 }
 
-inline std::shared_ptr<Ope> chr(char dt) {
+inline std::shared_ptr<Ope> chr(char32_t dt) {
   return std::make_shared<Character>(dt);
 }
 
