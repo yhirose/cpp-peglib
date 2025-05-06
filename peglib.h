@@ -3482,8 +3482,8 @@ private:
     ~g["LABEL"] <= seq(cho(chr('^'), lit(u8(u8"⇑"))), g["Spacing"]);
 
     ~g["Spacing"] <= zom(cho(g["Space"], g["Comment"]));
-    g["Comment"] <=
-        seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())), g["EndOfLine"]);
+    g["Comment"] <= seq(chr('#'), zom(seq(npd(g["EndOfLine"]), dot())),
+                        opt(g["EndOfLine"]));
     g["Space"] <= cho(chr(' '), chr('\t'), g["EndOfLine"]);
     g["EndOfLine"] <= cho(lit("\r\n"), chr('\n'), chr('\r'));
     g["EndOfFile"] <= npd(dot());
