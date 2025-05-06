@@ -12,28 +12,28 @@ You can also try the online version, PEG Playground at https://yhirose.github.io
 
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bryan Ford. *cpp-peglib* also supports the following additional syntax for now:
 
-  * `'...'i` (Case-insensitive literal operator)
-  * `[...]i` (Case-insensitive character class operator)
-  * `[^...]` (Negated character class operator)
-  * `[^...]i` (Case-insensitive negated character class operator)
-  * `{2,5}` (Regex-like repetition operator)
-  * `<` ... `>` (Token boundary operator)
-  * `~` (Ignore operator)
-  * `\x20` (Hex number char)
-  * `\u10FFFF` (Unicode char)
-  * `%whitespace` (Automatic whitespace skipping)
-  * `%word` (Word expression)
-  * `$name(` ... `)` (Capture scope operator)
-  * `$name<` ... `>` (Named capture operator)
-  * `$name` (Backreference operator)
-  * `|` (Dictionary operator)
-  * `↑` (Cut operator)
-  * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
-  * `{ precedence L - + L / * }` (Parsing infix expression)
-  * `%recovery(` ... `)` (Error recovery operator)
-  * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
-  * `label { error_message "..." }` (Error message instruction)
-  * `{ no_ast_opt }` (No AST node optimization instruction)
+* `'...'i` (Case-insensitive literal operator)
+* `[...]i` (Case-insensitive character class operator)
+* `[^...]` (Negated character class operator)
+* `[^...]i` (Case-insensitive negated character class operator)
+* `{2,5}` (Regex-like repetition operator)
+* `<` ... `>` (Token boundary operator)
+* `~` (Ignore operator)
+* `\x20` (Hex number char)
+* `\u10FFFF` (Unicode char)
+* `%whitespace` (Automatic whitespace skipping)
+* `%word` (Word expression)
+* `$name(` ... `)` (Capture scope operator)
+* `$name<` ... `>` (Named capture operator)
+* `$name` (Backreference operator)
+* `|` (Dictionary operator)
+* `↑` (Cut operator)
+* `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
+* `{ precedence L - + L / * }` (Parsing infix expression)
+* `%recovery(` ... `)` (Error recovery operator)
+* `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
+* `label { error_message "..." }` (Error message instruction)
+* `{ no_ast_opt }` (No AST node optimization instruction)
 
 'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
 
@@ -136,10 +136,10 @@ There are four semantic actions available:
 
 `SemanticValues` value contains the following information:
 
- - Semantic values
- - Matched string information
- - Token information if the rule is literal or uses a token boundary operator
- - Choice number when the rule is 'prioritized choice'
+* Semantic values
+* Matched string information
+* Token information if the rule is literal or uses a token boundary operator
+* Choice number when the rule is 'prioritized choice'
 
 `any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
 
@@ -281,9 +281,9 @@ As you can see in the first example, we can ignore whitespaces between tokens au
 
 `%whitespace` rule can be applied to the following three conditions:
 
-  * trailing spaces on tokens
-  * leading spaces on text
-  * trailing spaces on literal strings in rules
+* trailing spaces on tokens
+* leading spaces on text
+* trailing spaces on literal strings in rules
 
 These are valid tokens:
 
@@ -787,13 +787,13 @@ Number      <- < [0-9]+ >
 Sample codes
 ------------
 
-  * [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
-  * [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
-  * [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
-  * [Calculator (parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc4.cc)
-  * [Calculator (AST version and parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc5.cc)
-  * [A tiny PL/0 JIT compiler in less than 900 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
-  * [A Programming Language just for writing Fizz Buzz program. :)](https://github.com/yhirose/fizzbuzzlang)
+* [Calculator](https://github.com/yhirose/cpp-peglib/blob/master/example/calc.cc)
+* [Calculator (with parser operators)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc2.cc)
+* [Calculator (AST version)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc)
+* [Calculator (parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc4.cc)
+* [Calculator (AST version and parsing expressions by precedence climbing)](https://github.com/yhirose/cpp-peglib/blob/master/example/calc5.cc)
+* [A tiny PL/0 JIT compiler in less than 900 LOC with LLVM and PEG parser](https://github.com/yhirose/pl0-jit-compiler)
+* [A Programming Language just for writing Fizz Buzz program. :)](https://github.com/yhirose/fizzbuzzlang)
 
 License
 -------
