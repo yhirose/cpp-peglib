@@ -47,3 +47,4 @@ CMakeCache.txt
 *.opensdf
 .idea/
 grammar/test/*
+.DS_Store
