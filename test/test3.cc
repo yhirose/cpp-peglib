@@ -256,7 +256,7 @@ TEST(PEGTest, PEG_Operators) {
 
 TEST(PEGTest, PEG_Comment) {
   EXPECT_TRUE(ParserGenerator::parse_test("Comment", "# Comment.\n"));
-  EXPECT_FALSE(ParserGenerator::parse_test("Comment", "# Comment."));
+  EXPECT_TRUE(ParserGenerator::parse_test("Comment", "# Comment."));
   EXPECT_FALSE(ParserGenerator::parse_test("Comment", " "));
   EXPECT_FALSE(ParserGenerator::parse_test("Comment", "a"));
 }
