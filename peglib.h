@@ -287,7 +287,8 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
     auto ch = s[i];
     if (ch == '\\') {
       i++;
-      if (i == n) { throw std::runtime_error("Invalid escape sequence..."); }
+      assert(i < n);
+
       switch (s[i]) {
       case 'f':
         r += '\f';
@@ -3369,6 +3370,17 @@ private:
     Data() : grammar(std::make_shared<Grammar>()) {}
   };
 
+  class SyntaxErrorException : public std::runtime_error {
+  public:
+    SyntaxErrorException(const char *what_arg, std::pair<size_t, size_t> r)
+        : std::runtime_error(what_arg), r_(r) {}
+
+    std::pair<size_t, size_t> line_info() const { return r_; }
+
+  private:
+    std::pair<size_t, size_t> r_;
+  };
+
   void make_grammar() {
     // Setup PEG syntax parser
     g["Grammar"] <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
@@ -3822,6 +3834,10 @@ private:
         auto s2 = std::any_cast<std::string>(vs[1]);
         auto cp1 = decode_codepoint(s1.data(), s1.length());
         auto cp2 = decode_codepoint(s2.data(), s2.length());
+        if (cp1 > cp2) {
+          throw SyntaxErrorException("characer range is out of order...",
+                                     vs.line_info());
+        }
         return std::pair(cp1, cp2);
       }
       case 1: {
@@ -4026,19 +4042,27 @@ private:
       }
     }
 
-    std::any dt = &data;
-    auto r = g["Grammar"].parse(s, n, dt, nullptr, log);
+    try {
+      std::any dt = &data;
+      auto r = g["Grammar"].parse(s, n, dt, nullptr, log);
 
-    if (!r.ret) {
-      if (log) {
-        if (r.error_info.message_pos) {
-          auto line = line_info(s, r.error_info.message_pos);
-          log(line.first, line.second, r.error_info.message,
-              r.error_info.label);
-        } else {
-          auto line = line_info(s, r.error_info.error_pos);
-          log(line.first, line.second, "syntax error", r.error_info.label);
+      if (!r.ret) {
+        if (log) {
+          if (r.error_info.message_pos) {
+            auto line = line_info(s, r.error_info.message_pos);
+            log(line.first, line.second, r.error_info.message,
+                r.error_info.label);
+          } else {
+            auto line = line_info(s, r.error_info.error_pos);
+            log(line.first, line.second, "syntax error", r.error_info.label);
+          }
         }
+        return {};
+      }
+    } catch (const SyntaxErrorException &e) {
+      if (log) {
+        auto line = e.line_info();
+        log(line.first, line.second, e.what(), "");
       }
       return {};
     }
@@ -4067,7 +4091,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The definition '" + name + "' is already defined.", "");
+              "the definition '" + name + "' is already defined.", "");
         }
       }
       ret = false;
@@ -4079,7 +4103,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The instruction '" + type + "' is already defined.", "");
+              "the instruction '" + type + "' is already defined.", "");
         }
       }
       ret = false;
@@ -4091,7 +4115,7 @@ private:
         if (log) {
           auto line = line_info(s, ptr);
           log(line.first, line.second,
-              "The back reference '" + name + "' is undefined.", "");
+              "the back reference '" + name + "' is undefined.", "");
         }
       }
       ret = false;
@@ -4107,7 +4131,7 @@ private:
         if (log) {
           auto line = line_info(s, s);
           log(line.first, line.second,
-              "The specified start rule '" + requested_start +
+              "the specified start rule '" + requested_start +
                   "' is undefined.",
               "");
         }
@@ -4125,7 +4149,7 @@ private:
         if (log) {
           auto line = line_info(s, start_rule.s_);
           log(line.first, line.second,
-              "Ignore operator cannot be applied to '" + start_rule.name + "'.",
+              "ignore operator cannot be applied to '" + start_rule.name + "'.",
               "");
         }
         ret = false;

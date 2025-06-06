@@ -1321,3 +1321,11 @@ TEST(GeneralTest, SpecifyStartRule) {
     EXPECT_TRUE(peg.parse(" [one] , [two] "));
   }
 }
+
+TEST(GeneralTest, InvalidRange) {
+  parser parser("S <- [z-a]");
+
+  bool ret = parser;
+  EXPECT_FALSE(ret);
+}
+
