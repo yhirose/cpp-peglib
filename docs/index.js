@@ -101,11 +101,11 @@ function parse() {
   });
   window.setTimeout(() => {
     const data = JSON.parse(Module.lint(grammarText, codeText, mode, packrat, startRule));
-      $('#overlay').css({
-        'z-index': '-1',
-        'display': 'none',
-        'background-color': 'rgba(1, 1, 1, 1.0)'
-      });
+    $('#overlay').css({
+      'z-index': '-1',
+      'display': 'none',
+      'background-color': 'rgba(1, 1, 1, 1.0)'
+    });
 
     if (data.grammar_valid) {
       $grammarValidation.removeClass('validation-invalid').show();

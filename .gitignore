@@ -48,3 +48,4 @@ CMakeCache.txt
 .idea/
 grammar/test/*
 .DS_Store
+.vscode/
