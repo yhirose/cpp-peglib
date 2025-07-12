@@ -97,7 +97,13 @@ inline size_t codepoint_length(const char *s8, size_t l) {
 
 inline size_t codepoint_count(const char *s8, size_t l) {
   size_t count = 0;
-  for (size_t i = 0; i < l; i += codepoint_length(s8 + i, l - i)) {
+  for (size_t i = 0; i < l;) {
+    auto len = codepoint_length(s8 + i, l - i);
+    if (len == 0) {
+      // Invalid UTF-8 byte, treat as single byte to avoid infinite loop
+      len = 1;
+    }
+    i += len;
     count++;
   }
   return count;
