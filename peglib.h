@@ -670,6 +670,16 @@ private:
   Fty fn_;
 };
 
+class Error {
+public:
+  Error(std::string message) : message_(std::move(message)) {}
+
+  const std::string& message() const { return message_; }
+
+private:
+  std::string message_;
+};
+
 /*
  * Parse result helper
  */
@@ -1443,7 +1453,8 @@ public:
 
   void accept(Visitor &v) override;
 
-  std::any reduce(SemanticValues &vs, std::any &dt) const;
+  bool reduce(std::any &a_val, SemanticValues &vs, std::any &dt,
+                  std::string& msg) const;
 
   const std::string &name() const;
   const std::string &trace_name() const;
@@ -2843,7 +2854,16 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       if (success(len)) {
-        if (!c.recovered) { a_val = reduce(chvs, dt); }
+        if (!c.recovered) {
+          if (!reduce(a_val, chvs, dt, msg)) {
+            if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+              c.error_info.message_pos = s;
+              c.error_info.message = msg;
+              c.error_info.label = outer_->name;
+            }
+            len = static_cast<size_t>(-1);
+          }
+        }
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -2871,14 +2891,22 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   return len;
 }
 
-inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
+inline bool Holder::reduce(std::any &a_val, SemanticValues &vs, std::any &dt,
+                           std::string &msg) const {
   if (outer_->action && !outer_->disable_action) {
-    return outer_->action(vs, dt);
+    auto unchecked = outer_->action(vs, dt);
+    if (const Error* err = std::any_cast<Error>(&unchecked)) {
+      msg = err->message();
+      return false;
+    }
+    a_val = std::move(unchecked);
+    return true;
   } else if (vs.empty()) {
-    return std::any();
+    a_val = std::any();
   } else {
-    return std::move(vs.front());
+    a_val = std::move(vs.front());
   }
+  return true;
 }
 
 inline const std::string &Holder::name() const { return outer_->name; }
