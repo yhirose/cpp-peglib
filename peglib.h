@@ -4401,8 +4401,8 @@ struct AstOptimizer {
     if (opt && original->nodes.size() == 1) {
       auto child = optimize(original->nodes[0], parent);
       auto ast = std::make_shared<T>(*child, original->name.data(),
-                                     original->choice_count, original->position,
-                                     original->length, original->choice);
+                                     original->position, original->length,
+                                     original->choice_count, original->choice);
       for (auto node : ast->nodes) {
         node->parent = ast;
       }
