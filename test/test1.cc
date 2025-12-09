@@ -1329,3 +1329,95 @@ TEST(GeneralTest, InvalidRange) {
   EXPECT_FALSE(ret);
 }
 
+namespace {
+  auto expect_log(size_t expected_ln, size_t expected_col,
+                  std::string expected_msg) {
+    return [=](size_t ln, size_t col, const std::string &msg) {
+      EXPECT_EQ(expected_ln, ln);
+      EXPECT_EQ(expected_col, col);
+      EXPECT_EQ(expected_msg, msg);
+    };
+  }
+}
+
+TEST(GeneralTest, Action_with_Error) {
+  const std::string message = "Not allowing 'x'";
+
+  parser parser(R"(
+    WORD    <- LETTER {5}
+    LETTER  <- [a-z]
+  )");
+
+  parser["LETTER"] = [&](const SemanticValues &vs) -> std::any {
+    if (vs.token() == "x") {
+      return Error(message);
+    }
+    return vs.token();
+  };
+
+  EXPECT_TRUE(parser.parse("hello"));
+
+  parser.set_logger(expect_log(1, 2, message));
+  EXPECT_FALSE(parser.parse("extra"));
+}
+
+TEST(GeneralTest, Action_with_Error_choice) {
+  const std::string message = "Not allowing 'x'";
+
+  parser parser(R"(
+    WORD    <- LETTER / '!'
+    LETTER  <- [a-z]
+  )");
+
+  parser["LETTER"] = [&](const SemanticValues &vs) -> std::any {
+    if (vs.token() == "x") {
+      return Error(message);
+    }
+    return vs.token();
+  };
+
+  parser.set_logger(expect_log(1, 1, message));
+  EXPECT_FALSE(parser.parse("x"));
+}
+
+TEST(GeneralTest, Action_with_Error_choice_overlap) {
+  const std::string message = "Not allowing 'x'";
+
+  parser parser(R"(
+    WORD    <- LETTER / 'x'
+    LETTER  <- [a-z]
+  )");
+
+  parser["LETTER"] = [&](const SemanticValues &vs) -> std::any {
+    if (vs.token() == "x") {
+      return Error(message);
+    }
+    return vs.token();
+  };
+
+  EXPECT_TRUE(parser.parse("x"));
+}
+
+TEST(GeneralTest, Action_with_Error_choice_2nd_error) {
+  const std::string message = "Not allowing 'x'";
+  const std::string message2 = "2nd message";
+
+  parser parser(R"(
+    WORD    <- LETTER / X
+    LETTER  <- [a-z]
+    X       <- 'x'
+  )");
+
+  parser["LETTER"] = [&](const SemanticValues &vs) -> std::any {
+    if (vs.token() == "x") {
+      return Error(message);
+    }
+    return vs.token();
+  };
+  parser["X"] = [&](const SemanticValues & /*vs*/) -> std::any {
+    return Error(message2);
+  };
+
+  parser.set_logger(expect_log(1, 1, message));
+  EXPECT_FALSE(parser.parse("x"));
+}

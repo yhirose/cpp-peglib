@@ -647,6 +647,33 @@ custom_message.txt:1:8: code format error...
 
 NOTE: If there is more than one element with an error message instruction in a prioritized choice, this feature may not work as you expect.
 
+Errors During Actions
+---------------------
+
+It is possible to return a `peg::Error` during an action.
+
+This can be used to check that a parsed number can be supported by the resulting integer type:
+```cpp
+parser parser(R"(
+  NUMBER  <- [0-9]+
+)");
+
+parser.number = [](const peg::SemanticValues& vs) -> std::any {
+  int value;
+  auto [ptr, err] = std::from_chars(
+    vs.token().data(),
+    vs.token().data() + vs.token().size(),
+    value
+    );
+
+  if (err != std::errc()) {
+    return peg::Error("Number out of range.");
+  }
+
+  return value;
+};
+```
+
 Change the Start Definition Rule
 --------------------------------
 
