@@ -1969,18 +1969,19 @@ Block <- Statements {}
   ast = pg.optimize_ast(ast);
   auto s = ast_to_s(ast);
 
-  EXPECT_EQ(R"(+ Start/0[I]
-  + Block/0[Statements]
-    + Statement/0[S]
-    + Statement/0[I]
-      + Block/0[Statements]
-        + Statement/0[I]
-          + Block/0[Statements]
-            + Statement/0[S]
-            + Statement/0[S]
-        + Statement/0[S]
-    + Statement/0[S]
-)", s);
+  EXPECT_EQ(R"(+ Start[I]
+  + Block[Statements]
+    + Statement[S]
+    + Statement[I]
+      + Block[Statements]
+        + Statement[I]
+          + Block[Statements]
+            + Statement[S]
+            + Statement[S]
+        + Statement[S]
+    + Statement[S]
+)",
+            s);
 }
 
 TEST(StateTest, NestedBlocks) {
@@ -2018,7 +2019,8 @@ expr <- 'hello'
   };
 
   size_t i = 0;
-  pg.set_logger([&](size_t ln, size_t col, const std::string &msg, const std::string &rule) {
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg,
+                    const std::string &rule) {
     std::stringstream ss;
     ss << ln << ":" << col << ": " << msg;
     EXPECT_EQ(errors[i++], ss.str());
@@ -2045,4 +2047,3 @@ expr <- 'hello'
 
   EXPECT_EQ(i, errors.size());
 }
-
