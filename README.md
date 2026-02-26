@@ -670,6 +670,16 @@ parser.load_grammar(grammar, "A"); // Start Rule is "A"
 parser.parse(" [one] , [two] "); // OK
 ```
 
+Alternatively, the start rule can be changed without reconstructing the parser from the grammar by using the `set_start_rule` function. This does have
+the disadvantage that it won't re-do any of the consistency checks that are performed while instantiating the parser. In the above example, this would
+look like this:
+```cpp
+peg::parser parser(grammar);
+parser.set_start_rule("A");
+
+parser.parse(" [one] , [two] "); // OK
+```
+
 peglint - PEG syntax lint utility
 ---------------------------------
 
