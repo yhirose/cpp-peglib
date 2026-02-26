@@ -4638,6 +4638,29 @@ public:
     return load_grammar(sv.data(), sv.size(), start);
   }
 
+  void set_start_rule(std::string rule) {
+    std::string prev = std::move(start_);
+    start_ = std::move(rule);
+
+    if (!grammar_) {
+      return;
+    }
+
+    auto it = grammar_->find(start_);
+    if (it == grammar_->end()) {
+      throw std::logic_error("Tried using non-existent start-rule '" + rule + "'");
+    }
+
+    auto &prev_start_rule = grammar_->at(prev);
+
+    auto &start_rule = grammar_->at(start_);
+
+    // Transfer rules for automatic whitespace skipping and word expressions from old
+    // to new start rule
+    start_rule.whitespaceOpe = std::move(prev_start_rule.whitespaceOpe);
+    start_rule.wordOpe = std::move(prev_start_rule.wordOpe);
+  }
+
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];

@@ -1320,6 +1320,32 @@ TEST(GeneralTest, SpecifyStartRule) {
     peg.load_grammar(grammar, "A");
     EXPECT_TRUE(peg.parse(" [one] , [two] "));
   }
+
+  {
+    parser peg(grammar);
+    EXPECT_THROW(peg.set_start_rule("bla"), std::logic_error);
+  }
+
+  {
+    parser peg(grammar);
+    peg.set_start_rule("A");
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+  }
+
+  {
+    parser peg(grammar);
+    peg.set_start_rule("B");
+    EXPECT_FALSE(peg.parse(" [one] , [two] "));
+    EXPECT_TRUE(peg.parse(" [one] "));
+  }
+
+  {
+    parser peg(grammar);
+    peg.set_start_rule("B");
+    EXPECT_FALSE(peg.parse(" [one] , [two] "));
+    peg.set_start_rule("A");
+    EXPECT_TRUE(peg.parse(" [one] , [two] "));
+  }
 }
 
 TEST(GeneralTest, InvalidRange) {
