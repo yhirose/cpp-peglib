@@ -95,13 +95,15 @@ static BenchResult bench_sql_grammar_load(const string &sql_grammar,
 
 static BenchResult bench_sql_parse(const string &name,
                                    const string &sql_grammar,
-                                   const string &sql_input, int iterations) {
+                                   const string &sql_input, int iterations,
+                                   bool no_first_set = false) {
   parser pg(sql_grammar);
   if (!pg) {
     cerr << "Error: failed to parse SQL grammar" << endl;
     exit(1);
   }
   pg.enable_packrat_parsing();
+  if (no_first_set) { pg.disable_first_set_optimization(); }
 
   return bench(name, iterations, [&]() { pg.parse(sql_input); });
 }
@@ -146,8 +148,8 @@ int main(int argc, char *argv[]) {
   vector<BenchResult> results;
   int test_num = 1;
 
-  // PEG benchmarks
-  cout << endl << "--- cpp-peglib (PEG) ---" << endl;
+  // PEG benchmarks (with First-Set optimization)
+  cout << endl << "--- cpp-peglib (PEG + First-Set) ---" << endl;
 
   cout << endl
        << "[" << test_num++ << "] PEG: grammar load (" << sql_grammar.size()
@@ -155,22 +157,43 @@ int main(int argc, char *argv[]) {
   results.push_back(bench_sql_grammar_load(sql_grammar, iterations));
 
   cout << endl
+       << "[" << test_num++ << "] PEG+FS: TPC-H Q1 (" << q1_sql.size()
+       << " bytes)" << endl;
+  results.push_back(
+      bench_sql_parse("PEG+FS: TPC-H Q1", sql_grammar, q1_sql, iterations));
+
+  cout << endl
+       << "[" << test_num++ << "] PEG+FS: all TPC-H (" << tpch_sql.size()
+       << " bytes)" << endl;
+  results.push_back(
+      bench_sql_parse("PEG+FS: all TPC-H", sql_grammar, tpch_sql, iterations));
+
+  cout << endl
+       << "[" << test_num++ << "] PEG+FS: big.sql (" << big_sql.size()
+       << " bytes)" << endl;
+  results.push_back(bench_sql_parse("PEG+FS: big.sql (~1MB)", sql_grammar,
+                                    big_sql, iterations));
+
+  // PEG benchmarks (without First-Set — baseline)
+  cout << endl << "--- cpp-peglib (PEG baseline) ---" << endl;
+
+  cout << endl
        << "[" << test_num++ << "] PEG: TPC-H Q1 (" << q1_sql.size() << " bytes)"
        << endl;
   results.push_back(
-      bench_sql_parse("PEG: TPC-H Q1", sql_grammar, q1_sql, iterations));
+      bench_sql_parse("PEG: TPC-H Q1", sql_grammar, q1_sql, iterations, true));
 
   cout << endl
        << "[" << test_num++ << "] PEG: all TPC-H (" << tpch_sql.size()
        << " bytes)" << endl;
-  results.push_back(
-      bench_sql_parse("PEG: all TPC-H", sql_grammar, tpch_sql, iterations));
+  results.push_back(bench_sql_parse("PEG: all TPC-H", sql_grammar, tpch_sql,
+                                    iterations, true));
 
   cout << endl
        << "[" << test_num++ << "] PEG: big.sql (" << big_sql.size() << " bytes)"
        << endl;
-  results.push_back(
-      bench_sql_parse("PEG: big.sql (~1MB)", sql_grammar, big_sql, iterations));
+  results.push_back(bench_sql_parse("PEG: big.sql (~1MB)", sql_grammar, big_sql,
+                                    iterations, true));
 
   // YACC benchmarks
 #ifdef HAS_PG_QUERY
@@ -199,13 +222,30 @@ int main(int argc, char *argv[]) {
     print_result(r);
   }
 
+  // Print ratios for big.sql
+  auto find_result = [&](const string &name) -> double {
+    for (const auto &r : results) {
+      if (r.name == name) return r.median();
+    }
+    return 0.0;
+  };
+
+  auto peg_fs_big = find_result("PEG+FS: big.sql (~1MB)");
+  auto peg_big = find_result("PEG: big.sql (~1MB)");
+  if (peg_fs_big > 0 && peg_big > 0) {
+    cout << endl
+         << "  First-Set speedup (big.sql): " << fixed << setprecision(2)
+         << peg_big / peg_fs_big << "x" << endl;
+  }
+
 #ifdef HAS_PG_QUERY
-  // Print ratio for big.sql
-  auto peg_big = results[3].median();
-  auto yacc_big = results[6].median();
-  cout << endl
-       << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
-       << peg_big / yacc_big << "x" << endl;
+  auto yacc_big = find_result("YACC: big.sql (~1MB)");
+  if (yacc_big > 0) {
+    cout << "  Ratio (big.sql): PEG+FS/YACC = " << fixed << setprecision(1)
+         << peg_fs_big / yacc_big << "x" << endl;
+    cout << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
+         << peg_big / yacc_big << "x" << endl;
+  }
 #endif
 
   return 0;
