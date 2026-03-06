@@ -42,4 +42,9 @@ if (${PEGLIB_BUILD_PL0})
   add_subdirectory(pl0)
 endif()
 
+option(PEGLIB_BUILD_BENCHMARK "Build cpp-peglib benchmark" OFF)
+if (${PEGLIB_BUILD_BENCHMARK})
+  add_subdirectory(benchmark)
+endif()
+
 install(FILES peglib.h DESTINATION include)
