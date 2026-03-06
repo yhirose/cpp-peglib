@@ -652,18 +652,62 @@ public:
 
   operator bool() const { return bool(fn_); }
 
-  std::any operator()(SemanticValues &vs, std::any &dt) const {
-    return fn_(vs, dt);
+  std::any operator()(SemanticValues &vs, std::any &dt,
+                      const std::any &predicate_data) const {
+    return fn_(vs, dt, predicate_data);
   }
 
 private:
-  using Fty = std::function<std::any(SemanticValues &vs, std::any &dt)>;
+  using Fty = std::function<std::any(SemanticValues &vs, std::any &dt,
+                                     const std::any &predicate_data)>;
 
   template <typename F> Fty make_adaptor(F fn) {
     if constexpr (argument_count<F>::value == 1) {
-      return [fn](auto &vs, auto & /*dt*/) { return call(fn, vs); };
+      return [fn](auto &vs, auto & /*dt*/, const auto & /*predicate_data*/) {
+        return call(fn, vs);
+      };
+    } else if constexpr (argument_count<F>::value == 2) {
+      return [fn](auto &vs, auto &dt, const auto & /*predicate_data*/) {
+        return call(fn, vs, dt);
+      };
     } else {
-      return [fn](auto &vs, auto &dt) { return call(fn, vs, dt); };
+      return [fn](auto &vs, auto &dt, const auto &predicate_data) {
+        return call(fn, vs, dt, predicate_data);
+      };
+    }
+  }
+
+  Fty fn_;
+};
+
+class Predicate {
+public:
+  Predicate() = default;
+  Predicate(Predicate &&rhs) = default;
+  template <typename F> Predicate(F fn) : fn_(make_adaptor(fn)) {}
+  template <typename F> void operator=(F fn) { fn_ = make_adaptor(fn); }
+  Predicate &operator=(const Predicate &rhs) = default;
+
+  operator bool() const { return bool(fn_); }
+
+  bool operator()(const SemanticValues &vs, const std::any &dt,
+                  std::string &msg, std::any &predicate_data) const {
+    return fn_(vs, dt, msg, predicate_data);
+  }
+
+private:
+  using Fty = std::function<bool(const SemanticValues &vs, const std::any &dt,
+                                 std::string &msg, std::any &predicate_data)>;
+
+  template <typename F> Fty make_adaptor(F fn) {
+    if constexpr (argument_count<F>::value == 3) {
+      return [fn](const auto &vs, const auto &dt, auto &msg,
+                  auto & /*predicate_data*/) { return fn(vs, dt, msg); };
+    } else {
+      return [fn](const auto &vs, const auto &dt, auto &msg,
+                  auto &predicate_data) {
+        return fn(vs, dt, msg, predicate_data);
+      };
     }
   }
 
@@ -1443,7 +1487,8 @@ public:
 
   void accept(Visitor &v) override;
 
-  std::any reduce(SemanticValues &vs, std::any &dt) const;
+  std::any reduce(SemanticValues &vs, std::any &dt,
+                  const std::any &predicate_data) const;
 
   const std::string &name() const;
   const std::string &trace_name() const;
@@ -2393,9 +2438,7 @@ public:
   const char *s_ = nullptr;
   std::pair<size_t, size_t> line_ = {1, 1};
 
-  std::function<bool(const SemanticValues &vs, const std::any &dt,
-                     std::string &msg)>
-      predicate;
+  Predicate predicate;
 
   size_t id = 0;
   Action action;
@@ -2833,17 +2876,20 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       std::string msg;
-      if (outer_->predicate && !outer_->predicate(chvs, dt, msg)) {
-        if (c.log && !msg.empty() && c.error_info.message_pos < s) {
-          c.error_info.message_pos = s;
-          c.error_info.message = msg;
-          c.error_info.label = outer_->name;
+      std::any predicate_data;
+      if (outer_->predicate) {
+        if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
+          if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+            c.error_info.message_pos = s;
+            c.error_info.message = msg;
+            c.error_info.label = outer_->name;
+          }
+          len = static_cast<size_t>(-1);
         }
-        len = static_cast<size_t>(-1);
       }
 
       if (success(len)) {
-        if (!c.recovered) { a_val = reduce(chvs, dt); }
+        if (!c.recovered) { a_val = reduce(chvs, dt, predicate_data); }
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -2871,9 +2917,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   return len;
 }
 
-inline std::any Holder::reduce(SemanticValues &vs, std::any &dt) const {
+inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
+                               const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
-    return outer_->action(vs, dt);
+    return outer_->action(vs, dt, predicate_data);
   } else if (vs.empty()) {
     return std::any();
   } else {
@@ -2977,10 +3024,11 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
   auto &rule = get_reference_for_binop(c);
   auto action = std::move(rule.action);
 
-  rule.action = [&](SemanticValues &vs2, std::any &dt2) {
+  rule.action = [&](SemanticValues &vs2, std::any &dt2,
+                    const std::any &predicate_data2) {
     tok = vs2.token();
     if (action) {
-      return action(vs2, dt2);
+      return action(vs2, dt2, predicate_data2);
     } else if (!vs2.empty()) {
       return vs2[0];
     }
@@ -3030,7 +3078,8 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     std::any val;
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
-      val = rule_.action(vs, dt);
+      static const std::any empty_predicate_data;
+      val = rule_.action(vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
       val = vs[0];
     }
