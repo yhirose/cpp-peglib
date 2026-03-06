@@ -246,6 +246,31 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
+The predicate can pass data to the action via `predicate_data` to avoid redundant computation:
+
+```cpp
+peg::parser parser("NUMBER  <-  < [0-9]+ >");
+
+parser["NUMBER"].predicate = [](const SemanticValues &vs,
+                                const std::any & /*dt*/, std::string &msg,
+                                std::any &predicate_data) {
+  int value;
+  auto [ptr, err] = std::from_chars(
+      vs.token().data(), vs.token().data() + vs.token().size(), value);
+  if (err != std::errc()) {
+    msg = "Number out of range.";
+    return false;
+  }
+  predicate_data = value;
+  return true;
+};
+
+parser["NUMBER"] = [](const SemanticValues & /*vs*/, std::any & /*dt*/,
+                      const std::any &predicate_data) {
+  return std::any_cast<int>(predicate_data);
+};
+```
+
 *enter* and *leave* actions are also available.
 
 ```cpp

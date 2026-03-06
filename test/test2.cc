@@ -1,4 +1,5 @@
-﻿#include <gtest/gtest.h>
+﻿#include <charconv>
+#include <gtest/gtest.h>
 #include <peglib.h>
 #include <sstream>
 
@@ -2046,4 +2047,64 @@ expr <- 'hello'
 )"));
 
   EXPECT_EQ(i, errors.size());
+}
+
+TEST(PredicateTest, User_data_pass_from_predicate_to_action) {
+  parser parser(R"(
+    NUMBER <- < [0-9]+ >
+  )");
+
+  parser["NUMBER"].predicate = [](const SemanticValues &vs,
+                                  const std::any & /*dt*/, std::string &msg,
+                                  std::any &predicate_data) {
+    int value;
+    auto [ptr, err] = std::from_chars(
+        vs.token().data(), vs.token().data() + vs.token().size(), value);
+    if (err != std::errc()) {
+      msg = "Number out of range.";
+      return false;
+    }
+    predicate_data = value;
+    return true;
+  };
+
+  parser["NUMBER"] = [](const SemanticValues & /*vs*/, std::any & /*dt*/,
+                        const std::any &predicate_data) {
+    return std::any_cast<int>(predicate_data);
+  };
+
+  int result;
+  EXPECT_TRUE(parser.parse("12345", result));
+  EXPECT_EQ(12345, result);
+
+  parser.set_logger(
+      [](size_t /*line*/, size_t /*col*/, const std::string &msg) {
+        EXPECT_EQ("Number out of range.", msg);
+      });
+  EXPECT_FALSE(parser.parse("99999999999999999999", result));
+}
+
+TEST(PredicateTest, User_data_backward_compatibility) {
+  parser parser(R"(
+    NUMBER <- < [0-9]+ >
+  )");
+
+  // Old 3-arg predicate still works
+  parser["NUMBER"].predicate = [](const SemanticValues &vs,
+                                  const std::any & /*dt*/, std::string &msg) {
+    if (vs.token_to_number<long>() != 100) {
+      msg = "value error!!";
+      return false;
+    }
+    return true;
+  };
+
+  // Old 1-arg action still works
+  parser["NUMBER"] = [](const SemanticValues &vs) {
+    return vs.token_to_number<long>();
+  };
+
+  long val;
+  EXPECT_TRUE(parser.parse("100", val));
+  EXPECT_EQ(100, val);
 }
