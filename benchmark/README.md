@@ -52,23 +52,54 @@ Default is 10 iterations. Each benchmark reports median, mean, min, and max time
 
 ## Baseline Performance
 
-Measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build), 10 iterations:
-
-```
-Summary:
-  PEG: grammar load        median:      3.539 ms
-  PEG: TPC-H Q1            median:      0.138 ms
-  PEG: all TPC-H           median:      2.880 ms
-  PEG: big.sql (~1MB)      median:    228.433 ms
-  YACC: TPC-H Q1           median:      0.014 ms
-  YACC: all TPC-H          median:      0.368 ms
-  YACC: big.sql (~1MB)     median:     31.130 ms
-```
-
-| Benchmark | cpp-peglib (PEG) | PostgreSQL YACC | Ratio |
-|---|---|---|---|
-| TPC-H Q1 (544 B) | 0.138 ms | 0.014 ms | 9.9x |
-| all TPC-H (14 KB) | 2.880 ms | 0.368 ms | 7.8x |
-| big.sql (1.2 MB) | 228.4 ms | 31.1 ms | 7.3x |
+Measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build), 10 iterations.
 
 cpp-peglib is approximately **7–10x slower** than the YACC parser, consistent with the findings reported in the DuckDB article.
+
+| Benchmark | PEG/YACC |
+|---|---|
+| TPC-H Q1 (544 B) | 9.9x slower |
+| all TPC-H (14 KB) | 7.8x slower |
+| big.sql (1.2 MB) | 7.3x slower |
+
+## First-Set Optimization
+
+The First-Set optimization precomputes the set of possible first bytes for each `PrioritizedChoice` alternative at grammar compilation time. At parse time, alternatives whose First-Set does not include the current input byte are skipped without attempting them.
+
+| Benchmark | PEG/YACC |
+|---|---|
+| TPC-H Q1 (544 B) | 5.9x slower |
+| all TPC-H (14 KB) | 4.6x slower |
+| big.sql (1.2 MB) | 4.6x slower |
+
+## Devirtualization of `dynamic_cast` in Holder
+
+`Holder::parse_core` previously used 2–3 `dynamic_cast` calls per rule match to check whether the inner operator is a `TokenBoundary`, `PrioritizedChoice`, or `Dictionary`. These RTTI lookups accounted for ~27% of parse time in profiling. Replacing them with boolean flags (`is_token_boundary`, `is_choice_like`) on the `Ope` base class eliminates the RTTI overhead entirely.
+
+| Benchmark | PEG/YACC |
+|---|---|
+| TPC-H Q1 (544 B) | 4.2x slower |
+| all TPC-H (14 KB) | 3.4x slower |
+| big.sql (1.2 MB) | 3.4x slower |
+
+## Summary (big.sql, ~1.2 MB)
+
+All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build), 30 iterations.
+
+| Configuration | Median | PEG/YACC |
+|---|---|---|
+| YACC (libpg_query) | 30.7 ms | 1.0x |
+| PEG (no optimizations) | 228.4 ms | 7.4x |
+| PEG + Devirt | 190.9 ms | 6.2x |
+| PEG + First-Set | 135.8 ms | 4.6x |
+| PEG (all optimizations) | 105.1 ms | 3.4x |
+
+```
+YACC                    |████                                        30.7 ms (1.0x)
+PEG (all optimizations) |██████████████                             105.1 ms (3.4x)
+PEG + First-Set         |█████████████████                          135.8 ms (4.6x)
+PEG + Devirt            |████████████████████████                   190.9 ms (6.2x)
+PEG (no optimizations)  |█████████████████████████████              228.4 ms (7.4x)
+```
+
+With all optimizations applied, the gap to YACC has been reduced from **7.4x to 3.4x**.

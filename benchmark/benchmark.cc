@@ -199,13 +199,22 @@ int main(int argc, char *argv[]) {
     print_result(r);
   }
 
+  // Print ratios for big.sql
+  auto find_result = [&](const string &name) -> double {
+    for (const auto &r : results) {
+      if (r.name == name) return r.median();
+    }
+    return 0.0;
+  };
+
 #ifdef HAS_PG_QUERY
-  // Print ratio for big.sql
-  auto peg_big = results[3].median();
-  auto yacc_big = results[6].median();
-  cout << endl
-       << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
-       << peg_big / yacc_big << "x" << endl;
+  auto peg_big = find_result("PEG: big.sql (~1MB)");
+  auto yacc_big = find_result("YACC: big.sql (~1MB)");
+  if (peg_big > 0 && yacc_big > 0) {
+    cout << endl
+         << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
+         << peg_big / yacc_big << "x" << endl;
+  }
 #endif
 
   return 0;

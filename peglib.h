@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <any>
+#include <bitset>
 #include <cassert>
 #include <cctype>
 #if __has_include(<charconv>)
@@ -433,6 +434,8 @@ public:
   }
 
   size_t size() const { return dic_.size(); }
+
+  friend struct ComputeFirstSet;
 
 private:
   std::string to_lower(std::string s) const {
@@ -1033,6 +1036,9 @@ public:
   virtual size_t parse_core(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt) const = 0;
   virtual void accept(Visitor &v) = 0;
+
+  bool is_token_boundary = false;
+  bool is_choice_like = false;
 };
 
 class Sequence : public Ope {
@@ -1062,15 +1068,39 @@ public:
   std::vector<std::shared_ptr<Ope>> opes_;
 };
 
+struct FirstSet {
+  // First-Set: set of possible first bytes for an expression.
+  // Used by PrioritizedChoice to skip alternatives that cannot match.
+  std::bitset<256> chars;    // byte values that can appear as the first byte
+  bool can_be_empty = false; // true if the expression can match empty string
+  bool any_char = false;     // true if any character can appear (cannot filter)
+  const char *first_literal = nullptr; // first literal for error reporting
+  const Definition *first_rule =
+      nullptr; // first token rule for error reporting
+
+  void merge(const FirstSet &other) {
+    chars |= other.chars;
+    if (other.can_be_empty) { can_be_empty = true; }
+    if (other.any_char) { any_char = true; }
+    // Note: first_literal/first_rule are NOT merged — per-alternative
+  }
+};
+
 class PrioritizedChoice : public Ope {
 public:
   template <typename... Args>
   PrioritizedChoice(bool for_label, const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
-        for_label_(for_label) {}
+        for_label_(for_label) {
+    is_choice_like = true;
+  }
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
-      : opes_(opes) {}
-  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
+      : opes_(opes) {
+    is_choice_like = true;
+  }
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {
+    is_choice_like = true;
+  }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
@@ -1083,6 +1113,29 @@ public:
 
     size_t id = 0;
     for (const auto &ope : opes_) {
+      // First-Set filtering: skip if next byte cannot start this alternative
+      if (n > 0 && id < first_sets_.size()) {
+        const auto &fs = first_sets_[id];
+        if (!fs.any_char && !fs.can_be_empty &&
+            !fs.chars.test(static_cast<unsigned char>(*s))) {
+          if (c.log && (fs.first_literal || fs.first_rule)) {
+            if (c.error_info.error_pos <= s) {
+              if (c.error_info.error_pos < s || !(id > 0)) {
+                c.error_info.error_pos = s;
+                c.error_info.expected_tokens.clear();
+              }
+              if (fs.first_literal) {
+                c.error_info.add(fs.first_literal, nullptr);
+              } else {
+                c.error_info.add(nullptr, fs.first_rule);
+              }
+            }
+          }
+          id++;
+          continue;
+        }
+      }
+
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
       auto &chvs = c.push();
@@ -1116,6 +1169,7 @@ public:
 
   std::vector<std::shared_ptr<Ope>> opes_;
   bool for_label_ = false;
+  std::vector<FirstSet> first_sets_;
 };
 
 class Repetition : public Ope {
@@ -1234,7 +1288,9 @@ public:
 class Dictionary : public Ope, public std::enable_shared_from_this<Dictionary> {
 public:
   Dictionary(const std::vector<std::string> &v, bool ignore_case)
-      : trie_(v, ignore_case) {}
+      : trie_(v, ignore_case) {
+    is_choice_like = true;
+  }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
@@ -1322,6 +1378,8 @@ public:
   }
 
   void accept(Visitor &v) override;
+
+  friend struct ComputeFirstSet;
 
 private:
   bool in_range(const std::pair<char32_t, char32_t> &range, char32_t cp) const {
@@ -1419,7 +1477,9 @@ public:
 
 class TokenBoundary : public Ope {
 public:
-  TokenBoundary(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
+  TokenBoundary(const std::shared_ptr<Ope> &ope) : ope_(ope) {
+    is_token_boundary = true;
+  }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
@@ -2254,6 +2314,160 @@ private:
 };
 
 /*
+ * First-Set computation
+ */
+struct ComputeFirstSet : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      FirstSet element_fs;
+      auto save = result_;
+      result_ = FirstSet{};
+      op->accept(*this);
+      element_fs = result_;
+      result_ = save;
+      result_.chars |= element_fs.chars;
+      if (element_fs.any_char) { result_.any_char = true; }
+      if (!result_.first_literal) {
+        result_.first_literal = element_fs.first_literal;
+      }
+      if (!result_.first_rule) { result_.first_rule = element_fs.first_rule; }
+      if (!element_fs.can_be_empty) { return; }
+      // This element can be empty, continue to next
+    }
+    result_.can_be_empty = true;
+  }
+  void visit(PrioritizedChoice &ope) override {
+    auto save = result_;
+    for (auto op : ope.opes_) {
+      result_ = FirstSet{};
+      op->accept(*this);
+      save.merge(result_);
+    }
+    result_ = save;
+  }
+  void visit(Repetition &ope) override {
+    ope.ope_->accept(*this);
+    if (ope.min_ == 0) { result_.can_be_empty = true; }
+  }
+  void visit(AndPredicate &) override { result_.can_be_empty = true; }
+  void visit(NotPredicate &) override { result_.can_be_empty = true; }
+  void visit(Dictionary &ope) override {
+    for (const auto &[key, info] : ope.trie_.dic_) {
+      if (!key.empty()) {
+        auto ch = static_cast<unsigned char>(key[0]);
+        result_.chars.set(ch);
+        if (ope.trie_.ignore_case_) {
+          result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
+          result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
+        }
+      }
+    }
+  }
+  void visit(LiteralString &ope) override {
+    if (ope.lit_.empty()) {
+      result_.can_be_empty = true;
+    } else {
+      auto ch = static_cast<unsigned char>(ope.lit_[0]);
+      result_.chars.set(ch);
+      if (ope.ignore_case_) {
+        result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
+        result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
+      }
+      if (!result_.first_literal) { result_.first_literal = ope.lit_.c_str(); }
+    }
+  }
+  void visit(CharacterClass &ope) override {
+    for (const auto &range : ope.ranges_) {
+      auto cp1 = range.first;
+      auto cp2 = range.second;
+      if (cp1 > 0x7F || cp2 > 0x7F) {
+        // Non-ASCII range: conservative fallback
+        result_.any_char = true;
+        return;
+      }
+      for (auto cp = cp1; cp <= cp2; cp++) {
+        auto ch = static_cast<unsigned char>(cp);
+        result_.chars.set(ch);
+        if (ope.ignore_case_) {
+          result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
+          result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
+        }
+      }
+    }
+    if (ope.negated_) {
+      result_.chars.flip();
+      result_.any_char = true; // negated class can match non-ASCII
+    }
+  }
+  void visit(Character &ope) override {
+    if (ope.ch_ > 0x7F) {
+      result_.any_char = true;
+    } else {
+      result_.chars.set(static_cast<unsigned char>(ope.ch_));
+    }
+  }
+  void visit(AnyCharacter &) override { result_.any_char = true; }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(User &) override { result_.any_char = true; }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(BackReference &) override { result_.any_char = true; }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(Cut &) override { result_.can_be_empty = true; }
+
+  FirstSet result_;
+
+private:
+  std::unordered_set<std::string> refs_;
+};
+
+struct SetupFirstSets : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
+  void visit(Sequence &ope) override {
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    ope.first_sets_.clear();
+    ope.first_sets_.reserve(ope.opes_.size());
+    for (auto op : ope.opes_) {
+      ComputeFirstSet cfs;
+      op->accept(cfs);
+      ope.first_sets_.push_back(cfs.result_);
+    }
+    for (auto op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+
+private:
+  std::unordered_set<std::string> refs_;
+};
+
+/*
  * Keywords
  */
 static const char *WHITESPACE_DEFINITION_NAME = "%whitespace";
@@ -2865,12 +3079,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       chvs.name_ = outer_->name;
 
       auto ope_ptr = ope_.get();
-      {
-        auto tok_ptr = dynamic_cast<const peg::TokenBoundary *>(ope_ptr);
-        if (tok_ptr) { ope_ptr = tok_ptr->ope_.get(); }
+      if (ope_ptr->is_token_boundary) {
+        ope_ptr = static_cast<const peg::TokenBoundary *>(ope_ptr)->ope_.get();
       }
-      if (!dynamic_cast<const peg::PrioritizedChoice *>(ope_ptr) &&
-          !dynamic_cast<const peg::Dictionary *>(ope_ptr)) {
+      if (!ope_ptr->is_choice_like) {
         chvs.choice_count_ = 0;
         chvs.choice_ = 0;
       }
@@ -3318,6 +3530,28 @@ inline void ReferenceChecker::visit(Reference &ope) {
       arg->accept(*this);
     }
   }
+}
+
+inline void ComputeFirstSet::visit(Reference &ope) {
+  if (!ope.rule_) {
+    // Macro parameter reference — can't predict what it will match
+    result_.any_char = true;
+    return;
+  }
+  if (refs_.count(ope.name_)) { return; }
+  refs_.insert(ope.name_);
+  ope.rule_->accept(*this);
+  if (!result_.first_rule && ope.rule_->is_token()) {
+    result_.first_rule = ope.rule_;
+  }
+  refs_.erase(ope.name_);
+}
+
+inline void SetupFirstSets::visit(Reference &ope) {
+  if (!ope.rule_ || refs_.count(ope.name_)) { return; }
+  refs_.insert(ope.name_);
+  ope.rule_->accept(*this);
+  refs_.erase(ope.name_);
 }
 
 inline void LinkReferences::visit(Reference &ope) {
@@ -4311,6 +4545,12 @@ private:
           rule.no_ast_opt = true;
         }
       }
+    }
+
+    // Setup First-Set optimization for PrioritizedChoice
+    for (auto &x : grammar) {
+      SetupFirstSets vis;
+      x.second.accept(vis);
     }
 
     return {data.grammar, start, data.enablePackratParsing};
