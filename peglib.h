@@ -2432,8 +2432,6 @@ private:
 struct SetupFirstSets : public Ope::Visitor {
   using Ope::Visitor::visit;
 
-  SetupFirstSets(bool setup = true) : setup_(setup) {}
-
   void visit(Sequence &ope) override {
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -2441,13 +2439,11 @@ struct SetupFirstSets : public Ope::Visitor {
   }
   void visit(PrioritizedChoice &ope) override {
     ope.first_sets_.clear();
-    if (setup_) {
-      ope.first_sets_.reserve(ope.opes_.size());
-      for (auto op : ope.opes_) {
-        ComputeFirstSet cfs;
-        op->accept(cfs);
-        ope.first_sets_.push_back(cfs.result_);
-      }
+    ope.first_sets_.reserve(ope.opes_.size());
+    for (auto op : ope.opes_) {
+      ComputeFirstSet cfs;
+      op->accept(cfs);
+      ope.first_sets_.push_back(cfs.result_);
     }
     for (auto op : ope.opes_) {
       op->accept(*this);
@@ -2468,7 +2464,6 @@ struct SetupFirstSets : public Ope::Visitor {
   void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
 private:
-  bool setup_;
   std::unordered_set<std::string> refs_;
 };
 
@@ -5035,15 +5030,6 @@ public:
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.enablePackratParsing = enablePackratParsing_;
-    }
-  }
-
-  void disable_first_set_optimization() {
-    if (grammar_ != nullptr) {
-      for (auto &[name, rule] : *grammar_) {
-        SetupFirstSets vis(false);
-        rule.accept(vis);
-      }
     }
   }
 

@@ -17,29 +17,6 @@ TEST(FirstSetTest, Basic_filtering) {
   EXPECT_FALSE(pg.parse("bar"));
 }
 
-// Verify that disabling First-Set produces identical results
-TEST(FirstSetTest, Disable_optimization) {
-  auto grammar = R"(
-    S    <- STMT*
-    STMT <- 'if' / 'for' / 'while' / 'return'
-    %whitespace <- [ \t\n]*
-  )";
-
-  parser pg1(grammar);
-  parser pg2(grammar);
-  ASSERT_TRUE(!!pg1);
-  ASSERT_TRUE(!!pg2);
-  pg2.disable_first_set_optimization();
-
-  auto input = "if for while return if";
-
-  EXPECT_TRUE(pg1.parse(input));
-  EXPECT_TRUE(pg2.parse(input));
-
-  EXPECT_FALSE(pg1.parse("bad"));
-  EXPECT_FALSE(pg2.parse("bad"));
-}
-
 // Case-insensitive literals must include both cases in First-Set
 TEST(FirstSetTest, Case_insensitive_literal) {
   parser pg(R"(
