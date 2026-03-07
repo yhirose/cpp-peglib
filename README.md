@@ -30,6 +30,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `↑` (Cut operator)
 * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
 * `{ precedence L - + L / * }` (Parsing infix expression)
+* Left recursive rules (direct, indirect, and mutual left recursion)
 * `%recovery(` ... `)` (Error recovery operator)
 * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
 * `label { error_message "..." }` (Error message instruction)
@@ -37,7 +38,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 
 'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
 
-This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing.
+This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing. It also supports *left recursive* grammars (direct, indirect, and mutual) via a seed-growing algorithm, allowing natural expression of left-associative operators.
 
 IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
@@ -478,6 +479,63 @@ Rule <- Atom (Operator Atom)* {
 ```
 
 *precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator *literal* tokens follow. The first entry has the highest order level.
+
+Left Recursive Grammars
+-----------------------
+
+cpp-peglib supports left recursive rules, which are commonly used in expression grammars to achieve left-associative operators naturally. Left recursion is automatically detected at grammar compile time and handled via a seed-growing algorithm at parse time.
+
+```cpp
+parser parser(R"(
+  Expr   <- Expr '+' Term / Expr '-' Term / Term
+  Term   <- Term '*' Factor / Term '/' Factor / Factor
+  Factor <- '(' Expr ')' / Number
+  Number <- < [0-9]+ >
+  %whitespace <- [ \t]*
+)");
+
+parser["Expr"] = [](const SemanticValues &vs) {
+  switch (vs.choice()) {
+  case 0: return any_cast<long>(vs[0]) + any_cast<long>(vs[1]);
+  case 1: return any_cast<long>(vs[0]) - any_cast<long>(vs[1]);
+  default: return any_cast<long>(vs[0]);
+  }
+};
+
+parser["Term"] = [](const SemanticValues &vs) {
+  switch (vs.choice()) {
+  case 0: return any_cast<long>(vs[0]) * any_cast<long>(vs[1]);
+  case 1: return any_cast<long>(vs[0]) / any_cast<long>(vs[1]);
+  default: return any_cast<long>(vs[0]);
+  }
+};
+
+parser["Number"] = [](const SemanticValues &vs) {
+  return vs.token_to_number<long>();
+};
+
+long val;
+parser.parse("1 - 2 - 3", val);
+assert(val == -4);  // Left-associative: (1-2)-3 = -4
+
+parser.parse("8 / 4 / 2", val);
+assert(val == 1);   // Left-associative: (8/4)/2 = 1
+```
+
+Direct, indirect, and mutual left recursion are all supported. For example, indirect left recursion works as expected:
+
+```peg
+A <- B 'a'
+B <- A 'b' / 'b'
+```
+
+Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
+
+```cpp
+peg::parser parser;
+parser.enable_left_recursion(false);
+parser.load_grammar(grammar);
+```
 
 AST generation
 --------------

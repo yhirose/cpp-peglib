@@ -849,6 +849,44 @@ public:
   std::map<std::pair<size_t, size_t>, std::tuple<size_t, std::any>>
       cache_values;
 
+  // Left recursion support
+  struct LRMemo {
+    size_t len = static_cast<size_t>(-1);
+    std::any val;
+  };
+  std::map<std::pair<const Definition *, const char *>, LRMemo> lr_memo;
+
+  // Rules whose lr_memo was hit during the current parse scope.
+  // Used to track LR cycle membership.
+  std::set<const Definition *> lr_refs_hit;
+
+  // Rules currently in their seeding/growing phase at a given position.
+  // Protected from having their lr_memo erased by inner growers.
+  std::set<std::pair<const Definition *, const char *>> lr_active_seeds;
+
+  void clear_packrat_cache(const char *pos, size_t def_id) {
+    if (!enablePackratParsing) { return; }
+    auto col = static_cast<size_t>(pos - s);
+    auto idx = def_count * col + def_id;
+    if (idx < cache_registered.size()) {
+      cache_registered[idx] = false;
+      cache_success[idx] = false;
+    }
+    cache_values.erase(std::make_pair(col, def_id));
+  }
+
+  void write_packrat_cache(const char *pos, size_t def_id, size_t len,
+                           const std::any &val) {
+    if (!enablePackratParsing) { return; }
+    auto col = pos - s;
+    auto idx = def_count * static_cast<size_t>(col) + def_id;
+    if (idx >= cache_registered.size()) { return; }
+    cache_registered[idx] = true;
+    cache_success[idx] = true;
+    auto key = std::pair(col, def_id);
+    cache_values[key] = std::pair(len, val);
+  }
+
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
   std::any trace_data;
@@ -905,13 +943,15 @@ public:
         return;
       }
     } else {
-      fn(val);
+      // Pre-register as failure before calling fn. This prevents
+      // infinite recursion from undetected left recursion (e.g.
+      // through macro parameters): if the same rule re-enters at
+      // the same position, it hits this entry and returns failure.
       cache_registered[idx] = true;
-      cache_success[idx] = success(len);
-      if (success(len)) {
-        auto key = std::pair(col, def_id);
-        cache_values[key] = std::pair(len, val);
-      }
+      cache_success[idx] = false;
+
+      fn(val);
+      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
       return;
     }
   }
@@ -2037,10 +2077,55 @@ struct DetectLeftRecursion : public Ope::Visitor {
 
   const char *error_s = nullptr;
 
+  std::shared_ptr<Ope> resolve_macro_arg(size_t iarg) const;
+
 private:
   std::string name_;
   std::unordered_set<std::string> refs_;
   bool done_ = false;
+  std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
+};
+
+struct ComputeCanBeEmpty : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
+  bool result = false;
+
+  void visit(Sequence &ope) override {
+    result = std::all_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      return vis.result;
+    });
+  }
+  void visit(PrioritizedChoice &ope) override {
+    result = std::any_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      return vis.result;
+    });
+  }
+  void visit(Repetition &ope) override { result = ope.min_ == 0; }
+  void visit(AndPredicate &) override { result = true; }
+  void visit(NotPredicate &) override { result = true; }
+  void visit(Dictionary &) override { result = false; }
+  void visit(LiteralString &ope) override { result = ope.lit_.empty(); }
+  void visit(CharacterClass &) override { result = false; }
+  void visit(Character &) override { result = false; }
+  void visit(AnyCharacter &) override { result = false; }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(User &) override { result = false; }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(BackReference &) override { result = false; }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(Cut &) override { result = false; }
 };
 
 struct HasEmptyElement : public Ope::Visitor {
@@ -2596,7 +2681,7 @@ public:
   Result parse_and_get_value(const char8_t *s, size_t n, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, *path,
+    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, path,
                                log);
   }
 
@@ -2604,7 +2689,7 @@ public:
   Result parse_and_get_value(const char8_t *s, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), val, *path,
+    return parse_and_get_value(reinterpret_cast<const char *>(s), val, path,
                                log);
   }
 
@@ -2613,15 +2698,15 @@ public:
                              const char *path = nullptr,
                              Log log = nullptr) const {
     return parse_and_get_value(reinterpret_cast<const char *>(s), n, dt, val,
-                               *path, log);
+                               path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, std::any &dt, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val,
-                               *path, log);
+    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val, path,
+                               log);
   }
 #endif
 
@@ -2668,6 +2753,8 @@ public:
   bool is_macro = false;
   std::vector<std::string> params;
   bool disable_action = false;
+  bool is_left_recursive = false;
+  bool can_be_empty = false;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -3061,21 +3148,26 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   size_t len;
   std::any val;
 
-  c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
+  // Shared parse body: invokes enter/leave callbacks, parses the rule's
+  // operator, handles actions/predicates/errors, and calls reduce.
+  // Returns {parse_len, parse_val}.
+  auto do_parse = [&]() {
+    size_t parse_len;
+    std::any parse_val;
+
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
-      if (outer_->leave) { outer_->leave(c, s, n, len, a_val, dt); }
+      if (outer_->leave) { outer_->leave(c, s, n, parse_len, parse_val, dt); }
     });
 
     c.rule_stack.push_back(outer_);
-    len = ope_->parse(s, n, chvs, c, dt);
+    parse_len = ope_->parse(s, n, chvs, c, dt);
     c.rule_stack.pop_back();
 
-    // Invoke action
-    if (success(len)) {
-      chvs.sv_ = std::string_view(s, len);
+    if (success(parse_len)) {
+      chvs.sv_ = std::string_view(s, parse_len);
       chvs.name_ = outer_->name;
 
       auto ope_ptr = ope_.get();
@@ -3096,12 +3188,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
             c.error_info.message = msg;
             c.error_info.label = outer_->name;
           }
-          len = static_cast<size_t>(-1);
+          parse_len = static_cast<size_t>(-1);
         }
       }
 
-      if (success(len)) {
-        if (!c.recovered) { a_val = reduce(chvs, dt, predicate_data); }
+      if (success(parse_len)) {
+        if (!c.recovered) { parse_val = reduce(chvs, dt, predicate_data); }
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -3117,7 +3209,119 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         c.error_info.label = outer_->name;
       }
     }
-  });
+
+    return std::make_pair(parse_len, std::move(parse_val));
+  };
+
+  if (outer_->is_left_recursive) {
+    auto lr_key = std::make_pair(outer_, s);
+
+    // Check LR memo first
+    auto it = c.lr_memo.find(lr_key);
+    if (it != c.lr_memo.end()) {
+      if (success(it->second.len)) {
+        len = it->second.len;
+        val = it->second.val;
+      } else {
+        len = static_cast<size_t>(-1);
+      }
+      // Record that this rule's lr_memo was accessed.
+      // Any LR rule currently seeding will know we're in its cycle.
+      c.lr_refs_hit.insert(outer_);
+    } else {
+      // Seed with FAIL
+      c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
+
+      // Mark as active seed (protects our lr_memo from inner growers)
+      c.lr_active_seeds.insert(lr_key);
+      auto seed_guard = scope_exit([&]() { c.lr_active_seeds.erase(lr_key); });
+
+      // Track which LR rules are referenced during our parse
+      // to identify cycle members
+      auto saved_refs = std::move(c.lr_refs_hit);
+      c.lr_refs_hit.clear();
+
+      // Initial parse (self-references will hit the FAIL seed)
+      auto [initial_len, initial_val] = do_parse();
+
+      // Rules whose lr_memo was hit during our parse are in our cycle.
+      // If we detected cycle members, we ourselves are also part of
+      // the cycle, so add self — this lets parent seeders see us as
+      // a transitive cycle member.
+      auto cycle_rules = c.lr_refs_hit;
+      if (!cycle_rules.empty()) { cycle_rules.insert(outer_); }
+
+      // Restore parent's refs and propagate cycle info upward
+      c.lr_refs_hit = std::move(saved_refs);
+      c.lr_refs_hit.insert(cycle_rules.begin(), cycle_rules.end());
+
+      if (!success(initial_len)) {
+        // Keep FAIL in lr_memo so we don't re-seed
+        len = static_cast<size_t>(-1);
+      } else {
+        // Got initial seed, now grow
+        len = initial_len;
+        val = std::move(initial_val);
+        c.lr_memo[lr_key] = {len, val};
+
+        while (true) {
+          // Clear this rule's packrat cache
+          c.clear_packrat_cache(s, outer_->id);
+
+          // Clear lr_memo for cycle-dependent rules at this position,
+          // but NOT for rules currently in their own seeding phase
+          // (lr_active_seeds) — those are outer growers we must not
+          // interfere with.
+          for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
+            if (memo_it->first.second == s && memo_it->first.first != outer_ &&
+                cycle_rules.count(memo_it->first.first) &&
+                !c.lr_active_seeds.count(memo_it->first)) {
+              memo_it = c.lr_memo.erase(memo_it);
+            } else {
+              ++memo_it;
+            }
+          }
+
+          auto [new_len, new_val] = do_parse();
+
+          if (!success(new_len) || new_len <= len) {
+            break; // No improvement, done growing
+          }
+
+          len = new_len;
+          val = std::move(new_val);
+          c.lr_memo[lr_key] = {len, val};
+        }
+      }
+
+      // Write final result to packrat cache (lr_memo entry is kept as
+      // the primary lookup for LR rules at this position)
+      if (success(len)) { c.write_packrat_cache(s, outer_->id, len, val); }
+    }
+  } else {
+    if (c.enablePackratParsing) {
+      // Packrat cache acts as re-entry guard (pre-registered as
+      // failure before fn is called).
+      c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
+        auto [parse_len, parse_val] = do_parse();
+        len = parse_len;
+        if (success(len)) { a_val = std::move(parse_val); }
+      });
+    } else {
+      // Without packrat, use lr_memo as re-entry guard to prevent
+      // stack overflow from undetected left recursion.
+      auto guard_key = std::make_pair(outer_, s);
+      if (c.lr_memo.count(guard_key)) {
+        len = static_cast<size_t>(-1);
+      } else {
+        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
+        auto [parse_len, parse_val] = do_parse();
+        len = parse_len;
+        val = std::move(parse_val);
+        c.lr_memo.erase(guard_key);
+      }
+    }
+  }
 
   if (success(len)) {
     if (!outer_->ignoreSemanticValue) {
@@ -3417,17 +3621,60 @@ inline void FindLiteralToken::visit(Reference &ope) {
   }
 }
 
+inline void ComputeCanBeEmpty::visit(Reference &ope) {
+  result = ope.rule_ && ope.rule_->can_be_empty;
+}
+
 inline void DetectLeftRecursion::visit(Reference &ope) {
   if (ope.name_ == name_) {
     error_s = ope.s_;
+  } else if (!ope.rule_ && !macro_args_stack_.empty()) {
+    // Macro parameter reference: resolve through nested macro arg
+    // stacks (e.g. B(X) <- C(X) where X is itself a param ref).
+    auto resolved = resolve_macro_arg(ope.iarg_);
+    if (resolved) {
+      resolved->accept(*this);
+      if (done_ == false) { return; }
+    }
   } else if (!refs_.count(ope.name_)) {
     refs_.insert(ope.name_);
     if (ope.rule_) {
+      if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
       ope.rule_->accept(*this);
+      if (ope.is_macro_) { macro_args_stack_.pop_back(); }
       if (done_ == false) { return; }
     }
   }
-  done_ = true;
+  // If the referenced rule can match empty, don't mark as done —
+  // the sequence may continue past this element to find LR.
+  if (!ope.rule_ && !macro_args_stack_.empty()) {
+    auto resolved = resolve_macro_arg(ope.iarg_);
+    if (resolved) {
+      ComputeCanBeEmpty cbe;
+      resolved->accept(cbe);
+      done_ = !cbe.result;
+    } else {
+      done_ = true;
+    }
+  } else {
+    done_ = !(ope.rule_ && ope.rule_->can_be_empty);
+  }
+}
+
+inline std::shared_ptr<Ope>
+DetectLeftRecursion::resolve_macro_arg(size_t iarg) const {
+  for (int i = static_cast<int>(macro_args_stack_.size()) - 1; i >= 0; i--) {
+    auto &args = *macro_args_stack_[i];
+    if (iarg >= args.size()) { return nullptr; }
+    auto ref = dynamic_cast<Reference *>(args[iarg].get());
+    if (ref && !ref->rule_) {
+      // Another param ref — resolve using parent level's args
+      iarg = ref->iarg_;
+      continue;
+    }
+    return args[iarg];
+  }
+  return nullptr;
 }
 
 inline void HasEmptyElement::visit(Sequence &ope) {
@@ -3603,8 +3850,10 @@ public:
   };
 
   static ParserContext parse(const char *s, size_t n, const Rules &rules,
-                             Log log, std::string_view start) {
-    return get_instance().perform_core(s, n, rules, log, std::string(start));
+                             Log log, std::string_view start,
+                             bool enable_left_recursion = true) {
+    return get_instance().perform_core(s, n, rules, log, std::string(start),
+                                       enable_left_recursion);
   }
 
   // For debugging purpose
@@ -4313,7 +4562,8 @@ private:
   }
 
   ParserContext perform_core(const char *s, size_t n, const Rules &rules,
-                             Log log, std::string requested_start) {
+                             Log log, std::string requested_start,
+                             bool enable_left_recursion = true) {
     Data data;
     auto &grammar = *data.grammar;
 
@@ -4487,22 +4737,47 @@ private:
       rule.accept(vis);
     }
 
-    // Check left recursion
-    ret = true;
-
-    for (auto &[name, rule] : grammar) {
-      DetectLeftRecursion vis(name);
-      rule.accept(vis);
-      if (vis.error_s) {
-        if (log) {
-          auto line = line_info(s, vis.error_s);
-          log(line.first, line.second, "'" + name + "' is left recursive.", "");
+    // Compute can_be_empty for each rule (fixed-point iteration)
+    {
+      bool changed = true;
+      while (changed) {
+        changed = false;
+        for (auto &[name, rule] : grammar) {
+          ComputeCanBeEmpty vis;
+          rule.accept(vis);
+          if (vis.result != rule.can_be_empty) {
+            rule.can_be_empty = vis.result;
+            changed = true;
+          }
         }
-        ret = false;
       }
     }
 
-    if (!ret) { return {}; }
+    // Check left recursion
+    if (enable_left_recursion) {
+      for (auto &[name, rule] : grammar) {
+        DetectLeftRecursion vis(name);
+        rule.accept(vis);
+        if (vis.error_s) { rule.is_left_recursive = true; }
+      }
+    } else {
+      ret = true;
+
+      for (auto &[name, rule] : grammar) {
+        DetectLeftRecursion vis(name);
+        rule.accept(vis);
+        if (vis.error_s) {
+          if (log) {
+            auto line = line_info(s, vis.error_s);
+            log(line.first, line.second, "'" + name + "' is left recursive.",
+                "");
+          }
+          ret = false;
+        }
+      }
+
+      if (!ret) { return {}; }
+    }
 
     // Check infinite loop
     if (detect_infiniteLoop(data, start_rule, log, s)) { return {}; }
@@ -4903,11 +5178,12 @@ public:
                start) {}
 #endif
 
-  operator bool() { return grammar_ != nullptr; }
+  operator bool() const { return grammar_ != nullptr; }
 
   bool load_grammar(const char *s, size_t n, const Rules &rules,
                     std::string_view start = {}) {
-    auto cxt = ParserGenerator::parse(s, n, rules, log_, start);
+    auto cxt =
+        ParserGenerator::parse(s, n, rules, log_, start, enableLeftRecursion_);
     grammar_ = cxt.grammar;
     start_ = cxt.start;
     enablePackratParsing_ = cxt.enablePackratParsing;
@@ -4924,7 +5200,7 @@ public:
   }
 
   bool load_grammar(std::string_view sv, std::string_view start = {}) {
-    return load_grammar(sv.data(), sv.size(), start);
+    return load_grammar(sv.data(), sv.size(), Rules(), start);
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
@@ -5026,6 +5302,10 @@ public:
     }
   }
 
+  void enable_left_recursion(bool enable = true) {
+    enableLeftRecursion_ = enable;
+  }
+
   void enable_packrat_parsing() {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
@@ -5098,6 +5378,7 @@ private:
 
   std::shared_ptr<Grammar> grammar_;
   std::string start_;
+  bool enableLeftRecursion_ = true;
   bool enablePackratParsing_ = false;
   Log log_;
 };

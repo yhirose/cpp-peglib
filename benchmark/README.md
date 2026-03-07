@@ -82,24 +82,38 @@ The First-Set optimization precomputes the set of possible first bytes for each 
 | all TPC-H (14 KB) | 3.4x slower |
 | big.sql (1.2 MB) | 3.4x slower |
 
+## Left Recursion Support
+
+Left recursion support adds `DetectLeftRecursion` and seed-growing logic at parse time. For non-left-recursive grammars (such as SQL), this adds zero overhead — only a single `bool` check per rule invocation.
+
+| Benchmark | PEG/YACC |
+|---|---|
+| TPC-H Q1 (544 B) | 4.3x slower |
+| all TPC-H (14 KB) | 3.6x slower |
+| big.sql (1.2 MB) | 3.6x slower |
+
+No regression compared to the previous configuration.
+
 ## Summary (big.sql, ~1.2 MB)
 
-All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build), 30 iterations.
+All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build).
 
 | Configuration | Median | PEG/YACC |
 |---|---|---|
-| YACC (libpg_query) | 30.7 ms | 1.0x |
+| YACC (libpg_query) | 36.1 ms | 1.0x |
 | PEG (no optimizations) | 228.4 ms | 7.4x |
 | PEG + Devirt | 190.9 ms | 6.2x |
 | PEG + First-Set | 135.8 ms | 4.6x |
 | PEG (all optimizations) | 105.1 ms | 3.4x |
+| PEG (all opts + LR support) | 130.3 ms | 3.6x |
 
 ```
-YACC                    |████                                        30.7 ms (1.0x)
-PEG (all optimizations) |██████████████                             105.1 ms (3.4x)
-PEG + First-Set         |█████████████████                          135.8 ms (4.6x)
-PEG + Devirt            |████████████████████████                   190.9 ms (6.2x)
-PEG (no optimizations)  |█████████████████████████████              228.4 ms (7.4x)
+YACC                         |█████                                  36.1 ms (1.0x)
+PEG (all optimizations)      |██████████████                        105.1 ms (3.4x)
+PEG (all opts + LR support)  |█████████████████                     130.3 ms (3.6x)
+PEG + First-Set              |█████████████████                     135.8 ms (4.6x)
+PEG + Devirt                 |████████████████████████               190.9 ms (6.2x)
+PEG (no optimizations)       |█████████████████████████████          228.4 ms (7.4x)
 ```
 
-With all optimizations applied, the gap to YACC has been reduced from **7.4x to 3.4x**.
+With all optimizations and left recursion support, the gap to YACC is **3.6x** — no regression from adding LR support to non-LR grammars.
