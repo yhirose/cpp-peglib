@@ -849,6 +849,44 @@ public:
   std::map<std::pair<size_t, size_t>, std::tuple<size_t, std::any>>
       cache_values;
 
+  // Left recursion support
+  struct LRMemo {
+    size_t len = static_cast<size_t>(-1);
+    std::any val;
+  };
+  std::map<std::pair<const Definition *, const char *>, LRMemo> lr_memo;
+
+  // Rules whose lr_memo was hit during the current parse scope.
+  // Used to track LR cycle membership.
+  std::set<const Definition *> lr_refs_hit;
+
+  // Rules currently in their seeding/growing phase at a given position.
+  // Protected from having their lr_memo erased by inner growers.
+  std::set<std::pair<const Definition *, const char *>> lr_active_seeds;
+
+  void clear_packrat_cache(const char *pos, size_t def_id) {
+    if (!enablePackratParsing) { return; }
+    auto col = static_cast<size_t>(pos - s);
+    auto idx = def_count * col + def_id;
+    if (idx < cache_registered.size()) {
+      cache_registered[idx] = false;
+      cache_success[idx] = false;
+    }
+    cache_values.erase(std::make_pair(col, def_id));
+  }
+
+  void write_packrat_cache(const char *pos, size_t def_id, size_t len,
+                           const std::any &val) {
+    if (!enablePackratParsing) { return; }
+    auto col = pos - s;
+    auto idx = def_count * static_cast<size_t>(col) + def_id;
+    if (idx >= cache_registered.size()) { return; }
+    cache_registered[idx] = true;
+    cache_success[idx] = true;
+    auto key = std::pair(col, def_id);
+    cache_values[key] = std::pair(len, val);
+  }
+
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
   std::any trace_data;
@@ -906,11 +944,11 @@ public:
       }
     } else {
       fn(val);
-      cache_registered[idx] = true;
-      cache_success[idx] = success(len);
       if (success(len)) {
-        auto key = std::pair(col, def_id);
-        cache_values[key] = std::pair(len, val);
+        write_packrat_cache(a_s, def_id, len, val);
+      } else {
+        cache_registered[idx] = true;
+        cache_success[idx] = false;
       }
       return;
     }
@@ -3062,21 +3100,26 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   size_t len;
   std::any val;
 
-  c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
+  // Shared parse body: invokes enter/leave callbacks, parses the rule's
+  // operator, handles actions/predicates/errors, and calls reduce.
+  // Returns {parse_len, parse_val}.
+  auto do_parse = [&]() {
+    size_t parse_len;
+    std::any parse_val;
+
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
-      if (outer_->leave) { outer_->leave(c, s, n, len, a_val, dt); }
+      if (outer_->leave) { outer_->leave(c, s, n, parse_len, parse_val, dt); }
     });
 
     c.rule_stack.push_back(outer_);
-    len = ope_->parse(s, n, chvs, c, dt);
+    parse_len = ope_->parse(s, n, chvs, c, dt);
     c.rule_stack.pop_back();
 
-    // Invoke action
-    if (success(len)) {
-      chvs.sv_ = std::string_view(s, len);
+    if (success(parse_len)) {
+      chvs.sv_ = std::string_view(s, parse_len);
       chvs.name_ = outer_->name;
 
       auto ope_ptr = ope_.get();
@@ -3097,12 +3140,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
             c.error_info.message = msg;
             c.error_info.label = outer_->name;
           }
-          len = static_cast<size_t>(-1);
+          parse_len = static_cast<size_t>(-1);
         }
       }
 
-      if (success(len)) {
-        if (!c.recovered) { a_val = reduce(chvs, dt, predicate_data); }
+      if (success(parse_len)) {
+        if (!c.recovered) { parse_val = reduce(chvs, dt, predicate_data); }
       } else {
         if (c.log && !msg.empty() && c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
@@ -3118,7 +3161,102 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         c.error_info.label = outer_->name;
       }
     }
-  });
+
+    return std::make_pair(parse_len, std::move(parse_val));
+  };
+
+  if (outer_->is_left_recursive) {
+    auto lr_key = std::make_pair(outer_, s);
+
+    // Check LR memo first
+    auto it = c.lr_memo.find(lr_key);
+    if (it != c.lr_memo.end()) {
+      if (success(it->second.len)) {
+        len = it->second.len;
+        val = it->second.val;
+      } else {
+        len = static_cast<size_t>(-1);
+      }
+      // Record that this rule's lr_memo was accessed.
+      // Any LR rule currently seeding will know we're in its cycle.
+      c.lr_refs_hit.insert(outer_);
+    } else {
+      // Seed with FAIL
+      c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
+
+      // Mark as active seed (protects our lr_memo from inner growers)
+      c.lr_active_seeds.insert(lr_key);
+      auto seed_guard = scope_exit([&]() { c.lr_active_seeds.erase(lr_key); });
+
+      // Track which LR rules are referenced during our parse
+      // to identify cycle members
+      auto saved_refs = std::move(c.lr_refs_hit);
+      c.lr_refs_hit.clear();
+
+      // Initial parse (self-references will hit the FAIL seed)
+      auto [initial_len, initial_val] = do_parse();
+
+      // Rules whose lr_memo was hit during our parse are in our cycle.
+      // If we detected cycle members, we ourselves are also part of
+      // the cycle, so add self — this lets parent seeders see us as
+      // a transitive cycle member.
+      auto cycle_rules = c.lr_refs_hit;
+      if (!cycle_rules.empty()) { cycle_rules.insert(outer_); }
+
+      // Restore parent's refs and propagate cycle info upward
+      c.lr_refs_hit = std::move(saved_refs);
+      c.lr_refs_hit.insert(cycle_rules.begin(), cycle_rules.end());
+
+      if (!success(initial_len)) {
+        // Keep FAIL in lr_memo so we don't re-seed
+        len = static_cast<size_t>(-1);
+      } else {
+        // Got initial seed, now grow
+        len = initial_len;
+        val = std::move(initial_val);
+        c.lr_memo[lr_key] = {len, val};
+
+        while (true) {
+          // Clear this rule's packrat cache
+          c.clear_packrat_cache(s, outer_->id);
+
+          // Clear lr_memo for cycle-dependent rules at this position,
+          // but NOT for rules currently in their own seeding phase
+          // (lr_active_seeds) — those are outer growers we must not
+          // interfere with.
+          for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
+            if (memo_it->first.second == s && memo_it->first.first != outer_ &&
+                cycle_rules.count(memo_it->first.first) &&
+                !c.lr_active_seeds.count(memo_it->first)) {
+              memo_it = c.lr_memo.erase(memo_it);
+            } else {
+              ++memo_it;
+            }
+          }
+
+          auto [new_len, new_val] = do_parse();
+
+          if (!success(new_len) || new_len <= len) {
+            break; // No improvement, done growing
+          }
+
+          len = new_len;
+          val = std::move(new_val);
+          c.lr_memo[lr_key] = {len, val};
+        }
+      }
+
+      // Write final result to packrat cache (lr_memo entry is kept as
+      // the primary lookup for LR rules at this position)
+      if (success(len)) { c.write_packrat_cache(s, outer_->id, len, val); }
+    }
+  } else {
+    c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
+      auto [parse_len, parse_val] = do_parse();
+      len = parse_len;
+      if (success(len)) { a_val = std::move(parse_val); }
+    });
+  }
 
   if (success(len)) {
     if (!outer_->ignoreSemanticValue) {
