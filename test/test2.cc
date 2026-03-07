@@ -776,7 +776,8 @@ TEST(LeftRecursiveTest, Left_recursive_test) {
   parser parser(R"(
         A <- A 'a'
         B <- A 'a'
-    )");
+    )",
+                {}, false);
 
   EXPECT_FALSE(parser);
 }
@@ -785,7 +786,8 @@ TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
   parser parser(R"(
         A  <- 'a' / 'b'? B 'c'
         B  <- A
-    )");
+    )",
+                {}, false);
 
   EXPECT_FALSE(parser);
 }
@@ -793,7 +795,8 @@ TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
 TEST(LeftRecursiveTest, Left_recursive_with_zom_test) {
   parser parser(R"(
         A <- 'a'* A*
-    )");
+    )",
+                {}, false);
 
   EXPECT_FALSE(parser);
 }
@@ -803,13 +806,14 @@ TEST(LeftRecursiveTest, Left_recursive_with_a_ZOM_content_rule) {
         A <- B
         B <- _ A
         _ <- ' '* # Zero or more
-    )");
+    )",
+                {}, false);
 
   EXPECT_FALSE(parser);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
-  parser parser(" A <- '' A");
+  parser parser(" A <- '' A", {}, false);
 
   EXPECT_FALSE(parser);
 }

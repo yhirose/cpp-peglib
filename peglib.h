@@ -2668,6 +2668,7 @@ public:
   bool is_macro = false;
   std::vector<std::string> params;
   bool disable_action = false;
+  bool is_left_recursive = false;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -3603,8 +3604,10 @@ public:
   };
 
   static ParserContext parse(const char *s, size_t n, const Rules &rules,
-                             Log log, std::string_view start) {
-    return get_instance().perform_core(s, n, rules, log, std::string(start));
+                             Log log, std::string_view start,
+                             bool enable_left_recursion = true) {
+    return get_instance().perform_core(s, n, rules, log, std::string(start),
+                                       enable_left_recursion);
   }
 
   // For debugging purpose
@@ -4313,7 +4316,8 @@ private:
   }
 
   ParserContext perform_core(const char *s, size_t n, const Rules &rules,
-                             Log log, std::string requested_start) {
+                             Log log, std::string requested_start,
+                             bool enable_left_recursion = true) {
     Data data;
     auto &grammar = *data.grammar;
 
@@ -4488,21 +4492,30 @@ private:
     }
 
     // Check left recursion
-    ret = true;
-
-    for (auto &[name, rule] : grammar) {
-      DetectLeftRecursion vis(name);
-      rule.accept(vis);
-      if (vis.error_s) {
-        if (log) {
-          auto line = line_info(s, vis.error_s);
-          log(line.first, line.second, "'" + name + "' is left recursive.", "");
-        }
-        ret = false;
+    if (enable_left_recursion) {
+      for (auto &[name, rule] : grammar) {
+        DetectLeftRecursion vis(name);
+        rule.accept(vis);
+        if (vis.error_s) { rule.is_left_recursive = true; }
       }
-    }
+    } else {
+      ret = true;
 
-    if (!ret) { return {}; }
+      for (auto &[name, rule] : grammar) {
+        DetectLeftRecursion vis(name);
+        rule.accept(vis);
+        if (vis.error_s) {
+          if (log) {
+            auto line = line_info(s, vis.error_s);
+            log(line.first, line.second, "'" + name + "' is left recursive.",
+                "");
+          }
+          ret = false;
+        }
+      }
+
+      if (!ret) { return {}; }
+    }
 
     // Check infinite loop
     if (detect_infiniteLoop(data, start_rule, log, s)) { return {}; }
@@ -4880,18 +4893,21 @@ public:
   parser() = default;
 
   parser(const char *s, size_t n, const Rules &rules,
-         std::string_view start = {}) {
-    load_grammar(s, n, rules, start);
+         std::string_view start = {}, bool enable_left_recursion = true) {
+    load_grammar(s, n, rules, start, enable_left_recursion);
   }
 
-  parser(const char *s, size_t n, std::string_view start = {})
-      : parser(s, n, Rules(), start) {}
+  parser(const char *s, size_t n, std::string_view start = {},
+         bool enable_left_recursion = true)
+      : parser(s, n, Rules(), start, enable_left_recursion) {}
 
-  parser(std::string_view sv, const Rules &rules, std::string_view start = {})
-      : parser(sv.data(), sv.size(), rules, start) {}
+  parser(std::string_view sv, const Rules &rules, std::string_view start = {},
+         bool enable_left_recursion = true)
+      : parser(sv.data(), sv.size(), rules, start, enable_left_recursion) {}
 
-  parser(std::string_view sv, std::string_view start = {})
-      : parser(sv.data(), sv.size(), Rules(), start) {}
+  parser(std::string_view sv, std::string_view start = {},
+         bool enable_left_recursion = true)
+      : parser(sv.data(), sv.size(), Rules(), start, enable_left_recursion) {}
 
 #if defined(__cpp_lib_char8_t)
   parser(std::u8string_view sv, const Rules &rules, std::string_view start = {})
@@ -4903,28 +4919,35 @@ public:
                start) {}
 #endif
 
-  operator bool() { return grammar_ != nullptr; }
+  operator bool() const { return grammar_ != nullptr; }
 
   bool load_grammar(const char *s, size_t n, const Rules &rules,
-                    std::string_view start = {}) {
-    auto cxt = ParserGenerator::parse(s, n, rules, log_, start);
+                    std::string_view start = {},
+                    bool enable_left_recursion = true) {
+    auto cxt =
+        ParserGenerator::parse(s, n, rules, log_, start, enable_left_recursion);
     grammar_ = cxt.grammar;
     start_ = cxt.start;
     enablePackratParsing_ = cxt.enablePackratParsing;
     return grammar_ != nullptr;
   }
 
-  bool load_grammar(const char *s, size_t n, std::string_view start = {}) {
-    return load_grammar(s, n, Rules(), start);
+  bool load_grammar(const char *s, size_t n, std::string_view start = {},
+                    bool enable_left_recursion = true) {
+    return load_grammar(s, n, Rules(), start, enable_left_recursion);
   }
 
   bool load_grammar(std::string_view sv, const Rules &rules,
-                    std::string_view start = {}) {
-    return load_grammar(sv.data(), sv.size(), rules, start);
+                    std::string_view start = {},
+                    bool enable_left_recursion = true) {
+    return load_grammar(sv.data(), sv.size(), rules, start,
+                        enable_left_recursion);
   }
 
-  bool load_grammar(std::string_view sv, std::string_view start = {}) {
-    return load_grammar(sv.data(), sv.size(), start);
+  bool load_grammar(std::string_view sv, std::string_view start = {},
+                    bool enable_left_recursion = true) {
+    return load_grammar(sv.data(), sv.size(), Rules(), start,
+                        enable_left_recursion);
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
