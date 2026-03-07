@@ -943,13 +943,15 @@ public:
         return;
       }
     } else {
+      // Pre-register as failure before calling fn. This prevents
+      // infinite recursion from undetected left recursion (e.g.
+      // through macro parameters): if the same rule re-enters at
+      // the same position, it hits this entry and returns failure.
+      cache_registered[idx] = true;
+      cache_success[idx] = false;
+
       fn(val);
-      if (success(len)) {
-        write_packrat_cache(a_s, def_id, len, val);
-      } else {
-        cache_registered[idx] = true;
-        cache_success[idx] = false;
-      }
+      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
       return;
     }
   }
@@ -2075,10 +2077,13 @@ struct DetectLeftRecursion : public Ope::Visitor {
 
   const char *error_s = nullptr;
 
+  std::shared_ptr<Ope> resolve_macro_arg(size_t iarg) const;
+
 private:
   std::string name_;
   std::unordered_set<std::string> refs_;
   bool done_ = false;
+  std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
 };
 
 struct ComputeCanBeEmpty : public Ope::Visitor {
@@ -3294,11 +3299,28 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (success(len)) { c.write_packrat_cache(s, outer_->id, len, val); }
     }
   } else {
-    c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
-      auto [parse_len, parse_val] = do_parse();
-      len = parse_len;
-      if (success(len)) { a_val = std::move(parse_val); }
-    });
+    if (c.enablePackratParsing) {
+      // Packrat cache acts as re-entry guard (pre-registered as
+      // failure before fn is called).
+      c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
+        auto [parse_len, parse_val] = do_parse();
+        len = parse_len;
+        if (success(len)) { a_val = std::move(parse_val); }
+      });
+    } else {
+      // Without packrat, use lr_memo as re-entry guard to prevent
+      // stack overflow from undetected left recursion.
+      auto guard_key = std::make_pair(outer_, s);
+      if (c.lr_memo.count(guard_key)) {
+        len = static_cast<size_t>(-1);
+      } else {
+        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
+        auto [parse_len, parse_val] = do_parse();
+        len = parse_len;
+        val = std::move(parse_val);
+        c.lr_memo.erase(guard_key);
+      }
+    }
   }
 
   if (success(len)) {
@@ -3606,16 +3628,53 @@ inline void ComputeCanBeEmpty::visit(Reference &ope) {
 inline void DetectLeftRecursion::visit(Reference &ope) {
   if (ope.name_ == name_) {
     error_s = ope.s_;
+  } else if (!ope.rule_ && !macro_args_stack_.empty()) {
+    // Macro parameter reference: resolve through nested macro arg
+    // stacks (e.g. B(X) <- C(X) where X is itself a param ref).
+    auto resolved = resolve_macro_arg(ope.iarg_);
+    if (resolved) {
+      resolved->accept(*this);
+      if (done_ == false) { return; }
+    }
   } else if (!refs_.count(ope.name_)) {
     refs_.insert(ope.name_);
     if (ope.rule_) {
+      if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
       ope.rule_->accept(*this);
+      if (ope.is_macro_) { macro_args_stack_.pop_back(); }
       if (done_ == false) { return; }
     }
   }
   // If the referenced rule can match empty, don't mark as done —
   // the sequence may continue past this element to find LR.
-  done_ = !(ope.rule_ && ope.rule_->can_be_empty);
+  if (!ope.rule_ && !macro_args_stack_.empty()) {
+    auto resolved = resolve_macro_arg(ope.iarg_);
+    if (resolved) {
+      ComputeCanBeEmpty cbe;
+      resolved->accept(cbe);
+      done_ = !cbe.result;
+    } else {
+      done_ = true;
+    }
+  } else {
+    done_ = !(ope.rule_ && ope.rule_->can_be_empty);
+  }
+}
+
+inline std::shared_ptr<Ope>
+DetectLeftRecursion::resolve_macro_arg(size_t iarg) const {
+  for (int i = static_cast<int>(macro_args_stack_.size()) - 1; i >= 0; i--) {
+    auto &args = *macro_args_stack_[i];
+    if (iarg >= args.size()) { return nullptr; }
+    auto ref = dynamic_cast<Reference *>(args[iarg].get());
+    if (ref && !ref->rule_) {
+      // Another param ref — resolve using parent level's args
+      iarg = ref->iarg_;
+      continue;
+    }
+    return args[iarg];
+  }
+  return nullptr;
 }
 
 inline void HasEmptyElement::visit(Sequence &ope) {
