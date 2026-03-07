@@ -2596,7 +2596,7 @@ public:
   Result parse_and_get_value(const char8_t *s, size_t n, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, *path,
+    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, path,
                                log);
   }
 
@@ -2604,7 +2604,7 @@ public:
   Result parse_and_get_value(const char8_t *s, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), val, *path,
+    return parse_and_get_value(reinterpret_cast<const char *>(s), val, path,
                                log);
   }
 
@@ -2613,15 +2613,15 @@ public:
                              const char *path = nullptr,
                              Log log = nullptr) const {
     return parse_and_get_value(reinterpret_cast<const char *>(s), n, dt, val,
-                               *path, log);
+                               path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, std::any &dt, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val,
-                               *path, log);
+    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val, path,
+                               log);
   }
 #endif
 
