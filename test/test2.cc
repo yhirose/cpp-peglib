@@ -773,49 +773,54 @@ TEST(RepetitionTest, Repetition__2) {
 }
 
 TEST(LeftRecursiveTest, Left_recursive_test) {
-  parser parser(R"(
+  parser p;
+  p.load_grammar(R"(
         A <- A 'a'
         B <- A 'a'
     )",
-                {}, false);
+                 std::string_view{}, false);
 
-  EXPECT_FALSE(parser);
+  EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
-  parser parser(R"(
+  parser p;
+  p.load_grammar(R"(
         A  <- 'a' / 'b'? B 'c'
         B  <- A
     )",
-                {}, false);
+                 std::string_view{}, false);
 
-  EXPECT_FALSE(parser);
+  EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_zom_test) {
-  parser parser(R"(
+  parser p;
+  p.load_grammar(R"(
         A <- 'a'* A*
     )",
-                {}, false);
+                 std::string_view{}, false);
 
-  EXPECT_FALSE(parser);
+  EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_a_ZOM_content_rule) {
-  parser parser(R"(
+  parser p;
+  p.load_grammar(R"(
         A <- B
         B <- _ A
         _ <- ' '* # Zero or more
     )",
-                {}, false);
+                 std::string_view{}, false);
 
-  EXPECT_FALSE(parser);
+  EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
-  parser parser(" A <- '' A", {}, false);
+  parser p;
+  p.load_grammar(" A <- '' A", std::string_view{}, false);
 
-  EXPECT_FALSE(parser);
+  EXPECT_FALSE(p);
 }
 
 TEST(UserRuleTest, User_defined_rule_test) {
