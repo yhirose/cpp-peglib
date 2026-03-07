@@ -12,7 +12,18 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(peglib-test-main test1.cc test2.cc test3.cc test_first_set.cc test_left_recursive.cc)
+add_executable(peglib-test-main
+  test_core.cc
+  test_peg_syntax.cc
+  test_rules.cc
+  test_error.cc
+  test_token_predicate.cc
+  test_unicode_state.cc
+  test_packrat.cc
+  test_left_recursive.cc
+  test_first_set.cc
+  test_integration.cc
+)
 
 target_include_directories(peglib-test-main PRIVATE ..)
 

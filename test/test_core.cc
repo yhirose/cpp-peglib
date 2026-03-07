@@ -1328,4 +1328,3 @@ TEST(GeneralTest, InvalidRange) {
   bool ret = parser;
   EXPECT_FALSE(ret);
 }
-

@@ -690,3 +690,59 @@ TEST(LeftRecursionTest, PackratWithLeftRecursion) {
   EXPECT_TRUE(p.parse("1+2+3+4", val2));
   EXPECT_EQ(val, val2);
 }
+
+// =============================================================================
+// Left Recursion Detection Tests (LR disabled)
+// =============================================================================
+
+TEST(LeftRecursiveTest, Left_recursive_test) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        A <- A 'a'
+        B <- A 'a'
+    )");
+
+  EXPECT_FALSE(p);
+}
+
+TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        A  <- 'a' / 'b'? B 'c'
+        B  <- A
+    )");
+
+  EXPECT_FALSE(p);
+}
+
+TEST(LeftRecursiveTest, Left_recursive_with_zom_test) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        A <- 'a'* A*
+    )");
+
+  EXPECT_FALSE(p);
+}
+
+TEST(LeftRecursiveTest, Left_recursive_with_a_ZOM_content_rule) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        A <- B
+        B <- _ A
+        _ <- ' '* # Zero or more
+    )");
+
+  EXPECT_FALSE(p);
+}
+
+TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(" A <- '' A");
+
+  EXPECT_FALSE(p);
+}
