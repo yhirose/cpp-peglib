@@ -2081,6 +2081,48 @@ private:
   bool done_ = false;
 };
 
+struct ComputeCanBeEmpty : public Ope::Visitor {
+  using Ope::Visitor::visit;
+
+  bool result = false;
+
+  void visit(Sequence &ope) override {
+    result = std::all_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      return vis.result;
+    });
+  }
+  void visit(PrioritizedChoice &ope) override {
+    result = std::any_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      return vis.result;
+    });
+  }
+  void visit(Repetition &ope) override { result = ope.min_ == 0; }
+  void visit(AndPredicate &) override { result = true; }
+  void visit(NotPredicate &) override { result = true; }
+  void visit(Dictionary &) override { result = false; }
+  void visit(LiteralString &ope) override { result = ope.lit_.empty(); }
+  void visit(CharacterClass &) override { result = false; }
+  void visit(Character &) override { result = false; }
+  void visit(AnyCharacter &) override { result = false; }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(User &) override { result = false; }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Reference &ope) override;
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(BackReference &) override { result = false; }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(Cut &) override { result = false; }
+};
+
 struct HasEmptyElement : public Ope::Visitor {
   using Ope::Visitor::visit;
 
@@ -2707,6 +2749,7 @@ public:
   std::vector<std::string> params;
   bool disable_action = false;
   bool is_left_recursive = false;
+  bool can_be_empty = false;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -3556,6 +3599,10 @@ inline void FindLiteralToken::visit(Reference &ope) {
   }
 }
 
+inline void ComputeCanBeEmpty::visit(Reference &ope) {
+  result = ope.rule_ && ope.rule_->can_be_empty;
+}
+
 inline void DetectLeftRecursion::visit(Reference &ope) {
   if (ope.name_ == name_) {
     error_s = ope.s_;
@@ -3566,7 +3613,9 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
       if (done_ == false) { return; }
     }
   }
-  done_ = true;
+  // If the referenced rule can match empty, don't mark as done —
+  // the sequence may continue past this element to find LR.
+  done_ = !(ope.rule_ && ope.rule_->can_be_empty);
 }
 
 inline void HasEmptyElement::visit(Sequence &ope) {
@@ -4627,6 +4676,22 @@ private:
       auto &rule = x.second;
       LinkReferences vis(grammar, rule.params);
       rule.accept(vis);
+    }
+
+    // Compute can_be_empty for each rule (fixed-point iteration)
+    {
+      bool changed = true;
+      while (changed) {
+        changed = false;
+        for (auto &[name, rule] : grammar) {
+          ComputeCanBeEmpty vis;
+          rule.accept(vis);
+          if (vis.result != rule.can_be_empty) {
+            rule.can_be_empty = vis.result;
+            changed = true;
+          }
+        }
+      }
     }
 
     // Check left recursion
