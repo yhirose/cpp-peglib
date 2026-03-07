@@ -336,7 +336,9 @@ static void setup_arithmetic_actions(parser &p) {
 }
 
 TEST(LeftRecursionTest, ArithmeticExpressions_left_recursion_disabled) {
-  parser p(PEG_ArithmeticExpressions_Left_Recursion, "", false);
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(PEG_ArithmeticExpressions_Left_Recursion);
   EXPECT_FALSE(p);
 }
 

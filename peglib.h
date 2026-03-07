@@ -5155,21 +5155,18 @@ public:
   parser() = default;
 
   parser(const char *s, size_t n, const Rules &rules,
-         std::string_view start = {}, bool enable_left_recursion = true) {
-    load_grammar(s, n, rules, start, enable_left_recursion);
+         std::string_view start = {}) {
+    load_grammar(s, n, rules, start);
   }
 
-  parser(const char *s, size_t n, std::string_view start = {},
-         bool enable_left_recursion = true)
-      : parser(s, n, Rules(), start, enable_left_recursion) {}
+  parser(const char *s, size_t n, std::string_view start = {})
+      : parser(s, n, Rules(), start) {}
 
-  parser(std::string_view sv, const Rules &rules, std::string_view start = {},
-         bool enable_left_recursion = true)
-      : parser(sv.data(), sv.size(), rules, start, enable_left_recursion) {}
+  parser(std::string_view sv, const Rules &rules, std::string_view start = {})
+      : parser(sv.data(), sv.size(), rules, start) {}
 
-  parser(std::string_view sv, std::string_view start = {},
-         bool enable_left_recursion = true)
-      : parser(sv.data(), sv.size(), Rules(), start, enable_left_recursion) {}
+  parser(std::string_view sv, std::string_view start = {})
+      : parser(sv.data(), sv.size(), Rules(), start) {}
 
 #if defined(__cpp_lib_char8_t)
   parser(std::u8string_view sv, const Rules &rules, std::string_view start = {})
@@ -5184,32 +5181,26 @@ public:
   operator bool() const { return grammar_ != nullptr; }
 
   bool load_grammar(const char *s, size_t n, const Rules &rules,
-                    std::string_view start = {},
-                    bool enable_left_recursion = true) {
+                    std::string_view start = {}) {
     auto cxt =
-        ParserGenerator::parse(s, n, rules, log_, start, enable_left_recursion);
+        ParserGenerator::parse(s, n, rules, log_, start, enableLeftRecursion_);
     grammar_ = cxt.grammar;
     start_ = cxt.start;
     enablePackratParsing_ = cxt.enablePackratParsing;
     return grammar_ != nullptr;
   }
 
-  bool load_grammar(const char *s, size_t n, std::string_view start = {},
-                    bool enable_left_recursion = true) {
-    return load_grammar(s, n, Rules(), start, enable_left_recursion);
+  bool load_grammar(const char *s, size_t n, std::string_view start = {}) {
+    return load_grammar(s, n, Rules(), start);
   }
 
   bool load_grammar(std::string_view sv, const Rules &rules,
-                    std::string_view start = {},
-                    bool enable_left_recursion = true) {
-    return load_grammar(sv.data(), sv.size(), rules, start,
-                        enable_left_recursion);
+                    std::string_view start = {}) {
+    return load_grammar(sv.data(), sv.size(), rules, start);
   }
 
-  bool load_grammar(std::string_view sv, std::string_view start = {},
-                    bool enable_left_recursion = true) {
-    return load_grammar(sv.data(), sv.size(), Rules(), start,
-                        enable_left_recursion);
+  bool load_grammar(std::string_view sv, std::string_view start = {}) {
+    return load_grammar(sv.data(), sv.size(), Rules(), start);
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
@@ -5311,6 +5302,10 @@ public:
     }
   }
 
+  void enable_left_recursion(bool enable = true) {
+    enableLeftRecursion_ = enable;
+  }
+
   void enable_packrat_parsing() {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
@@ -5383,6 +5378,7 @@ private:
 
   std::shared_ptr<Grammar> grammar_;
   std::string start_;
+  bool enableLeftRecursion_ = true;
   bool enablePackratParsing_ = false;
   Log log_;
 };

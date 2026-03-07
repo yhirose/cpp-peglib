@@ -529,10 +529,12 @@ A <- B 'a'
 B <- A 'b' / 'b'
 ```
 
-Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), pass `false` as the `enable_left_recursion` parameter:
+Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 
 ```cpp
-parser parser(grammar, /* start = */ {}, /* enable_left_recursion = */ false);
+peg::parser parser;
+parser.enable_left_recursion(false);
+parser.load_grammar(grammar);
 ```
 
 AST generation

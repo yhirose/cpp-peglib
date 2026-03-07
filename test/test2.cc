@@ -774,51 +774,52 @@ TEST(RepetitionTest, Repetition__2) {
 
 TEST(LeftRecursiveTest, Left_recursive_test) {
   parser p;
+  p.enable_left_recursion(false);
   p.load_grammar(R"(
         A <- A 'a'
         B <- A 'a'
-    )",
-                 std::string_view{}, false);
+    )");
 
   EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_option_test) {
   parser p;
+  p.enable_left_recursion(false);
   p.load_grammar(R"(
         A  <- 'a' / 'b'? B 'c'
         B  <- A
-    )",
-                 std::string_view{}, false);
+    )");
 
   EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_zom_test) {
   parser p;
+  p.enable_left_recursion(false);
   p.load_grammar(R"(
         A <- 'a'* A*
-    )",
-                 std::string_view{}, false);
+    )");
 
   EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_a_ZOM_content_rule) {
   parser p;
+  p.enable_left_recursion(false);
   p.load_grammar(R"(
         A <- B
         B <- _ A
         _ <- ' '* # Zero or more
-    )",
-                 std::string_view{}, false);
+    )");
 
   EXPECT_FALSE(p);
 }
 
 TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
   parser p;
-  p.load_grammar(" A <- '' A", std::string_view{}, false);
+  p.enable_left_recursion(false);
+  p.load_grammar(" A <- '' A");
 
   EXPECT_FALSE(p);
 }
