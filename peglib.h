@@ -1227,6 +1227,30 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
+    // ISpan fast path: tight loop for ASCII CharacterClass repetition.
+    // Safe because each ASCII match is exactly 1 byte, so byte count == match
+    // count.
+    if (span_bitset_) {
+      const auto &bitset = *span_bitset_;
+      size_t i = 0;
+      if (max_ == std::numeric_limits<size_t>::max()) {
+        // Unbounded repetition (*, +): no per-iteration max check
+        while (i < n && bitset.test(static_cast<unsigned char>(s[i]))) {
+          i++;
+        }
+      } else {
+        auto limit = std::min(n, max_);
+        while (i < limit && bitset.test(static_cast<unsigned char>(s[i]))) {
+          i++;
+        }
+      }
+      if (i < min_) {
+        c.set_error_pos(s + i);
+        return static_cast<size_t>(-1);
+      }
+      return i;
+    }
+
     size_t count = 0;
     size_t i = 0;
     while (count < min_) {
@@ -1286,6 +1310,8 @@ public:
   std::shared_ptr<Ope> ope_;
   size_t min_;
   size_t max_;
+  const std::bitset<256> *span_bitset_ =
+      nullptr; // non-owning, set by SetupFirstSets
 };
 
 class AndPredicate : public Ope {
@@ -1388,12 +1414,14 @@ public:
       }
     }
     assert(!ranges_.empty());
+    setup_ascii_bitset();
   }
 
   CharacterClass(const std::vector<std::pair<char32_t, char32_t>> &ranges,
                  bool negated, bool ignore_case)
       : ranges_(ranges), negated_(negated), ignore_case_(ignore_case) {
     assert(!ranges_.empty());
+    setup_ascii_bitset();
   }
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
@@ -1429,6 +1457,9 @@ public:
 
   friend struct ComputeFirstSet;
 
+  bool is_ascii_only() const { return is_ascii_only_; }
+  const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
+
 private:
   bool in_range(const std::pair<char32_t, char32_t> &range, char32_t cp) const {
     if (ignore_case_) {
@@ -1440,9 +1471,29 @@ private:
     }
   }
 
+  void setup_ascii_bitset() {
+    if (negated_) { return; } // negated classes can match non-ASCII
+    for (const auto &[lo, hi] : ranges_) {
+      if (lo > 0x7F || hi > 0x7F) { return; }
+    }
+    is_ascii_only_ = true;
+    for (const auto &[lo, hi] : ranges_) {
+      for (auto cp = lo; cp <= hi; cp++) {
+        auto ch = static_cast<unsigned char>(cp);
+        ascii_bitset_.set(ch);
+        if (ignore_case_) {
+          ascii_bitset_.set(static_cast<unsigned char>(std::toupper(ch)));
+          ascii_bitset_.set(static_cast<unsigned char>(std::tolower(ch)));
+        }
+      }
+    }
+  }
+
   std::vector<std::pair<char32_t, char32_t>> ranges_;
   bool negated_;
   bool ignore_case_;
+  std::bitset<256> ascii_bitset_;
+  bool is_ascii_only_ = false;
 };
 
 class Character : public Ope, public std::enable_shared_from_this<Character> {
@@ -2542,7 +2593,12 @@ struct SetupFirstSets : public Ope::Visitor {
       op->accept(*this);
     }
   }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override {
+    ope.ope_->accept(*this);
+    // ISpan optimization: detect Repetition + ASCII CharacterClass
+    auto cc = dynamic_cast<CharacterClass *>(ope.ope_.get());
+    if (cc && cc->is_ascii_only()) { ope.span_bitset_ = &cc->ascii_bitset(); }
+  }
   void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
   void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
@@ -4830,7 +4886,7 @@ private:
       }
     }
 
-    // Setup First-Set optimization for PrioritizedChoice
+    // Setup First-Set and ISpan optimizations
     for (auto &x : grammar) {
       SetupFirstSets vis;
       x.second.accept(vis);
