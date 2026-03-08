@@ -386,10 +386,11 @@ template <typename T> T token_to_number_(std::string_view sv) {
 class Trie {
 public:
   Trie(const std::vector<std::string> &items, bool ignore_case)
-      : ignore_case_(ignore_case) {
+      : ignore_case_(ignore_case), items_count_(items.size()) {
     size_t id = 0;
     for (const auto &item : items) {
       const auto &s = ignore_case ? to_lower(item) : item;
+      if (item.size() > max_len_) { max_len_ = item.size(); }
       for (size_t len = 1; len <= item.size(); len++) {
         auto last = len == item.size();
         std::string_view sv(s.data(), len);
@@ -407,16 +408,20 @@ public:
   }
 
   size_t match(const char *text, size_t text_len, size_t &id) const {
+    auto limit = std::min(text_len, max_len_);
     std::string lower_text;
     if (ignore_case_) {
-      lower_text = to_lower(text);
+      lower_text.assign(text, limit);
+      for (auto &c : lower_text) {
+        c = std::tolower(c);
+      }
       text = lower_text.data();
     }
 
     size_t match_len = 0;
     auto done = false;
     size_t len = 1;
-    while (!done && len <= text_len) {
+    while (!done && len <= limit) {
       std::string_view sv(text, len);
       auto it = dic_.find(sv);
       if (it == dic_.end()) {
@@ -434,6 +439,7 @@ public:
   }
 
   size_t size() const { return dic_.size(); }
+  size_t items_count() const { return items_count_; }
 
   friend struct ComputeFirstSet;
 
@@ -456,6 +462,8 @@ private:
   std::map<std::string, Info, std::less<>> dic_;
 
   bool ignore_case_;
+  size_t items_count_;
+  size_t max_len_ = 0;
 };
 
 /*-----------------------------------------------------------------------------
@@ -3054,7 +3062,7 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
     return static_cast<size_t>(-1);
   }
 
-  vs.choice_count_ = trie_.size();
+  vs.choice_count_ = trie_.items_count();
   vs.choice_ = id;
 
   // Word check

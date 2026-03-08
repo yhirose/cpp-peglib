@@ -89,8 +89,8 @@ Left recursion support adds `DetectLeftRecursion` and seed-growing logic at pars
 | Benchmark | PEG/YACC |
 |---|---|
 | TPC-H Q1 (544 B) | 4.3x slower |
-| all TPC-H (14 KB) | 3.6x slower |
-| big.sql (1.2 MB) | 3.6x slower |
+| all TPC-H (14 KB) | 3.7x slower |
+| big.sql (1.2 MB) | 3.4x slower |
 
 No regression compared to the previous configuration.
 
@@ -100,20 +100,18 @@ All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release
 
 | Configuration | Median | PEG/YACC |
 |---|---|---|
-| YACC (libpg_query) | 36.1 ms | 1.0x |
+| YACC (libpg_query) | 31.2 ms | 1.0x |
 | PEG (no optimizations) | 228.4 ms | 7.4x |
 | PEG + Devirt | 190.9 ms | 6.2x |
 | PEG + First-Set | 135.8 ms | 4.6x |
-| PEG (all optimizations) | 105.1 ms | 3.4x |
-| PEG (all opts + LR support) | 130.3 ms | 3.6x |
+| PEG (all opts + LR support) | 107.4 ms | 3.4x |
 
 ```
-YACC                         |█████                                  36.1 ms (1.0x)
-PEG (all optimizations)      |██████████████                        105.1 ms (3.4x)
-PEG (all opts + LR support)  |█████████████████                     130.3 ms (3.6x)
+YACC                         |████                                   31.2 ms (1.0x)
+PEG (all opts + LR support)  |██████████████                        107.4 ms (3.4x)
 PEG + First-Set              |█████████████████                     135.8 ms (4.6x)
-PEG + Devirt                 |████████████████████████               190.9 ms (6.2x)
-PEG (no optimizations)       |█████████████████████████████          228.4 ms (7.4x)
+PEG + Devirt                 |████████████████████████              190.9 ms (6.2x)
+PEG (no optimizations)       |█████████████████████████████         228.4 ms (7.4x)
 ```
 
-With all optimizations and left recursion support, the gap to YACC is **3.6x** — no regression from adding LR support to non-LR grammars.
+With all optimizations including left recursion support, the gap to YACC is **3.4x**.

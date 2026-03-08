@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -120,7 +123,171 @@ static BenchResult bench_yacc_parse(const string &name, const string &sql_input,
 }
 #endif
 
+// Profile subcommand: per-rule self-time profiling
+struct RuleStats {
+  string name;
+  size_t success = 0;
+  size_t fail = 0;
+  double self_ns = 0; // exclusive (self) time in nanoseconds
+};
+
+struct ProfileData {
+  vector<RuleStats> rules;
+  map<string, size_t> index;
+  vector<chrono::steady_clock::time_point> enter_times;
+  vector<double> child_ns; // accumulated child time at each stack level
+  chrono::steady_clock::time_point start;
+};
+
+static int run_profile(const string &data_dir, int argc, char *argv[]) {
+  // Determine which input to profile
+  string input_name = "big.sql";
+  if (argc > 0) { input_name = argv[0]; }
+
+  string input_file;
+  if (input_name == "q1") {
+    input_file = data_dir + "/q1.sql";
+  } else if (input_name == "tpch") {
+    input_file = data_dir + "/all-tpch.sql";
+  } else {
+    input_file = data_dir + "/big.sql";
+  }
+
+  auto sql_grammar = read_file(data_dir + "/sql.gram");
+  auto sql_input = read_file(input_file);
+
+  parser pg(sql_grammar);
+  if (!pg) {
+    cerr << "Error: failed to parse SQL grammar" << endl;
+    return 1;
+  }
+  pg.enable_packrat_parsing();
+
+  ProfileData *profile_result = nullptr;
+
+  pg.enable_trace(
+      // enter
+      [](auto &ope, auto, auto, auto &, auto &, auto &, std::any &trace_data) {
+        auto holder = dynamic_cast<const peg::Holder *>(&ope);
+        if (!holder) return;
+
+        auto &pd = *std::any_cast<ProfileData *>(trace_data);
+        auto &name = holder->name();
+        if (pd.index.find(name) == pd.index.end()) {
+          pd.index[name] = pd.rules.size();
+          pd.rules.push_back({name, 0, 0, 0});
+        }
+
+        pd.enter_times.push_back(chrono::steady_clock::now());
+        pd.child_ns.push_back(0);
+      },
+      // leave
+      [](auto &ope, auto, auto, auto &, auto &, auto &, auto len,
+         std::any &trace_data) {
+        auto holder = dynamic_cast<const peg::Holder *>(&ope);
+        if (!holder) return;
+
+        auto &pd = *std::any_cast<ProfileData *>(trace_data);
+        auto now = chrono::steady_clock::now();
+        auto elapsed =
+            chrono::duration<double, nano>(now - pd.enter_times.back()).count();
+        auto child_time = pd.child_ns.back();
+        auto self_time = elapsed - child_time;
+
+        pd.enter_times.pop_back();
+        pd.child_ns.pop_back();
+
+        // Add elapsed to parent's child accumulator
+        if (!pd.child_ns.empty()) { pd.child_ns.back() += elapsed; }
+
+        auto &name = holder->name();
+        auto idx = pd.index[name];
+        auto &stat = pd.rules[idx];
+        stat.self_ns += self_time;
+        if (len != static_cast<size_t>(-1)) {
+          stat.success++;
+        } else {
+          stat.fail++;
+        }
+      },
+      // start
+      [&profile_result](auto &trace_data) {
+        auto pd = new ProfileData{};
+        pd->start = chrono::steady_clock::now();
+        trace_data = pd;
+        profile_result = pd;
+      },
+      // end
+      [](auto &trace_data) {});
+
+  cout << "Profiling parse of " << input_file << " (" << sql_input.size()
+       << " bytes)..." << endl;
+
+  auto t0 = chrono::steady_clock::now();
+  pg.parse(sql_input);
+  auto t1 = chrono::steady_clock::now();
+  auto total_ms =
+      chrono::duration_cast<chrono::microseconds>(t1 - t0).count() / 1000.0;
+
+  // Output results
+  auto &pd = *profile_result;
+  auto &rules = pd.rules;
+
+  vector<size_t> order(rules.size());
+  iota(order.begin(), order.end(), 0);
+  sort(order.begin(), order.end(),
+       [&](size_t a, size_t b) { return rules[a].self_ns > rules[b].self_ns; });
+
+  size_t total_calls = 0;
+  double total_self_ns = 0;
+  for (auto &r : rules) {
+    total_calls += r.success + r.fail;
+    total_self_ns += r.self_ns;
+  }
+
+  cout << endl;
+  cout << "Profile: " << input_file << " (" << sql_input.size() << " bytes)"
+       << endl;
+  cout << "Total time: " << fixed << setprecision(3) << total_ms << " ms"
+       << endl;
+  cout << "Total rule calls: " << total_calls << endl;
+  cout << endl;
+
+  char buf[256];
+  snprintf(buf, sizeof(buf), "%4s  %-30s  %10s  %6s  %10s  %10s  %6s  %8s",
+           "rank", "rule", "self(ms)", "%", "success", "fail", "fail%",
+           "avg(ns)");
+  cout << buf << endl;
+  cout << string(100, '-') << endl;
+
+  size_t rank = 1;
+  for (auto i : order) {
+    auto &r = rules[i];
+    auto total = r.success + r.fail;
+    if (total == 0) continue;
+    auto self_ms = r.self_ns / 1e6;
+    auto pct = r.self_ns / total_self_ns * 100.0;
+    auto fail_pct = total > 0 ? r.fail * 100.0 / total : 0.0;
+    auto avg_ns = r.self_ns / total;
+    snprintf(buf, sizeof(buf),
+             "%4zu  %-30s  %10.3f  %5.1f%%  %10zu  %10zu  %5.1f%%  %8.1f", rank,
+             r.name.c_str(), self_ms, pct, r.success, r.fail, fail_pct, avg_ns);
+    cout << buf << endl;
+    rank++;
+  }
+
+  delete profile_result;
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
+  string data_dir = BENCHMARK_DATA_DIR;
+
+  // Check for subcommands
+  if (argc > 1 && strcmp(argv[1], "profile") == 0) {
+    return run_profile(data_dir, argc - 2, argv + 2);
+  }
+
   int iterations = 10;
   if (argc > 1) {
     iterations = atoi(argv[1]);
@@ -129,8 +296,6 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   }
-
-  string data_dir = BENCHMARK_DATA_DIR;
 
   auto sql_grammar = read_file(data_dir + "/sql.gram");
   auto q1_sql = read_file(data_dir + "/q1.sql");
