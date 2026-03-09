@@ -1008,6 +1008,12 @@ public:
     capture_entries.resize(snap.capture_size);
   }
 
+  // Skip trailing whitespace with trace suppression.
+  // Returns whitespace length, or -1 on failure.
+  // No-op (returns 0) if inside a token boundary or no whitespaceOpe.
+  size_t skip_whitespace(const char *a_s, size_t n, SemanticValues &vs,
+                         std::any &dt);
+
   // Error
   void set_error_pos(const char *a_s, const char *literal = nullptr);
 
@@ -1154,17 +1160,9 @@ private:
     }
     // Success: emit token and consume trailing whitespace
     vs.tokens.emplace_back(std::string_view(s, id_len));
-    size_t total = id_len;
-    if (!c.in_token_boundary_count && c.whitespaceOpe) {
-      auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.verbose_trace;
-      auto se =
-          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
-      auto wl = c.whitespaceOpe->parse(s + total, n - total, vs, c, dt);
-      if (fail(wl)) { return wl; }
-      total += wl;
-    }
-    return total;
+    auto wl = c.skip_whitespace(s + id_len, n - id_len, vs, dt);
+    if (fail(wl)) { return wl; }
+    return id_len + wl;
   }
 };
 
@@ -2987,16 +2985,9 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   // Skip whitespace
-  if (!c.in_token_boundary_count && c.whitespaceOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
-
-    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
-    if (fail(len)) { return len; }
-    i += len;
-  }
+  auto wl = c.skip_whitespace(s + i, n - i, vs, dt);
+  if (fail(wl)) { return wl; }
+  i += wl;
 
   return i;
 }
@@ -3071,6 +3062,15 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
       log(line.first, line.second, msg, label);
     }
   }
+}
+
+inline size_t Context::skip_whitespace(const char *a_s, size_t n,
+                                       SemanticValues &vs, std::any &dt) {
+  if (in_token_boundary_count || !whitespaceOpe) { return 0; }
+  auto save = ignore_trace_state;
+  ignore_trace_state = !verbose_trace;
+  auto se = scope_exit([&]() { ignore_trace_state = save; });
+  return whitespaceOpe->parse(a_s, n, vs, *this, dt);
 }
 
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
@@ -3177,16 +3177,9 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   }
 
   // Skip whitespace
-  if (!c.in_token_boundary_count && c.whitespaceOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
-
-    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
-    if (fail(len)) { return len; }
-    i += len;
-  }
+  auto wl = c.skip_whitespace(s + i, n - i, vs, dt);
+  if (fail(wl)) { return wl; }
+  i += wl;
 
   return i;
 }
@@ -3216,13 +3209,9 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
   if (success(len)) {
     vs.tokens.emplace_back(std::string_view(s, len));
 
-    if (!c.in_token_boundary_count) {
-      if (c.whitespaceOpe) {
-        auto l = c.whitespaceOpe->parse(s + len, n - len, vs, c, dt);
-        if (fail(l)) { return l; }
-        len += l;
-      }
-    }
+    auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
+    if (fail(wl)) { return wl; }
+    len += wl;
   }
   return len;
 }
