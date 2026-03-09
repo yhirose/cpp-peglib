@@ -114,6 +114,34 @@ A/B comparison (same session, alternating builds):
 
 Note: Grammar load time increases slightly (~0.8 ms) due to bitset construction, but this is a one-time cost at grammar compilation.
 
+## Snapshot/Rollback (Phase 2)
+
+Replaced the `push()`/`pop()`/`append()` pattern with LPeg-style snapshot/rollback. Instead of allocating a child `SemanticValues` scope and copying results on success, operators now write directly to the parent and truncate on failure. `CaptureScope` was flattened from `vector<map>` to a flat `vector<pair>` with reverse linear search.
+
+Key changes:
+
+- `PrioritizedChoice`: snapshot before each alternative, rollback on failure, no-op on success
+- `Sequence`: direct write to parent (no child scope)
+- `Repetition`: snapshot only when `max` is bounded
+- `AndPredicate`/`NotPredicate`: always rollback (side-effect isolation)
+- `CaptureScope`: flat `vector<pair<string_view, string>>` instead of scoped `vector<map>`
+
+A/B comparison (same session, alternating builds):
+
+| Benchmark | Baseline | Snapshot/Rollback | Improvement |
+| --- | --- | --- | --- |
+| TPC-H Q1 (544 B) | 0.075 ms | 0.058 ms | -22.7% |
+| all TPC-H (14 KB) | 1.286 ms | 1.161 ms | -9.7% |
+| big.sql (1.2 MB) | 105.4 ms | 99.2 ms | -5.9% |
+
+| Benchmark | PEG/YACC |
+| --- | --- |
+| TPC-H Q1 (544 B) | 4.1x slower |
+| all TPC-H (14 KB) | 3.2x slower |
+| big.sql (1.2 MB) | 3.4x slower |
+
+The improvement is most pronounced on small inputs (Q1: -22.7%) where per-rule allocation overhead dominates, and smaller on large inputs (big.sql: -5.9%) where the grammar structure itself is the bottleneck.
+
 ## Summary (big.sql, ~1.2 MB)
 
 All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build).
@@ -126,14 +154,15 @@ All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release
 | PEG + First-Set | 135.8 ms | 4.6x |
 | PEG + First-Set + Devirt + LR | 107.4 ms | 3.4x |
 | PEG (all opts + ISpan) | 93.4 ms | 3.0x |
+| PEG (all opts + Snapshot/Rollback) | 99.2 ms | 3.4x |
 
 ```ascii
 YACC                      |████                            31.2 ms (1.0x)
-PEG (all opts + ISpan)    |████████████                    93.4 ms (3.0x)
+PEG (all opts + S/R)      |████████████                    99.2 ms (3.4x)
 PEG + First-Set + Devirt  |██████████████                 107.4 ms (3.4x)
 PEG + First-Set           |█████████████████              135.8 ms (4.6x)
 PEG + Devirt              |████████████████████████       190.9 ms (6.2x)
 PEG (no optimizations)    |█████████████████████████████  228.4 ms (7.4x)
 ```
 
-With all optimizations including ISpan fusion, the gap to YACC is **3.0x** (93.4 ms estimated from A/B relative improvement of ~12% applied to 107.4 ms baseline).
+With all optimizations including Snapshot/Rollback, the gap to YACC is **3.4x** on big.sql. The Snapshot/Rollback optimization provides the largest gains on small inputs (Q1: -22.7%) where per-rule allocation overhead is proportionally higher.

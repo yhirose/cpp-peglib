@@ -573,19 +573,6 @@ struct SemanticValues : protected std::vector<std::any> {
     return r;
   }
 
-  void append(SemanticValues &chvs) {
-    sv_ = chvs.sv_;
-    for (auto &v : chvs) {
-      emplace_back(std::move(v));
-    }
-    for (auto &tag : chvs.tags) {
-      tags.emplace_back(std::move(tag));
-    }
-    for (auto &tok : chvs.tokens) {
-      tokens.emplace_back(std::move(tok));
-    }
-  }
-
   using std::vector<std::any>::iterator;
   using std::vector<std::any>::const_iterator;
   using std::vector<std::any>::size;
@@ -844,8 +831,7 @@ public:
 
   std::shared_ptr<Ope> wordOpe;
 
-  std::vector<std::map<std::string_view, std::string>> capture_scope_stack;
-  size_t capture_scope_stack_size = 0;
+  std::vector<std::pair<std::string_view, std::string>> capture_entries;
 
   std::vector<bool> cut_stack;
 
@@ -915,14 +901,10 @@ public:
         trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
 
     push_args({});
-    push_capture_scope();
   }
 
   ~Context() {
-    pop_capture_scope();
-
     assert(!value_stack_size);
-    assert(!capture_scope_stack_size);
     assert(cut_stack.empty());
   }
 
@@ -964,16 +946,6 @@ public:
     }
   }
 
-  SemanticValues &push() {
-    push_capture_scope();
-    return push_semantic_values_scope();
-  }
-
-  void pop() {
-    pop_capture_scope();
-    pop_semantic_values_scope();
-  }
-
   // Semantic values
   SemanticValues &push_semantic_values_scope() {
     assert(value_stack_size <= value_stack.size());
@@ -1010,28 +982,30 @@ public:
     return args_stack[args_stack.size() - 1];
   }
 
-  // Capture scope
-  void push_capture_scope() {
-    assert(capture_scope_stack_size <= capture_scope_stack.size());
-    if (capture_scope_stack_size == capture_scope_stack.size()) {
-      capture_scope_stack.emplace_back(
-          std::map<std::string_view, std::string>());
-    } else {
-      auto &cs = capture_scope_stack[capture_scope_stack_size];
-      if (!cs.empty()) { cs.clear(); }
-    }
-    capture_scope_stack_size++;
+  // Snapshot/Rollback
+  struct Snapshot {
+    size_t sv_size;
+    size_t sv_tags_size;
+    size_t sv_tokens_size;
+    std::string_view sv_sv;
+    size_t choice_count;
+    size_t choice;
+    size_t capture_size;
+  };
+
+  Snapshot snapshot(const SemanticValues &vs) const {
+    return {vs.size(),        vs.tags.size(), vs.tokens.size(),      vs.sv_,
+            vs.choice_count_, vs.choice_,     capture_entries.size()};
   }
 
-  void pop_capture_scope() { capture_scope_stack_size--; }
-
-  void shift_capture_values() {
-    assert(capture_scope_stack_size >= 2);
-    auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
-    auto prev = curr - 1;
-    for (const auto &[k, v] : *curr) {
-      (*prev)[k] = v;
-    }
+  void rollback(SemanticValues &vs, const Snapshot &snap) {
+    vs.resize(snap.sv_size);
+    vs.tags.resize(snap.sv_tags_size);
+    vs.tokens.resize(snap.sv_tokens_size);
+    vs.sv_ = snap.sv_sv;
+    vs.choice_count_ = snap.choice_count;
+    vs.choice_ = snap.choice;
+    capture_entries.resize(snap.capture_size);
   }
 
   // Error
@@ -1099,15 +1073,12 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    auto &chvs = c.push_semantic_values_scope();
-    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
     size_t i = 0;
     for (const auto &ope : opes_) {
-      auto len = ope->parse(s + i, n - i, chvs, c, dt);
+      auto len = ope->parse(s + i, n - i, vs, c, dt);
       if (fail(len)) { return len; }
       i += len;
     }
-    vs.append(chvs);
     return i;
   }
 
@@ -1186,28 +1157,25 @@ public:
 
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
-      auto &chvs = c.push();
+      auto snap = c.snapshot(vs);
       c.error_info.keep_previous_token = id > 0;
-      auto se = scope_exit([&]() {
-        c.pop();
-        c.error_info.keep_previous_token = false;
-      });
 
-      len = ope->parse(s, n, chvs, c, dt);
+      len = ope->parse(s, n, vs, c, dt);
 
       if (success(len)) {
-        vs.append(chvs);
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        c.shift_capture_values();
-        break;
-      } else if (!c.cut_stack.empty() && c.cut_stack.back()) {
         break;
       }
+
+      c.rollback(vs, snap);
+
+      if (!c.cut_stack.empty() && c.cut_stack.back()) { break; }
 
       id++;
     }
 
+    c.error_info.keep_previous_token = false;
     return len;
   }
 
@@ -1254,31 +1222,17 @@ public:
     size_t count = 0;
     size_t i = 0;
     while (count < min_) {
-      auto &chvs = c.push();
-      auto se = scope_exit([&]() { c.pop(); });
-
-      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
-
-      if (success(len)) {
-        vs.append(chvs);
-        c.shift_capture_values();
-      } else {
-        return len;
-      }
+      auto len = ope_->parse(s + i, n - i, vs, c, dt);
+      if (fail(len)) { return len; }
       i += len;
       count++;
     }
 
     while (count < max_) {
-      auto &chvs = c.push();
-      auto se = scope_exit([&]() { c.pop(); });
-
-      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
-
-      if (success(len)) {
-        vs.append(chvs);
-        c.shift_capture_values();
-      } else {
+      auto snap = c.snapshot(vs);
+      auto len = ope_->parse(s + i, n - i, vs, c, dt);
+      if (fail(len)) {
+        c.rollback(vs, snap);
         break;
       }
       i += len;
@@ -1318,13 +1272,11 @@ class AndPredicate : public Ope {
 public:
   AndPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
-                    Context &c, std::any &dt) const override {
-    auto &chvs = c.push();
-    auto se = scope_exit([&]() { c.pop(); });
-
-    auto len = ope_->parse(s, n, chvs, c, dt);
-
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override {
+    auto snap = c.snapshot(vs);
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.rollback(vs, snap); // Always rollback — predicates consume nothing
     if (success(len)) {
       return 0;
     } else {
@@ -1341,11 +1293,11 @@ class NotPredicate : public Ope {
 public:
   NotPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
-                    Context &c, std::any &dt) const override {
-    auto &chvs = c.push();
-    auto se = scope_exit([&]() { c.pop(); });
-    auto len = ope_->parse(s, n, chvs, c, dt);
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override {
+    auto snap = c.snapshot(vs);
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.rollback(vs, snap); // Always rollback — predicates consume nothing
     if (success(len)) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1544,9 +1496,10 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    c.push_capture_scope();
-    auto se = scope_exit([&]() { c.pop_capture_scope(); });
-    return ope_->parse(s, n, vs, c, dt);
+    auto cap_snap = c.capture_entries.size();
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.capture_entries.resize(cap_snap); // Always rollback (isolation)
+    return len;
   }
 
   void accept(Visitor &v) override;
@@ -3463,12 +3416,10 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
 inline size_t BackReference::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
-  auto size = static_cast<int>(c.capture_scope_stack_size);
-  for (auto i = size - 1; i >= 0; i--) {
-    auto index = static_cast<size_t>(i);
-    const auto &cs = c.capture_scope_stack[index];
-    if (cs.find(name_) != cs.end()) {
-      const auto &lit = cs.at(name_);
+  for (auto it = c.capture_entries.rbegin(); it != c.capture_entries.rend();
+       ++it) {
+    if (it->first == name_) {
+      const auto &lit = it->second;
       std::once_flag init_is_word;
       auto is_word = false;
       return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false);
@@ -4373,8 +4324,7 @@ private:
         data.captures_in_current_definition.insert(name);
 
         return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
-          auto &cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
-          cs[name] = std::string(a_s, a_n);
+          c.capture_entries.emplace_back(name, std::string(a_s, a_n));
         });
       }
       default: {

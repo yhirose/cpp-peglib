@@ -27,6 +27,7 @@ add_executable(peglib-test-main
   test_combinators.cc
   test_definition_api.cc
   test_utf8.cc
+  test_snapshot.cc
 )
 
 target_include_directories(peglib-test-main PRIVATE ..)
