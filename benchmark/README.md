@@ -142,6 +142,31 @@ A/B comparison (same session, alternating builds):
 
 The improvement is most pronounced on small inputs (Q1: -22.7%) where per-rule allocation overhead dominates, and smaller on large inputs (big.sql: -5.9%) where the grammar structure itself is the bottleneck.
 
+## Keyword Guard (Phase 3)
+
+At grammar compilation time, the pattern `!ReservedKeyword <[a-z_]i[a-z0-9_]i*>` is detected. At parse time, instead of running the full NotPredicate → Holder → PrioritizedChoice chain for each keyword alternative, the fast path scans the identifier using a bitset, then checks the result against a precomputed keyword table. Identifiers whose length falls outside the keyword length range skip the lookup entirely.
+
+Key techniques:
+
+- Bitset-based identifier scanning (same as ISpan)
+- Stack buffer for case-folding (heap fallback for identifiers > 64 chars)
+- Length-range early-out (`min_keyword_len` / `max_keyword_len`)
+- Compound keywords (e.g., `GROUP BY`) fall back to the normal path
+
+A/B comparison (same session, alternating builds):
+
+| Benchmark | Baseline | Keyword Guard | Improvement |
+| --- | --- | --- | --- |
+| TPC-H Q1 (544 B) | 0.058 ms | 0.055 ms | -5.2% |
+| all TPC-H (14 KB) | 1.117 ms | 1.109 ms | -0.7% |
+| big.sql (1.2 MB) | 99.2 ms | 92.4 ms | -6.8% |
+
+| Benchmark | PEG/YACC |
+| --- | --- |
+| TPC-H Q1 (544 B) | 3.7x slower |
+| all TPC-H (14 KB) | 3.0x slower |
+| big.sql (1.2 MB) | 3.1x slower |
+
 ## Summary (big.sql, ~1.2 MB)
 
 All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build).
@@ -153,16 +178,17 @@ All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release
 | PEG + Devirt | 190.9 ms | 6.2x |
 | PEG + First-Set | 135.8 ms | 4.6x |
 | PEG + First-Set + Devirt + LR | 107.4 ms | 3.4x |
-| PEG (all opts + ISpan) | 93.4 ms | 3.0x |
 | PEG (all opts + Snapshot/Rollback) | 99.2 ms | 3.4x |
+| PEG (all opts + Keyword Guard) | 92.4 ms | 3.1x |
 
 ```ascii
 YACC                      |████                            31.2 ms (1.0x)
-PEG (all opts + S/R)      |████████████                    99.2 ms (3.4x)
+PEG (all opts + KW Guard) |████████████                    92.4 ms (3.1x)
+PEG (all opts + S/R)      |█████████████                   99.2 ms (3.4x)
 PEG + First-Set + Devirt  |██████████████                 107.4 ms (3.4x)
 PEG + First-Set           |█████████████████              135.8 ms (4.6x)
 PEG + Devirt              |████████████████████████       190.9 ms (6.2x)
 PEG (no optimizations)    |█████████████████████████████  228.4 ms (7.4x)
 ```
 
-With all optimizations including Snapshot/Rollback, the gap to YACC is **3.4x** on big.sql. The Snapshot/Rollback optimization provides the largest gains on small inputs (Q1: -22.7%) where per-rule allocation overhead is proportionally higher.
+With all optimizations including Keyword Guard, the gap to YACC is **3.1x** on big.sql — a **2.5x improvement** from the original 7.4x baseline.
