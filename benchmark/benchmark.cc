@@ -153,7 +153,15 @@ static int run_profile(const string &data_dir, int argc, char *argv[]) {
     input_file = data_dir + "/big.sql";
   }
 
-  auto sql_grammar = read_file(data_dir + "/sql.gram");
+  // Grammar: default or "optimized"
+  string grammar_file = data_dir + "/sql.gram";
+  for (int i = 0; i < argc; i++) {
+    string arg = argv[i];
+    if (arg == "optimized" || arg == "opt") {
+      grammar_file = data_dir + "/sql-optimized.gram";
+    }
+  }
+  auto sql_grammar = read_file(grammar_file);
   auto sql_input = read_file(input_file);
 
   parser pg(sql_grammar);
@@ -220,6 +228,9 @@ static int run_profile(const string &data_dir, int argc, char *argv[]) {
       // end
       [](auto &trace_data) {});
 
+  // Enable packrat stats collection
+  pg["Statements"].collect_packrat_stats = true;
+
   cout << "Profiling parse of " << input_file << " (" << sql_input.size()
        << " bytes)..." << endl;
 
@@ -274,6 +285,65 @@ static int run_profile(const string &data_dir, int argc, char *argv[]) {
              r.name.c_str(), self_ms, pct, r.success, r.fail, fail_pct, avg_ns);
     cout << buf << endl;
     rank++;
+  }
+
+  // Packrat stats
+  auto &pkstats = pg["Statements"].packrat_stats_;
+  if (!pkstats.empty()) {
+    cout << endl;
+    cout << "Packrat cache stats per rule:" << endl;
+    snprintf(buf, sizeof(buf), "%4s  %-30s  %10s  %10s  %10s  %6s", "rank",
+             "rule", "hits", "misses", "total", "hit%");
+    cout << buf << endl;
+    cout << string(80, '-') << endl;
+
+    // Build def_id → name map from ProfileData
+    map<size_t, string> defid_to_name;
+    for (auto &[name, idx] : pd.index) {
+      try {
+        auto &rule = pg[name.c_str()];
+        defid_to_name[rule.id] = name;
+      } catch (...) {}
+    }
+
+    struct PkEntry {
+      string name;
+      size_t hits, misses;
+    };
+    vector<PkEntry> pk_entries;
+    size_t total_hits = 0, total_misses = 0;
+    for (size_t i = 0; i < pkstats.size(); i++) {
+      auto &st = pkstats[i];
+      if (st.hits + st.misses == 0) continue;
+      auto it = defid_to_name.find(i);
+      string name =
+          it != defid_to_name.end() ? it->second : "id=" + to_string(i);
+      pk_entries.push_back({name, st.hits, st.misses});
+      total_hits += st.hits;
+      total_misses += st.misses;
+    }
+
+    sort(pk_entries.begin(), pk_entries.end(), [](auto &a, auto &b) {
+      return a.hits + a.misses > b.hits + b.misses;
+    });
+
+    rank = 1;
+    for (auto &e : pk_entries) {
+      auto total = e.hits + e.misses;
+      auto hit_pct = total > 0 ? e.hits * 100.0 / total : 0.0;
+      snprintf(buf, sizeof(buf), "%4zu  %-30s  %10zu  %10zu  %10zu  %5.1f%%",
+               rank, e.name.c_str(), e.hits, e.misses, total, hit_pct);
+      cout << buf << endl;
+      rank++;
+    }
+    cout << endl;
+    snprintf(buf, sizeof(buf),
+             "Total: hits=%zu misses=%zu total=%zu hit%%=%.1f%%", total_hits,
+             total_misses, total_hits + total_misses,
+             (total_hits + total_misses) > 0
+                 ? total_hits * 100.0 / (total_hits + total_misses)
+                 : 0.0);
+    cout << buf << endl;
   }
 
   delete profile_result;
@@ -336,6 +406,18 @@ int main(int argc, char *argv[]) {
        << endl;
   results.push_back(
       bench_sql_parse("PEG: big.sql (~1MB)", sql_grammar, big_sql, iterations));
+
+  // Optimized grammar benchmarks
+  {
+    auto opt_grammar = read_file(data_dir + "/sql-optimized.gram");
+    cout << endl << "--- cpp-peglib (PEG, optimized grammar) ---" << endl;
+
+    cout << endl
+         << "[" << test_num++ << "] PEG-opt: big.sql (" << big_sql.size()
+         << " bytes)" << endl;
+    results.push_back(bench_sql_parse("PEG-opt: big.sql (~1MB)", opt_grammar,
+                                      big_sql, iterations));
+  }
 
   // YACC benchmarks
 #ifdef HAS_PG_QUERY
