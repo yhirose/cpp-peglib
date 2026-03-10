@@ -912,6 +912,18 @@ public:
   Context(Context &&) = delete;
   Context operator=(const Context &) = delete;
 
+  // Per-rule packrat stats (populated when packrat_stats is non-null)
+  struct PackratStats {
+    size_t hits = 0;
+    size_t misses = 0;
+  };
+  std::vector<PackratStats> *packrat_stats = nullptr;
+
+  // Per-rule packrat filter: if set, only rules with filter[def_id]=true
+  // use full memoization (cache_values map). Others use bitvector-only
+  // re-entry guard.
+  const std::vector<bool> *packrat_rule_filter = nullptr;
+
   template <typename T>
   void packrat(const char *a_s, size_t def_id, size_t &len, std::any &val,
                T fn) {
@@ -924,6 +936,9 @@ public:
     auto idx = def_count * static_cast<size_t>(col) + def_id;
 
     if (cache_registered[idx]) {
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].hits++;
+      }
       if (cache_success[idx]) {
         auto key = std::pair(col, def_id);
         std::tie(len, val) = cache_values[key];
@@ -933,15 +948,25 @@ public:
         return;
       }
     } else {
-      // Pre-register as failure before calling fn. This prevents
-      // infinite recursion from undetected left recursion (e.g.
-      // through macro parameters): if the same rule re-enters at
-      // the same position, it hits this entry and returns failure.
+      // Pre-register as failure (re-entry guard for all rules)
       cache_registered[idx] = true;
       cache_success[idx] = false;
 
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].misses++;
+      }
+
       fn(val);
-      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
+
+      bool full_memo =
+          !packrat_rule_filter || (def_id < packrat_rule_filter->size() &&
+                                   (*packrat_rule_filter)[def_id]);
+      if (full_memo) {
+        if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
+      } else {
+        // Guard-only: undo registration so future calls re-parse
+        cache_registered[idx] = false;
+      }
       return;
     }
   }
@@ -2861,6 +2886,10 @@ public:
 
   bool eoi_check = true;
 
+  // Per-rule packrat stats (optional, for profiling)
+  mutable bool collect_packrat_stats = false;
+  mutable std::vector<Context::PackratStats> packrat_stats_;
+
 private:
   friend class Reference;
   friend class ParserGenerator;
@@ -2878,6 +2907,8 @@ private:
     });
   }
 
+  void initialize_packrat_filter() const;
+
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log) const {
     initialize_definition_ids();
@@ -2893,6 +2924,18 @@ private:
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
               verbose_trace, log);
+
+    if (collect_packrat_stats) {
+      packrat_stats_.resize(definition_ids_.size());
+      c.packrat_stats = &packrat_stats_;
+    }
+
+    if (enablePackratParsing) {
+      initialize_packrat_filter();
+      if (!packrat_filter_.empty()) {
+        c.packrat_rule_filter = &packrat_filter_;
+      }
+    }
 
     size_t i = 0;
 
@@ -2931,6 +2974,8 @@ private:
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
+  mutable std::once_flag packrat_filter_init_;
+  mutable std::vector<bool> packrat_filter_;
 };
 
 /*
@@ -3996,6 +4041,127 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
   kw->exact_keywords = std::move(exact_keywords);
   kw->prefix_keywords = std::move(prefix_keywords);
   seq.kw_guard_ = std::move(kw);
+}
+
+// Compute which rules benefit from packrat memoization.
+// A rule benefits if it's reachable from 2+ alternatives of the same
+// PrioritizedChoice (backtracking will re-visit it at the same position).
+inline void Definition::initialize_packrat_filter() const {
+  std::call_once(packrat_filter_init_, [&]() {
+    auto def_count = definition_ids_.size();
+    if (def_count == 0) { return; }
+
+    // Collect rule IDs reachable from an Ope subtree (bitvector indexed by
+    // def_id)
+    struct CollectReachableRules : public Ope::Visitor {
+      using Ope::Visitor::visit;
+      std::vector<bool> reachable; // indexed by def_id
+
+      CollectReachableRules(size_t n) : reachable(n, false) {}
+
+      void visit(Sequence &ope) override {
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+        }
+      }
+      void visit(PrioritizedChoice &ope) override {
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+        }
+      }
+      void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+      void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+      void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+      void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+      void visit(Capture &ope) override { ope.ope_->accept(*this); }
+      void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+      void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+      void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id < reachable.size()) { reachable[id] = true; }
+        ope.ope_->accept(*this);
+      }
+      void visit(Reference &ope) override {
+        if (ope.rule_ && ope.rule_->id < reachable.size() &&
+            !reachable[ope.rule_->id]) {
+          reachable[ope.rule_->id] = true;
+          ope.rule_->accept(*this);
+        }
+      }
+      void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+      void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+    };
+
+    // Find rules that benefit: reachable from 2+ alternatives of same choice
+    std::vector<bool> benefits(def_count, false);
+
+    struct FindBacktrackRules : public Ope::Visitor {
+      using Ope::Visitor::visit;
+      std::vector<bool> &benefits;
+      size_t def_count;
+      std::vector<bool> visited_rules; // indexed by def_id
+
+      FindBacktrackRules(std::vector<bool> &b, size_t n)
+          : benefits(b), def_count(n), visited_rules(n, false) {}
+
+      void visit(PrioritizedChoice &ope) override {
+        // For each alternative, collect reachable rules as bitvectors
+        std::vector<std::vector<bool>> alt_reachable;
+        for (auto &op : ope.opes_) {
+          CollectReachableRules crr(def_count);
+          op->accept(crr);
+          alt_reachable.push_back(std::move(crr.reachable));
+        }
+
+        // Mark rules reachable from 2+ alternatives
+        for (size_t id = 0; id < def_count; id++) {
+          size_t count = 0;
+          for (auto &alt : alt_reachable) {
+            if (alt[id]) { count++; }
+          }
+          if (count >= 2) { benefits[id] = true; }
+        }
+
+        // Recurse into alternatives
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+        }
+      }
+      void visit(Sequence &ope) override {
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+        }
+      }
+      void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+      void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+      void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+      void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+      void visit(Capture &ope) override { ope.ope_->accept(*this); }
+      void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+      void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+      void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id < visited_rules.size() && !visited_rules[id]) {
+          visited_rules[id] = true;
+          ope.ope_->accept(*this);
+        }
+      }
+      void visit(Reference &ope) override {
+        if (ope.rule_) { ope.rule_->accept(*this); }
+      }
+      void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+      void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+    };
+
+    FindBacktrackRules finder(benefits, def_count);
+    holder_->accept(finder);
+    if (whitespaceOpe) { whitespaceOpe->accept(finder); }
+    if (wordOpe) { wordOpe->accept(finder); }
+
+    packrat_filter_ = std::move(benefits);
+  });
 }
 
 inline void LinkReferences::visit(Reference &ope) {

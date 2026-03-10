@@ -167,6 +167,40 @@ A/B comparison (same session, alternating builds):
 | all TPC-H (14 KB) | 3.0x slower |
 | big.sql (1.2 MB) | 3.1x slower |
 
+## Whitespace Skip Optimization
+
+At grammar compilation time, `Sequence` nodes with whitespace operators between elements are detected. At parse time, instead of dispatching through the full operator chain for each whitespace consumption, a fast inline function scans whitespace using a precomputed bitset. This eliminates vtable calls, scope management, and SemanticValues bookkeeping for one of the most frequently invoked operations.
+
+A/B comparison (same session, alternating builds):
+
+| Benchmark | Baseline | Whitespace Skip | Improvement |
+| --- | --- | --- | --- |
+| big.sql (1.2 MB) | 92.4 ms | 93.0 ms | ~neutral |
+
+| Benchmark | PEG/YACC |
+| --- | --- |
+| big.sql (1.2 MB) | 3.0x slower |
+
+The improvement was within noise range on big.sql. The optimization primarily benefits grammars with heavy whitespace-separated sequences.
+
+## Selective Packrat Memoization
+
+At grammar compilation time, static analysis identifies which rules actually benefit from packrat memoization. A rule benefits only if it is reachable from 2+ alternatives of the same `PrioritizedChoice` (i.e., backtracking will re-visit it at the same position). Rules that don't benefit use a lightweight bitvector-only re-entry guard instead of the full `std::map`-based cache.
+
+Empirical profiling of the SQL grammar showed that only 2 of 53 rules benefit from packrat (Identifier: 50.3% hit rate, ColumnReference: 45.1%). The remaining 51 rules had 0% hit rate with ~295K wasted map insertions.
+
+A/B comparison (same session, alternating builds):
+
+| Benchmark | Baseline | Selective Packrat | Improvement |
+| --- | --- | --- | --- |
+| big.sql (1.2 MB) | 93.0 ms | 88.3 ms | -5.1% |
+
+| Benchmark | PEG/YACC |
+| --- | --- |
+| TPC-H Q1 (544 B) | 3.8x slower |
+| all TPC-H (14 KB) | 2.8x slower |
+| big.sql (1.2 MB) | 2.8x slower |
+
 ## Summary (big.sql, ~1.2 MB)
 
 All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build).
@@ -180,15 +214,17 @@ All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release
 | PEG + First-Set + Devirt + LR | 107.4 ms | 3.4x |
 | PEG (all opts + Snapshot/Rollback) | 99.2 ms | 3.4x |
 | PEG (all opts + Keyword Guard) | 92.4 ms | 3.1x |
+| PEG (all opts + Selective Packrat) | 88.3 ms | 2.8x |
 
 ```ascii
-YACC                      |████                            31.2 ms (1.0x)
-PEG (all opts + KW Guard) |████████████                    92.4 ms (3.1x)
-PEG (all opts + S/R)      |█████████████                   99.2 ms (3.4x)
-PEG + First-Set + Devirt  |██████████████                 107.4 ms (3.4x)
-PEG + First-Set           |█████████████████              135.8 ms (4.6x)
-PEG + Devirt              |████████████████████████       190.9 ms (6.2x)
-PEG (no optimizations)    |█████████████████████████████  228.4 ms (7.4x)
+YACC                       |████                            31.2 ms (1.0x)
+PEG (all opts + Sel. Pack) |███████████                     88.3 ms (2.8x)
+PEG (all opts + KW Guard)  |████████████                    92.4 ms (3.1x)
+PEG (all opts + S/R)       |█████████████                   99.2 ms (3.4x)
+PEG + First-Set + Devirt   |██████████████                 107.4 ms (3.4x)
+PEG + First-Set            |█████████████████              135.8 ms (4.6x)
+PEG + Devirt               |████████████████████████       190.9 ms (6.2x)
+PEG (no optimizations)     |█████████████████████████████  228.4 ms (7.4x)
 ```
 
-With all optimizations including Keyword Guard, the gap to YACC is **3.1x** on big.sql — a **2.5x improvement** from the original 7.4x baseline.
+With all optimizations including Selective Packrat, the gap to YACC is **2.8x** on big.sql — a **2.6x improvement** from the original 7.4x baseline.
