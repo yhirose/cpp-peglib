@@ -998,7 +998,7 @@ public:
 
   // Arguments
   void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
-    args_stack.emplace_back(args);
+    args_stack.emplace_back(std::move(args));
   }
 
   void pop_args() { args_stack.pop_back(); }
@@ -2029,12 +2029,12 @@ struct AssignIDToDefinition : public Ope::Visitor {
   using Ope::Visitor::visit;
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
@@ -2059,7 +2059,7 @@ struct IsLiteralToken : public Ope::Visitor {
   using Ope::Visitor::visit;
 
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       if (!IsLiteralToken::check(*op)) { return; }
     }
     result_ = true;
@@ -2082,12 +2082,12 @@ struct TokenChecker : public Ope::Visitor {
   using Ope::Visitor::visit;
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
@@ -2141,7 +2141,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (done_) {
         break;
@@ -2152,7 +2152,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (error_s) {
         done_ = true;
@@ -2253,7 +2253,7 @@ struct HasEmptyElement : public Ope::Visitor {
 
   void visit(Sequence &ope) override;
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (is_empty) { return; }
     }
@@ -2309,13 +2309,13 @@ struct DetectInfiniteLoop : public Ope::Visitor {
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (has_error) { return; }
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (has_error) { return; }
     }
@@ -2363,12 +2363,12 @@ struct ReferenceChecker : public Ope::Visitor {
       : grammar_(grammar), params_(params) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
@@ -2402,12 +2402,12 @@ struct LinkReferences : public Ope::Visitor {
       : grammar_(grammar), params_(params) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
@@ -2439,17 +2439,17 @@ struct FindReference : public Ope::Visitor {
 
   void visit(Sequence &ope) override {
     std::vector<std::shared_ptr<Ope>> opes;
-    for (auto o : ope.opes_) {
+    for (const auto &o : ope.opes_) {
       o->accept(*this);
-      opes.push_back(found_ope);
+      opes.emplace_back(std::move(found_ope));
     }
     found_ope = std::make_shared<Sequence>(opes);
   }
   void visit(PrioritizedChoice &ope) override {
     std::vector<std::shared_ptr<Ope>> opes;
-    for (auto o : ope.opes_) {
+    for (const auto &o : ope.opes_) {
       o->accept(*this);
-      opes.push_back(found_ope);
+      opes.emplace_back(std::move(found_ope));
     }
     found_ope = std::make_shared<PrioritizedChoice>(opes);
   }
@@ -2521,7 +2521,7 @@ struct ComputeFirstSet : public Ope::Visitor {
   using Ope::Visitor::visit;
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       FirstSet element_fs;
       auto save = result_;
       result_ = FirstSet{};
@@ -2541,7 +2541,7 @@ struct ComputeFirstSet : public Ope::Visitor {
   }
   void visit(PrioritizedChoice &ope) override {
     auto save = result_;
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       result_ = FirstSet{};
       op->accept(*this);
       save.merge(result_);
@@ -2639,12 +2639,12 @@ struct SetupFirstSets : public Ope::Visitor {
   void visit(PrioritizedChoice &ope) override {
     ope.first_sets_.clear();
     ope.first_sets_.reserve(ope.opes_.size());
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       ComputeFirstSet cfs;
       op->accept(cfs);
       ope.first_sets_.push_back(cfs.result_);
     }
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
@@ -3499,21 +3499,19 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
 
       // Collect arguments
       std::vector<std::shared_ptr<Ope>> args;
-      for (auto arg : args_) {
+      for (const auto &arg : args_) {
         arg->accept(vis);
         args.emplace_back(std::move(vis.found_ope));
       }
 
       c.push_args(std::move(args));
       auto se = scope_exit([&]() { c.pop_args(); });
-      auto ope = get_core_operator();
-      return ope->parse(s, n, vs, c, dt);
+      return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
       // Definition
       c.push_args(std::vector<std::shared_ptr<Ope>>());
-      auto se = scope_exit([&]() { c.pop_args(); });
-      auto ope = get_core_operator();
-      return ope->parse(s, n, vs, c, dt);
+      auto se2 = scope_exit([&]() { c.pop_args(); });
+      return rule_->holder_->parse(s, n, vs, c, dt);
     }
   } else {
     // Reference parameter in macro
@@ -3718,7 +3716,7 @@ inline void AssignIDToDefinition::visit(Holder &ope) {
 
 inline void AssignIDToDefinition::visit(Reference &ope) {
   if (ope.rule_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
     ope.rule_->accept(*this);
@@ -3732,7 +3730,7 @@ inline void AssignIDToDefinition::visit(PrecedenceClimbing &ope) {
 
 inline void TokenChecker::visit(Reference &ope) {
   if (ope.is_macro_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   } else {
@@ -3743,7 +3741,7 @@ inline void TokenChecker::visit(Reference &ope) {
 inline void FindLiteralToken::visit(Reference &ope) {
   if (ope.is_macro_) {
     ope.rule_->accept(*this);
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3876,7 +3874,7 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
   }
 
   if (ope.is_macro_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3901,7 +3899,7 @@ inline void ReferenceChecker::visit(Reference &ope) {
       error_s[ope.name_] = ope.s_;
       error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
     }
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3932,7 +3930,7 @@ inline void SetupFirstSets::visit(Reference &ope) {
 inline void SetupFirstSets::visit(Sequence &ope) {
   ope.kw_guard_.reset();
   setup_keyword_guarded_identifier(ope);
-  for (auto op : ope.opes_) {
+  for (const auto &op : ope.opes_) {
     op->accept(*this);
   }
 }
@@ -4182,7 +4180,7 @@ inline void LinkReferences::visit(Reference &ope) {
     ope.rule_ = &rule;
   }
 
-  for (auto arg : ope.args_) {
+  for (const auto &arg : ope.args_) {
     arg->accept(*this);
   }
 }
@@ -4842,7 +4840,7 @@ private:
     g["PrecedenceClimbing"] = [](const SemanticValues &vs) {
       PrecedenceClimbing::BinOpeInfo binOpeInfo;
       size_t level = 1;
-      for (auto v : vs) {
+      for (const auto &v : vs) {
         auto tokens = std::any_cast<std::vector<std::string_view>>(v);
         auto assoc = tokens[0][0];
         for (size_t i = 1; i < tokens.size(); i++) {
@@ -5299,7 +5297,7 @@ void ast_to_s_core(const std::shared_ptr<T> &ptr, std::string &s, int level,
     s += "+ " + name + "\n";
   }
   if (fn) { s += fn(ast, level + 1); }
-  for (auto node : ast.nodes) {
+  for (const auto &node : ast.nodes) {
     ast_to_s_core(node, s, level + 1, fn);
   }
 }
@@ -5329,7 +5327,7 @@ struct AstOptimizer {
       auto ast = std::make_shared<T>(*child, original->name.data(),
                                      original->position, original->length,
                                      original->choice_count, original->choice);
-      for (auto node : ast->nodes) {
+      for (auto &node : ast->nodes) {
         node->parent = ast;
       }
       return ast;
@@ -5338,7 +5336,7 @@ struct AstOptimizer {
     auto ast = std::make_shared<T>(*original);
     ast->parent = parent;
     ast->nodes.clear();
-    for (auto node : original->nodes) {
+    for (const auto &node : original->nodes) {
       auto child = optimize(node, ast);
       ast->nodes.push_back(child);
     }
@@ -5370,7 +5368,7 @@ template <typename T = Ast> void add_ast_action(Definition &rule) {
                             std::distance(vs.ss, vs.sv().data()),
                             vs.sv().length(), vs.choice_count(), vs.choice());
 
-    for (auto node : ast->nodes) {
+    for (auto &node : ast->nodes) {
       node->parent = ast;
     }
     return ast;
