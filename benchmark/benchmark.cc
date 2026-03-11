@@ -55,6 +55,57 @@ struct BenchResult {
   }
 };
 
+static void print_bar_chart(const vector<BenchResult> &results) {
+  // Collect big.sql results for the bar chart
+  struct Entry {
+    string name;
+    double ms;
+  };
+  vector<Entry> entries;
+
+  for (const auto &r : results) {
+    if (r.name.find("big.sql") != string::npos) {
+      entries.push_back({r.name, r.median()});
+    }
+  }
+
+  if (entries.empty()) return;
+
+  // Sort by time (fastest first)
+  sort(entries.begin(), entries.end(),
+       [](const Entry &a, const Entry &b) { return a.ms < b.ms; });
+
+  double baseline = entries.front().ms; // fastest as 1.0x
+  double max_ms = entries.back().ms;
+
+  const int max_bar_width = 30;
+  const int name_width = 28;
+
+  cout << endl << "  Bar chart (big.sql):" << endl << endl;
+
+  for (const auto &e : entries) {
+    double ratio = baseline > 0 ? e.ms / baseline : 0;
+    int bar_len =
+        max_ms > 0 ? static_cast<int>(e.ms / max_ms * max_bar_width) : 0;
+    if (bar_len < 1) bar_len = 1;
+
+    // Build bar with Unicode block character U+2588
+    string bar_str;
+    for (int i = 0; i < bar_len; i++) {
+      bar_str += "\xe2\x96\x88";
+    }
+    // Pad with spaces to align the numbers
+    string padding(max_bar_width - bar_len, ' ');
+
+    char line[256];
+    snprintf(line, sizeof(line), "%6.1f ms (%.1fx)", e.ms, ratio);
+
+    // Print: name | bar + padding + numbers
+    cout << "  " << left << setw(name_width) << e.name << " |" << bar_str
+         << padding << "  " << line << endl;
+  }
+}
+
 static void print_result(const BenchResult &r) {
   cout << "  " << left << setw(30) << r.name << right << "  median: " << fixed
        << setprecision(3) << setw(10) << r.median()
@@ -154,11 +205,11 @@ static int run_profile(const string &data_dir, int argc, char *argv[]) {
   }
 
   // Grammar: default or "optimized"
-  string grammar_file = data_dir + "/sql.gram";
+  string grammar_file = data_dir + "/sql.peg";
   for (int i = 0; i < argc; i++) {
     string arg = argv[i];
     if (arg == "optimized" || arg == "opt") {
-      grammar_file = data_dir + "/sql-optimized.gram";
+      grammar_file = data_dir + "/sql-optimized.peg";
     }
   }
   auto sql_grammar = read_file(grammar_file);
@@ -226,7 +277,7 @@ static int run_profile(const string &data_dir, int argc, char *argv[]) {
         profile_result = pd;
       },
       // end
-      [](auto &trace_data) {});
+      [](auto & /*trace_data*/) {});
 
   // Enable packrat stats collection
   pg["Statements"].collect_packrat_stats = true;
@@ -367,53 +418,49 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  auto sql_grammar = read_file(data_dir + "/sql.gram");
+  auto sql_grammar = read_file(data_dir + "/sql.peg");
   auto q1_sql = read_file(data_dir + "/q1.sql");
   auto tpch_sql = read_file(data_dir + "/all-tpch.sql");
   auto big_sql = read_file(data_dir + "/big.sql");
 
-  cout << "cpp-peglib SQL benchmark (" << iterations << " iterations)" << endl;
+  cout << "cpp-peglib SQL benchmark (" << iterations << " iterations)";
 #ifdef HAS_PG_QUERY
-  cout << "(with libpg_query YACC comparison)" << endl;
+  cout << "(with libpg_query YACC comparison)";
 #endif
-  cout << string(70, '=') << endl;
+  cout << endl;
+  cout << string(80, '=') << endl;
 
   vector<BenchResult> results;
   int test_num = 1;
 
   // PEG benchmarks
-  cout << endl << "--- cpp-peglib (PEG) ---" << endl;
+  cout << "--- cpp-peglib (PEG) ---" << endl;
 
-  cout << endl
-       << "[" << test_num++ << "] PEG: grammar load (" << sql_grammar.size()
+  cout << "[" << test_num++ << "] PEG: grammar load (" << sql_grammar.size()
        << " bytes)" << endl;
   results.push_back(bench_sql_grammar_load(sql_grammar, iterations));
 
-  cout << endl
-       << "[" << test_num++ << "] PEG: TPC-H Q1 (" << q1_sql.size() << " bytes)"
+  cout << "[" << test_num++ << "] PEG: TPC-H Q1 (" << q1_sql.size() << " bytes)"
        << endl;
   results.push_back(
       bench_sql_parse("PEG: TPC-H Q1", sql_grammar, q1_sql, iterations));
 
-  cout << endl
-       << "[" << test_num++ << "] PEG: all TPC-H (" << tpch_sql.size()
+  cout << "[" << test_num++ << "] PEG: all TPC-H (" << tpch_sql.size()
        << " bytes)" << endl;
   results.push_back(
       bench_sql_parse("PEG: all TPC-H", sql_grammar, tpch_sql, iterations));
 
-  cout << endl
-       << "[" << test_num++ << "] PEG: big.sql (" << big_sql.size() << " bytes)"
+  cout << "[" << test_num++ << "] PEG: big.sql (" << big_sql.size() << " bytes)"
        << endl;
   results.push_back(
       bench_sql_parse("PEG: big.sql (~1MB)", sql_grammar, big_sql, iterations));
 
   // Optimized grammar benchmarks
   {
-    auto opt_grammar = read_file(data_dir + "/sql-optimized.gram");
+    auto opt_grammar = read_file(data_dir + "/sql-optimized.peg");
     cout << endl << "--- cpp-peglib (PEG, optimized grammar) ---" << endl;
 
-    cout << endl
-         << "[" << test_num++ << "] PEG-opt: big.sql (" << big_sql.size()
+    cout << "[" << test_num++ << "] PEG-opt: big.sql (" << big_sql.size()
          << " bytes)" << endl;
     results.push_back(bench_sql_parse("PEG-opt: big.sql (~1MB)", opt_grammar,
                                       big_sql, iterations));
@@ -423,24 +470,21 @@ int main(int argc, char *argv[]) {
 #ifdef HAS_PG_QUERY
   cout << endl << "--- PostgreSQL YACC (libpg_query) ---" << endl;
 
-  cout << endl
-       << "[" << test_num++ << "] YACC: TPC-H Q1 (" << q1_sql.size()
+  cout << "[" << test_num++ << "] YACC: TPC-H Q1 (" << q1_sql.size()
        << " bytes)" << endl;
   results.push_back(bench_yacc_parse("YACC: TPC-H Q1", q1_sql, iterations));
 
-  cout << endl
-       << "[" << test_num++ << "] YACC: all TPC-H (" << tpch_sql.size()
+  cout << "[" << test_num++ << "] YACC: all TPC-H (" << tpch_sql.size()
        << " bytes)" << endl;
   results.push_back(bench_yacc_parse("YACC: all TPC-H", tpch_sql, iterations));
 
-  cout << endl
-       << "[" << test_num++ << "] YACC: big.sql (" << big_sql.size()
+  cout << "[" << test_num++ << "] YACC: big.sql (" << big_sql.size()
        << " bytes)" << endl;
   results.push_back(
       bench_yacc_parse("YACC: big.sql (~1MB)", big_sql, iterations));
 #endif
 
-  cout << endl << string(70, '=') << endl;
+  cout << endl << string(80, '=') << endl;
   cout << "Summary:" << endl;
   for (const auto &r : results) {
     print_result(r);
@@ -463,6 +507,8 @@ int main(int argc, char *argv[]) {
          << peg_big / yacc_big << "x" << endl;
   }
 #endif
+
+  print_bar_chart(results);
 
   return 0;
 }

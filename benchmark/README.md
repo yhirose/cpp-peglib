@@ -12,7 +12,7 @@ All test data comes from the [peg-parser-experiments](https://github.com/hannes/
 
 | File | Description | Size |
 | --- | --- | --- |
-| `sql.gram` | PEG grammar for SQL (covers TPC-H and TPC-DS) | 3.9 KB |
+| `sql.peg` | PEG grammar for SQL (covers TPC-H and TPC-DS) | 3.9 KB |
 | `q1.sql` | Single TPC-H query (Q1) | 544 B |
 | `all-tpch.sql` | All 22 TPC-H queries | 14 KB |
 | `big.sql` | TPC-H + TPC-DS queries repeated 6x | 1.2 MB |
