@@ -201,24 +201,40 @@ A/B comparison (same session, alternating builds):
 | all TPC-H (14 KB) | 2.8x slower |
 | big.sql (1.2 MB) | 2.8x slower |
 
+## Micro-optimizations (to_lower consolidation, LiteralString move fix)
+
+Consolidated multiple `to_lower` implementations (Trie member function, inline loop, lambda) into a single `peg::to_lower` free function. Pre-computed lowercase literals (`lower_lit_`) for case-insensitive `LiteralString` matching, eliminating per-character `tolower` calls on the literal side during parsing. Also fixed a missing `std::move` in the `LiteralString` rvalue constructor.
+
+| Benchmark | Baseline | After | Improvement |
+| --- | --- | --- | --- |
+| big.sql (1.2 MB) | 88.3 ms | 82.5 ms | -6.6% |
+
+| Benchmark | PEG/YACC |
+| --- | --- |
+| TPC-H Q1 (544 B) | 3.5x slower |
+| all TPC-H (14 KB) | 2.9x slower |
+| big.sql (1.2 MB) | 2.8x slower |
+
 ## Summary (big.sql, ~1.2 MB)
 
 All optimizations measured on Apple M2 Max, macOS, AppleClang 17, `-O3` (Release build).
 
 | Configuration | Median | PEG/YACC |
 | --- | --- | --- |
-| YACC (libpg_query) | 31.2 ms | 1.0x |
+| YACC (libpg_query) | 29.6 ms | 1.0x |
 | PEG (no optimizations) | 228.4 ms | 7.4x |
 | PEG + Devirt | 190.9 ms | 6.2x |
 | PEG + First-Set | 135.8 ms | 4.6x |
 | PEG + First-Set + Devirt + LR | 107.4 ms | 3.4x |
 | PEG (all opts + Snapshot/Rollback) | 99.2 ms | 3.4x |
 | PEG (all opts + Keyword Guard) | 92.4 ms | 3.1x |
-| PEG (all opts + Selective Packrat) | 88.3 ms | 2.8x |
+| PEG (all opts + Selective Packrat) | 88.3 ms | 3.0x |
+| PEG (all opts + micro-opts) | 82.5 ms | 2.8x |
 
 ```ascii
-YACC                       |████                            31.2 ms (1.0x)
-PEG (all opts + Sel. Pack) |███████████                     88.3 ms (2.8x)
+YACC                       |████                            29.6 ms (1.0x)
+PEG (all opts + micro)     |██████████                      82.5 ms (2.8x)
+PEG (all opts + Sel. Pack) |███████████                     88.3 ms (3.0x)
 PEG (all opts + KW Guard)  |████████████                    92.4 ms (3.1x)
 PEG (all opts + S/R)       |█████████████                   99.2 ms (3.4x)
 PEG + First-Set + Devirt   |██████████████                 107.4 ms (3.4x)
@@ -227,4 +243,4 @@ PEG + Devirt               |█████████████████�
 PEG (no optimizations)     |█████████████████████████████  228.4 ms (7.4x)
 ```
 
-With all optimizations including Selective Packrat, the gap to YACC is **2.8x** on big.sql — a **2.6x improvement** from the original 7.4x baseline.
+With all optimizations, the gap to YACC is **2.8x** on big.sql — a **2.6x improvement** from the original 7.4x baseline.

@@ -379,6 +379,13 @@ template <typename T> T token_to_number_(std::string_view sv) {
   return n;
 }
 
+inline std::string to_lower(std::string s) {
+  for (auto &c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
 /*-----------------------------------------------------------------------------
  *  Trie
  *---------------------------------------------------------------------------*/
@@ -411,10 +418,7 @@ public:
     auto limit = std::min(text_len, max_len_);
     std::string lower_text;
     if (ignore_case_) {
-      lower_text.assign(text, limit);
-      for (auto &c : lower_text) {
-        c = std::tolower(c);
-      }
+      lower_text = to_lower(std::string(text, limit));
       text = lower_text.data();
     }
 
@@ -444,13 +448,6 @@ public:
   friend struct ComputeFirstSet;
 
 private:
-  std::string to_lower(std::string s) const {
-    for (char &c : s) {
-      c = std::tolower(c);
-    }
-    return s;
-  }
-
   struct Info {
     bool done;
     bool match;
@@ -1117,7 +1114,7 @@ public:
   Sequence(const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
-  Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
+  Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(std::move(opes)) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
@@ -1221,7 +1218,8 @@ public:
       : opes_(opes) {
     is_choice_like = true;
   }
-  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes)
+      : opes_(std::move(opes)) {
     is_choice_like = true;
   }
 
@@ -1434,10 +1432,14 @@ class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
   LiteralString(std::string &&s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
+      : lit_(std::move(s)), ignore_case_(ignore_case),
+        lower_lit_(ignore_case ? to_lower(lit_) : std::string()),
+        is_word_(false) {}
 
   LiteralString(const std::string &s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
+      : lit_(s), ignore_case_(ignore_case),
+        lower_lit_(ignore_case ? to_lower(lit_) : std::string()),
+        is_word_(false) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
@@ -1446,6 +1448,7 @@ public:
 
   std::string lit_;
   bool ignore_case_;
+  std::string lower_lit_; // pre-computed for ignore_case
   mutable std::once_flag init_is_word_;
   mutable bool is_word_;
 };
@@ -1763,7 +1766,7 @@ public:
 
 class BackReference : public Ope {
 public:
-  BackReference(std::string &&name) : name_(name) {}
+  BackReference(std::string &&name) : name_(std::move(name)) {}
 
   BackReference(const std::string &name) : name_(name) {}
 
@@ -2985,11 +2988,13 @@ private:
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
                             std::once_flag &init_is_word, bool &is_word,
-                            bool ignore_case) {
+                            bool ignore_case, const std::string &lower_lit) {
   size_t i = 0;
   for (; i < lit.size(); i++) {
-    if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i]))
-                               : (s[i] != lit[i]))) {
+    if (i >= n ||
+        (ignore_case ? (static_cast<char>(std::tolower(
+                            static_cast<unsigned char>(s[i]))) != lower_lit[i])
+                     : (s[i] != lit[i]))) {
       c.set_error_pos(s, lit.data());
       return static_cast<size_t>(-1);
     }
@@ -3233,7 +3238,7 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
   return parse_literal(s, n, vs, c, dt, lit_, init_is_word_, is_word_,
-                       ignore_case_);
+                       ignore_case_, lower_lit_);
 }
 
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
@@ -3533,7 +3538,9 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
       const auto &lit = it->second;
       std::once_flag init_is_word;
       auto is_word = false;
-      return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false);
+      static const std::string empty;
+      return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false,
+                           empty);
     }
   }
 
@@ -3959,13 +3966,6 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
   if (!choice) { return; }
 
   // Extract keywords from PrioritizedChoice alternatives
-  auto to_lower = [](std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) {
-      return static_cast<char>(std::tolower(ch));
-    });
-    return s;
-  };
-
   std::vector<std::string> exact_keywords;
   std::vector<std::string> prefix_keywords;
 
