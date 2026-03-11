@@ -1991,6 +1991,32 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
+struct TraversalVisitor : public Ope::Visitor {
+  using Ope::Visitor::visit;
+  void visit(Sequence &ope) override {
+    for (auto &op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto &op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+};
+
 struct TraceOpeName : public Ope::Visitor {
   using Ope::Visitor::visit;
 
@@ -2028,32 +2054,12 @@ private:
   const char *name_ = nullptr;
 };
 
-struct AssignIDToDefinition : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct AssignIDToDefinition : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
-  void visit(Sequence &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(PrecedenceClimbing &ope) override;
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   std::unordered_map<void *, size_t> ids;
 };
@@ -2081,30 +2087,14 @@ private:
   bool result_ = false;
 };
 
-struct TokenChecker : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct TokenChecker : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
-  void visit(Sequence &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
   void visit(TokenBoundary &) override { has_token_boundary_ = true; }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &) override {}
+  void visit(NotPredicate &) override {}
   void visit(WeakHolder &) override { has_rule_ = true; }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   static bool is_token(Ope &ope) {
     if (IsLiteralToken::check(ope)) { return true; }
@@ -2138,8 +2128,8 @@ private:
   const char *token_ = nullptr;
 };
 
-struct DetectLeftRecursion : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct DetectLeftRecursion : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
@@ -2180,18 +2170,9 @@ struct DetectLeftRecursion : public Ope::Visitor {
   void visit(CharacterClass &) override { done_ = true; }
   void visit(Character &) override { done_ = true; }
   void visit(AnyCharacter &) override { done_ = true; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { done_ = true; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { done_ = true; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { done_ = true; }
 
   const char *error_s = nullptr;
@@ -2205,8 +2186,8 @@ private:
   std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
 };
 
-struct ComputeCanBeEmpty : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ComputeCanBeEmpty : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   bool result = false;
 
@@ -2232,23 +2213,14 @@ struct ComputeCanBeEmpty : public Ope::Visitor {
   void visit(CharacterClass &) override { result = false; }
   void visit(Character &) override { result = false; }
   void visit(AnyCharacter &) override { result = false; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { result = false; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { result = false; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { result = false; }
 };
 
-struct HasEmptyElement : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct HasEmptyElement : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs,
                   std::unordered_map<std::string, bool> &has_error_cache)
@@ -2273,16 +2245,7 @@ struct HasEmptyElement : public Ope::Visitor {
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) { set_error(); }
   }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   bool is_empty = false;
   const char *error_s = nullptr;
@@ -2297,8 +2260,8 @@ private:
   std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
-struct DetectInfiniteLoop : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct DetectInfiniteLoop : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   DetectInfiniteLoop(const char *s, const std::string &name,
                      std::vector<std::pair<const char *, std::string>> &refs,
@@ -2336,18 +2299,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
       ope.ope_->accept(*this);
     }
   }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   bool has_error = false;
   const char *error_s = nullptr;
@@ -2358,36 +2310,14 @@ private:
   std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
-struct ReferenceChecker : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ReferenceChecker : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   ReferenceChecker(const Grammar &grammar,
                    const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
-  void visit(Sequence &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   std::unordered_map<std::string, const char *> error_s;
   std::unordered_map<std::string, std::string> error_message;
@@ -2398,35 +2328,13 @@ private:
   const std::vector<std::string> &params_;
 };
 
-struct LinkReferences : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct LinkReferences : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   LinkReferences(Grammar &grammar, const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
-  void visit(Sequence &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
 private:
   Grammar &grammar_;
@@ -2520,8 +2428,8 @@ private:
 /*
  * First-Set computation
  */
-struct ComputeFirstSet : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ComputeFirstSet : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
@@ -2613,18 +2521,9 @@ struct ComputeFirstSet : public Ope::Visitor {
     }
   }
   void visit(AnyCharacter &) override { result_.any_char = true; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { result_.any_char = true; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { result_.any_char = true; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { result_.can_be_empty = true; }
 
   FirstSet result_;
@@ -2633,8 +2532,8 @@ private:
   std::unordered_set<std::string> refs_;
 };
 
-struct SetupFirstSets : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct SetupFirstSets : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   void visit(Sequence &ope) override;
   void setup_keyword_guarded_identifier(Sequence &ope);
@@ -2657,18 +2556,7 @@ struct SetupFirstSets : public Ope::Visitor {
     auto cc = dynamic_cast<CharacterClass *>(ope.ope_.get());
     if (cc && cc->is_ascii_only()) { ope.span_bitset_ = &cc->ascii_bitset(); }
   }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
 private:
   std::unordered_set<std::string> refs_;
@@ -4051,30 +3939,12 @@ inline void Definition::initialize_packrat_filter() const {
 
     // Collect rule IDs reachable from an Ope subtree (bitvector indexed by
     // def_id)
-    struct CollectReachableRules : public Ope::Visitor {
-      using Ope::Visitor::visit;
+    struct CollectReachableRules : public TraversalVisitor {
+      using TraversalVisitor::visit;
       std::vector<bool> reachable; // indexed by def_id
 
       CollectReachableRules(size_t n) : reachable(n, false) {}
 
-      void visit(Sequence &ope) override {
-        for (auto &op : ope.opes_) {
-          op->accept(*this);
-        }
-      }
-      void visit(PrioritizedChoice &ope) override {
-        for (auto &op : ope.opes_) {
-          op->accept(*this);
-        }
-      }
-      void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-      void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-      void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-      void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-      void visit(Capture &ope) override { ope.ope_->accept(*this); }
-      void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-      void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-      void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < reachable.size()) { reachable[id] = true; }
@@ -4087,15 +3957,13 @@ inline void Definition::initialize_packrat_filter() const {
           ope.rule_->accept(*this);
         }
       }
-      void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-      void visit(Recovery &ope) override { ope.ope_->accept(*this); }
     };
 
     // Find rules that benefit: reachable from 2+ alternatives of same choice
     std::vector<bool> benefits(def_count, false);
 
-    struct FindBacktrackRules : public Ope::Visitor {
-      using Ope::Visitor::visit;
+    struct FindBacktrackRules : public TraversalVisitor {
+      using TraversalVisitor::visit;
       std::vector<bool> &benefits;
       size_t def_count;
       std::vector<bool> visited_rules; // indexed by def_id
@@ -4126,19 +3994,6 @@ inline void Definition::initialize_packrat_filter() const {
           op->accept(*this);
         }
       }
-      void visit(Sequence &ope) override {
-        for (auto &op : ope.opes_) {
-          op->accept(*this);
-        }
-      }
-      void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-      void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-      void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-      void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-      void visit(Capture &ope) override { ope.ope_->accept(*this); }
-      void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-      void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-      void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < visited_rules.size() && !visited_rules[id]) {
@@ -4149,8 +4004,6 @@ inline void Definition::initialize_packrat_filter() const {
       void visit(Reference &ope) override {
         if (ope.rule_) { ope.rule_->accept(*this); }
       }
-      void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-      void visit(Recovery &ope) override { ope.ope_->accept(*this); }
     };
 
     FindBacktrackRules finder(benefits, def_count);
