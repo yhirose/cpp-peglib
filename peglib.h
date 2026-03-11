@@ -379,6 +379,13 @@ template <typename T> T token_to_number_(std::string_view sv) {
   return n;
 }
 
+inline std::string to_lower(std::string s) {
+  for (auto &c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
 /*-----------------------------------------------------------------------------
  *  Trie
  *---------------------------------------------------------------------------*/
@@ -386,10 +393,11 @@ template <typename T> T token_to_number_(std::string_view sv) {
 class Trie {
 public:
   Trie(const std::vector<std::string> &items, bool ignore_case)
-      : ignore_case_(ignore_case) {
+      : ignore_case_(ignore_case), items_count_(items.size()) {
     size_t id = 0;
     for (const auto &item : items) {
       const auto &s = ignore_case ? to_lower(item) : item;
+      if (item.size() > max_len_) { max_len_ = item.size(); }
       for (size_t len = 1; len <= item.size(); len++) {
         auto last = len == item.size();
         std::string_view sv(s.data(), len);
@@ -407,16 +415,17 @@ public:
   }
 
   size_t match(const char *text, size_t text_len, size_t &id) const {
+    auto limit = std::min(text_len, max_len_);
     std::string lower_text;
     if (ignore_case_) {
-      lower_text = to_lower(text);
+      lower_text = to_lower(std::string(text, limit));
       text = lower_text.data();
     }
 
     size_t match_len = 0;
     auto done = false;
     size_t len = 1;
-    while (!done && len <= text_len) {
+    while (!done && len <= limit) {
       std::string_view sv(text, len);
       auto it = dic_.find(sv);
       if (it == dic_.end()) {
@@ -434,17 +443,11 @@ public:
   }
 
   size_t size() const { return dic_.size(); }
+  size_t items_count() const { return items_count_; }
 
   friend struct ComputeFirstSet;
 
 private:
-  std::string to_lower(std::string s) const {
-    for (char &c : s) {
-      c = std::tolower(c);
-    }
-    return s;
-  }
-
   struct Info {
     bool done;
     bool match;
@@ -456,6 +459,8 @@ private:
   std::map<std::string, Info, std::less<>> dic_;
 
   bool ignore_case_;
+  size_t items_count_;
+  size_t max_len_ = 0;
 };
 
 /*-----------------------------------------------------------------------------
@@ -563,19 +568,6 @@ struct SemanticValues : protected std::vector<std::any> {
       r.emplace_back(std::any_cast<T>((*this)[i]));
     }
     return r;
-  }
-
-  void append(SemanticValues &chvs) {
-    sv_ = chvs.sv_;
-    for (auto &v : chvs) {
-      emplace_back(std::move(v));
-    }
-    for (auto &tag : chvs.tags) {
-      tags.emplace_back(std::move(tag));
-    }
-    for (auto &tok : chvs.tokens) {
-      tokens.emplace_back(std::move(tok));
-    }
   }
 
   using std::vector<std::any>::iterator;
@@ -836,8 +828,7 @@ public:
 
   std::shared_ptr<Ope> wordOpe;
 
-  std::vector<std::map<std::string_view, std::string>> capture_scope_stack;
-  size_t capture_scope_stack_size = 0;
+  std::vector<std::pair<std::string_view, std::string>> capture_entries;
 
   std::vector<bool> cut_stack;
 
@@ -907,20 +898,28 @@ public:
         trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
 
     push_args({});
-    push_capture_scope();
   }
 
   ~Context() {
-    pop_capture_scope();
-
     assert(!value_stack_size);
-    assert(!capture_scope_stack_size);
     assert(cut_stack.empty());
   }
 
   Context(const Context &) = delete;
   Context(Context &&) = delete;
   Context operator=(const Context &) = delete;
+
+  // Per-rule packrat stats (populated when packrat_stats is non-null)
+  struct PackratStats {
+    size_t hits = 0;
+    size_t misses = 0;
+  };
+  std::vector<PackratStats> *packrat_stats = nullptr;
+
+  // Per-rule packrat filter: if set, only rules with filter[def_id]=true
+  // use full memoization (cache_values map). Others use bitvector-only
+  // re-entry guard.
+  const std::vector<bool> *packrat_rule_filter = nullptr;
 
   template <typename T>
   void packrat(const char *a_s, size_t def_id, size_t &len, std::any &val,
@@ -934,6 +933,9 @@ public:
     auto idx = def_count * static_cast<size_t>(col) + def_id;
 
     if (cache_registered[idx]) {
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].hits++;
+      }
       if (cache_success[idx]) {
         auto key = std::pair(col, def_id);
         std::tie(len, val) = cache_values[key];
@@ -943,27 +945,27 @@ public:
         return;
       }
     } else {
-      // Pre-register as failure before calling fn. This prevents
-      // infinite recursion from undetected left recursion (e.g.
-      // through macro parameters): if the same rule re-enters at
-      // the same position, it hits this entry and returns failure.
+      // Pre-register as failure (re-entry guard for all rules)
       cache_registered[idx] = true;
       cache_success[idx] = false;
 
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].misses++;
+      }
+
       fn(val);
-      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
+
+      bool full_memo =
+          !packrat_rule_filter || (def_id < packrat_rule_filter->size() &&
+                                   (*packrat_rule_filter)[def_id]);
+      if (full_memo) {
+        if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
+      } else {
+        // Guard-only: undo registration so future calls re-parse
+        cache_registered[idx] = false;
+      }
       return;
     }
-  }
-
-  SemanticValues &push() {
-    push_capture_scope();
-    return push_semantic_values_scope();
-  }
-
-  void pop() {
-    pop_capture_scope();
-    pop_semantic_values_scope();
   }
 
   // Semantic values
@@ -993,7 +995,7 @@ public:
 
   // Arguments
   void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
-    args_stack.emplace_back(args);
+    args_stack.emplace_back(std::move(args));
   }
 
   void pop_args() { args_stack.pop_back(); }
@@ -1002,29 +1004,37 @@ public:
     return args_stack[args_stack.size() - 1];
   }
 
-  // Capture scope
-  void push_capture_scope() {
-    assert(capture_scope_stack_size <= capture_scope_stack.size());
-    if (capture_scope_stack_size == capture_scope_stack.size()) {
-      capture_scope_stack.emplace_back(
-          std::map<std::string_view, std::string>());
-    } else {
-      auto &cs = capture_scope_stack[capture_scope_stack_size];
-      if (!cs.empty()) { cs.clear(); }
-    }
-    capture_scope_stack_size++;
+  // Snapshot/Rollback
+  struct Snapshot {
+    size_t sv_size;
+    size_t sv_tags_size;
+    size_t sv_tokens_size;
+    std::string_view sv_sv;
+    size_t choice_count;
+    size_t choice;
+    size_t capture_size;
+  };
+
+  Snapshot snapshot(const SemanticValues &vs) const {
+    return {vs.size(),        vs.tags.size(), vs.tokens.size(),      vs.sv_,
+            vs.choice_count_, vs.choice_,     capture_entries.size()};
   }
 
-  void pop_capture_scope() { capture_scope_stack_size--; }
-
-  void shift_capture_values() {
-    assert(capture_scope_stack_size >= 2);
-    auto curr = &capture_scope_stack[capture_scope_stack_size - 1];
-    auto prev = curr - 1;
-    for (const auto &[k, v] : *curr) {
-      (*prev)[k] = v;
-    }
+  void rollback(SemanticValues &vs, const Snapshot &snap) {
+    vs.resize(snap.sv_size);
+    vs.tags.resize(snap.sv_tags_size);
+    vs.tokens.resize(snap.sv_tokens_size);
+    vs.sv_ = snap.sv_sv;
+    vs.choice_count_ = snap.choice_count;
+    vs.choice_ = snap.choice;
+    capture_entries.resize(snap.capture_size);
   }
+
+  // Skip trailing whitespace with trace suppression.
+  // Returns whitespace length, or -1 on failure.
+  // No-op (returns 0) if inside a token boundary or no whitespaceOpe.
+  size_t skip_whitespace(const char *a_s, size_t n, SemanticValues &vs,
+                         std::any &dt);
 
   // Error
   void set_error_pos(const char *a_s, const char *literal = nullptr);
@@ -1081,31 +1091,101 @@ public:
   bool is_choice_like = false;
 };
 
+// Keyword-guarded identifier data, heap-allocated only for matching Sequences.
+// Avoids bloating all Sequence objects with bitsets and keyword sets.
+struct KeywordGuardData {
+  std::bitset<256> identifier_first;        // first char of identifier
+  std::bitset<256> identifier_rest;         // subsequent chars of identifier
+  std::vector<std::string> exact_keywords;  // single-word keywords (lowercase)
+  std::vector<std::string> prefix_keywords; // first word of compound keywords
+  size_t min_keyword_len = 0;
+  size_t max_keyword_len = 0;
+
+  static bool matches_any(const std::vector<std::string> &keywords,
+                          std::string_view input) {
+    return std::any_of(keywords.begin(), keywords.end(),
+                       [&](const auto &kw) { return kw == input; });
+  }
+};
+
 class Sequence : public Ope {
 public:
   template <typename... Args>
   Sequence(const Args &...args)
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...} {}
   Sequence(const std::vector<std::shared_ptr<Ope>> &opes) : opes_(opes) {}
-  Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {}
+  Sequence(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(std::move(opes)) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    auto &chvs = c.push_semantic_values_scope();
-    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+    // Keyword-guarded identifier fast path:
+    // Fuses !ReservedKeyword <identifier> into scan-then-lookup
+    if (kw_guard_) {
+      if (auto result = parse_keyword_guarded(s, n, vs, c, dt)) {
+        return *result;
+      }
+      // nullopt means prefix keyword match — fall through to normal path
+    }
     size_t i = 0;
     for (const auto &ope : opes_) {
-      auto len = ope->parse(s + i, n - i, chvs, c, dt);
+      auto len = ope->parse(s + i, n - i, vs, c, dt);
       if (fail(len)) { return len; }
       i += len;
     }
-    vs.append(chvs);
     return i;
   }
 
   void accept(Visitor &v) override;
 
   std::vector<std::shared_ptr<Ope>> opes_;
+
+private:
+  friend struct SetupFirstSets;
+  std::unique_ptr<KeywordGuardData> kw_guard_;
+
+  // Returns parse result, or nullopt to fall through to normal path
+  std::optional<size_t> parse_keyword_guarded(const char *s, size_t n,
+                                              SemanticValues &vs, Context &c,
+                                              std::any &dt) const {
+    const auto &kw = *kw_guard_;
+    if (n < 1 || !kw.identifier_first.test(static_cast<unsigned char>(*s))) {
+      c.set_error_pos(s);
+      return static_cast<size_t>(-1);
+    }
+    // Scan identifier using bitset
+    size_t id_len = 1;
+    while (id_len < n &&
+           kw.identifier_rest.test(static_cast<unsigned char>(s[id_len]))) {
+      id_len++;
+    }
+    // Skip keyword matching if identifier length is out of range
+    if (id_len >= kw.min_keyword_len && id_len <= kw.max_keyword_len) {
+      char lower_buf[64];
+      std::unique_ptr<char[]> lower_heap;
+      char *lower = lower_buf;
+      if (id_len > sizeof(lower_buf)) {
+        lower_heap.reset(new char[id_len]);
+        lower = lower_heap.get();
+      }
+      std::transform(s, s + id_len, lower, [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+      });
+      std::string_view lower_sv(lower, id_len);
+
+      if (KeywordGuardData::matches_any(kw.exact_keywords, lower_sv)) {
+        c.set_error_pos(s);
+        return static_cast<size_t>(-1);
+      }
+      if (KeywordGuardData::matches_any(kw.prefix_keywords, lower_sv)) {
+        return std::nullopt;
+      }
+    }
+    // Success: emit token and consume trailing whitespace
+    vs.tokens.emplace_back(std::string_view(s, id_len));
+    auto wl = c.skip_whitespace(s + id_len, n - id_len, vs, dt);
+    if (fail(wl)) { return wl; }
+    return id_len + wl;
+  }
 };
 
 struct FirstSet {
@@ -1138,7 +1218,8 @@ public:
       : opes_(opes) {
     is_choice_like = true;
   }
-  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes) : opes_(opes) {
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes)
+      : opes_(std::move(opes)) {
     is_choice_like = true;
   }
 
@@ -1178,28 +1259,25 @@ public:
 
       if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
-      auto &chvs = c.push();
+      auto snap = c.snapshot(vs);
       c.error_info.keep_previous_token = id > 0;
-      auto se = scope_exit([&]() {
-        c.pop();
-        c.error_info.keep_previous_token = false;
-      });
 
-      len = ope->parse(s, n, chvs, c, dt);
+      len = ope->parse(s, n, vs, c, dt);
 
       if (success(len)) {
-        vs.append(chvs);
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        c.shift_capture_values();
-        break;
-      } else if (!c.cut_stack.empty() && c.cut_stack.back()) {
         break;
       }
+
+      c.rollback(vs, snap);
+
+      if (!c.cut_stack.empty() && c.cut_stack.back()) { break; }
 
       id++;
     }
 
+    c.error_info.keep_previous_token = false;
     return len;
   }
 
@@ -1219,34 +1297,44 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
+    // ISpan fast path: tight loop for ASCII CharacterClass repetition.
+    // Safe because each ASCII match is exactly 1 byte, so byte count == match
+    // count.
+    if (span_bitset_) {
+      const auto &bitset = *span_bitset_;
+      size_t i = 0;
+      if (max_ == std::numeric_limits<size_t>::max()) {
+        // Unbounded repetition (*, +): no per-iteration max check
+        while (i < n && bitset.test(static_cast<unsigned char>(s[i]))) {
+          i++;
+        }
+      } else {
+        auto limit = std::min(n, max_);
+        while (i < limit && bitset.test(static_cast<unsigned char>(s[i]))) {
+          i++;
+        }
+      }
+      if (i < min_) {
+        c.set_error_pos(s + i);
+        return static_cast<size_t>(-1);
+      }
+      return i;
+    }
+
     size_t count = 0;
     size_t i = 0;
     while (count < min_) {
-      auto &chvs = c.push();
-      auto se = scope_exit([&]() { c.pop(); });
-
-      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
-
-      if (success(len)) {
-        vs.append(chvs);
-        c.shift_capture_values();
-      } else {
-        return len;
-      }
+      auto len = ope_->parse(s + i, n - i, vs, c, dt);
+      if (fail(len)) { return len; }
       i += len;
       count++;
     }
 
     while (count < max_) {
-      auto &chvs = c.push();
-      auto se = scope_exit([&]() { c.pop(); });
-
-      auto len = ope_->parse(s + i, n - i, chvs, c, dt);
-
-      if (success(len)) {
-        vs.append(chvs);
-        c.shift_capture_values();
-      } else {
+      auto snap = c.snapshot(vs);
+      auto len = ope_->parse(s + i, n - i, vs, c, dt);
+      if (fail(len)) {
+        c.rollback(vs, snap);
         break;
       }
       i += len;
@@ -1278,19 +1366,19 @@ public:
   std::shared_ptr<Ope> ope_;
   size_t min_;
   size_t max_;
+  const std::bitset<256> *span_bitset_ =
+      nullptr; // non-owning, set by SetupFirstSets
 };
 
 class AndPredicate : public Ope {
 public:
   AndPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
-                    Context &c, std::any &dt) const override {
-    auto &chvs = c.push();
-    auto se = scope_exit([&]() { c.pop(); });
-
-    auto len = ope_->parse(s, n, chvs, c, dt);
-
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override {
+    auto snap = c.snapshot(vs);
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.rollback(vs, snap); // Always rollback — predicates consume nothing
     if (success(len)) {
       return 0;
     } else {
@@ -1307,11 +1395,11 @@ class NotPredicate : public Ope {
 public:
   NotPredicate(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
 
-  size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
-                    Context &c, std::any &dt) const override {
-    auto &chvs = c.push();
-    auto se = scope_exit([&]() { c.pop(); });
-    auto len = ope_->parse(s, n, chvs, c, dt);
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override {
+    auto snap = c.snapshot(vs);
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.rollback(vs, snap); // Always rollback — predicates consume nothing
     if (success(len)) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
@@ -1344,10 +1432,14 @@ class LiteralString : public Ope,
                       public std::enable_shared_from_this<LiteralString> {
 public:
   LiteralString(std::string &&s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
+      : lit_(std::move(s)), ignore_case_(ignore_case),
+        lower_lit_(ignore_case ? to_lower(lit_) : std::string()),
+        is_word_(false) {}
 
   LiteralString(const std::string &s, bool ignore_case)
-      : lit_(s), ignore_case_(ignore_case), is_word_(false) {}
+      : lit_(s), ignore_case_(ignore_case),
+        lower_lit_(ignore_case ? to_lower(lit_) : std::string()),
+        is_word_(false) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
@@ -1356,6 +1448,7 @@ public:
 
   std::string lit_;
   bool ignore_case_;
+  std::string lower_lit_; // pre-computed for ignore_case
   mutable std::once_flag init_is_word_;
   mutable bool is_word_;
 };
@@ -1380,12 +1473,14 @@ public:
       }
     }
     assert(!ranges_.empty());
+    setup_ascii_bitset();
   }
 
   CharacterClass(const std::vector<std::pair<char32_t, char32_t>> &ranges,
                  bool negated, bool ignore_case)
       : ranges_(ranges), negated_(negated), ignore_case_(ignore_case) {
     assert(!ranges_.empty());
+    setup_ascii_bitset();
   }
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
@@ -1421,6 +1516,9 @@ public:
 
   friend struct ComputeFirstSet;
 
+  bool is_ascii_only() const { return is_ascii_only_; }
+  const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
+
 private:
   bool in_range(const std::pair<char32_t, char32_t> &range, char32_t cp) const {
     if (ignore_case_) {
@@ -1432,9 +1530,29 @@ private:
     }
   }
 
+  void setup_ascii_bitset() {
+    if (negated_) { return; } // negated classes can match non-ASCII
+    for (const auto &[lo, hi] : ranges_) {
+      if (lo > 0x7F || hi > 0x7F) { return; }
+    }
+    is_ascii_only_ = true;
+    for (const auto &[lo, hi] : ranges_) {
+      for (auto cp = lo; cp <= hi; cp++) {
+        auto ch = static_cast<unsigned char>(cp);
+        ascii_bitset_.set(ch);
+        if (ignore_case_) {
+          ascii_bitset_.set(static_cast<unsigned char>(std::toupper(ch)));
+          ascii_bitset_.set(static_cast<unsigned char>(std::tolower(ch)));
+        }
+      }
+    }
+  }
+
   std::vector<std::pair<char32_t, char32_t>> ranges_;
   bool negated_;
   bool ignore_case_;
+  std::bitset<256> ascii_bitset_;
+  bool is_ascii_only_ = false;
 };
 
 class Character : public Ope, public std::enable_shared_from_this<Character> {
@@ -1485,9 +1603,10 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    c.push_capture_scope();
-    auto se = scope_exit([&]() { c.pop_capture_scope(); });
-    return ope_->parse(s, n, vs, c, dt);
+    auto cap_snap = c.capture_entries.size();
+    auto len = ope_->parse(s, n, vs, c, dt);
+    c.capture_entries.resize(cap_snap); // Always rollback (isolation)
+    return len;
   }
 
   void accept(Visitor &v) override;
@@ -1647,7 +1766,7 @@ public:
 
 class BackReference : public Ope {
 public:
-  BackReference(std::string &&name) : name_(name) {}
+  BackReference(std::string &&name) : name_(std::move(name)) {}
 
   BackReference(const std::string &name) : name_(name) {}
 
@@ -1872,6 +1991,32 @@ struct Ope::Visitor {
   virtual void visit(Cut &) {}
 };
 
+struct TraversalVisitor : public Ope::Visitor {
+  using Ope::Visitor::visit;
+  void visit(Sequence &ope) override {
+    for (auto &op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(PrioritizedChoice &ope) override {
+    for (auto &op : ope.opes_) {
+      op->accept(*this);
+    }
+  }
+  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
+  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
+  void visit(Capture &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
+  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
+  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
+  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
+};
+
 struct TraceOpeName : public Ope::Visitor {
   using Ope::Visitor::visit;
 
@@ -1909,32 +2054,12 @@ private:
   const char *name_ = nullptr;
 };
 
-struct AssignIDToDefinition : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct AssignIDToDefinition : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
-  void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(PrecedenceClimbing &ope) override;
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   std::unordered_map<void *, size_t> ids;
 };
@@ -1943,7 +2068,7 @@ struct IsLiteralToken : public Ope::Visitor {
   using Ope::Visitor::visit;
 
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       if (!IsLiteralToken::check(*op)) { return; }
     }
     result_ = true;
@@ -1962,30 +2087,14 @@ private:
   bool result_ = false;
 };
 
-struct TokenChecker : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct TokenChecker : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
-  void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
   void visit(TokenBoundary &) override { has_token_boundary_ = true; }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  void visit(AndPredicate &) override {}
+  void visit(NotPredicate &) override {}
   void visit(WeakHolder &) override { has_rule_ = true; }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   static bool is_token(Ope &ope) {
     if (IsLiteralToken::check(ope)) { return true; }
@@ -2019,13 +2128,13 @@ private:
   const char *token_ = nullptr;
 };
 
-struct DetectLeftRecursion : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct DetectLeftRecursion : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (done_) {
         break;
@@ -2036,7 +2145,7 @@ struct DetectLeftRecursion : public Ope::Visitor {
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (error_s) {
         done_ = true;
@@ -2061,18 +2170,9 @@ struct DetectLeftRecursion : public Ope::Visitor {
   void visit(CharacterClass &) override { done_ = true; }
   void visit(Character &) override { done_ = true; }
   void visit(AnyCharacter &) override { done_ = true; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { done_ = true; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { done_ = true; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { done_ = true; }
 
   const char *error_s = nullptr;
@@ -2086,8 +2186,8 @@ private:
   std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
 };
 
-struct ComputeCanBeEmpty : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ComputeCanBeEmpty : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   bool result = false;
 
@@ -2113,23 +2213,14 @@ struct ComputeCanBeEmpty : public Ope::Visitor {
   void visit(CharacterClass &) override { result = false; }
   void visit(Character &) override { result = false; }
   void visit(AnyCharacter &) override { result = false; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { result = false; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { result = false; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { result = false; }
 };
 
-struct HasEmptyElement : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct HasEmptyElement : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs,
                   std::unordered_map<std::string, bool> &has_error_cache)
@@ -2137,7 +2228,7 @@ struct HasEmptyElement : public Ope::Visitor {
 
   void visit(Sequence &ope) override;
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (is_empty) { return; }
     }
@@ -2154,16 +2245,7 @@ struct HasEmptyElement : public Ope::Visitor {
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) { set_error(); }
   }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   bool is_empty = false;
   const char *error_s = nullptr;
@@ -2178,8 +2260,8 @@ private:
   std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
-struct DetectInfiniteLoop : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct DetectInfiniteLoop : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   DetectInfiniteLoop(const char *s, const std::string &name,
                      std::vector<std::pair<const char *, std::string>> &refs,
@@ -2193,13 +2275,13 @@ struct DetectInfiniteLoop : public Ope::Visitor {
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (has_error) { return; }
     }
   }
   void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (has_error) { return; }
     }
@@ -2217,18 +2299,7 @@ struct DetectInfiniteLoop : public Ope::Visitor {
       ope.ope_->accept(*this);
     }
   }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   bool has_error = false;
   const char *error_s = nullptr;
@@ -2239,36 +2310,14 @@ private:
   std::unordered_map<std::string, bool> &has_error_cache_;
 };
 
-struct ReferenceChecker : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ReferenceChecker : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   ReferenceChecker(const Grammar &grammar,
                    const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
-  void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
   std::unordered_map<std::string, const char *> error_s;
   std::unordered_map<std::string, std::string> error_message;
@@ -2279,35 +2328,13 @@ private:
   const std::vector<std::string> &params_;
 };
 
-struct LinkReferences : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct LinkReferences : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   LinkReferences(Grammar &grammar, const std::vector<std::string> &params)
       : grammar_(grammar), params_(params) {}
 
-  void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
 private:
   Grammar &grammar_;
@@ -2323,17 +2350,17 @@ struct FindReference : public Ope::Visitor {
 
   void visit(Sequence &ope) override {
     std::vector<std::shared_ptr<Ope>> opes;
-    for (auto o : ope.opes_) {
+    for (const auto &o : ope.opes_) {
       o->accept(*this);
-      opes.push_back(found_ope);
+      opes.emplace_back(std::move(found_ope));
     }
     found_ope = std::make_shared<Sequence>(opes);
   }
   void visit(PrioritizedChoice &ope) override {
     std::vector<std::shared_ptr<Ope>> opes;
-    for (auto o : ope.opes_) {
+    for (const auto &o : ope.opes_) {
       o->accept(*this);
-      opes.push_back(found_ope);
+      opes.emplace_back(std::move(found_ope));
     }
     found_ope = std::make_shared<PrioritizedChoice>(opes);
   }
@@ -2401,11 +2428,11 @@ private:
 /*
  * First-Set computation
  */
-struct ComputeFirstSet : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct ComputeFirstSet : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
   void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       FirstSet element_fs;
       auto save = result_;
       result_ = FirstSet{};
@@ -2425,7 +2452,7 @@ struct ComputeFirstSet : public Ope::Visitor {
   }
   void visit(PrioritizedChoice &ope) override {
     auto save = result_;
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       result_ = FirstSet{};
       op->accept(*this);
       save.merge(result_);
@@ -2494,18 +2521,9 @@ struct ComputeFirstSet : public Ope::Visitor {
     }
   }
   void visit(AnyCharacter &) override { result_.any_char = true; }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
   void visit(User &) override { result_.any_char = true; }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(BackReference &) override { result_.any_char = true; }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(Cut &) override { result_.can_be_empty = true; }
 
   FirstSet result_;
@@ -2514,39 +2532,31 @@ private:
   std::unordered_set<std::string> refs_;
 };
 
-struct SetupFirstSets : public Ope::Visitor {
-  using Ope::Visitor::visit;
+struct SetupFirstSets : public TraversalVisitor {
+  using TraversalVisitor::visit;
 
-  void visit(Sequence &ope) override {
-    for (auto op : ope.opes_) {
-      op->accept(*this);
-    }
-  }
+  void visit(Sequence &ope) override;
+  void setup_keyword_guarded_identifier(Sequence &ope);
+
   void visit(PrioritizedChoice &ope) override {
     ope.first_sets_.clear();
     ope.first_sets_.reserve(ope.opes_.size());
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       ComputeFirstSet cfs;
       op->accept(cfs);
       ope.first_sets_.push_back(cfs.result_);
     }
-    for (auto op : ope.opes_) {
+    for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
   }
-  void visit(Repetition &ope) override { ope.ope_->accept(*this); }
-  void visit(AndPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(NotPredicate &ope) override { ope.ope_->accept(*this); }
-  void visit(CaptureScope &ope) override { ope.ope_->accept(*this); }
-  void visit(Capture &ope) override { ope.ope_->accept(*this); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(Repetition &ope) override {
+    ope.ope_->accept(*this);
+    // ISpan optimization: detect Repetition + ASCII CharacterClass
+    auto cc = dynamic_cast<CharacterClass *>(ope.ope_.get());
+    if (cc && cc->is_ascii_only()) { ope.span_bitset_ = &cc->ascii_bitset(); }
+  }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
 
 private:
   std::unordered_set<std::string> refs_;
@@ -2767,6 +2777,10 @@ public:
 
   bool eoi_check = true;
 
+  // Per-rule packrat stats (optional, for profiling)
+  mutable bool collect_packrat_stats = false;
+  mutable std::vector<Context::PackratStats> packrat_stats_;
+
 private:
   friend class Reference;
   friend class ParserGenerator;
@@ -2784,6 +2798,8 @@ private:
     });
   }
 
+  void initialize_packrat_filter() const;
+
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log) const {
     initialize_definition_ids();
@@ -2799,6 +2815,18 @@ private:
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
               verbose_trace, log);
+
+    if (collect_packrat_stats) {
+      packrat_stats_.resize(definition_ids_.size());
+      c.packrat_stats = &packrat_stats_;
+    }
+
+    if (enablePackratParsing) {
+      initialize_packrat_filter();
+      if (!packrat_filter_.empty()) {
+        c.packrat_rule_filter = &packrat_filter_;
+      }
+    }
 
     size_t i = 0;
 
@@ -2837,6 +2865,8 @@ private:
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
+  mutable std::once_flag packrat_filter_init_;
+  mutable std::vector<bool> packrat_filter_;
 };
 
 /*
@@ -2846,11 +2876,13 @@ private:
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
                             std::once_flag &init_is_word, bool &is_word,
-                            bool ignore_case) {
+                            bool ignore_case, const std::string &lower_lit) {
   size_t i = 0;
   for (; i < lit.size(); i++) {
-    if (i >= n || (ignore_case ? (std::tolower(s[i]) != std::tolower(lit[i]))
-                               : (s[i] != lit[i]))) {
+    if (i >= n ||
+        (ignore_case ? (static_cast<char>(std::tolower(
+                            static_cast<unsigned char>(s[i]))) != lower_lit[i])
+                     : (s[i] != lit[i]))) {
       c.set_error_pos(s, lit.data());
       return static_cast<size_t>(-1);
     }
@@ -2891,16 +2923,9 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   }
 
   // Skip whitespace
-  if (!c.in_token_boundary_count && c.whitespaceOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
-
-    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
-    if (fail(len)) { return len; }
-    i += len;
-  }
+  auto wl = c.skip_whitespace(s + i, n - i, vs, dt);
+  if (fail(wl)) { return wl; }
+  i += wl;
 
   return i;
 }
@@ -2975,6 +3000,15 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
       log(line.first, line.second, msg, label);
     }
   }
+}
+
+inline size_t Context::skip_whitespace(const char *a_s, size_t n,
+                                       SemanticValues &vs, std::any &dt) {
+  if (in_token_boundary_count || !whitespaceOpe) { return 0; }
+  auto save = ignore_trace_state;
+  ignore_trace_state = !verbose_trace;
+  auto se = scope_exit([&]() { ignore_trace_state = save; });
+  return whitespaceOpe->parse(a_s, n, vs, *this, dt);
 }
 
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
@@ -3054,7 +3088,7 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
     return static_cast<size_t>(-1);
   }
 
-  vs.choice_count_ = trie_.size();
+  vs.choice_count_ = trie_.items_count();
   vs.choice_ = id;
 
   // Word check
@@ -3081,16 +3115,9 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   }
 
   // Skip whitespace
-  if (!c.in_token_boundary_count && c.whitespaceOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
-
-    auto len = c.whitespaceOpe->parse(s + i, n - i, vs, c, dt);
-    if (fail(len)) { return len; }
-    i += len;
-  }
+  auto wl = c.skip_whitespace(s + i, n - i, vs, dt);
+  if (fail(wl)) { return wl; }
+  i += wl;
 
   return i;
 }
@@ -3099,7 +3126,7 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
   return parse_literal(s, n, vs, c, dt, lit_, init_is_word_, is_word_,
-                       ignore_case_);
+                       ignore_case_, lower_lit_);
 }
 
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
@@ -3120,13 +3147,9 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
   if (success(len)) {
     vs.tokens.emplace_back(std::string_view(s, len));
 
-    if (!c.in_token_boundary_count) {
-      if (c.whitespaceOpe) {
-        auto l = c.whitespaceOpe->parse(s + len, n - len, vs, c, dt);
-        if (fail(l)) { return l; }
-        len += l;
-      }
-    }
+    auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
+    if (fail(wl)) { return wl; }
+    len += wl;
   }
   return len;
 }
@@ -3369,21 +3392,19 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
 
       // Collect arguments
       std::vector<std::shared_ptr<Ope>> args;
-      for (auto arg : args_) {
+      for (const auto &arg : args_) {
         arg->accept(vis);
         args.emplace_back(std::move(vis.found_ope));
       }
 
       c.push_args(std::move(args));
       auto se = scope_exit([&]() { c.pop_args(); });
-      auto ope = get_core_operator();
-      return ope->parse(s, n, vs, c, dt);
+      return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
       // Definition
       c.push_args(std::vector<std::shared_ptr<Ope>>());
-      auto se = scope_exit([&]() { c.pop_args(); });
-      auto ope = get_core_operator();
-      return ope->parse(s, n, vs, c, dt);
+      auto se2 = scope_exit([&]() { c.pop_args(); });
+      return rule_->holder_->parse(s, n, vs, c, dt);
     }
   } else {
     // Reference parameter in macro
@@ -3399,15 +3420,15 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
 inline size_t BackReference::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
-  auto size = static_cast<int>(c.capture_scope_stack_size);
-  for (auto i = size - 1; i >= 0; i--) {
-    auto index = static_cast<size_t>(i);
-    const auto &cs = c.capture_scope_stack[index];
-    if (cs.find(name_) != cs.end()) {
-      const auto &lit = cs.at(name_);
+  for (auto it = c.capture_entries.rbegin(); it != c.capture_entries.rend();
+       ++it) {
+    if (it->first == name_) {
+      const auto &lit = it->second;
       std::once_flag init_is_word;
       auto is_word = false;
-      return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false);
+      static const std::string empty;
+      return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false,
+                           empty);
     }
   }
 
@@ -3590,7 +3611,7 @@ inline void AssignIDToDefinition::visit(Holder &ope) {
 
 inline void AssignIDToDefinition::visit(Reference &ope) {
   if (ope.rule_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
     ope.rule_->accept(*this);
@@ -3604,7 +3625,7 @@ inline void AssignIDToDefinition::visit(PrecedenceClimbing &ope) {
 
 inline void TokenChecker::visit(Reference &ope) {
   if (ope.is_macro_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   } else {
@@ -3615,7 +3636,7 @@ inline void TokenChecker::visit(Reference &ope) {
 inline void FindLiteralToken::visit(Reference &ope) {
   if (ope.is_macro_) {
     ope.rule_->accept(*this);
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3748,7 +3769,7 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
   }
 
   if (ope.is_macro_) {
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3773,7 +3794,7 @@ inline void ReferenceChecker::visit(Reference &ope) {
       error_s[ope.name_] = ope.s_;
       error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
     }
-    for (auto arg : ope.args_) {
+    for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
   }
@@ -3801,6 +3822,199 @@ inline void SetupFirstSets::visit(Reference &ope) {
   refs_.erase(ope.name_);
 }
 
+inline void SetupFirstSets::visit(Sequence &ope) {
+  ope.kw_guard_.reset();
+  setup_keyword_guarded_identifier(ope);
+  for (const auto &op : ope.opes_) {
+    op->accept(*this);
+  }
+}
+
+inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
+  // Detect pattern: NotPredicate(Reference→PrioritizedChoice<literals>)
+  //                 TokenBoundary(Sequence[CharacterClass,
+  //                 Repetition(CharacterClass)])
+  // This is the pattern used by: PlainIdentifier <- !ReservedKeyword
+  // <[a-z_]i[a-z0-9_]i*>
+  if (seq.opes_.size() != 2) { return; }
+
+  // Child 0 must be NotPredicate
+  auto *not_pred = dynamic_cast<NotPredicate *>(seq.opes_[0].get());
+  if (!not_pred) { return; }
+
+  // NotPredicate's child must be Reference to a rule
+  auto *ref = dynamic_cast<Reference *>(not_pred->ope_.get());
+  if (!ref || !ref->rule_) { return; }
+
+  // The referenced rule's inner operator (Holder) must contain
+  // PrioritizedChoice
+  auto *holder = dynamic_cast<Holder *>(ref->get_core_operator().get());
+  if (!holder) { return; }
+  auto *choice = dynamic_cast<PrioritizedChoice *>(holder->ope_.get());
+  if (!choice) { return; }
+
+  // Extract keywords from PrioritizedChoice alternatives
+  std::vector<std::string> exact_keywords;
+  std::vector<std::string> prefix_keywords;
+
+  for (const auto &alt : choice->opes_) {
+    auto *lit = dynamic_cast<LiteralString *>(alt.get());
+    if (lit) {
+      if (!lit->ignore_case_) { return; }
+      exact_keywords.push_back(to_lower(lit->lit_));
+      continue;
+    }
+    // Check for compound keyword (Sequence of LiteralStrings)
+    auto *sub_seq = dynamic_cast<Sequence *>(alt.get());
+    if (sub_seq && !sub_seq->opes_.empty()) {
+      auto *first_lit = dynamic_cast<LiteralString *>(sub_seq->opes_[0].get());
+      if (first_lit) {
+        auto all_ignore_case_lits =
+            std::all_of(sub_seq->opes_.begin(), sub_seq->opes_.end(),
+                        [](const auto &child) {
+                          auto *l = dynamic_cast<LiteralString *>(child.get());
+                          return l && l->ignore_case_;
+                        });
+        if (all_ignore_case_lits) {
+          prefix_keywords.push_back(to_lower(first_lit->lit_));
+          continue;
+        }
+      }
+    }
+    // Unrecognized alternative — bail out
+    return;
+  }
+
+  if (exact_keywords.empty()) { return; }
+
+  // Child 1 must be TokenBoundary
+  auto *tb = dynamic_cast<TokenBoundary *>(seq.opes_[1].get());
+  if (!tb) { return; }
+
+  // TokenBoundary content: Sequence[CharacterClass, Repetition(CharacterClass)]
+  // or just CharacterClass (single char identifier)
+  CharacterClass *first_cc = nullptr;
+  CharacterClass *rest_cc = nullptr;
+
+  auto *inner_seq = dynamic_cast<Sequence *>(tb->ope_.get());
+  if (inner_seq && inner_seq->opes_.size() == 2) {
+    first_cc = dynamic_cast<CharacterClass *>(inner_seq->opes_[0].get());
+    auto *rep = dynamic_cast<Repetition *>(inner_seq->opes_[1].get());
+    if (rep) { rest_cc = dynamic_cast<CharacterClass *>(rep->ope_.get()); }
+  }
+
+  if (!first_cc || !rest_cc) { return; }
+  if (!first_cc->is_ascii_only() || !rest_cc->is_ascii_only()) { return; }
+
+  // All conditions met — set up the fast path
+  auto kw = std::make_unique<KeywordGuardData>();
+  kw->identifier_first = first_cc->ascii_bitset();
+  kw->identifier_rest = rest_cc->ascii_bitset();
+
+  // Compute keyword length range for early-out in hot path
+  size_t min_len = SIZE_MAX, max_len = 0;
+  for (const auto &k : exact_keywords) {
+    min_len = std::min(min_len, k.size());
+    max_len = std::max(max_len, k.size());
+  }
+  for (const auto &k : prefix_keywords) {
+    min_len = std::min(min_len, k.size());
+    max_len = std::max(max_len, k.size());
+  }
+  kw->min_keyword_len = min_len;
+  kw->max_keyword_len = max_len;
+
+  kw->exact_keywords = std::move(exact_keywords);
+  kw->prefix_keywords = std::move(prefix_keywords);
+  seq.kw_guard_ = std::move(kw);
+}
+
+// Compute which rules benefit from packrat memoization.
+// A rule benefits if it's reachable from 2+ alternatives of the same
+// PrioritizedChoice (backtracking will re-visit it at the same position).
+inline void Definition::initialize_packrat_filter() const {
+  std::call_once(packrat_filter_init_, [&]() {
+    auto def_count = definition_ids_.size();
+    if (def_count == 0) { return; }
+
+    // Collect rule IDs reachable from an Ope subtree (bitvector indexed by
+    // def_id)
+    struct CollectReachableRules : public TraversalVisitor {
+      using TraversalVisitor::visit;
+      std::vector<bool> reachable; // indexed by def_id
+
+      CollectReachableRules(size_t n) : reachable(n, false) {}
+
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id < reachable.size()) { reachable[id] = true; }
+        ope.ope_->accept(*this);
+      }
+      void visit(Reference &ope) override {
+        if (ope.rule_ && ope.rule_->id < reachable.size() &&
+            !reachable[ope.rule_->id]) {
+          reachable[ope.rule_->id] = true;
+          ope.rule_->accept(*this);
+        }
+      }
+    };
+
+    // Find rules that benefit: reachable from 2+ alternatives of same choice
+    std::vector<bool> benefits(def_count, false);
+
+    struct FindBacktrackRules : public TraversalVisitor {
+      using TraversalVisitor::visit;
+      std::vector<bool> &benefits;
+      size_t def_count;
+      std::vector<bool> visited_rules; // indexed by def_id
+
+      FindBacktrackRules(std::vector<bool> &b, size_t n)
+          : benefits(b), def_count(n), visited_rules(n, false) {}
+
+      void visit(PrioritizedChoice &ope) override {
+        // For each alternative, collect reachable rules as bitvectors
+        std::vector<std::vector<bool>> alt_reachable;
+        for (auto &op : ope.opes_) {
+          CollectReachableRules crr(def_count);
+          op->accept(crr);
+          alt_reachable.push_back(std::move(crr.reachable));
+        }
+
+        // Mark rules reachable from 2+ alternatives
+        for (size_t id = 0; id < def_count; id++) {
+          size_t count = 0;
+          for (auto &alt : alt_reachable) {
+            if (alt[id]) { count++; }
+          }
+          if (count >= 2) { benefits[id] = true; }
+        }
+
+        // Recurse into alternatives
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+        }
+      }
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id < visited_rules.size() && !visited_rules[id]) {
+          visited_rules[id] = true;
+          ope.ope_->accept(*this);
+        }
+      }
+      void visit(Reference &ope) override {
+        if (ope.rule_) { ope.rule_->accept(*this); }
+      }
+    };
+
+    FindBacktrackRules finder(benefits, def_count);
+    holder_->accept(finder);
+    if (whitespaceOpe) { whitespaceOpe->accept(finder); }
+    if (wordOpe) { wordOpe->accept(finder); }
+
+    packrat_filter_ = std::move(benefits);
+  });
+}
+
 inline void LinkReferences::visit(Reference &ope) {
   // Check if the reference is a macro parameter
   auto found_param = false;
@@ -3819,7 +4033,7 @@ inline void LinkReferences::visit(Reference &ope) {
     ope.rule_ = &rule;
   }
 
-  for (auto arg : ope.args_) {
+  for (const auto &arg : ope.args_) {
     arg->accept(*this);
   }
 }
@@ -4309,8 +4523,7 @@ private:
         data.captures_in_current_definition.insert(name);
 
         return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
-          auto &cs = c.capture_scope_stack[c.capture_scope_stack_size - 1];
-          cs[name] = std::string(a_s, a_n);
+          c.capture_entries.emplace_back(name, std::string(a_s, a_n));
         });
       }
       default: {
@@ -4480,7 +4693,7 @@ private:
     g["PrecedenceClimbing"] = [](const SemanticValues &vs) {
       PrecedenceClimbing::BinOpeInfo binOpeInfo;
       size_t level = 1;
-      for (auto v : vs) {
+      for (const auto &v : vs) {
         auto tokens = std::any_cast<std::vector<std::string_view>>(v);
         auto assoc = tokens[0][0];
         for (size_t i = 1; i < tokens.size(); i++) {
@@ -4822,7 +5035,7 @@ private:
       }
     }
 
-    // Setup First-Set optimization for PrioritizedChoice
+    // Setup First-Set and ISpan optimizations
     for (auto &x : grammar) {
       SetupFirstSets vis;
       x.second.accept(vis);
@@ -4937,7 +5150,7 @@ void ast_to_s_core(const std::shared_ptr<T> &ptr, std::string &s, int level,
     s += "+ " + name + "\n";
   }
   if (fn) { s += fn(ast, level + 1); }
-  for (auto node : ast.nodes) {
+  for (const auto &node : ast.nodes) {
     ast_to_s_core(node, s, level + 1, fn);
   }
 }
@@ -4967,7 +5180,7 @@ struct AstOptimizer {
       auto ast = std::make_shared<T>(*child, original->name.data(),
                                      original->position, original->length,
                                      original->choice_count, original->choice);
-      for (auto node : ast->nodes) {
+      for (auto &node : ast->nodes) {
         node->parent = ast;
       }
       return ast;
@@ -4976,7 +5189,7 @@ struct AstOptimizer {
     auto ast = std::make_shared<T>(*original);
     ast->parent = parent;
     ast->nodes.clear();
-    for (auto node : original->nodes) {
+    for (const auto &node : original->nodes) {
       auto child = optimize(node, ast);
       ast->nodes.push_back(child);
     }
@@ -5008,7 +5221,7 @@ template <typename T = Ast> void add_ast_action(Definition &rule) {
                             std::distance(vs.ss, vs.sv().data()),
                             vs.sv().length(), vs.choice_count(), vs.choice());
 
-    for (auto node : ast->nodes) {
+    for (auto &node : ast->nodes) {
       node->parent = ast;
     }
     return ast;
