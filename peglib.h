@@ -2434,11 +2434,10 @@ struct ComputeFirstSet : public TraversalVisitor {
 
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
-      FirstSet element_fs;
       auto save = result_;
       result_ = FirstSet{};
       op->accept(*this);
-      element_fs = result_;
+      auto element_fs = result_;
       result_ = save;
       result_.chars |= element_fs.chars;
       if (element_fs.any_char) { result_.any_char = true; }
