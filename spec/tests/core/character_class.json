@@ -1,0 +1,51 @@
+[
+  {
+    "name": "single_character_range",
+    "description": "Character class with single-character range [a-a]",
+    "grammar": "S <- [a-a]+",
+    "cases": [
+      { "input": "aaa", "match": true },
+      { "input": "b", "match": false }
+    ]
+  },
+  {
+    "name": "special_characters_in_class",
+    "description": "Hyphen and backslash in character class",
+    "grammar": "S <- [-\\\\]+",
+    "cases": [
+      { "input": "-\\", "match": true },
+      { "input": "abc", "match": false }
+    ]
+  },
+  {
+    "name": "escape_sequences_in_class",
+    "description": "Escape sequences in character class",
+    "grammar": "S <- [\\t\\n\\r]+",
+    "cases": [
+      { "input": "\t\n\r", "match": true },
+      { "input": "abc", "match": false }
+    ]
+  },
+  {
+    "name": "negated_class_matches_unicode",
+    "description": "Negated character class matches Unicode and non-matched ASCII",
+    "grammar": "S <- [^a-z]+",
+    "cases": [
+      { "input": "123", "match": true },
+      { "input": "ABC", "match": true },
+      { "input": "\u65e5\u672c", "match": true },
+      { "input": "abc", "match": false }
+    ]
+  },
+  {
+    "name": "case_insensitive_class",
+    "description": "Case-insensitive character class [a-z]i",
+    "grammar": "S <- [a-z]i+",
+    "cases": [
+      { "input": "abc", "match": true },
+      { "input": "ABC", "match": true },
+      { "input": "aBc", "match": true },
+      { "input": "123", "match": false }
+    ]
+  }
+]

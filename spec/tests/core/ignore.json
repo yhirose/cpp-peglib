@@ -1,0 +1,45 @@
+[
+  {
+    "name": "ignore_operator_in_rule",
+    "description": "~ operator on a rule ignores its semantic value from parent",
+    "grammar": "START <- ~HELLO WORLD\nHELLO <- 'Hello' _\nWORLD <- 'World' _\n_ <- [ \\t\\r\\n]*",
+    "ast": {},
+    "cases": [
+      { "input": "Hello World", "match": true }
+    ]
+  },
+  {
+    "name": "ignore_not_predicate_semantic_value",
+    "description": "Not-predicate semantic value is ignored in AST",
+    "grammar": "START <- _ !DUMMY HELLO_WORLD '.'\nHELLO_WORLD <- HELLO 'World' _\nHELLO <- 'Hello' _\nDUMMY <- 'dummy' _\n~_ <- [ \\t\\r\\n]*",
+    "ast": {},
+    "cases": [
+      { "input": "Hello World.", "match": true }
+    ]
+  },
+  {
+    "name": "ignore_and_predicate_semantic_value",
+    "description": "And-predicate semantic value is ignored in AST",
+    "grammar": "START <- _ &HELLO HELLO_WORLD '.'\nHELLO_WORLD <- HELLO 'World' _\nHELLO <- 'Hello' _\n~_ <- [ \\t\\r\\n]*",
+    "ast": {},
+    "cases": [
+      { "input": "Hello World.", "match": true }
+    ]
+  },
+  {
+    "name": "skip_token_with_tilde",
+    "description": "Tilde on whitespace rule ignores its semantic value",
+    "grammar": "ROOT <- _ ITEM (',' _ ITEM _)*\nITEM <- ([a-z0-9])+\n~_ <- [ \\t]*",
+    "cases": [
+      { "input": " item1, item2 ", "match": true }
+    ]
+  },
+  {
+    "name": "skip_token_with_whitespace",
+    "description": "%whitespace auto-skip achieves same result",
+    "grammar": "ROOT <- ITEM (',' ITEM)*\nITEM <- < ([a-z0-9])+ >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": " item1, item2 ", "match": true }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[package]
+name = "peglib"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "MIT"
+description = "Rust port of cpp-peglib: a PEG (Parsing Expression Grammars) library"
+repository = "https://github.com/yhirose/cpp-peglib"
+homepage = "https://github.com/yhirose/cpp-peglib"
+readme = "README.md"
+keywords = ["peg", "parser", "parsing", "grammar", "packrat"]
+categories = ["parsing", "text-processing"]
+exclude = ["tests/", "target/"]
+
+[dependencies]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

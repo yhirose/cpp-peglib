@@ -1,0 +1,29 @@
+[
+  {
+    "name": "context_driven_predicate",
+    "description": "Enter/leave set a flag that controls predicate behavior (right side requires uppercase)",
+    "grammar": "START <- LTOKEN '=' RTOKEN\nLTOKEN <- TOKEN\nRTOKEN <- TOKEN\nTOKEN <- [A-Za-z]+",
+    "vars": {
+      "require_upper": { "type": "bool", "init": false }
+    },
+    "handlers": {
+      "LTOKEN": {
+        "enter": { "set": { "require_upper": false } },
+        "leave": { "set": { "require_upper": true } }
+      },
+      "TOKEN": {
+        "predicate": {
+          "when": "require_upper",
+          "check": { "sv": { "matches": "^[A-Z]+$" } },
+          "error": "should be upper case string..."
+        }
+      }
+    },
+    "cases": [
+      { "input": "hello=world", "match": false },
+      { "input": "HELLO=world", "match": false },
+      { "input": "hello=WORLD", "match": true },
+      { "input": "HELLO=WORLD", "match": true }
+    ]
+  }
+]

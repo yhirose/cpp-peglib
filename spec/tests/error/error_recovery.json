@@ -1,0 +1,39 @@
+[
+  {
+    "name": "basic_recovery_with_named_error",
+    "description": "Recovery operator with custom error message",
+    "grammar": "S <- 'a' ITEM^err 'c'\nITEM <- 'b'\nerr <- '' { error_message \"expected 'b'\" }",
+    "cases": [
+      { "input": "abc", "match": true },
+      {
+        "input": "axc",
+        "match": false,
+        "expected_error": { "message": "expected 'b'" }
+      }
+    ]
+  },
+  {
+    "name": "recovery_in_list_pattern",
+    "description": "Recovery within a list pattern continues parsing after error",
+    "grammar": "S <- ITEM (',' ITEM)*\nITEM <- NUM / %recover((!(',' / !.) .)+)\nNUM <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "1, 2, 3", "match": true },
+      { "input": "1, abc, 3", "match": false }
+    ]
+  },
+  {
+    "name": "recovery_java_example",
+    "description": "Java-like grammar with recovery for missing semicolons and block ends",
+    "grammar": "Prog <- PUBLIC CLASS NAME LCUR PUBLIC STATIC VOID MAIN LPAR STRING LBRA RBRA NAME RPAR BlockStmt RCUR\nBlockStmt <- LCUR (Stmt)* RCUR^rcblk\nStmt <- IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt\nIfStmt <- IF LPAR Exp RPAR Stmt (ELSE Stmt)?\nWhileStmt <- WHILE LPAR Exp RPAR Stmt\nDecStmt <- INT NAME (ASSIGN Exp)? SEMI\nAssignStmt <- NAME ASSIGN Exp SEMI^semia\nPrintStmt <- PRINTLN LPAR Exp RPAR SEMI\nExp <- RelExp (EQ RelExp)*\nRelExp <- AddExp (LT AddExp)*\nAddExp <- MulExp ((PLUS / MINUS) MulExp)*\nMulExp <- AtomExp ((TIMES / DIV) AtomExp)*\nAtomExp <- LPAR Exp RPAR / NUMBER / NAME\n\nNUMBER <- < [0-9]+ >\nNAME <- < [a-zA-Z_][a-zA-Z_0-9]* >\n\n~LPAR <- '('\n~RPAR <- ')'\n~LCUR <- '{'\n~RCUR <- '}'\n~LBRA <- '['\n~RBRA <- ']'\n~SEMI <- ';'\n\n~EQ <- '=='\n~LT <- '<'\n~ASSIGN <- '='\n\n~IF <- 'if'\n~ELSE <- 'else'\n~WHILE <- 'while'\n\nPLUS <- '+'\nMINUS <- '-'\nTIMES <- '*'\nDIV <- '/'\n\nCLASS <- 'class'\nPUBLIC <- 'public'\nSTATIC <- 'static'\n\nVOID <- 'void'\nINT <- 'int'\n\nMAIN <- 'main'\nSTRING <- 'String'\nPRINTLN <- 'System.out.println'\n\n%whitespace <- [ \\t\\n]*\n%word <- NAME\n\nrcblk <- (!RCUR (LCUR SkipToRCUR / .))* RCUR { error_message \"missing end of block.\" }\nsemia <- '' { error_message \"missing semicolon in assignment.\" }\n\nSkipToRCUR <- (!RCUR (LCUR SkipToRCUR / .))* RCUR",
+    "cases": [
+      {
+        "input": "public class Example {\n  public static void main(String[] args) {\n    int n = 5;\n    int f = 1;\n    while(0 < n) {\n      f = f * n;\n      n = n - 1\n    };\n    System.out.println(f);\n  }\n}\n",
+        "match": false,
+        "expected_errors": [
+          { "line": 8, "col": 5, "message": "missing semicolon in assignment." },
+          { "line": 8, "col": 6, "message": "missing end of block." }
+        ]
+      }
+    ]
+  }
+]

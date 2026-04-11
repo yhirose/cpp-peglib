@@ -1,0 +1,9 @@
+[package]
+name = "spec-harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+peglib = { path = "../../rust-peglib" }
+regex = "1"
+serde_json = "1"

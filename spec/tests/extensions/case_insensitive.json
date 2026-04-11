@@ -1,0 +1,32 @@
+[
+  {
+    "name": "case_insensitive_literal",
+    "description": "Case-insensitive literal with 'i' suffix",
+    "grammar": "ROOT <- HELLO WORLD\nHELLO <- 'hello'i\nWORLD <- 'world'i\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": "  Hello World  ", "match": true },
+      { "input": "HELLO WORLD", "match": true },
+      { "input": "hello world", "match": true }
+    ]
+  },
+  {
+    "name": "case_insensitive_character_class",
+    "description": "Case-insensitive character class with 'i' suffix",
+    "grammar": "ROOT <- [a-z]i+",
+    "cases": [
+      { "input": "abc", "match": true },
+      { "input": "ABC", "match": true },
+      { "input": "Abc", "match": true },
+      { "input": "123", "match": false }
+    ]
+  },
+  {
+    "name": "case_insensitive_negated_character_class",
+    "description": "Case-insensitive negated character class",
+    "grammar": "ROOT <- [^a-z]i+",
+    "cases": [
+      { "input": "123", "match": true },
+      { "input": "ABC", "match": false }
+    ]
+  }
+]

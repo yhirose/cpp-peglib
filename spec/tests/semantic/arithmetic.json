@@ -1,0 +1,50 @@
+[
+  {
+    "name": "calculator_with_grammar_text",
+    "description": "Standard expression grammar with all four operators using reduce (operator_rule auto-binds)",
+    "grammar": "EXPRESSION <- TERM (TERM_OPERATOR TERM)*\nTERM <- FACTOR (FACTOR_OPERATOR FACTOR)*\nFACTOR <- NUMBER / '(' EXPRESSION ')'\nTERM_OPERATOR <- < [-+] >\nFACTOR_OPERATOR <- < [/*] >\nNUMBER <- < [0-9]+ >",
+    "actions": {
+      "NUMBER": { "op": "token_to_number", "type": "long" },
+      "FACTOR": { "op": "passthrough", "index": 0 },
+      "TERM": {
+        "op": "reduce",
+        "operator_rule": "FACTOR_OPERATOR",
+        "initial": { "child": 0 },
+        "step": { "operator_child": 1, "value_child": 2, "operators": { "*": "multiply", "/": "divide" } }
+      },
+      "EXPRESSION": {
+        "op": "reduce",
+        "operator_rule": "TERM_OPERATOR",
+        "initial": { "child": 0 },
+        "step": { "operator_child": 1, "value_child": 2, "operators": { "+": "add", "-": "subtract" } }
+      }
+    },
+    "cases": [
+      { "input": "1+2*3*(4-5+6)/7-8", "match": true, "expected_value": -3 }
+    ]
+  },
+  {
+    "name": "macro_calculator",
+    "description": "Calculator using macro (parameterized) rules",
+    "grammar": "EXPRESSION <- _ LIST(TERM, TERM_OPERATOR)\nTERM <- LIST(FACTOR, FACTOR_OPERATOR)\nFACTOR <- NUMBER / T('(') EXPRESSION T(')')\nTERM_OPERATOR <- T([-+])\nFACTOR_OPERATOR <- T([*/])\nNUMBER <- T([0-9]+)\n~_ <- [ \\t]*\nLIST(I, D) <- I (D I)*\nT(S) <- < S > _",
+    "actions": {
+      "NUMBER": { "op": "token_to_number", "type": "long" },
+      "FACTOR": { "op": "passthrough", "index": 0 },
+      "TERM": {
+        "op": "reduce",
+        "operator_rule": "FACTOR_OPERATOR",
+        "initial": { "child": 0 },
+        "step": { "operator_child": 1, "value_child": 2, "operators": { "*": "multiply", "/": "divide" } }
+      },
+      "EXPRESSION": {
+        "op": "reduce",
+        "operator_rule": "TERM_OPERATOR",
+        "initial": { "child": 0 },
+        "step": { "operator_child": 1, "value_child": 2, "operators": { "+": "add", "-": "subtract" } }
+      }
+    },
+    "cases": [
+      { "input": " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ", "match": true, "expected_value": -3 }
+    ]
+  }
+]

@@ -1,0 +1,129 @@
+[
+  {
+    "name": "basic_filtering",
+    "description": "Alternatives with disjoint first bytes are correctly filtered",
+    "grammar": "S <- 'hello' / 'world' / 'foo'",
+    "cases": [
+      { "input": "hello", "match": true },
+      { "input": "world", "match": true },
+      { "input": "foo", "match": true },
+      { "input": "bar", "match": false }
+    ]
+  },
+  {
+    "name": "case_insensitive_literal",
+    "description": "Case-insensitive literals include both cases in First-Set",
+    "grammar": "S <- 'SELECT'i / 'INSERT'i / 'UPDATE'i",
+    "cases": [
+      { "input": "SELECT", "match": true },
+      { "input": "select", "match": true },
+      { "input": "Select", "match": true },
+      { "input": "INSERT", "match": true },
+      { "input": "insert", "match": true },
+      { "input": "UPDATE", "match": true },
+      { "input": "update", "match": true },
+      { "input": "DELETE", "match": false }
+    ]
+  },
+  {
+    "name": "can_be_empty_not_skipped",
+    "description": "Alternatives starting with optional elements must not be skipped",
+    "grammar": "S <- 'NOT'? [a-z]+",
+    "cases": [
+      { "input": "NOTabc", "match": true },
+      { "input": "abc", "match": true }
+    ]
+  },
+  {
+    "name": "any_character_not_skipped",
+    "description": "Alternatives starting with AnyCharacter (.) must not be skipped",
+    "grammar": "S <- 'hello' / .",
+    "cases": [
+      { "input": "hello", "match": true },
+      { "input": "x", "match": true },
+      { "input": "h", "match": true }
+    ]
+  },
+  {
+    "name": "character_class",
+    "description": "Character class alternatives with disjoint ranges",
+    "grammar": "S <- [0-9]+ / [a-z]+",
+    "cases": [
+      { "input": "123", "match": true },
+      { "input": "abc", "match": true },
+      { "input": "ABC", "match": false }
+    ]
+  },
+  {
+    "name": "negated_character_class",
+    "description": "Negated character class sets any_char (conservative)",
+    "grammar": "S <- 'hello' / [^0-9]+",
+    "cases": [
+      { "input": "hello", "match": true },
+      { "input": "abc", "match": true },
+      { "input": "123", "match": false }
+    ]
+  },
+  {
+    "name": "recursive_rule",
+    "description": "First-Set computation handles cycles in recursive rules",
+    "grammar": "EXPR <- TERM ('+' TERM)*\nTERM <- FACTOR ('*' FACTOR)*\nFACTOR <- '(' EXPR ')' / NUMBER\nNUMBER <- [0-9]+",
+    "cases": [
+      { "input": "1+2*3", "match": true },
+      { "input": "(1+2)*3", "match": true },
+      { "input": "+1", "match": false }
+    ]
+  },
+  {
+    "name": "many_alternatives",
+    "description": "Many alternatives: core use case for First-Set performance",
+    "grammar": "S <- KW\nKW <- 'alpha' / 'beta' / 'gamma' / 'delta' / 'epsilon' / 'zeta' / 'eta' / 'theta' / 'iota' / 'kappa'",
+    "cases": [
+      { "input": "alpha", "match": true },
+      { "input": "kappa", "match": true },
+      { "input": "eta", "match": true },
+      { "input": "lambda", "match": false }
+    ]
+  },
+  {
+    "name": "sequence_first_element",
+    "description": "First-Set comes from the first element of a sequence",
+    "grammar": "S <- 'SELECT' NAME / 'INSERT' NAME\nNAME <- < [a-z]+ >\n%whitespace <- [ ]*",
+    "cases": [
+      { "input": "SELECT foo", "match": true },
+      { "input": "INSERT bar", "match": true },
+      { "input": "DELETE baz", "match": false }
+    ]
+  },
+  {
+    "name": "sequence_optional_first",
+    "description": "Sequence with optional first element: both elements contribute",
+    "grammar": "S <- 'NOT'? [a-z]+ / [0-9]+",
+    "cases": [
+      { "input": "NOTabc", "match": true },
+      { "input": "abc", "match": true },
+      { "input": "123", "match": true }
+    ]
+  },
+  {
+    "name": "packrat_compatibility",
+    "description": "Packrat and First-Set work together",
+    "grammar": "S <- STMT+\nSTMT <- 'if' / 'for' / 'while' / ID\nID <- < [a-z]+ >\n%whitespace <- [ \\n]*",
+    "packrat": true,
+    "cases": [
+      { "input": "if for while foo bar", "match": true },
+      { "input": "123", "match": false }
+    ]
+  },
+  {
+    "name": "dictionary_operator",
+    "description": "Dictionary operator is not affected by First-Set",
+    "grammar": "S <- 'alpha' | 'beta' | 'gamma'",
+    "cases": [
+      { "input": "alpha", "match": true },
+      { "input": "beta", "match": true },
+      { "input": "gamma", "match": true },
+      { "input": "delta", "match": false }
+    ]
+  }
+]

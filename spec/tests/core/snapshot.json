@@ -1,0 +1,64 @@
+[
+  {
+    "name": "nested_choice_rollback",
+    "description": "Choice count and choice index are correctly rolled back on nested choice failure",
+    "grammar": "S <- A / B\nA <- 'x' INNER 'y'\nB <- 'x' 'z'\nINNER <- 'a' / 'b' / 'c'",
+    "actions": {
+      "S": { "op": "choice" }
+    },
+    "cases": [
+      { "input": "xz", "match": true, "expected_value": 1 }
+    ]
+  },
+  {
+    "name": "sequence_direct_write",
+    "description": "Sequence collects all child semantic values in order",
+    "grammar": "S <- A B C\nA <- 'aaa'\nB <- 'bbb'\nC <- 'ccc'",
+    "actions": {
+      "S": { "op": "size" }
+    },
+    "cases": [
+      { "input": "aaabbbccc", "match": true, "expected_value": 3 }
+    ]
+  },
+  {
+    "name": "predicate_no_side_effect",
+    "description": "And-predicate succeeds but its semantic values do not leak into the parent",
+    "grammar": "S <- &(AB) CD\nAB <- [a-z]+ [0-9]+\nCD <- [a-z]+ [0-9]+",
+    "actions": {
+      "S": { "op": "size" }
+    },
+    "cases": [
+      { "input": "abc123", "match": true, "expected_value": 1 }
+    ]
+  },
+  {
+    "name": "capture_scope_isolation",
+    "description": "CaptureScope isolates backreference bindings",
+    "grammar": "S <- $ref<'hello'> $(ISOLATED) $ref\nISOLATED <- $ref<'world'>",
+    "cases": [
+      { "input": "helloworldhello", "match": true },
+      { "input": "helloworldworld", "match": false }
+    ]
+  },
+  {
+    "name": "repetition_partial_rollback",
+    "description": "Repetition collects only successfully matched items",
+    "grammar": "S <- ITEM+\nITEM <- < [a-z]+ > ' '?",
+    "actions": {
+      "S": { "op": "size" }
+    },
+    "cases": [
+      { "input": "foo bar baz", "match": true, "expected_value": 3 }
+    ]
+  },
+  {
+    "name": "capture_rollback_on_choice_failure",
+    "description": "Backreference bindings from a failed choice alternative are discarded",
+    "grammar": "S <- A / B\nA <- $ref<'xx'> 'FAIL'\nB <- $ref<'yy'> $ref",
+    "cases": [
+      { "input": "yyyy", "match": true },
+      { "input": "yyxx", "match": false }
+    ]
+  }
+]

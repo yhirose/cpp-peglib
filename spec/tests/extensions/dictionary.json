@@ -1,0 +1,42 @@
+[
+  {
+    "name": "dictionary_basic",
+    "description": "Dictionary operator with trie-based word lookup",
+    "grammar": "START <- 'This month is ' MONTH '.'\nMONTH <- 'Jan' | 'January' | 'Feb' | 'February'",
+    "cases": [
+      { "input": "This month is Jan.", "match": true },
+      { "input": "This month is January.", "match": true },
+      { "input": "This month is Jannuary.", "match": false },
+      { "input": "This month is .", "match": false }
+    ]
+  },
+  {
+    "name": "dictionary_invalid_mixed_types",
+    "description": "Dictionary cannot mix literals and character classes",
+    "grammar": "START <- 'This month is ' MONTH '.'\nMONTH <- 'Jan' | 'January' | [a-z]+ | 'Feb' | 'February'",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "dictionary_choice_index",
+    "description": "Dictionary reports choice index for matched item",
+    "grammar": "START <- 'This month is ' MONTH '.'\nMONTH <- 'Jan' | 'January' | 'Feb' | 'February'",
+    "actions": {
+      "MONTH": { "op": "choice" }
+    },
+    "cases": [
+      { "input": "This month is Feb.", "match": true, "expected_value": 2 }
+    ]
+  },
+  {
+    "name": "dictionary_longest_match",
+    "description": "Dictionary tries longest match among alternatives",
+    "grammar": "S <- MONTH\nMONTH <- 'Jan' | 'January' | 'Jun' | 'June' | 'Jul' | 'July'",
+    "cases": [
+      { "input": "January", "match": true },
+      { "input": "Jan", "match": true },
+      { "input": "June", "match": true }
+    ]
+  }
+]

@@ -1,0 +1,53 @@
+[
+  {
+    "name": "token_boundary_no_whitespace_skip",
+    "description": "Inside < ... >, whitespace is NOT auto-skipped",
+    "grammar": "ROOT <- TOP\nTOP <- < 'a' 'b' 'c' >\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": false },
+      { "input": "abc", "match": true }
+    ]
+  },
+  {
+    "name": "token_boundary_subrule_no_skip",
+    "description": "Subrules inside < ... > don't get whitespace skipping",
+    "grammar": "ROOT <- TOP\nTOP <- < 'a' B 'c' >\nB <- 'b'\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": false }
+    ]
+  },
+  {
+    "name": "token_boundary_partial",
+    "description": "Only part of rule in < ... >; rest gets whitespace skip",
+    "grammar": "ROOT <- TOP\nTOP <- < A > B C\nA <- 'a'\nB <- 'b'\nC <- 'c'\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": true }
+    ]
+  },
+  {
+    "name": "token_boundary_all_subrules",
+    "description": "All subrules inside < ... > form one token",
+    "grammar": "ROOT <- TOP\nTOP <- < A B C >\nA <- 'a'\nB <- 'b'\nC <- 'c'\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": false },
+      { "input": "abc", "match": true }
+    ]
+  },
+  {
+    "name": "token_boundary_with_backtracking",
+    "description": "Token boundary works correctly with backtracking",
+    "grammar": "S <- A / B\nA <- < 'hello' > ' world'\nB <- < 'hello' > ' there'\n%whitespace <- ''",
+    "cases": [
+      { "input": "hello world", "match": true },
+      { "input": "hello there", "match": true }
+    ]
+  },
+  {
+    "name": "token_boundary_with_unicode",
+    "description": "Token boundary captures Unicode text",
+    "grammar": "S <- < [\u3042-\u3093]+ >",
+    "cases": [
+      { "input": "\u3042\u3044\u3046", "match": true }
+    ]
+  }
+]

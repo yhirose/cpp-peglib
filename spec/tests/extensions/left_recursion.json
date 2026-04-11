@@ -1,0 +1,361 @@
+[
+  {
+    "name": "direct_left_recursion_compiles",
+    "description": "Direct left recursion (A <- A 'a') compiles when LR is enabled",
+    "grammar": "A <- A 'a'\nB <- A 'a'",
+    "grammar_compiles": true
+  },
+  {
+    "name": "left_recursive_with_option_compiles",
+    "description": "Indirect LR through optional rule compiles",
+    "grammar": "A <- 'a' / 'b'? B 'c'\nB <- A",
+    "grammar_compiles": true
+  },
+  {
+    "name": "left_recursive_with_zom_compiles",
+    "description": "LR with zero-or-more compiles (A <- 'a'* A*)",
+    "grammar": "A <- 'a'* A*",
+    "grammar_compiles": true
+  },
+  {
+    "name": "left_recursive_with_zom_content_rule_compiles",
+    "description": "LR through a chain with a zero-or-more content rule compiles",
+    "grammar": "A <- B\nB <- _ A\n_ <- ' '*",
+    "grammar_compiles": true
+  },
+  {
+    "name": "indirect_left_recursion",
+    "description": "Indirect left recursion through three rules",
+    "grammar": "A <- B 'a'\nB <- C 'b'\nC <- A 'c' / 'd'",
+    "cases": [
+      { "input": "dba", "match": true },
+      { "input": "dbacba", "match": true }
+    ]
+  },
+  {
+    "name": "complex_indirect_left_recursion",
+    "description": "Complex indirect LR through a long chain",
+    "grammar": "A <- B / C 'a'\nB <- D 'b'\nC <- E 'c'\nD <- A 'd'\nE <- F 'e'\nF <- G 'f'\nG <- A 'g' / 'h'",
+    "cases": [
+      { "input": "hfeca", "match": true },
+      { "input": "hfecadb", "match": true },
+      { "input": "hfecadbgfeca", "match": true },
+      { "input": "hfecadbgfecadb", "match": true },
+      { "input": "", "match": false },
+      { "input": "h", "match": false },
+      { "input": "hf", "match": false },
+      { "input": "abc", "match": false }
+    ]
+  },
+  {
+    "name": "mutual_left_recursion",
+    "description": "Mutual left recursion between two rules",
+    "grammar": "A <- B 'x' / 'a'\nB <- A 'y'",
+    "cases": [
+      { "input": "a", "match": true },
+      { "input": "ayx", "match": true },
+      { "input": "ayxyx", "match": true },
+      { "input": "", "match": false },
+      { "input": "b", "match": false },
+      { "input": "ax", "match": false },
+      { "input": "ay", "match": false }
+    ]
+  },
+  {
+    "name": "hidden_left_recursion_with_epsilon",
+    "description": "LR hidden behind an optional (nullable) rule",
+    "grammar": "A <- B A / 'a'\nB <- 'b'?",
+    "cases": [
+      { "input": "a", "match": true },
+      { "input": "ba", "match": true },
+      { "input": "bba", "match": true },
+      { "input": "bbba", "match": true },
+      { "input": "", "match": false },
+      { "input": "b", "match": false },
+      { "input": "ab", "match": false },
+      { "input": "bb", "match": false }
+    ]
+  },
+  {
+    "name": "deep_indirect_epsilon",
+    "description": "LR through a chain of rules with a nullable prefix",
+    "grammar": "A <- B\nB <- C\nC <- D? A / 'x'\nD <- 'x'",
+    "cases": [
+      { "input": "x", "match": true },
+      { "input": "xx", "match": true }
+    ]
+  },
+  {
+    "name": "predicate_epsilon",
+    "description": "And-predicate is always nullable (does not consume)",
+    "grammar": "A <- &B A / 'a'\nB <- 'b'?",
+    "cases": [
+      { "input": "a", "match": true }
+    ]
+  },
+  {
+    "name": "complex_choice_epsilon",
+    "description": "Empty string rule makes D? A a nullable prefix",
+    "grammar": "A <- B / C\nB <- D? A 'x'\nC <- 'y'\nD <- ''",
+    "cases": [
+      { "input": "y", "match": true },
+      { "input": "yx", "match": true },
+      { "input": "yxx", "match": true }
+    ]
+  },
+  {
+    "name": "complex_sequence_epsilon",
+    "description": "Multiple nullable prefixes before the recursive reference",
+    "grammar": "A <- B C D A / 'a'\nB <- 'b'?\nC <- 'c'*\nD <- ''",
+    "cases": [
+      { "input": "a", "match": true },
+      { "input": "ba", "match": true },
+      { "input": "bca", "match": true },
+      { "input": "bcca", "match": true }
+    ]
+  },
+  {
+    "name": "cross_reference_epsilon",
+    "description": "Nullable through a chain of nullable rules; PEG ordered choice picks first match",
+    "grammar": "A <- B A / 'a'\nB <- C / D\nC <- E\nD <- F\nE <- 'e'?\nF <- 'f'*",
+    "cases": [
+      { "input": "a", "match": true },
+      { "input": "ea", "match": true },
+      { "input": "fa", "match": false }
+    ]
+  },
+  {
+    "name": "pure_epsilon_left_recursion",
+    "description": "A <- A / '' — most dangerous pattern, should not hang",
+    "grammar": "A <- A / ''",
+    "cases": [
+      { "input": "", "match": true },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "direct_left_recursion_no_alternatives",
+    "description": "A <- A — no base case, can never match",
+    "grammar": "A <- A",
+    "cases": [
+      { "input": "", "match": false },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "mutual_recursion_with_epsilon",
+    "description": "Mutual recursion with epsilon alternative",
+    "grammar": "A <- B / ''\nB <- A / 'x'",
+    "cases": [
+      { "input": "", "match": true },
+      { "input": "x", "match": true }
+    ]
+  },
+  {
+    "name": "diamond_dependency_epsilon",
+    "description": "Both B and C reference A through nullable D — no base case",
+    "grammar": "A <- B / C\nB <- D A 'b'\nC <- D A 'c'\nD <- 'x'?",
+    "cases": [
+      { "input": "", "match": false },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "class_epsilon",
+    "description": "Nullable character class before recursive reference",
+    "grammar": "A <- [a-z]? A / 'x'",
+    "cases": [
+      { "input": "x", "match": true },
+      { "input": "ax", "match": true },
+      { "input": "abx", "match": true }
+    ]
+  },
+  {
+    "name": "epsilon_with_complex_predicate",
+    "description": "And-predicate and not-predicate with nullable rules",
+    "grammar": "A <- &B !C A / 'a'\nB <- ''\nC <- 'c'?",
+    "cases": [
+      { "input": "a", "match": true }
+    ]
+  },
+  {
+    "name": "arithmetic_expressions",
+    "description": "Left-recursive arithmetic with semantic evaluation via choice_op",
+    "grammar": "expr <- expr '+' term / expr '-' term / term\nterm <- term '*' factor / term '/' factor / factor\nfactor <- '(' expr ')' / number\nnumber <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "actions": {
+      "number": { "op": "token_to_number", "type": "long" },
+      "factor": { "op": "passthrough", "index": 0 },
+      "term": {
+        "op": "choice_op",
+        "cases": {
+          "0": { "binary": "multiply", "left": 0, "right": 1 },
+          "1": { "binary": "divide",   "left": 0, "right": 1 },
+          "default": { "passthrough": 0 }
+        }
+      },
+      "expr": {
+        "op": "choice_op",
+        "cases": {
+          "0": { "binary": "add",      "left": 0, "right": 1 },
+          "1": { "binary": "subtract", "left": 0, "right": 1 },
+          "default": { "passthrough": 0 }
+        }
+      }
+    },
+    "cases": [
+      { "input": "1+2*3-4*5+6/2", "match": true, "expected_value": -10 },
+      { "input": "1-2-3", "match": true, "expected_value": -4 },
+      { "input": "8/4/2", "match": true, "expected_value": 1 }
+    ]
+  },
+  {
+    "name": "arithmetic_expressions_with_ast",
+    "description": "Left-recursive arithmetic AST structure after optimization",
+    "grammar": "expr <- expr '+' term / expr '-' term / term\nterm <- term '*' factor / term '/' factor / factor\nfactor <- '(' expr ')' / number\nnumber <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "ast": { "optimize": true },
+    "cases": [
+      {
+        "input": "1+2*3-4*5+6/2",
+        "match": true,
+        "expected_ast": "+ expr/0\n  + expr/1\n    + expr/0\n      - expr/2[number] (1)\n      + term/0\n        - term/2[number] (2)\n        - factor/1[number] (3)\n    + term/0\n      - term/2[number] (4)\n      - factor/1[number] (5)\n  + term/1\n    - term/2[number] (6)\n    - factor/1[number] (2)\n"
+      }
+    ]
+  },
+  {
+    "name": "left_recursion_disabled",
+    "description": "Left-recursive grammar should fail to compile when LR is disabled",
+    "grammar": "expr <- expr '+' term / expr '-' term / term\nterm <- term '*' factor / term '/' factor / factor\nfactor <- '(' expr ')' / number\nnumber <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "lr_detection_disabled_direct",
+    "description": "Direct LR detected as error when LR is disabled",
+    "grammar": "A <- A 'a'\nB <- A 'a'",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "lr_detection_disabled_option",
+    "description": "Indirect LR through option detected when LR is disabled",
+    "grammar": "A <- 'a' / 'b'? B 'c'\nB <- A",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "lr_detection_disabled_zom",
+    "description": "LR through zero-or-more detected when LR is disabled",
+    "grammar": "A <- 'a'* A*",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "lr_detection_disabled_zom_content",
+    "description": "LR through chain with ZOM content detected when LR is disabled",
+    "grammar": "A <- B\nB <- _ A\n_ <- ' '*",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "lr_detection_disabled_empty_string",
+    "description": "LR through empty string detected when LR is disabled",
+    "grammar": "A <- '' A",
+    "left_recursion": false,
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "monkey_language_precedence",
+    "description": "Monkey language grammar using precedence climbing",
+    "grammar": "PROGRAM <- STATEMENTS\n\nSTATEMENTS <- (STATEMENT ';'?)*\nSTATEMENT <- ASSIGNMENT / RETURN / EXPRESSION_STATEMENT\n\nASSIGNMENT <- 'let' IDENTIFIER '=' EXPRESSION\nRETURN <- 'return' EXPRESSION\nEXPRESSION_STATEMENT <- EXPRESSION\n\nEXPRESSION <- INFIX_EXPR(PREFIX_EXPR, INFIX_OPE)\nINFIX_EXPR(ATOM, OPE) <- ATOM (OPE ATOM)* {\n  precedence\n    L == !=\n    L < >\n    L + -\n    L * /\n}\n\nIF <- 'if' '(' EXPRESSION ')' BLOCK ('else' BLOCK)?\n\nFUNCTION <- 'fn' '(' PARAMETERS ')' BLOCK\nPARAMETERS <- LIST(IDENTIFIER, ',')\n\nBLOCK <- '{' STATEMENTS '}'\n\nCALL <- PRIMARY (ARGUMENTS / INDEX)*\nARGUMENTS <- '(' LIST(EXPRESSION, ',') ')'\nINDEX <- '[' EXPRESSION ']'\n\nPREFIX_EXPR <- PREFIX_OPE* CALL\nPRIMARY <- IF / FUNCTION / ARRAY / HASH / INTEGER / BOOLEAN / NULL / IDENTIFIER / STRING / '(' EXPRESSION ')'\n\nARRAY <- '[' LIST(EXPRESSION, ',') ']'\n\nHASH <- '{' LIST(HASH_PAIR, ',') '}'\nHASH_PAIR <- EXPRESSION ':' EXPRESSION\n\nIDENTIFIER <- < [a-zA-Z]+ >\nINTEGER <- < [0-9]+ >\nSTRING <- < [\"] < (![\"] .)* > [\"] >\nBOOLEAN <- 'true' / 'false'\nNULL <- 'null'\nPREFIX_OPE <- < [-!] >\nINFIX_OPE <- < [-+/*<>] / '==' / '!=' >\n\nKEYWORD <- 'null' | 'true' | 'false' | 'let' | 'return' | 'if' | 'else' | 'fn'\n\nLIST(ITEM, DELM) <- (ITEM (~DELM ITEM)*)?\n\nLINE_COMMENT <- '//' (!LINE_END .)* &LINE_END\nLINE_END <- '\\r\\n' / '\\r' / '\\n' / !.\n\n%whitespace <- ([ \\t\\r\\n]+ / LINE_COMMENT)*\n%word <- [a-zA-Z]+",
+    "cases": [
+      {
+        "input": "let fibonacci = fn(x) {\n  if (x == 0) {\n    0\n  } else {\n    if (x == 1) {\n      return 1;\n    } else {\n      fibonacci(x - 1) + fibonacci(x - 2);\n    }\n  }\n};\n\nputs(fibonacci(35));\n",
+        "match": true
+      },
+      {
+        "input": "// `newAdder` returns a closure\nlet newAdder = fn(a, b) {\n    fn(c) { a + b + c };\n};\n\nlet adder = newAdder(1, 2);\n\nputs(adder(8));\n",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "monkey_language_left_recursion",
+    "description": "Monkey language grammar using left recursion for operator precedence",
+    "grammar": "PROGRAM <- STATEMENTS\n\nSTATEMENTS <- (STATEMENT ';'?)*\nSTATEMENT <- ASSIGNMENT / RETURN / EXPRESSION_STATEMENT\n\nASSIGNMENT <- 'let' IDENTIFIER '=' EXPRESSION\nRETURN <- 'return' EXPRESSION\nEXPRESSION_STATEMENT <- EXPRESSION\n\nEXPRESSION <- logical_expr\nlogical_expr <- logical_expr logical_op equality_expr / equality_expr\nequality_expr <- equality_expr equality_op comparison_expr / comparison_expr\ncomparison_expr <- comparison_expr comparison_op additive_expr / additive_expr\nadditive_expr <- additive_expr additive_op multiplicative_expr / multiplicative_expr\nmultiplicative_expr <- multiplicative_expr multiplicative_op prefix_expr / prefix_expr\nprefix_expr <- PREFIX_OPE* postfix_expr\npostfix_expr <- postfix_expr (ARGUMENTS / INDEX) / primary_expr\nprimary_expr <- IF / FUNCTION / ARRAY / HASH / INTEGER / BOOLEAN / NULL / IDENTIFIER / STRING / '(' EXPRESSION ')'\n\nlogical_op <- '&&' / '||'\nequality_op <- '==' / '!='\ncomparison_op <- '<=' / '>=' / '<' / '>'\nadditive_op <- '+' / '-'\nmultiplicative_op <- '*' / '/'\n\nIF <- 'if' '(' EXPRESSION ')' BLOCK ('else' BLOCK)?\n\nFUNCTION <- 'fn' '(' PARAMETERS ')' BLOCK\nPARAMETERS <- LIST(IDENTIFIER, ',')\n\nBLOCK <- '{' STATEMENTS '}'\n\nARGUMENTS <- '(' LIST(EXPRESSION, ',') ')'\nINDEX <- '[' EXPRESSION ']'\n\nARRAY <- '[' LIST(EXPRESSION, ',') ']'\n\nHASH <- '{' LIST(HASH_PAIR, ',') '}'\nHASH_PAIR <- EXPRESSION ':' EXPRESSION\n\nIDENTIFIER <- !KEYWORD < [a-zA-Z_][a-zA-Z0-9_]* >\nINTEGER <- < [0-9]+ >\nSTRING <- < [\"] (![\"] .)* [\"] >\nBOOLEAN <- 'true' / 'false'\nNULL <- 'null'\nPREFIX_OPE <- < [-!] >\n\nKEYWORD <- 'null' / 'true' / 'false' / 'let' / 'return' / 'if' / 'else' / 'fn'\n\nLIST(ITEM, DELM) <- (ITEM (~DELM ITEM)*)?\n\nLINE_COMMENT <- '//' (!LINE_END .)* &LINE_END\nLINE_END <- '\\r\\n' / '\\r' / '\\n' / !.\n\n%whitespace <- ([ \\t\\r\\n]+ / LINE_COMMENT)*\n%word <- [a-zA-Z_][a-zA-Z0-9_]*",
+    "cases": [
+      {
+        "input": "let fibonacci = fn(x) {\n  if (x == 0) {\n    0\n  } else {\n    if (x == 1) {\n      return 1;\n    } else {\n      fibonacci(x - 1) + fibonacci(x - 2);\n    }\n  }\n};\n\nputs(fibonacci(35));\n",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "right_recursive_regression",
+    "description": "Right-recursive grammar should not break with LR enabled",
+    "grammar": "Expression <- Term ('+' / '-') Expression / Term\nTerm <- Factor ('*' / '/') Term / Factor\nFactor <- '(' Expression ')' / Number\nNumber <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "123", "match": true },
+      { "input": "1 + 2", "match": true },
+      { "input": "1 + 2 * 3", "match": true },
+      { "input": "(1 + 2) * 3", "match": true },
+      { "input": "", "match": false },
+      { "input": "1 +", "match": false }
+    ]
+  },
+  {
+    "name": "typescript_types_realistic",
+    "description": "TypeScript-like type grammar with left recursion",
+    "grammar": "Type <- UnionType / IntersectionType / PrimaryType\nUnionType <- UnionType '|' IntersectionType / IntersectionType\nIntersectionType <- IntersectionType '&' PrimaryType / PrimaryType\nPrimaryType <- BasicType / ObjectType / FunctionType / '(' Type ')'\nObjectType <- '{' PropertyList '}'\nPropertyList <- Property (',' Property)* / ''\nProperty <- Identifier ':' Type\nFunctionType <- '(' ParameterList ')' '=>' Type\nParameterList <- Type (',' Type)* / ''\nBasicType <- 'string' / 'number' / 'boolean'\nIdentifier <- < [a-zA-Z][a-zA-Z0-9]* >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "string", "match": true },
+      { "input": "string | number", "match": true },
+      { "input": "string & number", "match": true },
+      { "input": "(string, number) => boolean", "match": true },
+      { "input": "{name: string, age: number}", "match": true },
+      { "input": "", "match": false },
+      { "input": "|", "match": false }
+    ]
+  },
+  {
+    "name": "packrat_with_left_recursion",
+    "description": "Packrat caching works correctly with left-recursive grammars (with semantic evaluation)",
+    "grammar": "expr <- expr '+' term / expr '-' term / term\nterm <- term '*' factor / term '/' factor / factor\nfactor <- '(' expr ')' / number\nnumber <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "packrat": true,
+    "actions": {
+      "number": { "op": "token_to_number", "type": "long" },
+      "factor": { "op": "passthrough", "index": 0 },
+      "term": {
+        "op": "choice_op",
+        "cases": {
+          "0": { "binary": "multiply", "left": 0, "right": 1 },
+          "1": { "binary": "divide",   "left": 0, "right": 1 },
+          "default": { "passthrough": 0 }
+        }
+      },
+      "expr": {
+        "op": "choice_op",
+        "cases": {
+          "0": { "binary": "add",      "left": 0, "right": 1 },
+          "1": { "binary": "subtract", "left": 0, "right": 1 },
+          "default": { "passthrough": 0 }
+        }
+      }
+    },
+    "cases": [
+      { "input": "1+2*3-4*5+6/2", "match": true, "expected_value": -10 },
+      { "input": "1+2+3+4", "match": true, "expected_value": 10 }
+    ]
+  }
+]

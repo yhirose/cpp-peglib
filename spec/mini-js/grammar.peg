@@ -1,0 +1,139 @@
+# mini-js: a JavaScript-flavored mini language covering modern language
+# implementation patterns (immutability, enums, pattern matching, closures,
+# exceptions, Result-style error handling).
+
+Program    <- Statement*
+
+Statement  <- LetStmt
+            / EnumDecl
+            / IfStmt
+            / WhileStmt
+            / ForStmt
+            / FuncDecl
+            / ReturnStmt
+            / MatchStmt
+            / TryStmt
+            / ThrowStmt
+            / BreakStmt
+            / ContinueStmt
+            / BlockStmt
+            / ExprStmt
+
+LetStmt    <- 'let' 'mut'? Identifier TypeAnnot? ('=' Expression)? ';'^semi
+TypeAnnot  <- ':' Type
+Type       <- Identifier ('<' Type (',' Type)* '>')?
+IfStmt     <- 'if' '(' Expression ')' Statement ('else' Statement)?
+WhileStmt  <- 'while' '(' Expression ')' Statement
+ForStmt    <- 'for' '(' 'let' Identifier 'of' Expression ')' Statement
+FuncDecl   <- 'function' Identifier '(' List(Param)? ')' TypeAnnot? BlockStmt
+Param      <- Identifier TypeAnnot?
+ReturnStmt <- 'return' Expression? ';'^semi
+BreakStmt  <- 'break' ';'^semi
+ContinueStmt <- 'continue' ';'^semi
+TryStmt    <- 'try' BlockStmt (CatchClause FinallyClause? / FinallyClause)
+CatchClause <- 'catch' ('(' Identifier ')')? BlockStmt
+FinallyClause <- 'finally' BlockStmt
+ThrowStmt  <- 'throw' Expression ';'^semi
+BlockStmt  <- '{' Statement* '}'^rcur
+ExprStmt   <- Expression ';'^semi
+
+# --- Enum (tagged union) ---
+
+EnumDecl   <- 'enum' Identifier '{' List(EnumVariant) ','? '}'^rcur
+EnumVariant <- Identifier ('(' List(Type) ')')?
+
+# --- Pattern matching ---
+
+MatchStmt  <- 'match' '(' Expression ')' '{' MatchArm (',' MatchArm)* ','? '}'^rcur
+MatchArm   <- Pattern '=>' (BlockStmt / Expression)
+Pattern    <- '_'                                      # wildcard
+            / Identifier '(' List(Pattern) ')'         # enum variant with payload
+            / Identifier                               # binding or nullary variant
+            / Number
+            / String
+
+# --- Expressions (left-recursive with precedence) ---
+
+Expression <- Assignment
+
+Assignment <- Postfix '=' Assignment
+            / Ternary
+
+Ternary    <- LogicalOr ('?' Expression ':' Ternary)?
+
+LogicalOr  <- LogicalOr '||' LogicalAnd
+            / LogicalAnd
+
+LogicalAnd <- LogicalAnd '&&' Equality
+            / Equality
+
+Equality   <- Equality ('==' / '!=') Comparison
+            / Comparison
+
+Comparison <- Comparison ('<=' / '>=' / '<' / '>') Addition
+            / Addition
+
+Addition   <- Addition ('+' / '-') Multiplication
+            / Multiplication
+
+Multiplication <- Multiplication ('*' / '/' / '%') Unary
+               / Unary
+
+Unary      <- ('!' / '-') Unary
+            / Postfix
+
+Postfix    <- Postfix '(' List(Expression)? ')'   # function call
+            / Postfix '[' Expression ']'           # index
+            / Postfix '.' Identifier               # member access
+            / Primary
+
+Primary    <- Number
+            / TemplateLit
+            / String
+            / 'true' / 'false' / 'null'
+            / ArrayLit
+            / ObjectLit
+            / ArrowFunc
+            / Identifier
+            / '(' Expression ')'
+
+# --- Literals ---
+
+Number     <- < [0-9]+ ('.' [0-9]+)? ([eE] [-+]? [0-9]+)? >
+
+String     <- < ['] [^']* ['] >
+            / < ["] [^"]* ["] >
+
+TemplateLit <- '`' TemplateSpan* '`'
+TemplateSpan <- '${' Expression '}'
+             / TemplateCh+
+TemplateCh  <- !('`' / '${') .
+
+ArrayLit   <- '[' List(Expression)? ']'
+
+ObjectLit  <- '{' List(ObjectField)? '}'
+ObjectField <- (Identifier / String) ':' Expression
+
+# --- First-class functions (arrow) ---
+
+ArrowFunc  <- '(' List(Param)? ')' TypeAnnot? '=>' (BlockStmt / Expression)
+            / Identifier '=>' (BlockStmt / Expression)
+
+# --- Identifier (supports Unicode) ---
+
+Identifier <- < IdentStart IdentCont* >
+IdentStart <- [a-zA-Z_$] / UnicodeLetter
+IdentCont  <- IdentStart / [0-9]
+UnicodeLetter <- [^\x00-\x7f]
+
+# --- Error recovery labels ---
+
+semi <- '' { error_message "missing semicolon" }
+rcur <- '' { error_message "missing '}'" }
+
+# --- Helpers ---
+
+List(X) <- X (',' X)*
+
+%whitespace <- ([ \t\n\r]+ / '//' [^\n]* / '/*' (!'*/' .)* '*/')*
+%word       <- [a-zA-Z0-9_$] / [^\x00-\x7f]

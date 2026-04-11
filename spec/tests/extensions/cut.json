@@ -1,0 +1,59 @@
+[
+  {
+    "name": "basic_backtrack_prevention",
+    "description": "Cut prevents backtracking to other alternatives",
+    "grammar": "S <- A / B\nA <- 'a' \u2191 'b'\nB <- 'a' 'c'",
+    "cases": [
+      { "input": "ab", "match": true },
+      { "input": "ac", "match": false }
+    ]
+  },
+  {
+    "name": "without_cut_allows_backtrack",
+    "description": "Without cut, backtracking to other alternatives works",
+    "grammar": "S <- A / B\nA <- 'a' 'b'\nB <- 'a' 'c'",
+    "cases": [
+      { "input": "ab", "match": true },
+      { "input": "ac", "match": true }
+    ]
+  },
+  {
+    "name": "cut_with_multiple_alternatives",
+    "description": "Cut prevents sibling alternatives but not unrelated branches",
+    "grammar": "S <- A / B / C\nA <- 'x' \u2191 'a'\nB <- 'x' 'b'\nC <- 'y' 'c'",
+    "cases": [
+      { "input": "xa", "match": true },
+      { "input": "xb", "match": false },
+      { "input": "yc", "match": true }
+    ]
+  },
+  {
+    "name": "cut_in_nested_rules",
+    "description": "Cut in a nested rule prevents alternatives at that level",
+    "grammar": "S <- STMT*\nSTMT <- IF / ASSIGN\nIF <- 'if' \u2191 EXPR 'then' EXPR\nASSIGN <- NAME '=' EXPR\nEXPR <- NAME / NUM\nNAME <- < [a-z]+ >\nNUM <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "if x then 1", "match": true },
+      { "input": "x = 1", "match": true },
+      { "input": "if", "match": false }
+    ]
+  },
+  {
+    "name": "cut_does_not_affect_outer_choice",
+    "description": "Cut only affects the immediate choice level, not outer choices",
+    "grammar": "S <- INNER / 'fallback'\nINNER <- A / B\nA <- 'a' \u2191 'x'\nB <- 'a' 'y'",
+    "cases": [
+      { "input": "ax", "match": true },
+      { "input": "fallback", "match": true }
+    ]
+  },
+  {
+    "name": "cut_with_repetition",
+    "description": "Cut within a repeated rule",
+    "grammar": "S <- ITEM+\nITEM <- 'a' \u2191 'b' / 'c' 'd'\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "ab ab", "match": true },
+      { "input": "cd", "match": true },
+      { "input": "ab ac", "match": false }
+    ]
+  }
+]
