@@ -1,0 +1,56 @@
+[
+  {
+    "name": "precedence_climbing_basic",
+    "description": "Precedence climbing with standard arithmetic operators",
+    "grammar": "START <- _ EXPRESSION\nEXPRESSION <- ATOM (OPERATOR ATOM)* {\n  precedence\n    L + -\n    L * /\n}\nATOM <- NUMBER / T('(') EXPRESSION T(')')\nOPERATOR <- T([-+*/])\nNUMBER <- T('-'? [0-9]+)\n~_ <- [ \\t]*\nT(S) <- < S > _",
+    "packrat": true,
+    "cases": [
+      { "input": " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ", "match": true },
+      { "input": "-1+-2--3", "match": true }
+    ]
+  },
+  {
+    "name": "precedence_climbing_with_macro",
+    "description": "Precedence climbing inside a macro rule",
+    "grammar": "EXPRESSION <- INFIX_EXPRESSION(ATOM, OPERATOR)\nINFIX_EXPRESSION(A, O) <- A (O A)* {\n  precedence\n    L + -\n    L * /\n}\nATOM <- NUMBER / '(' EXPRESSION ')'\nOPERATOR <- < [-+*/] >\nNUMBER <- < '-'? [0-9]+ >\n%whitespace <- [ \\t]*",
+    "packrat": true,
+    "cases": [
+      { "input": " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ", "match": true },
+      { "input": "-1+-2--3", "match": true }
+    ]
+  },
+  {
+    "name": "precedence_climbing_error_different_atoms",
+    "description": "Precedence rule requires same atom on both sides",
+    "grammar": "START <- _ EXPRESSION\nEXPRESSION <- ATOM (OPERATOR ATOM1)* {\n  precedence\n    L + -\n    L * /\n}\nATOM <- NUMBER / T('(') EXPRESSION T(')')\nATOM1 <- NUMBER / T('(') EXPRESSION T(')')\nOPERATOR <- T([-+*/])\nNUMBER <- T('-'? [0-9]+)\n~_ <- [ \\t]*\nT(S) <- < S > _",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "precedence_climbing_error_not_list",
+    "description": "Precedence requires A (O A)* pattern, not A O A",
+    "grammar": "START <- _ EXPRESSION\nEXPRESSION <- ATOM OPERATOR ATOM {\n  precedence\n    L + -\n    L * /\n}\nATOM <- NUMBER / T('(') EXPRESSION T(')')\nOPERATOR <- T([-+*/])\nNUMBER <- T('-'? [0-9]+)\n~_ <- [ \\t]*\nT(S) <- < S > _",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "precedence_climbing_error_plus_not_star",
+    "description": "Precedence requires (O A)* not (O A)+",
+    "grammar": "EXPRESSION <- PRECEDENCE_PARSING(ATOM, OPERATOR)\nPRECEDENCE_PARSING(A, O) <- A (O A)+ {\n  precedence\n    L + -\n    L * /\n}\nATOM <- NUMBER / '(' EXPRESSION ')'\nOPERATOR <- < [-+*/] >\nNUMBER <- < '-'? [0-9]+ >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "precedence_with_unary",
+    "description": "Precedence climbing combined with unary minus",
+    "grammar": "EXPR <- INFIX_EXPR(UNARY, OPE)\nINFIX_EXPR(A, O) <- A (O A)* {\n  precedence\n    L + -\n    L * /\n}\nUNARY <- '-'? ATOM\nATOM <- < [0-9]+ > / '(' EXPR ')'\nOPE <- < [-+*/] >\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": "1 + 2 * 3", "match": true },
+      { "input": "-1 + 2", "match": true },
+      { "input": "(1 + 2) * 3", "match": true }
+    ]
+  }
+]

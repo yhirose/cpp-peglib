@@ -1,0 +1,115 @@
+[
+  {
+    "name": "macro_simple",
+    "description": "Basic single-parameter macro",
+    "grammar": "S <- HELLO WORLD\nHELLO <- T('hello')\nWORLD <- T('world')\nT(a) <- a [ \\t]*",
+    "cases": [
+      { "input": "hello \tworld ", "match": true }
+    ]
+  },
+  {
+    "name": "macro_two_parameters",
+    "description": "Macro with two parameters",
+    "grammar": "S <- HELLO_WORLD\nHELLO_WORLD <- T('hello', 'world')\nT(a, b) <- a [ \\t]* b [ \\t]*",
+    "cases": [
+      { "input": "hello \tworld ", "match": true }
+    ]
+  },
+  {
+    "name": "macro_syntax_error",
+    "description": "Space between macro name and parameter list is invalid",
+    "grammar": "S <- T('hello')\nT (a) <- a [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "macro_missing_argument",
+    "description": "Calling macro with wrong number of arguments fails",
+    "grammar": "S <- T ('hello')\nT(a, b) <- a [ \\t]* b",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "macro_reference_syntax_error",
+    "description": "Space before macro arguments in reference is invalid",
+    "grammar": "S <- T ('hello')\nT(a) <- a [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "macro_invalid_reference",
+    "description": "Calling a non-macro rule with arguments fails",
+    "grammar": "S <- T('hello')\nT <- 'world'",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "macro_expression_arguments",
+    "description": "Macro arguments can be expressions with choice",
+    "grammar": "S <- M('hello' / 'Hello', 'world' / 'World')\nM(arg0, arg1) <- arg0 [ \\t]+ arg1",
+    "cases": [
+      { "input": "Hello world", "match": true }
+    ]
+  },
+  {
+    "name": "macro_recursive",
+    "description": "Recursive macro calls",
+    "grammar": "S <- M('abc')\nM(s) <- !s / s ' ' M(s / '123') / s",
+    "cases": [
+      { "input": "", "match": true },
+      { "input": "abc", "match": true },
+      { "input": "abc abc", "match": true },
+      { "input": "abc 123 abc", "match": true }
+    ]
+  },
+  {
+    "name": "macro_exclusive_modifiers",
+    "description": "Macro used for exclusive modifier tracking (each modifier allowed once)",
+    "grammar": "S <- Modifiers(!\"\") _\nModifiers(Appeared) <- (!Appeared) (\n  Token('public') Modifiers(Appeared / 'public') /\n  Token('static') Modifiers(Appeared / 'static') /\n  Token('final') Modifiers(Appeared / 'final') /\n  \"\")\nToken(t) <- t _\n_ <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": "public", "match": true },
+      { "input": "static", "match": true },
+      { "input": "final", "match": true },
+      { "input": "public static final", "match": true },
+      { "input": "public public", "match": false },
+      { "input": "public static public", "match": false }
+    ]
+  },
+  {
+    "name": "macro_passes_arg_to_another_macro",
+    "description": "Macro passing its parameter to another macro",
+    "grammar": "A <- B(C)\nB(D) <- D\nC <- 'c'",
+    "cases": [
+      { "input": "c", "match": true }
+    ]
+  },
+  {
+    "name": "nested_macro_call",
+    "description": "Nested macro calls",
+    "grammar": "A <- B(T)\nB(X) <- C(X)\nC(Y) <- Y\nT <- 'val'",
+    "cases": [
+      { "input": "val", "match": true }
+    ]
+  },
+  {
+    "name": "nested_macro_call2",
+    "description": "Nested macro with multiple parameters",
+    "grammar": "START <- A('TestVal1', 'TestVal2')+\nA(Aarg1, Aarg2) <- B(Aarg1) '#End'\nB(Barg1) <- '#' Barg1",
+    "cases": [
+      { "input": "#TestVal1#End", "match": true }
+    ]
+  },
+  {
+    "name": "macro_with_complex_arguments",
+    "description": "Macro with literal arguments forming key=value pair",
+    "grammar": "S <- PAIR('key', 'value')\nPAIR(K, V) <- K '=' V",
+    "cases": [
+      { "input": "key=value", "match": true },
+      { "input": "key=other", "match": false }
+    ]
+  }
+]

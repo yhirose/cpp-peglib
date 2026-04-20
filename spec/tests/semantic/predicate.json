@@ -1,0 +1,93 @@
+[
+  {
+    "name": "predicate_value_check",
+    "description": "Semantic predicate rejects values not equal to 100",
+    "grammar": "NUMBER <- < [0-9]+ >",
+    "actions": {
+      "NUMBER": { "op": "token_to_number", "type": "long" }
+    },
+    "handlers": {
+      "NUMBER": {
+        "predicate": {
+          "check": { "token_number": { "eq": 100 } },
+          "error": "value error!!"
+        }
+      }
+    },
+    "cases": [
+      { "input": "100", "match": true, "expected_value": 100 },
+      { "input": "200", "match": false, "expected_error": { "message": "value error!!" } }
+    ]
+  },
+  {
+    "name": "predicate_with_backtracking",
+    "description": "Predicate failure triggers backtracking to next alternative",
+    "grammar": "S <- A / B\nA <- NUM\nB <- NUM\nNUM <- < [0-9]+ >",
+    "handlers": {
+      "A": {
+        "predicate": {
+          "check": { "token_number": { "between": [1, 99] } },
+          "error": "must be odd"
+        }
+      }
+    },
+    "cases": [
+      { "input": "3", "match": true },
+      { "input": "4", "match": true }
+    ]
+  },
+  {
+    "name": "predicate_error_message",
+    "description": "Predicate failure produces custom error message",
+    "grammar": "S <- < [0-9]+ >",
+    "handlers": {
+      "S": {
+        "predicate": {
+          "check": { "token_number": { "between": [0, 100] } },
+          "error": "value must be <= 100"
+        }
+      }
+    },
+    "cases": [
+      { "input": "50", "match": true },
+      { "input": "200", "match": false, "expected_error": { "message": "value must be <= 100" } }
+    ]
+  },
+  {
+    "name": "predicate_with_banned_words",
+    "description": "Predicate rejects tokens in a banned word list",
+    "grammar": "S <- TOKEN+\nTOKEN <- < [a-z]+ >\n%whitespace <- [ \\t]*",
+    "vars": {
+      "banned": { "type": "string[]", "init": ["bad", "evil"] }
+    },
+    "handlers": {
+      "TOKEN": {
+        "predicate": {
+          "check": { "token_string": { "not_in": "banned" } },
+          "error": "banned word"
+        }
+      }
+    },
+    "cases": [
+      { "input": "good nice", "match": true },
+      { "input": "good bad", "match": false }
+    ]
+  },
+  {
+    "name": "predicate_in_repetition",
+    "description": "Predicate limits numbers to single digits",
+    "grammar": "S <- NUM+\nNUM <- < [0-9]+ >\n%whitespace <- [ \\t]*",
+    "handlers": {
+      "NUM": {
+        "predicate": {
+          "check": { "token_number": { "between": [0, 9] } },
+          "error": "single digit only"
+        }
+      }
+    },
+    "cases": [
+      { "input": "1 2 3", "match": true },
+      { "input": "1 20 3", "match": false }
+    ]
+  }
+]

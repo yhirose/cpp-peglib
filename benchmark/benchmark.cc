@@ -136,17 +136,6 @@ BenchResult bench(const string &name, int iterations, F func) {
 }
 
 // cpp-peglib benchmarks
-static BenchResult bench_sql_grammar_load(const string &sql_grammar,
-                                          int iterations) {
-  return bench("PEG: grammar load", iterations, [&]() {
-    parser pg(sql_grammar);
-    if (!pg) {
-      cerr << "Error: failed to parse SQL grammar" << endl;
-      exit(1);
-    }
-  });
-}
-
 static BenchResult bench_sql_parse(const string &name,
                                    const string &sql_grammar,
                                    const string &sql_input, int iterations) {
@@ -435,10 +424,6 @@ int main(int argc, char *argv[]) {
 
   // PEG benchmarks
   cout << "--- cpp-peglib (PEG) ---" << endl;
-
-  cout << "[" << test_num++ << "] PEG: grammar load (" << sql_grammar.size()
-       << " bytes)" << endl;
-  results.push_back(bench_sql_grammar_load(sql_grammar, iterations));
 
   cout << "[" << test_num++ << "] PEG: TPC-H Q1 (" << q1_sql.size() << " bytes)"
        << endl;

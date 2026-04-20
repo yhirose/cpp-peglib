@@ -1,0 +1,25 @@
+[
+  {
+    "name": "choice_index",
+    "description": "choice() returns the 0-based index of the matched alternative",
+    "grammar": "S <- 'a' / 'b'",
+    "actions": {
+      "S": { "op": "choice" }
+    },
+    "cases": [
+      { "input": "a", "match": true, "expected_value": 0 },
+      { "input": "b", "match": true, "expected_value": 1 }
+    ]
+  },
+  {
+    "name": "choice_with_whitespace",
+    "description": "choice() works correctly with whitespace skipping",
+    "grammar": "type <- 'string' / 'int' / 'double'\n%whitespace <- ' '*",
+    "actions": {
+      "type": { "op": "choice" }
+    },
+    "cases": [
+      { "input": "int", "match": true, "expected_value": 1 }
+    ]
+  }
+]

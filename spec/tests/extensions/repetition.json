@@ -1,0 +1,55 @@
+[
+  {
+    "name": "repetition_exact",
+    "description": "Exact repetition count {N}",
+    "grammar": "START <- '(' DIGIT{3} ') ' DIGIT{3} '-' DIGIT{4}\nDIGIT <- [0-9]",
+    "cases": [
+      { "input": "(123) 456-7890", "match": true },
+      { "input": "(12a) 456-7890", "match": false },
+      { "input": "(123) 45-7890", "match": false }
+    ]
+  },
+  {
+    "name": "repetition_range",
+    "description": "Repetition with min and max {2,4}",
+    "grammar": "START <- DIGIT{2,4}\nDIGIT <- [0-9]",
+    "cases": [
+      { "input": "1", "match": false },
+      { "input": "12", "match": true },
+      { "input": "123", "match": true },
+      { "input": "1234", "match": true },
+      { "input": "12345", "match": false }
+    ]
+  },
+  {
+    "name": "repetition_inverted_range",
+    "description": "Inverted range {2,1} behaves as exact {2}",
+    "grammar": "START <- DIGIT{2,1}\nDIGIT <- [0-9]",
+    "cases": [
+      { "input": "1", "match": false },
+      { "input": "12", "match": true },
+      { "input": "123", "match": false }
+    ]
+  },
+  {
+    "name": "repetition_min_only",
+    "description": "Repetition with minimum only {2,}",
+    "grammar": "START <- DIGIT{2,}\nDIGIT <- [0-9]",
+    "cases": [
+      { "input": "1", "match": false },
+      { "input": "12", "match": true },
+      { "input": "12345", "match": true }
+    ]
+  },
+  {
+    "name": "repetition_max_only",
+    "description": "Repetition with maximum only {,2}",
+    "grammar": "START <- DIGIT{,2}\nDIGIT <- [0-9]",
+    "cases": [
+      { "input": "", "match": true },
+      { "input": "1", "match": true },
+      { "input": "12", "match": true },
+      { "input": "123", "match": false }
+    ]
+  }
+]

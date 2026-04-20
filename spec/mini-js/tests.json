@@ -1,0 +1,159 @@
+[
+  {
+    "name": "empty_program",
+    "input": "",
+    "expected_result": null
+  },
+  {
+    "name": "let_number",
+    "input": "let x = 42;",
+    "expected_result": null,
+    "expected_vars": { "x": 42 }
+  },
+  {
+    "name": "let_string",
+    "input": "let s = 'hello';",
+    "expected_result": null,
+    "expected_vars": { "s": "hello" }
+  },
+  {
+    "name": "arithmetic_precedence",
+    "input": "let x = 2 + 3 * 4;",
+    "expected_vars": { "x": 14 }
+  },
+  {
+    "name": "arithmetic_left_assoc",
+    "input": "let x = 10 - 3 - 2;",
+    "expected_vars": { "x": 5 }
+  },
+  {
+    "name": "parentheses",
+    "input": "let x = (2 + 3) * 4;",
+    "expected_vars": { "x": 20 }
+  },
+  {
+    "name": "comparison_and_ternary",
+    "input": "let x = 1 < 2 ? 10 : 20;",
+    "expected_vars": { "x": 10 }
+  },
+  {
+    "name": "logical_operators",
+    "input": "let x = true && false || true;",
+    "expected_vars": { "x": true }
+  },
+  {
+    "name": "unary_operators",
+    "input": "let x = -3; let y = !false;",
+    "expected_vars": { "x": -3, "y": true }
+  },
+  {
+    "name": "string_concat",
+    "description": "Strings should be values; no concat operator needed for parse test",
+    "input": "let a = 'hello'; let b = 'world';",
+    "expected_vars": { "a": "hello", "b": "world" }
+  },
+  {
+    "name": "template_literal_simple",
+    "input": "let name = 'world'; let s = `hello ${name}`;",
+    "expected_vars": { "s": "hello world" }
+  },
+  {
+    "name": "template_literal_expression",
+    "input": "let x = `result: ${1 + 2}`;",
+    "expected_vars": { "x": "result: 3" }
+  },
+  {
+    "name": "unicode_identifier",
+    "input": "let 名前 = 42;",
+    "expected_vars": { "名前": 42 }
+  },
+  {
+    "name": "unicode_string",
+    "input": "let s = 'こんにちは';",
+    "expected_vars": { "s": "こんにちは" }
+  },
+  {
+    "name": "function_decl_and_call",
+    "input": "function add(a, b) { return a + b; } let x = add(3, 4);",
+    "expected_vars": { "x": 7 }
+  },
+  {
+    "name": "recursive_function",
+    "input": "function fact(n) { if (n <= 1) { return 1; } return n * fact(n - 1); } let x = fact(5);",
+    "expected_vars": { "x": 120 }
+  },
+  {
+    "name": "if_else",
+    "input": "let x = 0; if (true) { x = 1; } else { x = 2; }",
+    "expected_vars": { "x": 1 }
+  },
+  {
+    "name": "while_loop",
+    "input": "let i = 0; let sum = 0; while (i < 5) { sum = sum + i; i = i + 1; }",
+    "expected_vars": { "sum": 10, "i": 5 }
+  },
+  {
+    "name": "array_literal",
+    "input": "let a = [1, 2, 3];",
+    "expected_vars": { "a": [1, 2, 3] }
+  },
+  {
+    "name": "array_index",
+    "input": "let a = [10, 20, 30]; let x = a[1];",
+    "expected_vars": { "x": 20 }
+  },
+  {
+    "name": "member_access",
+    "description": "Dot access parses correctly; evaluation of objects is stretch goal",
+    "input": "let x = console.log;",
+    "parse_only": true
+  },
+  {
+    "name": "nested_function_calls",
+    "input": "function f(x) { return x * 2; } function g(x) { return f(x) + 1; } let r = g(3);",
+    "expected_vars": { "r": 7 }
+  },
+  {
+    "name": "single_line_comment",
+    "input": "// this is a comment\nlet x = 1;",
+    "expected_vars": { "x": 1 }
+  },
+  {
+    "name": "multi_line_comment",
+    "input": "/* comment\n   spanning lines */\nlet x = 1;",
+    "expected_vars": { "x": 1 }
+  },
+  {
+    "name": "error_recovery_missing_semi",
+    "input": "let x = 1\nlet y = 2;",
+    "parse_fails": true,
+    "expected_error": "missing semicolon"
+  },
+  {
+    "name": "error_recovery_missing_brace",
+    "input": "if (true) { let x = 1;",
+    "parse_fails": true,
+    "expected_error": "missing '}'"
+  },
+  {
+    "name": "keyword_boundary",
+    "description": "%word prevents 'let' from matching prefix of 'letter'",
+    "input": "let letter = 1;",
+    "expected_vars": { "letter": 1 }
+  },
+  {
+    "name": "modulo_operator",
+    "input": "let x = 10 % 3;",
+    "expected_vars": { "x": 1 }
+  },
+  {
+    "name": "deeply_nested_expression",
+    "input": "let x = ((((1 + 2) * 3) - 4) / 5);",
+    "expected_vars": { "x": 1 }
+  },
+  {
+    "name": "empty_function",
+    "input": "function noop() {} noop();",
+    "parse_only": true
+  }
+]

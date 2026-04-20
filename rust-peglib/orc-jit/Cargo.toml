@@ -1,0 +1,8 @@
+[package]
+name = "orc-jit"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal safe Rust wrapper around LLVM ORC JIT for embedding JIT compilation in custom compilers"
+license = "MIT"
+
+[build-dependencies]

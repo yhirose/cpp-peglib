@@ -1,0 +1,86 @@
+[
+  {
+    "name": "whitespace_basic",
+    "description": "Automatic whitespace skipping between tokens",
+    "grammar": "ROOT <- ITEM (',' ITEM)*\nITEM <- WORD / PHRASE\nWORD <- < [a-zA-Z0-9_]+ >\nPHRASE <- < '\"' (!\"\\\"\" .)* '\"' >\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": "  one, \t \"two, three\",   four  ", "match": true }
+    ]
+  },
+  {
+    "name": "whitespace_with_subrules",
+    "description": "Whitespace rule with sub-rules",
+    "grammar": "ROOT <- ITEM (',' ITEM)*\nITEM <- '[' < [a-zA-Z0-9_]+ > ']'\n%whitespace <- (SPACE / TAB)*\nSPACE <- ' '\nTAB <- '\\t'",
+    "cases": [
+      { "input": "[one], \t[two] ,[three] ", "match": true }
+    ]
+  },
+  {
+    "name": "whitespace_inside_token_boundary",
+    "description": "Whitespace is NOT skipped inside token boundary operator",
+    "grammar": "ROOT <- TOP\nTOP <- < 'a' 'b' 'c' >\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": false }
+    ]
+  },
+  {
+    "name": "whitespace_outside_token_boundary",
+    "description": "Whitespace IS skipped outside token boundary",
+    "grammar": "ROOT <- TOP\nTOP <- 'a' 'b' 'c'\n%whitespace <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": " a  b  c ", "match": true }
+    ]
+  },
+  {
+    "name": "whitespace_in_string_literal",
+    "description": "Whitespace inside string quotes is preserved",
+    "grammar": "StrQuot <- < '\"' < (StrEscape / StrChars)* > '\"' >\nStrEscape <- '\\\\' any\nStrChars <- (!\"\\\"\" !'\\\\' any)+\nany <- .\n%whitespace <- [ \\t]*",
+    "cases": [
+      { "input": " \"  aaa \\\" bbb  \" ", "match": true }
+    ]
+  },
+  {
+    "name": "word_expression",
+    "description": "%word ensures word boundaries between keyword-like tokens",
+    "grammar": "ROOT <- 'hello' ','? 'world'\n%whitespace <- [ \\t\\r\\n]*\n%word <- [a-z]+",
+    "cases": [
+      { "input": "helloworld", "match": false },
+      { "input": "hello world", "match": true },
+      { "input": "hello,world", "match": true },
+      { "input": "hello, world", "match": true },
+      { "input": "hello , world", "match": true }
+    ]
+  },
+  {
+    "name": "word_expression_prioritized_choice",
+    "description": "%word with keyword checking via prioritized choice",
+    "grammar": "Identifier \u2190 < !Keyword [a-z][a-z]* >\nKeyword \u2190 'def' / 'to'\n%whitespace \u2190 [ \\t\\r\\n]*\n%word \u2190 [a-z]+",
+    "cases": [
+      { "input": "toa", "match": true }
+    ]
+  },
+  {
+    "name": "word_expression_dictionary",
+    "description": "%word with keyword checking via dictionary",
+    "grammar": "Identifier \u2190 < !Keyword [a-z][a-z]* >\nKeyword \u2190 'def' | 'to'\n%whitespace \u2190 [ \\t\\r\\n]*\n%word \u2190 [a-z]+",
+    "cases": [
+      { "input": "toa", "match": true }
+    ]
+  },
+  {
+    "name": "word_expression_case_ignore_dictionary",
+    "description": "%word with case-insensitive dictionary keywords",
+    "grammar": "Identifier \u2190 < !Keyword [a-z][a-z]* >\nKeyword \u2190 'def'i | 'to'i\n%whitespace \u2190 [ \\t\\r\\n]*\n%word \u2190 [a-z]+",
+    "cases": [
+      { "input": "toa", "match": true }
+    ]
+  },
+  {
+    "name": "word_expression_mixed_case_syntax_error",
+    "description": "Dictionary with mixed case-sensitivity is a syntax error",
+    "grammar": "Identifier \u2190 < !Keyword [a-z][a-z]* >\nKeyword \u2190 'def' | 'to'i\n%whitespace \u2190 [ \\t\\r\\n]*\n%word \u2190 [a-z]+",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  }
+]

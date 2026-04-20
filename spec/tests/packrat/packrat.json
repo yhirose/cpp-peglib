@@ -1,0 +1,65 @@
+[
+  {
+    "name": "packrat_with_whitespace",
+    "description": "Basic packrat parsing with whitespace rule",
+    "grammar": "ROOT <- 'a'\n%whitespace <- SPACE*\nSPACE <- ' '",
+    "packrat": true,
+    "cases": [
+      { "input": "a", "match": true }
+    ]
+  },
+  {
+    "name": "packrat_with_macro",
+    "description": "Packrat parsing with macro (parameterized) rules",
+    "grammar": "EXPRESSION <- _ LIST(TERM, TERM_OPERATOR)\nTERM <- LIST(FACTOR, FACTOR_OPERATOR)\nFACTOR <- NUMBER / T('(') EXPRESSION T(')')\nTERM_OPERATOR <- T([-+])\nFACTOR_OPERATOR <- T([*/])\nNUMBER <- T([0-9]+)\n~_ <- [ \\t]*\nLIST(I, D) <- I (D I)*\nT(S) <- < S > _",
+    "packrat": true,
+    "cases": [
+      { "input": " 1 + 2 * 3 * (4 - 5 + 6) / 7 - 8 ", "match": true }
+    ]
+  },
+  {
+    "name": "packrat_with_precedence",
+    "description": "Packrat parsing with precedence climbing",
+    "grammar": "Expression <- Atom (Operator Atom)* { precedence L + - L * / }\nAtom <- _? Number _?\nNumber <- [0-9]+\nOperator <- '+' / '-' / '*' / '/'\n_ <- ' '+",
+    "packrat": true,
+    "cases": [
+      { "input": " 1 + 2 * 3 ", "match": true }
+    ]
+  },
+  {
+    "name": "packrat_correctness",
+    "description": "Packrat produces same results as non-packrat parsing",
+    "grammar": "S <- A / B\nA <- X 'a'\nB <- X 'b'\nX <- 'x' 'y'?",
+    "packrat": true,
+    "cases": [
+      { "input": "xa", "match": true },
+      { "input": "xb", "match": true },
+      { "input": "xya", "match": true },
+      { "input": "xyb", "match": true },
+      { "input": "xc", "match": false },
+      { "input": "", "match": false }
+    ]
+  },
+  {
+    "name": "packrat_with_semantic_actions",
+    "description": "Packrat produces same parse results with semantic actions",
+    "grammar": "EXPR <- TERM (('+' / '-') TERM)*\nTERM <- < [0-9]+ >",
+    "packrat": true,
+    "cases": [
+      { "input": "1+2-3", "match": true },
+      { "input": "1+2", "match": true },
+      { "input": "5", "match": true },
+      { "input": "1-2+3-4", "match": true }
+    ]
+  },
+  {
+    "name": "packrat_cache_with_choice_backtracking",
+    "description": "Packrat caches results and reuses them across choice alternatives",
+    "grammar": "S <- A B / A C\nA <- 'hello'\nB <- 'world'\nC <- 'there'\n%whitespace <- [ ]*",
+    "packrat": true,
+    "cases": [
+      { "input": "hello there", "match": true },
+      { "input": "hello world", "match": true }
+    ]
+  }
+]

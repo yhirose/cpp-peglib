@@ -1,0 +1,379 @@
+[
+  {
+    "name": "peg_grammar",
+    "description": "PEG meta-grammar: Grammar rule parses valid grammar text",
+    "peg_meta_test": true,
+    "rule": "Grammar",
+    "cases": [
+      { "input": " Definition <- a / ( b c ) / d \n rule2 <- [a-zA-Z][a-z0-9-]+ ", "match": true }
+    ]
+  },
+  {
+    "name": "peg_definition",
+    "description": "PEG meta-grammar: Definition rule",
+    "peg_meta_test": true,
+    "rule": "Definition",
+    "cases": [
+      { "input": "Definition <- a / (b c) / d ", "match": true },
+      { "input": "Definition <- a / b c / d ", "match": true },
+      { "input": "Definitiond \u2190 a ", "match": true },
+      { "input": "Definition ", "match": false },
+      { "input": " ", "match": false },
+      { "input": "", "match": false },
+      { "input": "Definition = a / (b c) / d ", "match": false },
+      { "input": "Macro(param) <- a ", "match": true },
+      { "input": "Macro (param) <- a ", "match": false }
+    ]
+  },
+  {
+    "name": "peg_expression",
+    "description": "PEG meta-grammar: Expression rule",
+    "peg_meta_test": true,
+    "rule": "Expression",
+    "cases": [
+      { "input": "a / (b c) / d ", "match": true },
+      { "input": "a / b c / d ", "match": true },
+      { "input": "a b ", "match": true },
+      { "input": "", "match": true },
+      { "input": " ", "match": false },
+      { "input": " a b ", "match": false },
+      { "input": "a//b ", "match": true },
+      { "input": "a // b ", "match": true },
+      { "input": "a / / b ", "match": true }
+    ]
+  },
+  {
+    "name": "peg_sequence",
+    "description": "PEG meta-grammar: Sequence rule",
+    "peg_meta_test": true,
+    "rule": "Sequence",
+    "cases": [
+      { "input": "a b c d ", "match": true },
+      { "input": "", "match": true },
+      { "input": "!", "match": false },
+      { "input": "<-", "match": false },
+      { "input": " a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_prefix",
+    "description": "PEG meta-grammar: Prefix rule",
+    "peg_meta_test": true,
+    "rule": "Prefix",
+    "cases": [
+      { "input": "&[a]", "match": true },
+      { "input": "![']", "match": true },
+      { "input": "-[']", "match": false },
+      { "input": "", "match": false },
+      { "input": " a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_suffix",
+    "description": "PEG meta-grammar: Suffix rule",
+    "peg_meta_test": true,
+    "rule": "Suffix",
+    "cases": [
+      { "input": "aaa ", "match": true },
+      { "input": "aaa? ", "match": true },
+      { "input": "aaa* ", "match": true },
+      { "input": "aaa+ ", "match": true },
+      { "input": "aaa{} ", "match": false },
+      { "input": "aaa{10} ", "match": true },
+      { "input": "aaa{10,} ", "match": true },
+      { "input": "aaa{10,100} ", "match": true },
+      { "input": "aaa{,100} ", "match": true },
+      { "input": ". + ", "match": true },
+      { "input": ". {10} ", "match": true },
+      { "input": "?", "match": false },
+      { "input": "+", "match": false },
+      { "input": "{10}", "match": false },
+      { "input": "", "match": false },
+      { "input": " a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_primary",
+    "description": "PEG meta-grammar: Primary rule",
+    "peg_meta_test": true,
+    "rule": "Primary",
+    "cases": [
+      { "input": "_Identifier0_ ", "match": true },
+      { "input": "_Identifier0_<-", "match": false },
+      { "input": "( _Identifier0_ _Identifier1_ )", "match": true },
+      { "input": "'Literal String'", "match": true },
+      { "input": "\"Literal String\"", "match": true },
+      { "input": "[a-zA-Z]", "match": true },
+      { "input": ".", "match": true },
+      { "input": "", "match": false },
+      { "input": " ", "match": false },
+      { "input": " a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_identifier",
+    "description": "PEG meta-grammar: Identifier rule",
+    "peg_meta_test": true,
+    "rule": "Identifier",
+    "cases": [
+      { "input": "_Identifier0_ ", "match": true },
+      { "input": "0Identifier_ ", "match": false },
+      { "input": "Iden|t ", "match": false },
+      { "input": " ", "match": false },
+      { "input": " a", "match": false },
+      { "input": "", "match": false }
+    ]
+  },
+  {
+    "name": "peg_ident_start",
+    "description": "PEG meta-grammar: IdentStart rule",
+    "peg_meta_test": true,
+    "rule": "IdentStart",
+    "cases": [
+      { "input": "_", "match": true },
+      { "input": "a", "match": true },
+      { "input": "Z", "match": true },
+      { "input": "", "match": false },
+      { "input": " ", "match": false },
+      { "input": "0", "match": false }
+    ]
+  },
+  {
+    "name": "peg_ident_rest",
+    "description": "PEG meta-grammar: IdentRest rule",
+    "peg_meta_test": true,
+    "rule": "IdentRest",
+    "cases": [
+      { "input": "_", "match": true },
+      { "input": "a", "match": true },
+      { "input": "Z", "match": true },
+      { "input": "", "match": false },
+      { "input": " ", "match": false },
+      { "input": "0", "match": true }
+    ]
+  },
+  {
+    "name": "peg_literal",
+    "description": "PEG meta-grammar: Literal rule",
+    "peg_meta_test": true,
+    "rule": "Literal",
+    "cases": [
+      { "input": "'abc' ", "match": true },
+      { "input": "'a\\nb\\tc' ", "match": true },
+      { "input": "'a\\277\\tc' ", "match": true },
+      { "input": "'a\\77\\tc' ", "match": true },
+      { "input": "'a\\80\\tc' ", "match": false },
+      { "input": "'\\n' ", "match": true },
+      { "input": "'a\\'b' ", "match": true },
+      { "input": "'a'b' ", "match": false },
+      { "input": "'a\"'b' ", "match": false },
+      { "input": "\"'\\\"abc\\\"'\" ", "match": true },
+      { "input": "\"'\"abc\"'\" ", "match": false },
+      { "input": "abc", "match": false },
+      { "input": "", "match": false },
+      { "input": "\\", "match": false },
+      { "input": "'\u65e5\u672c\u8a9e'", "match": true },
+      { "input": "\"\u65e5\u672c\u8a9e\"", "match": true },
+      { "input": "\u65e5\u672c\u8a9e", "match": false }
+    ]
+  },
+  {
+    "name": "peg_class",
+    "description": "PEG meta-grammar: Class rule (character class)",
+    "peg_meta_test": true,
+    "rule": "Class",
+    "cases": [
+      { "input": "[]", "match": false },
+      { "input": "[a]", "match": true },
+      { "input": "[a-z]", "match": true },
+      { "input": "[az]", "match": true },
+      { "input": "[a-zA-Z-]", "match": true },
+      { "input": "[a-zA-Z-0-9]", "match": true },
+      { "input": "[a-]", "match": true },
+      { "input": "[-a]", "match": true },
+      { "input": "[", "match": false },
+      { "input": "[a", "match": false },
+      { "input": "]", "match": false },
+      { "input": "a]", "match": false },
+      { "input": "[\u3042-\u3093]", "match": true },
+      { "input": "\u3042-\u3093", "match": false },
+      { "input": "[-+]", "match": true },
+      { "input": "[+-]", "match": true },
+      { "input": "[\\^]", "match": true },
+      { "input": "[-]", "match": true },
+      { "input": "[\\-]", "match": true }
+    ]
+  },
+  {
+    "name": "peg_negated_class",
+    "description": "PEG meta-grammar: NegatedClass rule",
+    "peg_meta_test": true,
+    "rule": "NegatedClass",
+    "cases": [
+      { "input": "[^]", "match": false },
+      { "input": "[^a]", "match": true },
+      { "input": "[^a-z]", "match": true },
+      { "input": "[^az]", "match": true },
+      { "input": "[^a-zA-Z-]", "match": true },
+      { "input": "[^a-zA-Z-0-9]", "match": true },
+      { "input": "[^a-]", "match": true },
+      { "input": "[^-a]", "match": true },
+      { "input": "[^", "match": false },
+      { "input": "[^a", "match": false },
+      { "input": "^]", "match": false },
+      { "input": "^a]", "match": false },
+      { "input": "[^\u3042-\u3093]", "match": true },
+      { "input": "^\u3042-\u3093", "match": false },
+      { "input": "[^-+]", "match": true },
+      { "input": "[^+-]", "match": true },
+      { "input": "[^^]", "match": true }
+    ]
+  },
+  {
+    "name": "peg_range",
+    "description": "PEG meta-grammar: Range rule",
+    "peg_meta_test": true,
+    "rule": "Range",
+    "cases": [
+      { "input": "a", "match": true },
+      { "input": "a-z", "match": true },
+      { "input": "az", "match": false },
+      { "input": "", "match": false },
+      { "input": "a-", "match": false },
+      { "input": "-a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_char",
+    "description": "PEG meta-grammar: Char rule (escape sequences, hex, unicode)",
+    "peg_meta_test": true,
+    "rule": "Char",
+    "cases": [
+      { "input": "\\f", "match": true },
+      { "input": "\\n", "match": true },
+      { "input": "\\r", "match": true },
+      { "input": "\\t", "match": true },
+      { "input": "\\v", "match": true },
+      { "input": "\\'", "match": true },
+      { "input": "\\\"", "match": true },
+      { "input": "\\[", "match": true },
+      { "input": "\\]", "match": true },
+      { "input": "\\\\", "match": true },
+      { "input": "\\000", "match": true },
+      { "input": "\\377", "match": true },
+      { "input": "\\477", "match": false },
+      { "input": "\\087", "match": false },
+      { "input": "\\079", "match": false },
+      { "input": "\\00", "match": true },
+      { "input": "\\77", "match": true },
+      { "input": "\\80", "match": false },
+      { "input": "\\08", "match": false },
+      { "input": "\\0", "match": true },
+      { "input": "\\7", "match": true },
+      { "input": "\\8", "match": false },
+      { "input": "\\x0", "match": true },
+      { "input": "\\x00", "match": true },
+      { "input": "\\x000", "match": false },
+      { "input": "\\xa", "match": true },
+      { "input": "\\xab", "match": true },
+      { "input": "\\xabc", "match": false },
+      { "input": "\\xA", "match": true },
+      { "input": "\\xAb", "match": true },
+      { "input": "\\xAbc", "match": false },
+      { "input": "\\xg", "match": false },
+      { "input": "\\xga", "match": false },
+      { "input": "\\u0", "match": false },
+      { "input": "\\u00", "match": false },
+      { "input": "\\u0000", "match": true },
+      { "input": "\\u000000", "match": true },
+      { "input": "\\u0000000", "match": false },
+      { "input": "\\uFFFF", "match": true },
+      { "input": "\\u10000", "match": true },
+      { "input": "\\u10FFFF", "match": true },
+      { "input": "\\u110000", "match": false },
+      { "input": "\\uFFFFFF", "match": false },
+      { "input": "a", "match": true },
+      { "input": ".", "match": true },
+      { "input": "0", "match": true },
+      { "input": "\\", "match": false },
+      { "input": " ", "match": true },
+      { "input": "  ", "match": false },
+      { "input": "", "match": false },
+      { "input": "\u3042", "match": true }
+    ]
+  },
+  {
+    "name": "peg_operators",
+    "description": "PEG meta-grammar: Operator tokens",
+    "peg_meta_test": true,
+    "rule": "LEFTARROW",
+    "cases": [
+      { "input": "<-", "match": true }
+    ]
+  },
+  {
+    "name": "peg_operators_misc",
+    "description": "PEG meta-grammar: Various operator tokens",
+    "peg_meta_test": true,
+    "cases_by_rule": {
+      "SLASH": [{ "input": "/ ", "match": true }],
+      "AND": [{ "input": "& ", "match": true }],
+      "NOT": [{ "input": "! ", "match": true }],
+      "QUESTION": [{ "input": "? ", "match": true }],
+      "STAR": [{ "input": "* ", "match": true }],
+      "PLUS": [{ "input": "+ ", "match": true }],
+      "OPEN": [{ "input": "( ", "match": true }],
+      "CLOSE": [{ "input": ") ", "match": true }],
+      "DOT": [{ "input": ". ", "match": true }]
+    }
+  },
+  {
+    "name": "peg_comment",
+    "description": "PEG meta-grammar: Comment rule",
+    "peg_meta_test": true,
+    "rule": "Comment",
+    "cases": [
+      { "input": "# Comment.\n", "match": true },
+      { "input": "# Comment.", "match": true },
+      { "input": " ", "match": false },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_space",
+    "description": "PEG meta-grammar: Space rule",
+    "peg_meta_test": true,
+    "rule": "Space",
+    "cases": [
+      { "input": " ", "match": true },
+      { "input": "\t", "match": true },
+      { "input": "\n", "match": true },
+      { "input": "", "match": false },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_end_of_line",
+    "description": "PEG meta-grammar: EndOfLine rule",
+    "peg_meta_test": true,
+    "rule": "EndOfLine",
+    "cases": [
+      { "input": "\r\n", "match": true },
+      { "input": "\n", "match": true },
+      { "input": "\r", "match": true },
+      { "input": " ", "match": false },
+      { "input": "", "match": false },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "peg_end_of_file",
+    "description": "PEG meta-grammar: EndOfFile rule",
+    "peg_meta_test": true,
+    "rule": "EndOfFile",
+    "cases": [
+      { "input": "", "match": true },
+      { "input": " ", "match": false }
+    ]
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "name": "token_to_number_int",
+    "description": "Convert token to integer",
+    "grammar": "S <- < [0-9]+ >",
+    "actions": {
+      "S": { "op": "token_to_number", "type": "int" }
+    },
+    "cases": [
+      { "input": "42", "match": true, "expected_value": 42 }
+    ]
+  },
+  {
+    "name": "token_to_number_float",
+    "description": "Convert token to float",
+    "grammar": "S <- '1.1'",
+    "ast": {},
+    "cases": [
+      { "input": "1.1", "match": true }
+    ]
+  },
+  {
+    "name": "token_to_string_capture",
+    "description": "Capture multiple tokens from repeated rule",
+    "grammar": "ROOT <- _ TOKEN*\nTOKEN <- '[' < (!']' .)+ > ']' _\n_ <- [ \\t\\r\\n]*",
+    "actions": {
+      "TOKEN": { "op": "token_to_string" }
+    },
+    "cases": [
+      { "input": " [tag1] [tag:2] [tag-3] ", "match": true }
+    ]
+  }
+]

@@ -1,0 +1,498 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yhirose/cpp-peglib/spec/schema/test-case.schema.json",
+  "title": "PEG Parser Test Case",
+  "description": "Language-independent test case for PEG parser implementations",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/TestGroup"
+  },
+  "$defs": {
+    "TestGroup": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name identifying this test group"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this test group verifies"
+        },
+        "grammar": {
+          "type": "string",
+          "description": "PEG grammar text, as it would appear in a .peg file"
+        },
+        "peg_meta_test": {
+          "type": "boolean",
+          "description": "If true, tests the PEG meta-grammar itself (the grammar that parses .peg files). Uses 'rule' to specify which meta-grammar rule to test.",
+          "default": false
+        },
+        "rule": {
+          "type": "string",
+          "description": "For peg_meta_test: the meta-grammar rule to test against"
+        },
+        "cases_by_rule": {
+          "type": "object",
+          "description": "For peg_meta_test: map from rule name to array of test cases (for testing multiple meta-grammar rules in one group)",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/TestCase" }
+          }
+        },
+        "start_rule": {
+          "type": "string",
+          "description": "Override the start rule (default: first rule in grammar)"
+        },
+        "packrat": {
+          "type": "boolean",
+          "description": "Enable packrat parsing (default: false)",
+          "default": false
+        },
+        "left_recursion": {
+          "type": "boolean",
+          "description": "Enable left recursion support (default: true)",
+          "default": true
+        },
+        "grammar_compiles": {
+          "type": "boolean",
+          "description": "If true, only verify that the grammar compiles. Do not attempt to parse any inputs. Useful for left-recursive edge cases that would hang if parsed.",
+          "default": false
+        },
+        "actions": {
+          "type": "object",
+          "description": "Semantic actions keyed by rule name",
+          "additionalProperties": {
+            "$ref": "#/$defs/Action"
+          }
+        },
+        "vars": {
+          "type": "object",
+          "description": "Mutable state variables accessible from handlers",
+          "additionalProperties": {
+            "$ref": "#/$defs/VarDecl"
+          }
+        },
+        "handlers": {
+          "type": "object",
+          "description": "Enter/leave/predicate handlers keyed by rule name",
+          "additionalProperties": {
+            "$ref": "#/$defs/Handler"
+          }
+        },
+        "trace": {
+          "$ref": "#/$defs/TraceConfig"
+        },
+        "ast": {
+          "$ref": "#/$defs/AstConfig"
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestCase"
+          }
+        }
+      }
+    },
+
+    "TestCase": {
+      "type": "object",
+      "required": ["input"],
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Input text to parse"
+        },
+        "match": {
+          "type": "boolean",
+          "description": "Whether parsing should succeed"
+        },
+        "grammar_error": {
+          "type": "boolean",
+          "description": "If true, the grammar itself should fail to compile (e.g., infinite loop, invalid left recursion when disabled)"
+        },
+        "match_length": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Expected number of characters consumed"
+        },
+        "expected_value": {
+          "description": "Expected semantic value from the start rule"
+        },
+        "expected_ast": {
+          "type": "string",
+          "description": "Expected AST text dump (ast_to_s format)"
+        },
+        "expected_trace": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Expected enter/leave event sequence"
+        },
+        "expected_trace_prefix": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Expected prefix of the enter/leave event sequence (for failed parses where full trace is unspecified)"
+        },
+        "expected_error": {
+          "$ref": "#/$defs/ExpectedError"
+        },
+        "expected_errors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ExpectedError" },
+          "description": "Expected errors (for recovery mode with multiple errors)"
+        },
+        "expected_state": {
+          "type": "object",
+          "description": "Expected variable values after parsing",
+          "additionalProperties": {}
+        },
+        "context_data": {
+          "description": "Initial context data passed to the parser"
+        }
+      }
+    },
+
+    "ExpectedError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Expected error line (1-based)"
+        },
+        "col": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Expected error column (1-based)"
+        },
+        "message": {
+          "type": "string",
+          "description": "Expected error message (substring match)"
+        }
+      }
+    },
+
+    "Action": {
+      "oneOf": [
+        { "$ref": "#/$defs/TokenToNumberAction" },
+        { "$ref": "#/$defs/TokenToStringAction" },
+        { "$ref": "#/$defs/ChoiceAction" },
+        { "$ref": "#/$defs/SizeAction" },
+        { "$ref": "#/$defs/JoinTokensAction" },
+        { "$ref": "#/$defs/ReduceAction" },
+        { "$ref": "#/$defs/ChoiceOpAction" },
+        { "$ref": "#/$defs/PassthroughAction" }
+      ]
+    },
+
+    "TokenToNumberAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "token_to_number" },
+        "type": {
+          "type": "string",
+          "enum": ["int", "long", "float", "double"],
+          "default": "int",
+          "description": "Numeric type for conversion"
+        }
+      }
+    },
+
+    "TokenToStringAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "token_to_string" }
+      }
+    },
+
+    "ChoiceAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "choice" }
+      }
+    },
+
+    "SizeAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "size" }
+      }
+    },
+
+    "JoinTokensAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "join_tokens" },
+        "separator": {
+          "type": "string",
+          "default": "",
+          "description": "Separator between tokens"
+        }
+      }
+    },
+
+    "ReduceAction": {
+      "type": "object",
+      "required": ["op", "initial", "step"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "reduce" },
+        "operator_rule": {
+          "type": "string",
+          "description": "Name of the operator rule. The harness auto-binds this rule to token_to_string so the operator child's semantic value is a std::string matching the keys in step.operators."
+        },
+        "initial": {
+          "type": "object",
+          "required": ["child"],
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Index of the initial value in semantic values"
+            }
+          }
+        },
+        "step": {
+          "type": "object",
+          "required": ["operator_child", "value_child", "operators"],
+          "additionalProperties": false,
+          "properties": {
+            "operator_child": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Offset of operator in each step (relative to step start)"
+            },
+            "value_child": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Offset of value in each step (relative to step start)"
+            },
+            "operators": {
+              "type": "object",
+              "description": "Map from operator string to operation name",
+              "additionalProperties": {
+                "type": "string",
+                "enum": ["add", "subtract", "multiply", "divide"]
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "ChoiceOpAction": {
+      "type": "object",
+      "required": ["op", "cases"],
+      "additionalProperties": false,
+      "description": "Dispatch on vs.choice() to apply a binary op or passthrough. Used for left-recursive grammars like 'expr <- expr op term / term'.",
+      "properties": {
+        "op": { "const": "choice_op" },
+        "cases": {
+          "type": "object",
+          "description": "Map from choice index (as string) or 'default' to a case action",
+          "additionalProperties": {
+            "$ref": "#/$defs/ChoiceOpCase"
+          }
+        }
+      }
+    },
+
+    "ChoiceOpCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binary": {
+          "type": "string",
+          "enum": ["add", "subtract", "multiply", "divide"],
+          "description": "Binary operation to apply to left and right children"
+        },
+        "left": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index of left operand in semantic values"
+        },
+        "right": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index of right operand in semantic values"
+        },
+        "passthrough": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index of child to pass through unchanged"
+        }
+      }
+    },
+
+    "PassthroughAction": {
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "passthrough" },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Index of child value to return"
+        }
+      }
+    },
+
+    "VarDecl": {
+      "type": "object",
+      "required": ["type", "init"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["bool", "int", "string[]"],
+          "description": "Variable type"
+        },
+        "init": {
+          "description": "Initial value"
+        }
+      }
+    },
+
+    "Handler": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enter": {
+          "$ref": "#/$defs/EnterLeaveAction"
+        },
+        "leave": {
+          "$ref": "#/$defs/EnterLeaveAction"
+        },
+        "predicate": {
+          "$ref": "#/$defs/Predicate"
+        }
+      }
+    },
+
+    "EnterLeaveAction": {
+      "type": "object",
+      "required": ["set"],
+      "additionalProperties": false,
+      "properties": {
+        "set": {
+          "type": "object",
+          "description": "Variable assignments. Values can be constants or expressions like 'var + N'",
+          "additionalProperties": {}
+        }
+      }
+    },
+
+    "Predicate": {
+      "type": "object",
+      "required": ["check", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "when": {
+          "type": "string",
+          "description": "Variable name; predicate only applies when truthy"
+        },
+        "check": {
+          "$ref": "#/$defs/CheckCondition"
+        },
+        "error": {
+          "type": "string",
+          "description": "Error message on predicate failure"
+        }
+      }
+    },
+
+    "CheckCondition": {
+      "type": "object",
+      "description": "Condition mapping a parse property to a comparison",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["sv", "sv.length", "token_string", "token_number"]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Comparison"
+      }
+    },
+
+    "Comparison": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "eq": {
+          "description": "Equal to a constant or variable name"
+        },
+        "matches": {
+          "type": "string",
+          "description": "Regex pattern to match against"
+        },
+        "between": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[min, max] inclusive range"
+        },
+        "in": {
+          "type": "string",
+          "description": "Variable name of string[] to check membership"
+        },
+        "not_in": {
+          "type": "string",
+          "description": "Variable name of string[] to check non-membership"
+        }
+      }
+    },
+
+    "TraceConfig": {
+      "type": "object",
+      "required": ["rules", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rule names to trace"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["enter", "leave"]
+          },
+          "description": "Events to record"
+        }
+      }
+    },
+
+    "AstConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "optimize": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply AST optimization after parsing"
+        }
+      }
+    }
+  }
+}

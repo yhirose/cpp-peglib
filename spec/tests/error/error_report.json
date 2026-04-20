@@ -1,0 +1,50 @@
+[
+  {
+    "name": "default_error_with_dictionary",
+    "description": "Error reports unexpected token when dictionary match fails",
+    "grammar": "S <- '@' A B\nA <- < [a-z]+ >\nB <- 'hello' | 'world'\n%whitespace <- [ ]*\n%word <- [a-z]",
+    "cases": [
+      {
+        "input": " @ aaa typo ",
+        "match": false,
+        "expected_error": { "line": 1, "col": 8, "message": "syntax error, unexpected 'typo', expecting <B>." }
+      }
+    ]
+  },
+  {
+    "name": "default_error_with_choice",
+    "description": "Error reports expected alternatives from prioritized choice",
+    "grammar": "S <- '@' A B\nA <- < [a-z]+ >\nB <- 'hello' / 'world'\n%whitespace <- ' '*\n%word <- [a-z]",
+    "cases": [
+      {
+        "input": " @ aaa typo ",
+        "match": false,
+        "expected_error": { "line": 1, "col": 8, "message": "syntax error, unexpected 'typo', expecting 'hello', 'world'." }
+      }
+    ]
+  },
+  {
+    "name": "error_at_correct_position",
+    "description": "Error column points to the position of the unexpected input",
+    "grammar": "S <- 'abc' 'def' 'ghi'",
+    "cases": [
+      {
+        "input": "abcdefXXX",
+        "match": false,
+        "expected_error": { "col": 7 }
+      }
+    ]
+  },
+  {
+    "name": "error_message_with_rule_instruction",
+    "description": "Custom error message from rule instruction",
+    "grammar": "START <- (LINE (ln LINE)*)? ln?\n\nLINE <- STR '=' CODE\n\nCODE <- HEX / DEC { error_message 'code format error...' }\nHEX <- < [a-f0-9]+ 'h' >\nDEC <- < [0-9]+ >\n\nSTR <- < [a-z0-9]+ >\n\n~ln <- [\\r\\n]+\n%whitespace <- [ \\t]*",
+    "cases": [
+      {
+        "input": "1 = ah\n2 = b\n3 = ch\n",
+        "match": false,
+        "expected_error": { "line": 2, "col": 5, "message": "code format error..." }
+      }
+    ]
+  }
+]

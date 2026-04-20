@@ -1,0 +1,130 @@
+[
+  {
+    "name": "infinite_loop_zom_of_zom",
+    "description": "TOKEN <- [a-z0-9]* can match empty, making TOKEN* infinite",
+    "grammar": "ROOT <- WH TOKEN* WH\nTOKEN <- [a-z0-9]*\nWH <- [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_oom_of_zom",
+    "description": "TOKEN+ where TOKEN can match empty is still infinite",
+    "grammar": "ROOT <- WH TOKEN+ WH\nTOKEN <- [a-z0-9]*\nWH <- [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_not_predicate",
+    "description": "Not-predicate alone can match empty, making repetition infinite",
+    "grammar": "ROOT <- WH TOKEN* WH\nTOKEN <- !'word1'\nWH <- [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_and_predicate",
+    "description": "And-predicate alone can match empty, making repetition infinite",
+    "grammar": "ROOT <- WH TOKEN* WH\nTOKEN <- &'word1'\nWH <- [ \\t]*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_spacing_with_eof",
+    "description": "EOF is empty, making Spacing always succeed, making Number* infinite",
+    "grammar": "Numbers <- Number*\nNumber <- [0-9]+ / Spacing\nSpacing <- ' ' / '\\t' / '\\n' / EOF\nEOF <- !.",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_empty_string_zom",
+    "description": "Zero-or-more of empty string is infinite",
+    "grammar": "S <- ''*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_indirect_empty",
+    "description": "Indirect empty string through a rule",
+    "grammar": "S <- A*\nA <- ''",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_empty_choice_zom",
+    "description": "Empty alternative in choice within repetition",
+    "grammar": "ROOT <- ('A' /)*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_recover_empty_choice",
+    "description": "Recovery of empty alternative in choice within repetition",
+    "grammar": "ROOT <- %recover(('A' /)*)",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "not_infinite_eof_separate",
+    "description": "EOF as separate non-repeating element is valid",
+    "grammar": "Numbers <- Number* EOF\nNumber <- [0-9]+ / Spacing\nSpacing <- ' ' / '\\t' / '\\n'\nEOF <- !.",
+    "cases": [
+      { "input": "123 456", "match": true }
+    ]
+  },
+  {
+    "name": "not_infinite_sequence_nonempty",
+    "description": "Sequence with non-empty element is valid even with empty elements",
+    "grammar": "ROOT <- _ ('[' TAG_NAME ']' _)*\nTAG_NAME <- (!']' .)+\n_ <- [ \\t]*",
+    "cases": [
+      { "input": "[tag1] [tag2]", "match": true }
+    ]
+  },
+  {
+    "name": "not_infinite_expression",
+    "description": "Standard expression grammar is not infinite",
+    "grammar": "EXPRESSION <- _ TERM (TERM_OPERATOR TERM)*\nTERM <- FACTOR (FACTOR_OPERATOR FACTOR)*\nFACTOR <- NUMBER / '(' _ EXPRESSION ')' _\nTERM_OPERATOR <- < [-+] > _\nFACTOR_OPERATOR <- < [*/] > _\nNUMBER <- < [0-9]+ > _\n_ <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": "1 + 2 * 3", "match": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_whitespace",
+    "description": "Whitespace rule with infinite loop",
+    "grammar": "S <- 'hello'\n%whitespace <- ('')*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_word",
+    "description": "Word rule with infinite loop",
+    "grammar": "S <- 'hello'\n%whitespace <- ' '*\n%word <- ('')*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_in_sequence",
+    "description": "Infinite loop hidden in a sequence element",
+    "grammar": "S <- A*\nA <- 'a' B\nB <- 'a' ''*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "infinite_loop_in_prioritized_choice",
+    "description": "Infinite loop hidden in one branch of prioritized choice",
+    "grammar": "S <- A*\nA <- 'a' / 'b' B\nB <- 'a' ''*",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  }
+]

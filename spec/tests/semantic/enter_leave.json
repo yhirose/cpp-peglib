@@ -1,0 +1,72 @@
+[
+  {
+    "name": "enter_leave_ordering",
+    "description": "Enter and leave events fire in correct order",
+    "grammar": "S <- A B\nA <- 'a'\nB <- 'b'",
+    "trace": {
+      "rules": ["A", "B"],
+      "events": ["enter", "leave"]
+    },
+    "cases": [
+      {
+        "input": "ab",
+        "match": true,
+        "expected_trace": ["enter_A", "leave_A", "enter_B", "leave_B"]
+      }
+    ]
+  },
+  {
+    "name": "enter_leave_on_failed_parse",
+    "description": "Enter/leave fire even when parse ultimately fails",
+    "grammar": "S <- A B\nA <- 'a'\nB <- 'b'",
+    "trace": {
+      "rules": ["A", "B"],
+      "events": ["enter", "leave"]
+    },
+    "cases": [
+      {
+        "input": "ax",
+        "match": false,
+        "expected_trace_prefix": ["enter_A", "leave_A"]
+      }
+    ]
+  },
+  {
+    "name": "enter_leave_with_backtracking",
+    "description": "Enter/leave fire on both attempts when backtracking occurs",
+    "grammar": "S <- A / B\nA <- ITEM 'x'\nB <- ITEM 'y'\nITEM <- 'a'",
+    "trace": {
+      "rules": ["ITEM"],
+      "events": ["enter", "leave"]
+    },
+    "cases": [
+      {
+        "input": "ay",
+        "match": true,
+        "expected_trace": ["enter_ITEM", "leave_ITEM", "enter_ITEM", "leave_ITEM"]
+      }
+    ]
+  },
+  {
+    "name": "enter_leave_state_management",
+    "description": "Enter/leave manage depth state correctly",
+    "grammar": "S <- SCOPE+\nSCOPE <- '{' INNER '}'\nINNER <- [a-z]*",
+    "vars": {
+      "depth": { "type": "int", "init": 0 },
+      "max_depth": { "type": "int", "init": 0 }
+    },
+    "handlers": {
+      "SCOPE": {
+        "enter": { "set": { "depth": "depth + 1" } },
+        "leave": { "set": { "depth": "depth - 1" } }
+      }
+    },
+    "cases": [
+      {
+        "input": "{a}{b}{c}",
+        "match": true,
+        "expected_state": { "depth": 0 }
+      }
+    ]
+  }
+]

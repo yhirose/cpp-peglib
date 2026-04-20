@@ -1,0 +1,59 @@
+[
+  {
+    "name": "and_predicate_does_not_consume",
+    "description": "And-predicate checks ahead but does not consume input",
+    "grammar": "S <- &'hello' 'hello world'",
+    "cases": [
+      { "input": "hello world", "match": true },
+      { "input": "goodbye world", "match": false }
+    ]
+  },
+  {
+    "name": "not_predicate_does_not_consume",
+    "description": "Not-predicate checks ahead without consuming",
+    "grammar": "S <- !'bad' < [a-z]+ >",
+    "cases": [
+      { "input": "good", "match": true },
+      { "input": "bad", "match": false },
+      { "input": "badge", "match": false }
+    ]
+  },
+  {
+    "name": "not_predicate_match_until",
+    "description": "Match everything until a specific string",
+    "grammar": "S <- (!'bad' .)* !.",
+    "cases": [
+      { "input": "go", "match": true },
+      { "input": "bad", "match": false }
+    ]
+  },
+  {
+    "name": "predicate_in_sequence",
+    "description": "And-predicate ensures starting character class",
+    "grammar": "S <- &[a-z] < [a-z0-9]+ >",
+    "cases": [
+      { "input": "abc123", "match": true },
+      { "input": "123abc", "match": false }
+    ]
+  },
+  {
+    "name": "keyword_vs_identifier",
+    "description": "Not-predicate for keyword boundary using negative lookahead",
+    "grammar": "S <- KEYWORD / IDENT\nKEYWORD <- ('if' / 'else' / 'while') ![a-zA-Z0-9_]\nIDENT <- < [a-zA-Z_][a-zA-Z0-9_]* >",
+    "cases": [
+      { "input": "if", "match": true },
+      { "input": "else", "match": true },
+      { "input": "iffy", "match": true }
+    ]
+  },
+  {
+    "name": "not_predicate_with_any",
+    "description": "Match everything until 'end'",
+    "grammar": "S <- (!'end' .)* 'end'",
+    "cases": [
+      { "input": "hello world end", "match": true },
+      { "input": "end", "match": true },
+      { "input": "hello world", "match": false }
+    ]
+  }
+]

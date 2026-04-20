@@ -1,0 +1,113 @@
+[
+  {
+    "name": "simple_syntax",
+    "description": "Basic grammar compiles successfully",
+    "grammar": "ROOT <- _\n_ <- ' '",
+    "cases": [
+      { "input": " ", "match": true }
+    ]
+  },
+  {
+    "name": "simple_syntax_with_unicode_arrow",
+    "description": "Grammar with Unicode left-arrow (\u2190) compiles",
+    "grammar": "ROOT \u2190 _\n_ <- ' '",
+    "cases": [
+      { "input": " ", "match": true }
+    ]
+  },
+  {
+    "name": "empty_syntax",
+    "description": "Empty grammar string fails to compile",
+    "grammar": "",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "start_rule_with_ignore_operator",
+    "description": "Start rule cannot use ignore (~) operator",
+    "grammar": "~ROOT <- _\n_ <- ' '",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "backslash_escape_sequence",
+    "description": "Backslash escape in grammar literal",
+    "grammar": "ROOT <- _\n_ <- '\\\\'",
+    "cases": [
+      { "input": "\\", "match": true }
+    ]
+  },
+  {
+    "name": "invalid_escape_sequence",
+    "description": "Unterminated escape in grammar fails to compile",
+    "grammar": "ROOT <- _\n_ <- '\\'",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "missing_definitions",
+    "description": "Grammar with undefined rules fails to compile",
+    "grammar": "A <- B C",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "definition_duplicates",
+    "description": "Duplicate rule definitions fail to compile",
+    "grammar": "A <- ''\nA <- ''",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "octal_hex_unicode_value",
+    "description": "Octal, hex, and unicode escape values in literals",
+    "grammar": "ROOT <- '\\132\\x7a\\u30f3'",
+    "cases": [
+      { "input": "Zz\u30f3", "match": true }
+    ]
+  },
+  {
+    "name": "negated_class",
+    "description": "Negated character class [^...]",
+    "grammar": "ROOT <- [^a-z_]+",
+    "cases": [
+      { "input": "ABC123", "match": true },
+      { "input": "ABcZ", "match": false },
+      { "input": "ABCZ_", "match": false },
+      { "input": "", "match": false }
+    ]
+  },
+  {
+    "name": "invalid_cut_operator",
+    "description": "Cut operator in non-choice context still works",
+    "grammar": "S <- 'a' \u2191 'b'",
+    "cases": [
+      { "input": "ab", "match": true },
+      { "input": "ac", "match": false },
+      { "input": "b", "match": false }
+    ]
+  },
+  {
+    "name": "specify_start_rule",
+    "description": "Override the start rule for parsing",
+    "grammar": "Start <- A\nA <- B (',' B)*\nB <- '[one]' / '[two]'\n%whitespace <- [ \\t\\n]*",
+    "start_rule": "A",
+    "cases": [
+      { "input": " [one] , [two] ", "match": true }
+    ]
+  },
+  {
+    "name": "specify_invalid_start_rule",
+    "description": "Invalid start rule name fails to compile",
+    "grammar": "Start <- A\nA <- B (',' B)*\nB <- '[one]' / '[two]'\n%whitespace <- [ \\t\\n]*",
+    "start_rule": "AAA",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  }
+]

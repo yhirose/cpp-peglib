@@ -1,0 +1,60 @@
+[
+  {
+    "name": "backreference_raw_string",
+    "description": "Backreference for matching raw string delimiters (C++-style)",
+    "grammar": "START <- _ LQUOTE < (!RQUOTE .)* > RQUOTE _\nLQUOTE <- 'R\"' $delm< [a-zA-Z]* > '('\nRQUOTE <- ')' $delm '\"'\n~_ <- [ \\t\\r\\n]*",
+    "cases": [
+      { "input": "R\"(\"hello world\")\"", "match": true },
+      { "input": "R\"foo(\"(hello world)\")foo\"", "match": true },
+      { "input": "R\"foo(\"(hello world)\")bar\"", "match": false }
+    ]
+  },
+  {
+    "name": "undefined_backreference",
+    "description": "Referencing undefined backreference fails to compile",
+    "grammar": "S <- $bref",
+    "cases": [
+      { "input": "", "grammar_error": true }
+    ]
+  },
+  {
+    "name": "nested_capture_html_tags",
+    "description": "Nested HTML-like tag matching with backreference",
+    "grammar": "ROOT <- CONTENT\nCONTENT <- (ELEMENT / TEXT)*\nELEMENT <- $(STAG CONTENT ETAG)\nSTAG <- '<' $tag< TAG_NAME > '>'\nETAG <- '</' $tag '>'\nTAG_NAME <- 'b' / 'u'\nTEXT <- TEXT_DATA\nTEXT_DATA <- ![<] .",
+    "cases": [
+      { "input": "This is <b>a <u>test</u> text</b>.", "match": true },
+      { "input": "This is <b>a <u>test</b> text</u>.", "match": false },
+      { "input": "This is <b>a <u>test text</b>.", "match": false },
+      { "input": "This is a <u>test</u> text</b>.", "match": false }
+    ]
+  },
+  {
+    "name": "backreference_in_sequence",
+    "description": "Simple backreference matching same text twice",
+    "grammar": "S <- $tag<[a-z]+> '=' $tag",
+    "cases": [
+      { "input": "abc=abc", "match": true },
+      { "input": "abc=def", "match": false }
+    ]
+  },
+  {
+    "name": "backreference_with_choices",
+    "description": "Backreference captured from choice alternatives",
+    "grammar": "S <- OPEN CONTENT CLOSE\nOPEN <- $delim<'(' / '[' / '{'>\nCLOSE <- $delim\nCONTENT <- [a-z]+",
+    "cases": [
+      { "input": "(hello(", "match": true },
+      { "input": "[hello[", "match": true },
+      { "input": "(hello[", "match": false }
+    ]
+  },
+  {
+    "name": "backreference_with_zero_or_more",
+    "description": "Backreference across repeated branches",
+    "grammar": "TREE <- WRONG_BRANCH* CORRECT_BRANCH\nWRONG_BRANCH <- BRANCH THAT IS_capture WRONG\nCORRECT_BRANCH <- BRANCH THAT IS_backref CORRECT\nBRANCH <- 'branch'\nTHAT <- 'that'\nIS_capture <- $ref<..>\nIS_backref <- $ref\nWRONG <- 'wrong'\nCORRECT <- 'correct'",
+    "cases": [
+      { "input": "branchthatiswrongbranchthatiscorrect", "match": true },
+      { "input": "branchthatiswrongbranchthatIscorrect", "match": false },
+      { "input": "branchthatiscorrect", "match": false }
+    ]
+  }
+]
