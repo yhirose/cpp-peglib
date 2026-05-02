@@ -2531,6 +2531,9 @@ struct ComputeFirstSet : public TraversalVisitor {
   // Per-rule cache shared across a SetupFirstSets traversal. Without it,
   // every alternative of every PrioritizedChoice re-walks referenced
   // rules — O(refs^depth) work for grammars with many cross-references.
+  // Only cycle-free rule computations are cached; results computed under
+  // a cycle (left recursion) would be incomplete and unsafe to reuse from
+  // a different call context.
   using FirstSetCache = std::unordered_map<const Definition *, FirstSet>;
 
   explicit ComputeFirstSet(FirstSetCache &cache) : cache_(cache) {}
@@ -2540,6 +2543,7 @@ struct ComputeFirstSet : public TraversalVisitor {
 private:
   FirstSetCache &cache_;
   std::unordered_set<const Definition *> refs_;
+  size_t cycle_count_ = 0;
 };
 
 struct SetupFirstSets : public TraversalVisitor {
@@ -3819,22 +3823,40 @@ inline void ComputeFirstSet::visit(Reference &ope) {
   }
 
   auto it = cache_.find(ope.rule_);
-  if (it == cache_.end()) {
-    if (!refs_.insert(ope.rule_).second) { return; } // cycle / left recursion
+  FirstSet computed;
+  const FirstSet *rule_fs;
+  if (it != cache_.end()) {
+    rule_fs = &it->second;
+  } else {
+    if (!refs_.insert(ope.rule_).second) {
+      cycle_count_++; // cycle / left recursion
+      return;
+    }
     auto save = std::exchange(result_, FirstSet{});
+    auto saved_cycle_count = cycle_count_;
     ope.rule_->accept(*this);
-    auto inserted = cache_.try_emplace(ope.rule_, std::move(result_)).first;
+    computed = std::move(result_);
     result_ = std::move(save);
     refs_.erase(ope.rule_);
-    it = inserted;
+    if (cycle_count_ == saved_cycle_count) {
+      // Cycle-free: cached value is complete and safe to reuse.
+      it = cache_.try_emplace(ope.rule_, std::move(computed)).first;
+      rule_fs = &it->second;
+    } else {
+      // Cycle was hit during this rule's computation — its result may be
+      // missing contributions from rules that were on the call stack.
+      // Use the value here but do not cache it for other call contexts.
+      rule_fs = &computed;
+    }
   }
 
-  const auto &rule_fs = it->second;
-  result_.merge(rule_fs);
-  if (!result_.first_literal) { result_.first_literal = rule_fs.first_literal; }
+  result_.merge(*rule_fs);
+  if (!result_.first_literal) {
+    result_.first_literal = rule_fs->first_literal;
+  }
   if (!result_.first_rule) {
-    result_.first_rule = rule_fs.first_rule
-                             ? rule_fs.first_rule
+    result_.first_rule = rule_fs->first_rule
+                             ? rule_fs->first_rule
                              : (ope.rule_->is_token() ? ope.rule_ : nullptr);
   }
 }
