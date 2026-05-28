@@ -5117,21 +5117,24 @@ template <typename Annotation> struct AstBase : public Annotation {
   AstBase(const char *path, size_t line, size_t column, const char *name,
           const std::vector<std::shared_ptr<AstBase>> &nodes,
           size_t position = 0, size_t length = 0, size_t choice_count = 0,
-          size_t choice = 0)
+          size_t choice = 0, bool preserve_position = false)
       : path(path ? path : ""), line(line), column(column), name(name),
         position(position), length(length), choice_count(choice_count),
         choice(choice), original_name(name),
         original_choice_count(choice_count), original_choice(choice),
-        tag(str2tag(name)), original_tag(tag), is_token(false), nodes(nodes) {}
+        tag(str2tag(name)), original_tag(tag), is_token(false),
+        preserve_position(preserve_position), nodes(nodes) {}
 
   AstBase(const char *path, size_t line, size_t column, const char *name,
           const std::string_view &token, size_t position = 0, size_t length = 0,
-          size_t choice_count = 0, size_t choice = 0)
+          size_t choice_count = 0, size_t choice = 0,
+          bool preserve_position = false)
       : path(path ? path : ""), line(line), column(column), name(name),
         position(position), length(length), choice_count(choice_count),
         choice(choice), original_name(name),
         original_choice_count(choice_count), original_choice(choice),
-        tag(str2tag(name)), original_tag(tag), is_token(true), token(token) {}
+        tag(str2tag(name)), original_tag(tag), is_token(true),
+        preserve_position(preserve_position), token(token) {}
 
   AstBase(const AstBase &ast, const char *original_name, size_t position = 0,
           size_t length = 0, size_t original_choice_count = 0,
@@ -5142,7 +5145,8 @@ template <typename Annotation> struct AstBase : public Annotation {
         original_choice_count(original_choice_count),
         original_choice(original_choice), tag(ast.tag),
         original_tag(str2tag(original_name)), is_token(ast.is_token),
-        token(ast.token), nodes(ast.nodes), parent(ast.parent) {}
+        preserve_position(ast.preserve_position), token(ast.token),
+        nodes(ast.nodes), parent(ast.parent) {}
 
   const std::string path;
   const size_t line = 1;
@@ -5160,6 +5164,7 @@ template <typename Annotation> struct AstBase : public Annotation {
   const unsigned int original_tag;
 
   const bool is_token;
+  const bool preserve_position;
   const std::string_view token;
 
   std::vector<std::shared_ptr<AstBase<Annotation>>> nodes;
@@ -5222,8 +5227,10 @@ struct AstOptimizer {
 
     if (opt && original->nodes.size() == 1) {
       auto child = optimize(original->nodes[0], parent);
-      auto ast = std::make_shared<T>(*child, original->name.data(),
-                                     original->position, original->length,
+      auto pos =
+          child->preserve_position ? child->position : original->position;
+      auto len = child->preserve_position ? child->length : original->length;
+      auto ast = std::make_shared<T>(*child, original->name.data(), pos, len,
                                      original->choice_count, original->choice);
       for (auto &node : ast->nodes) {
         node->parent = ast;
@@ -5257,14 +5264,14 @@ template <typename T = Ast> void add_ast_action(Definition &rule) {
       return std::make_shared<T>(
           vs.path, line.first, line.second, rule.name.data(), vs.token(),
           std::distance(vs.ss, vs.sv().data()), vs.sv().length(),
-          vs.choice_count(), vs.choice());
+          vs.choice_count(), vs.choice(), rule.no_ast_opt);
     }
 
-    auto ast =
-        std::make_shared<T>(vs.path, line.first, line.second, rule.name.data(),
-                            vs.transform<std::shared_ptr<T>>(),
-                            std::distance(vs.ss, vs.sv().data()),
-                            vs.sv().length(), vs.choice_count(), vs.choice());
+    auto ast = std::make_shared<T>(
+        vs.path, line.first, line.second, rule.name.data(),
+        vs.transform<std::shared_ptr<T>>(),
+        std::distance(vs.ss, vs.sv().data()), vs.sv().length(),
+        vs.choice_count(), vs.choice(), rule.no_ast_opt);
 
     for (auto &node : ast->nodes) {
       node->parent = ast;

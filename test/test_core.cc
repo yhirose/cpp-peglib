@@ -1254,6 +1254,39 @@ LINE_END               <-  '\r\n' / '\r' / '\n' / !.
   }
 }
 
+TEST(GeneralTest, NoAstOptPreservesPosition) {
+  // When a rule has `no_ast_opt`, its source position (pos/len) must survive
+  // when outer rules are collapsed away by AstOptimizer. Otherwise the
+  // identity of the preserved rule is incomplete -- the name is kept but the
+  // source range gets overwritten by the outermost collapsed wrapper, which
+  // breaks error reporting and source-level rewriting on the preserved node.
+  parser parser(R"(
+    BLOCK       <-  '{' STATEMENTS '}'
+    STATEMENTS  <-  STATEMENT (';' STATEMENT)*
+    STATEMENT   <-  YIELD / EXPR
+    YIELD       <-  'yield' EXPR        { no_ast_opt }
+    EXPR        <-  < [a-z0-9]+ >
+    %whitespace <-  [ \t\r\n]*
+    %word       <-  [a-zA-Z]+
+  )");
+  parser.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  std::string src = "{ yield i }";
+  auto ret = parser.parse(src, ast);
+  EXPECT_TRUE(ret);
+
+  ast = parser.optimize_ast(ast);
+
+  // After collapse, the surviving node represents YIELD and must report
+  // YIELD's source range (starting at 'yield'), not BLOCK's range
+  // (which starts at '{').
+  EXPECT_EQ("YIELD", ast->name);
+  EXPECT_TRUE(ast->preserve_position);
+  EXPECT_EQ(src.find("yield"), ast->position);
+  EXPECT_LT(ast->length, src.length());
+}
+
 TEST(GeneralTest, ChoiceWithWhitespace) {
   auto parser = peg::parser(R"(
     type <- 'string' / 'int' / 'double'
