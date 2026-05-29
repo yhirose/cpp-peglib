@@ -2789,6 +2789,8 @@ public:
 
   std::string error_message;
   bool no_ast_opt = false;
+  std::string ast_name; // When non-empty, AST nodes produced by this rule carry
+                        // this name/tag instead of the rule's own name
 
   bool eoi_check = true;
 
@@ -4323,8 +4325,8 @@ private:
             opt(seq(g["InstructionItem"], zom(seq(g["InstructionItemSeparator"],
                                                   g["InstructionItem"])))),
             g["EndBracket"]);
-    g["InstructionItem"] <=
-        cho(g["PrecedenceClimbing"], g["ErrorMessage"], g["NoAstOpt"]);
+    g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
+                                g["NoAstOpt"], g["AstName"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
@@ -4356,6 +4358,10 @@ private:
 
     // No Ast node optimization instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
+
+    // AST node name override instruction: `{ ast_name: NodeTag }`
+    g["AstName"] <= seq(lit("ast_name"), g["SpacesZom"], lit(":"),
+                        g["SpacesZom"], g["Identifier"], g["SpacesZom"]);
 
     // Set definition names
     for (auto &x : g) {
@@ -4773,6 +4779,14 @@ private:
       return instruction;
     };
 
+    g["AstName"] = [](const SemanticValues &vs) {
+      Instruction instruction;
+      instruction.type = "ast_name";
+      instruction.data = std::any_cast<std::string>(vs[0]);
+      instruction.sv = vs.sv();
+      return instruction;
+    };
+
     g["Instruction"] = [](const SemanticValues &vs) {
       return vs.transform<Instruction>();
     };
@@ -5076,6 +5090,8 @@ private:
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
           rule.no_ast_opt = true;
+        } else if (instruction.type == "ast_name") {
+          rule.ast_name = std::any_cast<std::string>(instruction.data);
         }
       }
     }
@@ -5260,18 +5276,23 @@ template <typename T = Ast> void add_ast_action(Definition &rule) {
   rule.action = [&](const SemanticValues &vs) {
     auto line = vs.line_info();
 
+    // `{ ast_name: X }` overrides the node's name/tag (falls back to the
+    // rule's own name when unset).
+    const char *node_name =
+        rule.ast_name.empty() ? rule.name.data() : rule.ast_name.data();
+
     if (rule.is_token()) {
       return std::make_shared<T>(
-          vs.path, line.first, line.second, rule.name.data(), vs.token(),
+          vs.path, line.first, line.second, node_name, vs.token(),
           std::distance(vs.ss, vs.sv().data()), vs.sv().length(),
           vs.choice_count(), vs.choice(), rule.no_ast_opt);
     }
 
-    auto ast = std::make_shared<T>(
-        vs.path, line.first, line.second, rule.name.data(),
-        vs.transform<std::shared_ptr<T>>(),
-        std::distance(vs.ss, vs.sv().data()), vs.sv().length(),
-        vs.choice_count(), vs.choice(), rule.no_ast_opt);
+    auto ast = std::make_shared<T>(vs.path, line.first, line.second, node_name,
+                                   vs.transform<std::shared_ptr<T>>(),
+                                   std::distance(vs.ss, vs.sv().data()),
+                                   vs.sv().length(), vs.choice_count(),
+                                   vs.choice(), rule.no_ast_opt);
 
     for (auto &node : ast->nodes) {
       node->parent = ast;
@@ -5636,7 +5657,11 @@ private:
   std::vector<std::string> get_no_ast_opt_rules() const {
     std::vector<std::string> rules;
     for (auto &[name, rule] : *grammar_) {
-      if (rule.no_ast_opt) { rules.push_back(name); }
+      // The optimizer keeps nodes by their emitted name, so honor the
+      // `ast_name` override when present (else the rule's own name).
+      if (rule.no_ast_opt) {
+        rules.push_back(rule.ast_name.empty() ? name : rule.ast_name);
+      }
     }
     return rules;
   }
