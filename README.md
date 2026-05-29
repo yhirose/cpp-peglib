@@ -35,6 +35,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
 * `label { error_message "..." }` (Error message instruction)
 * `{ no_ast_opt }` (No AST node optimization instruction)
+* `{ ast_name: NodeTag }` (AST node name override instruction)
 
 'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
 
@@ -565,7 +566,41 @@ if (parser.parse("...", ast)) {
 
 `optimize_ast` removes redundant nodes to make an AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used.
 
+By default an AST node carries the name of the rule that produced it. A rule can override that tag with the `{ ast_name: NodeTag }` instruction, so several rules can emit nodes under a shared tag.
+
+Multiple instructions can be combined in a single `{ ... }` block by separating them with `;`, e.g. `{ no_ast_opt; ast_name: NodeTag }`.
+
 It internally calls `peg::AstOptimizer` to do the job. You can make your own AST optimizers to fit your needs.
+
+Each AST node exposes the following fields:
+
+```cpp
+const std::string      name;     // rule (or ast_name) that produced the node
+const unsigned int     tag;      // str2tag(name) — for fast switch dispatch
+std::string_view       token;    // matched text (valid when is_token is true)
+bool                   is_token;
+size_t                 choice;   // which alternative of a prioritized choice matched
+size_t                 line, column, position, length;
+std::vector<std::shared_ptr<Ast>> nodes;  // child nodes
+std::weak_ptr<Ast>     parent;
+```
+
+To walk the tree, switching on `tag` avoids string comparison. The `_` literal
+in `peg::udl` turns a node name into the same compile-time tag value:
+
+```cpp
+using namespace peg::udl;
+
+void traverse(const std::shared_ptr<peg::Ast> &ast) {
+  switch (ast->tag) {
+  case "Additive"_: /* ... */ break;
+  case "Number"_:   /* ... */ break;
+  default:
+    for (auto &node : ast->nodes) { traverse(node); }
+    break;
+  }
+}
+```
 
 See actual usages in the [AST calculator example](https://github.com/yhirose/cpp-peglib/blob/master/example/calc3.cc) and [PL/0 language example](https://github.com/yhirose/cpp-peglib/blob/master/pl0/pl0.cc).
 
@@ -753,6 +788,28 @@ parser.load_grammar(grammar, "A"); // Start Rule is "A"
 parser.parse(" [one] , [two] "); // OK
 ```
 
+Tracing the parser
+------------------
+
+To see how the parser proceeds, `peg::enable_tracing` prints a trace of every
+rule the parser enters and leaves to the given output stream.
+
+```cpp
+peg::parser parser(grammar);
+
+peg::enable_tracing(parser, std::cout);
+
+parser.parse(" [one] , [two] ");
+```
+
+This is what `peglint --trace` uses internally. For full control over the trace
+output, call `parser.enable_trace(enter, leave)` with your own callbacks, and
+`parser.set_verbose_trace(true)` to trace the intermediate operators inside each
+rule rather than just the rule boundaries.
+
+Similarly, `peg::enable_profiling(parser, std::cout)` reports how often each rule
+is invoked and how much time it takes — the counterpart of `peglint --profile`.
+
 peglint - PEG syntax lint utility
 ---------------------------------
 
@@ -866,6 +923,33 @@ Number      <- < [0-9]+ >
       + Multiplicative/1
         - Primary/1[Number] (3)
 ```
+
+### Override an AST node's tag with `ast_name` instruction
+
+By default, an AST node carries the name of the rule that produced it. A rule
+annotated `{ ast_name: NodeTag }` emits its node under `NodeTag` instead. This
+lets two parallel productions converge onto a single AST tag, so a tree-walker
+needs only one case per logical nonterminal:
+
+```
+> cat a.peg
+Atom        <- Number / String
+Number      <- < [0-9]+ >          { ast_name: Literal }
+String      <- '"' < [^"]* > '"'   { ast_name: Literal }
+%whitespace <- [ \t\r\n]*
+
+> peglint --ast --source "123" a.peg
++ Atom/0
+  - Literal (123)
+
+> peglint --ast --source "\"hi\"" a.peg
++ Atom/1
+  - Literal (hi)
+```
+
+The override also works on parameterized rules (macros): each instantiation
+emits the same tag. `ast_name` composes with `no_ast_opt` — the AST optimizer's
+keep-list honors the overridden name.
 
 Sample codes
 ------------
