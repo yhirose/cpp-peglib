@@ -693,7 +693,7 @@ private:
   }
 
   static void compile_var(IRBuilder<> &builder, const shared_ptr<AstPL0> ast) {
-    for (const auto node : ast->nodes) {
+    for (const auto &node : ast->nodes) {
       auto ident = node->token;
       builder.CreateAlloca(builder.getInt32Ty(), nullptr, ident);
     }
