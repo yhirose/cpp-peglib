@@ -1,3 +1,11 @@
+set shell := ["bash", "-cu"]
+
+default:
+    @just --list
+
+release *args:
+    @./scripts/release.sh {{args}}
+
 test: test-cpp test-rust
 
 test-cpp:

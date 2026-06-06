@@ -1,0 +1,63 @@
+name: abidiff
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    container:
+      image: debian:testing
+
+    steps:
+    - name: Install dependencies
+      run: apt -y --update install --no-install-recommends
+        abigail-tools
+        ca-certificates
+        g++
+        git
+
+    - uses: actions/checkout@v4
+      with:
+        path: current
+
+    - uses: actions/checkout@v4
+      with:
+        path: previous
+        fetch-depth: 0
+
+    - name: Checkout previous release
+      working-directory: previous
+      run: |
+        git config --global --add safe.directory "$PWD"
+        git describe --tags --abbrev=0 | xargs git checkout
+
+    - name: Build current
+      working-directory: current
+      run: |
+        mkdir -p build
+        g++ -std=c++17 -g -fPIC -shared abi/abi_probe.cc -o build/libpeglib-abi.so
+
+    - name: Build previous
+      working-directory: previous
+      run: |
+        # The probe is the harness, peglib.h is what changes — build the
+        # previous header against the current probe.
+        mkdir -p abi build
+        cp ../current/abi/abi_probe.cc abi/abi_probe.cc
+        g++ -std=c++17 -g -fPIC -shared abi/abi_probe.cc -o build/libpeglib-abi.so
+
+    - name: Run abidiff
+      run: abidiff
+        --headers-dir1 previous
+        --headers-dir2 current
+        previous/build/libpeglib-abi.so
+        current/build/libpeglib-abi.so
