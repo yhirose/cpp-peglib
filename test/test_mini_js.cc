@@ -14,6 +14,11 @@ static std::string read_file(const std::string &path) {
 }
 
 static std::string find_grammar() {
+#ifdef MINI_JS_GRAMMAR_PATH
+  if (std::ifstream(MINI_JS_GRAMMAR_PATH).good()) {
+    return MINI_JS_GRAMMAR_PATH;
+  }
+#endif
   for (auto prefix : {"", "../", "../../"}) {
     auto path = std::string(prefix) + "spec/mini-js/grammar.peg";
     std::ifstream ifs(path);
