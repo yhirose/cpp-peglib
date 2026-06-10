@@ -7,8 +7,8 @@
 
 #pragma once
 
-#define CPPPEGLIB_VERSION "1.11.0"
-#define CPPPEGLIB_VERSION_NUM "0x010b00"
+#define CPPPEGLIB_VERSION "1.12.0"
+#define CPPPEGLIB_VERSION_NUM "0x010c00"
 
 /*
  * Configuration
