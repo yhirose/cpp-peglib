@@ -811,6 +811,129 @@ using TracerLeave = std::function<void(
 
 using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 
+// Packrat memoization table: open-addressing hash map keyed by the fused
+// (position * rule count + rule id) index. The insert-heavy access pattern
+// makes node-based containers a bottleneck, so keys and lengths live in one
+// flat array of 16-byte POD slots probed linearly; semantic values go into a
+// parallel array that is never allocated when no cached result carries a
+// value. Erased slots become tombstones (erase only happens during
+// left-recursion cache invalidation).
+class PackratCache {
+public:
+  explicit PackratCache(size_t expected_entries) {
+    while (initial_capacity_ < expected_entries) {
+      initial_capacity_ *= 2;
+    }
+  }
+
+  bool find(size_t key, size_t &len, std::any &val) const {
+    if (slots_.empty()) { return false; }
+    auto mask = slots_.size() - 1;
+    auto i = mix(key) & mask;
+    while (true) {
+      auto &slot = slots_[i];
+      if (slot.key == key) {
+        len = slot.len;
+        if (!vals_.empty()) {
+          val = vals_[i];
+        } else {
+          val.reset();
+        }
+        return true;
+      }
+      if (slot.key == kEmpty) { return false; }
+      i = (i + 1) & mask;
+    }
+  }
+
+  void insert_or_assign(size_t key, size_t len, const std::any &val) {
+    if (slots_.empty() || (used_ + 1) * 4 > slots_.size() * 3) { grow(); }
+    auto mask = slots_.size() - 1;
+    auto i = mix(key) & mask;
+    auto insert_pos = kEmpty;
+    while (true) {
+      auto &slot = slots_[i];
+      if (slot.key == key) {
+        insert_pos = i;
+        break;
+      }
+      if (slot.key == kTombstone) {
+        if (insert_pos == kEmpty) { insert_pos = i; }
+      } else if (slot.key == kEmpty) {
+        if (insert_pos == kEmpty) { insert_pos = i; }
+        if (slots_[insert_pos].key == kEmpty) { used_++; }
+        break;
+      }
+      i = (i + 1) & mask;
+    }
+    auto &dest = slots_[insert_pos];
+    dest.key = key;
+    dest.len = len;
+    if (val.has_value()) {
+      if (vals_.empty()) { vals_.resize(slots_.size()); }
+      vals_[insert_pos] = val;
+    } else if (!vals_.empty()) {
+      vals_[insert_pos].reset();
+    }
+  }
+
+  void erase(size_t key) {
+    if (slots_.empty()) { return; }
+    auto mask = slots_.size() - 1;
+    auto i = mix(key) & mask;
+    while (true) {
+      auto &slot = slots_[i];
+      if (slot.key == key) {
+        slot.key = kTombstone;
+        if (!vals_.empty()) { vals_[i].reset(); }
+        return;
+      }
+      if (slot.key == kEmpty) { return; }
+      i = (i + 1) & mask;
+    }
+  }
+
+private:
+  static constexpr size_t kEmpty = static_cast<size_t>(-1);
+  static constexpr size_t kTombstone = static_cast<size_t>(-2);
+
+  struct Slot {
+    size_t key = kEmpty;
+    size_t len = 0;
+  };
+
+  static size_t mix(size_t key) {
+    auto h = key * static_cast<size_t>(0x9E3779B97F4A7C15ull);
+    return h ^ (h >> 32);
+  }
+
+  void grow() {
+    auto new_cap = slots_.empty() ? initial_capacity_ : slots_.size() * 2;
+    std::vector<Slot> old_slots = std::move(slots_);
+    std::vector<std::any> old_vals = std::move(vals_);
+    slots_.assign(new_cap, Slot{});
+    if (!old_vals.empty()) { vals_.assign(new_cap, std::any()); }
+    used_ = 0;
+    auto mask = new_cap - 1;
+    for (size_t j = 0; j < old_slots.size(); j++) {
+      auto &slot = old_slots[j];
+      if (slot.key == kEmpty || slot.key == kTombstone) { continue; }
+      auto i = mix(slot.key) & mask;
+      while (slots_[i].key != kEmpty) {
+        i = (i + 1) & mask;
+      }
+      slots_[i] = slot;
+      if (!old_vals.empty()) { vals_[i] = std::move(old_vals[j]); }
+      used_++;
+    }
+  }
+
+  size_t initial_capacity_ = 1024;
+  std::vector<Slot> slots_;
+  std::vector<std::any> vals_;
+  size_t used_ = 0; // occupied + tombstone slots
+};
+
 class Context {
 public:
   const char *path;
@@ -820,7 +943,7 @@ public:
   ErrorInfo error_info;
   bool recovered = false;
 
-  std::vector<std::shared_ptr<SemanticValues>> value_stack;
+  std::vector<std::unique_ptr<SemanticValues>> value_stack;
   size_t value_stack_size = 0;
 
   std::vector<Definition *> rule_stack;
@@ -842,8 +965,7 @@ public:
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
 
-  std::map<std::pair<size_t, size_t>, std::tuple<size_t, std::any>>
-      cache_values;
+  PackratCache cache_values;
 
   // Left recursion support
   struct LRMemo {
@@ -868,7 +990,7 @@ public:
       cache_registered[idx] = false;
       cache_success[idx] = false;
     }
-    cache_values.erase(std::make_pair(col, def_id));
+    cache_values.erase(idx);
   }
 
   void write_packrat_cache(const char *pos, size_t def_id, size_t len,
@@ -879,14 +1001,18 @@ public:
     if (idx >= cache_registered.size()) { return; }
     cache_registered[idx] = true;
     cache_success[idx] = true;
-    auto key = std::pair(col, def_id);
-    cache_values[key] = std::pair(len, val);
+    cache_values.insert_or_assign(idx, len, val);
   }
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
+  const bool has_tracer;
   std::any trace_data;
   const bool verbose_trace;
+
+  // Byte-wise tolower frozen at parse start, so case-insensitive matching
+  // avoids a locale-sensitive libc call per input byte.
+  unsigned char tolower_table[256];
 
   Log log;
 
@@ -899,8 +1025,15 @@ public:
         def_count(def_count), enablePackratParsing(enablePackratParsing),
         cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
         cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
+        cache_values(enablePackratParsing ? l / 2 : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
-        trace_data(trace_data), verbose_trace(verbose_trace), log(log) {
+        has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
+        verbose_trace(verbose_trace), log(log) {
+
+    for (size_t i = 0; i < 256; i++) {
+      tolower_table[i] =
+          static_cast<unsigned char>(std::tolower(static_cast<int>(i)));
+    }
 
     push_args({});
   }
@@ -942,8 +1075,10 @@ public:
         (*packrat_stats)[def_id].hits++;
       }
       if (cache_success[idx]) {
-        auto key = std::pair(col, def_id);
-        std::tie(len, val) = cache_values[key];
+        if (!cache_values.find(idx, len, val)) {
+          len = 0;
+          val.reset();
+        }
         return;
       } else {
         len = static_cast<size_t>(-1);
@@ -977,7 +1112,7 @@ public:
   SemanticValues &push_semantic_values_scope() {
     assert(value_stack_size <= value_stack.size());
     if (value_stack_size == value_stack.size()) {
-      value_stack.emplace_back(std::make_shared<SemanticValues>(this));
+      value_stack.emplace_back(std::make_unique<SemanticValues>(this));
     } else {
       auto &vs = *value_stack[value_stack_size];
       if (!vs.empty()) {
@@ -1172,8 +1307,8 @@ private:
         lower_heap.reset(new char[id_len]);
         lower = lower_heap.get();
       }
-      std::transform(s, s + id_len, lower, [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
+      std::transform(s, s + id_len, lower, [&c](unsigned char ch) {
+        return static_cast<char>(c.tolower_table[ch]);
       });
       std::string_view lower_sv(lower, id_len);
 
@@ -2900,9 +3035,11 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   size_t i = 0;
   for (; i < lit.size(); i++) {
     if (i >= n ||
-        (ignore_case ? (static_cast<char>(std::tolower(
-                            static_cast<unsigned char>(s[i]))) != lower_lit[i])
-                     : (s[i] != lit[i]))) {
+        (ignore_case
+             ? (static_cast<char>(
+                    c.tolower_table[static_cast<unsigned char>(s[i])]) !=
+                lower_lit[i])
+             : (s[i] != lit[i]))) {
       c.set_error_pos(s, lit.data());
       return static_cast<size_t>(-1);
     }
@@ -3079,7 +3216,7 @@ inline void Context::trace_leave(const Ope &ope, const char *a_s, size_t n,
 }
 
 inline bool Context::is_traceable(const Ope &ope) const {
-  if (tracer_enter && tracer_leave) {
+  if (has_tracer) {
     if (ignore_trace_state) { return false; }
     return !dynamic_cast<const peg::Reference *>(&ope);
   }

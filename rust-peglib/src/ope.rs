@@ -92,6 +92,154 @@ impl SemanticValues {
     }
 }
 
+// ---- PackratCache ----
+
+// Packrat memoization table: open-addressing hash map keyed by the fused
+// (position * rule count + rule id) index. The insert-heavy access pattern
+// makes node-based containers a bottleneck, so keys and lengths live in one
+// flat array of POD slots probed linearly; semantic values go into a
+// parallel array that is never allocated when no cached result carries a
+// value. Erased slots become tombstones (erase only happens during
+// left-recursion cache invalidation).
+const SLOT_EMPTY: usize = usize::MAX;
+const SLOT_TOMBSTONE: usize = usize::MAX - 1;
+
+#[derive(Clone, Copy)]
+struct Slot {
+    key: usize,
+    len: usize,
+}
+
+pub(crate) struct PackratCache {
+    initial_capacity: usize,
+    slots: Vec<Slot>,
+    vals: Vec<Option<Box<dyn Any>>>,
+    used: usize, // occupied + tombstone slots
+}
+
+impl PackratCache {
+    pub fn new(expected_entries: usize) -> Self {
+        let mut initial_capacity = 1024;
+        while initial_capacity < expected_entries {
+            initial_capacity *= 2;
+        }
+        Self { initial_capacity, slots: Vec::new(), vals: Vec::new(), used: 0 }
+    }
+
+    fn mix(key: usize) -> usize {
+        let h = key.wrapping_mul(0x9E3779B97F4A7C15u64 as usize);
+        h ^ (h >> 32)
+    }
+
+    pub fn find(&self, key: usize) -> Option<(usize, Option<&Box<dyn Any>>)> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        let mask = self.slots.len() - 1;
+        let mut i = Self::mix(key) & mask;
+        loop {
+            let slot = &self.slots[i];
+            if slot.key == key {
+                let val = if self.vals.is_empty() { None } else { self.vals[i].as_ref() };
+                return Some((slot.len, val));
+            }
+            if slot.key == SLOT_EMPTY {
+                return None;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    pub fn insert_or_assign(&mut self, key: usize, len: usize, val: Option<Box<dyn Any>>) {
+        if self.slots.is_empty() || (self.used + 1) * 4 > self.slots.len() * 3 {
+            self.grow();
+        }
+        let mask = self.slots.len() - 1;
+        let mut i = Self::mix(key) & mask;
+        let mut insert_pos = SLOT_EMPTY;
+        loop {
+            let slot = &self.slots[i];
+            if slot.key == key {
+                insert_pos = i;
+                break;
+            }
+            if slot.key == SLOT_TOMBSTONE {
+                if insert_pos == SLOT_EMPTY {
+                    insert_pos = i;
+                }
+            } else if slot.key == SLOT_EMPTY {
+                if insert_pos == SLOT_EMPTY {
+                    insert_pos = i;
+                }
+                if self.slots[insert_pos].key == SLOT_EMPTY {
+                    self.used += 1;
+                }
+                break;
+            }
+            i = (i + 1) & mask;
+        }
+        let dest = &mut self.slots[insert_pos];
+        dest.key = key;
+        dest.len = len;
+        if val.is_some() {
+            if self.vals.is_empty() {
+                self.vals.resize_with(self.slots.len(), || None);
+            }
+            self.vals[insert_pos] = val;
+        } else if !self.vals.is_empty() {
+            self.vals[insert_pos] = None;
+        }
+    }
+
+    pub fn erase(&mut self, key: usize) {
+        if self.slots.is_empty() {
+            return;
+        }
+        let mask = self.slots.len() - 1;
+        let mut i = Self::mix(key) & mask;
+        loop {
+            let slot = &mut self.slots[i];
+            if slot.key == key {
+                slot.key = SLOT_TOMBSTONE;
+                if !self.vals.is_empty() {
+                    self.vals[i] = None;
+                }
+                return;
+            }
+            if slot.key == SLOT_EMPTY {
+                return;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    fn grow(&mut self) {
+        let new_cap = if self.slots.is_empty() { self.initial_capacity } else { self.slots.len() * 2 };
+        let old_slots = std::mem::take(&mut self.slots);
+        let mut old_vals = std::mem::take(&mut self.vals);
+        self.slots = vec![Slot { key: SLOT_EMPTY, len: 0 }; new_cap];
+        if !old_vals.is_empty() {
+            self.vals.resize_with(new_cap, || None);
+        }
+        self.used = 0;
+        let mask = new_cap - 1;
+        for (j, slot) in old_slots.iter().enumerate() {
+            if slot.key == SLOT_EMPTY || slot.key == SLOT_TOMBSTONE {
+                continue;
+            }
+            let mut i = Self::mix(slot.key) & mask;
+            while self.slots[i].key != SLOT_EMPTY {
+                i = (i + 1) & mask;
+            }
+            self.slots[i] = *slot;
+            if !old_vals.is_empty() {
+                self.vals[i] = old_vals[j].take();
+            }
+            self.used += 1;
+        }
+    }
+}
+
 // ---- Context ----
 
 pub struct Context {
@@ -114,7 +262,7 @@ pub struct Context {
     pub(crate) enable_packrat: bool,
     pub(crate) cache_registered: BitVec,
     pub(crate) cache_success: BitVec,
-    pub(crate) cache_values: std::collections::HashMap<u32, (u32, Option<Box<dyn Any>>)>,
+    pub(crate) cache_values: PackratCache,
     pub(crate) lr_memo: std::collections::HashMap<(usize, usize), (usize, Option<Box<dyn Any>>)>,
     pub(crate) lr_refs_hit: std::collections::HashSet<usize>,
     pub(crate) lr_active_seeds: std::collections::HashSet<(usize, usize)>,
@@ -161,7 +309,7 @@ impl Context {
             cut_stack: Vec::new(),
             def_count, enable_packrat,
             cache_registered: cr, cache_success: cs,
-            cache_values: std::collections::HashMap::new(),
+            cache_values: PackratCache::new(if enable_packrat { l / 2 } else { 0 }),
             lr_memo: std::collections::HashMap::new(),
             lr_refs_hit: std::collections::HashSet::new(),
             lr_active_seeds: std::collections::HashSet::new(),
@@ -210,7 +358,7 @@ impl Context {
         let idx = self.packrat_idx(pos, def_id);
         if self.cache_registered.get(idx) {
             if self.cache_success.get(idx) {
-                return self.cache_values[&(idx as u32)].0 as usize;
+                return self.cache_values.find(idx).map_or(0, |(len, _)| len);
             }
             return FAIL;
         }
@@ -219,7 +367,7 @@ impl Context {
         let len = fn_(self);
         if success(len) {
             self.cache_success.set(idx, true);
-            self.cache_values.insert(idx as u32, (len as u32, None));
+            self.cache_values.insert_or_assign(idx, len, None);
         }
         len
     }
@@ -229,7 +377,7 @@ impl Context {
         let idx = self.packrat_idx(pos, def_id);
         self.cache_registered.set(idx, false);
         self.cache_success.set(idx, false);
-        self.cache_values.remove(&(idx as u32));
+        self.cache_values.erase(idx);
     }
 
     pub fn write_packrat_cache(&mut self, pos: usize, def_id: usize, len: usize, val: Option<Box<dyn Any>>) {
@@ -237,7 +385,7 @@ impl Context {
         let idx = self.packrat_idx(pos, def_id);
         self.cache_registered.set(idx, true);
         self.cache_success.set(idx, true);
-        self.cache_values.insert(idx as u32, (len as u32, val));
+        self.cache_values.insert_or_assign(idx, len, val);
     }
 
     pub fn push_args(&mut self, args: Vec<Rc<dyn Ope>>) { self.args_stack.push(args); }
@@ -384,7 +532,7 @@ impl Trie {
 
     pub fn items_count(&self) -> usize { self.items_count }
 }
-pub struct LiteralString { pub(crate) lit: Vec<u8>, pub(crate) ignore_case: bool, pub(crate) is_word: std::cell::Cell<bool> }
+pub struct LiteralString { pub(crate) lit: Vec<u8>, pub(crate) ignore_case: bool, pub(crate) lower_lit: Vec<u8>, pub(crate) is_word: std::cell::Cell<bool> }
 pub struct CharacterClass {
     pub(crate) ranges: Vec<(char, char)>, pub(crate) negated: bool, pub(crate) ignore_case: bool,
     pub(crate) is_ascii_only: bool, pub(crate) ascii_bitset: [u64; 4],
@@ -419,7 +567,12 @@ pub(crate) struct Cut;
 
 impl LiteralString {
     pub fn new(s: &str, ignore_case: bool) -> Self {
-        Self { lit: s.as_bytes().to_vec(), ignore_case, is_word: std::cell::Cell::new(false) }
+        Self {
+            lit: s.as_bytes().to_vec(),
+            ignore_case,
+            lower_lit: s.as_bytes().to_ascii_lowercase(),
+            is_word: std::cell::Cell::new(false),
+        }
     }
     pub(crate) fn lit_ptr(&self) -> *const str {
         // Safety: self.lit lives as long as the Grammar that owns this LiteralString
@@ -726,8 +879,8 @@ impl Ope for LiteralString {
             return FAIL;
         }
         if self.ignore_case {
-            for (i, &c) in self.lit.iter().enumerate() {
-                if !input[pos + i].eq_ignore_ascii_case(&c) {
+            for (i, &c) in self.lower_lit.iter().enumerate() {
+                if input[pos + i].to_ascii_lowercase() != c {
                     ctx.set_error_pos(pos, Some(self.lit_ptr()));
                     return FAIL;
                 }
@@ -978,9 +1131,13 @@ impl Ope for Holder {
             let idx = ctx.packrat_idx(pos, def_id);
             if ctx.cache_registered.get(idx) {
                 if ctx.cache_success.get(idx) {
-                    let (cached_len, ref cached_val) = ctx.cache_values[&(idx as u32)];
-                    let val = cached_val.as_ref().map(|v| clone_any_box(v));
-                    (cached_len as usize, val)
+                    match ctx.cache_values.find(idx) {
+                        Some((cached_len, cached_val)) => {
+                            let val = cached_val.map(|v| clone_any_box(v));
+                            (cached_len, val)
+                        }
+                        None => (0, None),
+                    }
                 } else {
                     (FAIL, None)
                 }
@@ -991,7 +1148,7 @@ impl Ope for Holder {
                 if success(result) {
                     ctx.cache_success.set(idx, true);
                     let cached_val = val.as_ref().map(|v| clone_any_box(v));
-                    ctx.cache_values.insert(idx as u32, (result as u32, cached_val));
+                    ctx.cache_values.insert_or_assign(idx, result, cached_val);
                 }
                 (result, val)
             }
