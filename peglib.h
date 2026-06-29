@@ -4304,6 +4304,17 @@ private:
   ParserGenerator() {
     make_grammar();
     setup_actions();
+    // Apply First-Set filtering to the bootstrap meta-grammar itself so that
+    // parsing a grammar (the bulk of load_grammar) skips alternatives whose
+    // next byte cannot match. This is safe -- First-Set filtering only skips
+    // alternatives that would have failed anyway, so no semantic action that
+    // would have committed is skipped (unlike packrat, which is unsound here).
+    {
+      SetupFirstSets vis;
+      for (auto &x : g) {
+        x.second.accept(vis);
+      }
+    }
   }
 
   struct Instruction {

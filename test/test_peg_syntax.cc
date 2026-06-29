@@ -284,3 +284,70 @@ TEST(PEGTest, PEG_EndOfFile) {
   EXPECT_TRUE(ParserGenerator::parse_test("EndOfFile", ""));
   EXPECT_FALSE(ParserGenerator::parse_test("EndOfFile", " "));
 }
+
+// First-Set filtering is applied to the bootstrap meta-grammar itself, so the
+// meta-parser must still accept and correctly compile the full range of grammar
+// syntax. Exercise the trickier constructs and confirm each grammar both loads
+// and parses as expected.
+TEST(PEGTest, MetaGrammarFirstSetCoverage) {
+  // And-predicate, token boundary, ignore-case literal, bounded repetition
+  {
+    parser pg(R"(
+      S <- &'h' < [a-z]+ > '_' 'END'i 'q'{2,3}
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("hello_ENDqq"));
+    EXPECT_TRUE(pg.parse("hello_endqqq"));
+    EXPECT_FALSE(pg.parse("xello_ENDqq")); // &'h' fails
+    EXPECT_FALSE(pg.parse("hello_ENDq"));  // 'q'{2,3} needs >= 2
+  }
+  // Macro definition and invocation
+  {
+    parser pg(R"(
+      S          <- Pair('x', 'y')
+      Pair(A, B) <- A B
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("xy"));
+    EXPECT_FALSE(pg.parse("xx"));
+  }
+  // Capture scope and back reference
+  {
+    parser pg(R"(
+      S <- $q< ['"'] > [a-z]+ $q
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("'abc'"));
+    EXPECT_FALSE(pg.parse("'abc\"")); // close quote must match the open one
+  }
+  // Precedence-climbing and ast_name instructions
+  {
+    parser pg(R"(
+      E  <- A (OP A)* { precedence L + - }
+      A  <- < [0-9]+ > { ast_name: NUMBER }
+      OP <- < '+' / '-' >
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("1 + 2 - 3"));
+  }
+  // Dictionary operator
+  {
+    parser pg(R"(
+      S <- 'cat' | 'dog' | 'cow'
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("dog"));
+    EXPECT_FALSE(pg.parse("fish"));
+  }
+  // Cut, negated class, ignored rule, any character
+  {
+    parser pg(R"(
+      S     <- 'a' ↑ [^0-9] Drop .
+      ~Drop <- '_'
+    )");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("ab_Z"));
+    EXPECT_FALSE(pg.parse("a1_Z")); // [^0-9] fails on a digit
+  }
+}
