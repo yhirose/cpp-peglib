@@ -2709,6 +2709,7 @@ struct SetupFirstSets : public TraversalVisitor {
     if (cc && cc->is_ascii_only()) { ope.span_bitset_ = &cc->ascii_bitset(); }
   }
   void visit(Reference &ope) override;
+  void visit(Holder &ope) override;
 
 private:
   ComputeFirstSet::FirstSetCache first_set_cache_;
@@ -4005,8 +4006,16 @@ inline void ComputeFirstSet::visit(Reference &ope) {
 
 inline void SetupFirstSets::visit(Reference &ope) {
   if (!ope.rule_) { return; }
-  if (!visited_rules_.insert(ope.rule_).second) { return; }
-  ope.rule_->accept(*this);
+  ope.rule_->accept(*this); // re-entry is guarded at the rule's Holder
+}
+
+// Guard rule setup by Definition so a SetupFirstSets shared across all rules
+// visits each rule's body at most once for the whole grammar. Without this the
+// per-rule setup re-walks every reachable rule once per referencing rule, which
+// is O(N^2) for grammars with dense cross-references.
+inline void SetupFirstSets::visit(Holder &ope) {
+  if (!visited_rules_.insert(ope.outer_).second) { return; }
+  ope.ope_->accept(*this);
 }
 
 inline void SetupFirstSets::visit(Sequence &ope) {
@@ -5249,10 +5258,15 @@ private:
       }
     }
 
-    // Setup First-Set and ISpan optimizations
-    for (auto &x : grammar) {
+    // Setup First-Set and ISpan optimizations. A single visitor is shared
+    // across all rules so its first-set cache and visited-rule set persist:
+    // each rule's first-sets are computed once (O(N)) instead of re-walking
+    // every reachable rule once per referencing rule (O(N^2)).
+    {
       SetupFirstSets vis;
-      x.second.accept(vis);
+      for (auto &x : grammar) {
+        x.second.accept(vis);
+      }
     }
 
     return {data.grammar, start, data.enablePackratParsing};

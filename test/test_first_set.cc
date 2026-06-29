@@ -260,3 +260,42 @@ TEST(FirstSetTest, Dictionary_operator) {
   EXPECT_TRUE(pg.parse("gamma"));
   EXPECT_FALSE(pg.parse("delta"));
 }
+
+// First-Set setup shares one visitor across all rules, so a sub-rule referenced
+// from many rules has its first-set computed once and reused. Verify the reused
+// first-set still filters correctly for every referencing rule.
+TEST(FirstSetTest, Shared_subrule_across_rules) {
+  parser pg(R"(
+    Start <- A / B / C
+    A     <- 'a' Term
+    B     <- 'b' Term
+    C     <- 'c' Term
+    Term  <- Num / Name
+    Num   <- [0-9]+
+    Name  <- [a-z]+
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a123"));
+  EXPECT_TRUE(pg.parse("bxyz"));
+  EXPECT_TRUE(pg.parse("c42"));
+  EXPECT_FALSE(pg.parse("a@")); // Term cannot start with '@'
+  EXPECT_FALSE(pg.parse("d1")); // no 'd' alternative
+}
+
+// A left-recursive rule referenced from multiple rules: the shared first-set
+// setup must handle the cycle correctly for every referencing rule.
+TEST(FirstSetTest, Left_recursive_rule_referenced_from_multiple_rules) {
+  parser pg(R"(
+    Start <- P / Q
+    P     <- 'p' Expr
+    Q     <- 'q' Expr
+    Expr  <- Expr '+' Num / Num
+    Num   <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("p1+2+3"));
+  EXPECT_TRUE(pg.parse("q9"));
+  EXPECT_FALSE(pg.parse("p+1")); // Expr cannot start with '+'
+}
