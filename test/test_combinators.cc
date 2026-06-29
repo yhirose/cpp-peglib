@@ -254,3 +254,23 @@ TEST(CombinatorTest, Cut_operator) {
   EXPECT_TRUE(parser.parse("ab"));
   EXPECT_FALSE(parser.parse("ac"));
 }
+
+// --- packrat on a recursive combinator-built grammar ---
+
+// Grammars built directly via the combinator API embed rules through WeakHolder
+// (rather than the name-based Reference used by load_grammar), so a recursive
+// rule forms a Holder cycle. Enabling packrat triggers the packrat-filter
+// setup, which must not infinitely recurse over that cycle.
+TEST(CombinatorTest, Packrat_on_recursive_combinator_grammar) {
+  Definition EXPR, TERM, FACTOR;
+  EXPR <= cho(seq(TERM, chr('+'), EXPR), TERM);
+  TERM <= cho(seq(FACTOR, chr('*'), TERM), FACTOR);
+  FACTOR <= cho(seq(chr('('), EXPR, chr(')')), chr('x'));
+  for (auto *d : {&EXPR, &TERM, &FACTOR}) {
+    d->enablePackratParsing = true;
+  }
+
+  EXPECT_TRUE(def_parse(EXPR, "x*(x+x)+x"));
+  EXPECT_TRUE(def_parse(EXPR, "x"));
+  EXPECT_FALSE(def_parse(EXPR, "x+"));
+}

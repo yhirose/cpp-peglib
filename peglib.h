@@ -4129,12 +4129,25 @@ inline void Definition::initialize_packrat_filter() const {
     struct CollectReachableRules : public TraversalVisitor {
       using TraversalVisitor::visit;
       std::vector<bool> reachable; // indexed by def_id
+      std::vector<bool>
+          visited_rules; // indexed by def_id; guards Holder cycles
 
-      CollectReachableRules(size_t n) : reachable(n, false) {}
+      CollectReachableRules(size_t n)
+          : reachable(n, false), visited_rules(n, false) {}
 
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
-        if (id < reachable.size()) { reachable[id] = true; }
+        if (id < reachable.size()) {
+          reachable[id] = true;
+
+          // Grammars built directly via the combinator API embed rules through
+          // WeakHolder rather than Reference, so a recursive rule forms a
+          // Holder cycle with no Reference to break it. Guard re-entry to avoid
+          // infinite recursion (reachability is monotone, so revisiting a rule
+          // we have already traversed adds nothing).
+          if (visited_rules[id]) { return; }
+          visited_rules[id] = true;
+        }
         ope.ope_->accept(*this);
       }
       void visit(Reference &ope) override {
