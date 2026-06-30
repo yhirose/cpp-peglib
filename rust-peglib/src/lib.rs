@@ -524,46 +524,54 @@ pub fn line_col(input: &str, pos: usize) -> (usize, usize) {
     (line, col)
 }
 
+// First-set cache: a rule's first-set is computed once and reused everywhere it
+// is referenced, so setup is O(N) instead of re-walking every reachable rule per
+// referencing rule (O(N^2)). The cache is shared across all rules and all
+// PrioritizedChoice alternatives; the per-alternative `seen`/cycle state is not.
+type FirstSetCache = std::collections::HashMap<usize, FirstSet>;
+
 fn setup_first_sets(rules: &[Definition]) {
+    let mut cache = FirstSetCache::new();
     for rule in rules {
-        fill_first_sets(rule.holder.as_ref(), rules);
+        fill_first_sets(rule.holder.as_ref(), rules, &mut cache);
     }
 }
 
-fn fill_first_sets(ope: &dyn Ope, rules: &[Definition]) {
+fn fill_first_sets(ope: &dyn Ope, rules: &[Definition], cache: &mut FirstSetCache) {
     let any = ope.as_any();
     if let Some(seq) = any.downcast_ref::<Sequence>() {
         setup_keyword_guard(seq, rules);
-        for o in &seq.opes { fill_first_sets(o.as_ref(), rules); }
+        for o in &seq.opes { fill_first_sets(o.as_ref(), rules, cache); }
         return;
     }
     if let Some(ch) = any.downcast_ref::<PrioritizedChoice>() {
         let mut sets = Vec::with_capacity(ch.opes.len());
         for alt in &ch.opes {
             let mut fs = FirstSet::default();
-            compute_first_set(alt.as_ref(), &mut fs, &mut std::collections::HashSet::new(), rules);
+            let mut cycle_count = 0usize;
+            compute_first_set(alt.as_ref(), &mut fs, &mut std::collections::HashSet::new(), &mut cycle_count, cache, rules);
             let (lit, rule) = first_hint(alt.as_ref(), rules);
             fs.first_literal = lit;
             fs.first_rule = rule;
             sets.push(fs);
         }
         unsafe { *ch.first_sets.get() = sets; }
-        for alt in &ch.opes { fill_first_sets(alt.as_ref(), rules); }
+        for alt in &ch.opes { fill_first_sets(alt.as_ref(), rules, cache); }
         return;
     }
-    if let Some(h) = any.downcast_ref::<Holder>() { if let Some(o) = &h.ope { fill_first_sets(o.as_ref(), rules); } return; }
-    if let Some(rep) = any.downcast_ref::<Repetition>() { fill_first_sets(rep.ope.as_ref(), rules); return; }
-    if let Some(p) = any.downcast_ref::<AndPredicate>() { fill_first_sets(p.ope.as_ref(), rules); return; }
-    if let Some(p) = any.downcast_ref::<NotPredicate>() { fill_first_sets(p.ope.as_ref(), rules); return; }
-    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { fill_first_sets(tb.ope.as_ref(), rules); return; }
-    if let Some(ws) = any.downcast_ref::<Whitespace>() { fill_first_sets(ws.ope.as_ref(), rules); return; }
-    if let Some(ig) = any.downcast_ref::<Ignore>() { fill_first_sets(ig.ope.as_ref(), rules); return; }
-    if let Some(cap) = any.downcast_ref::<Capture>() { fill_first_sets(cap.ope.as_ref(), rules); return; }
-    if let Some(cs) = any.downcast_ref::<CaptureScope>() { fill_first_sets(cs.ope.as_ref(), rules); return; }
-    if let Some(rec) = any.downcast_ref::<Recovery>() { fill_first_sets(rec.ope.as_ref(), rules); }
+    if let Some(h) = any.downcast_ref::<Holder>() { if let Some(o) = &h.ope { fill_first_sets(o.as_ref(), rules, cache); } return; }
+    if let Some(rep) = any.downcast_ref::<Repetition>() { fill_first_sets(rep.ope.as_ref(), rules, cache); return; }
+    if let Some(p) = any.downcast_ref::<AndPredicate>() { fill_first_sets(p.ope.as_ref(), rules, cache); return; }
+    if let Some(p) = any.downcast_ref::<NotPredicate>() { fill_first_sets(p.ope.as_ref(), rules, cache); return; }
+    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { fill_first_sets(tb.ope.as_ref(), rules, cache); return; }
+    if let Some(ws) = any.downcast_ref::<Whitespace>() { fill_first_sets(ws.ope.as_ref(), rules, cache); return; }
+    if let Some(ig) = any.downcast_ref::<Ignore>() { fill_first_sets(ig.ope.as_ref(), rules, cache); return; }
+    if let Some(cap) = any.downcast_ref::<Capture>() { fill_first_sets(cap.ope.as_ref(), rules, cache); return; }
+    if let Some(cs) = any.downcast_ref::<CaptureScope>() { fill_first_sets(cs.ope.as_ref(), rules, cache); return; }
+    if let Some(rec) = any.downcast_ref::<Recovery>() { fill_first_sets(rec.ope.as_ref(), rules, cache); }
 }
 
-fn compute_first_set(ope: &dyn Ope, out: &mut FirstSet, seen: &mut std::collections::HashSet<usize>, rules: &[Definition]) {
+fn compute_first_set(ope: &dyn Ope, out: &mut FirstSet, seen: &mut std::collections::HashSet<usize>, cycle_count: &mut usize, cache: &mut FirstSetCache, rules: &[Definition]) {
     let any = ope.as_any();
     if let Some(lit) = any.downcast_ref::<LiteralString>() {
         if let Some(&b) = lit.lit.first() {
@@ -590,7 +598,7 @@ fn compute_first_set(ope: &dyn Ope, out: &mut FirstSet, seen: &mut std::collecti
     if let Some(seq) = any.downcast_ref::<Sequence>() {
         for c in &seq.opes {
             let mut elem = FirstSet::default();
-            compute_first_set(c.as_ref(), &mut elem, seen, rules);
+            compute_first_set(c.as_ref(), &mut elem, seen, cycle_count, cache, rules);
             out.merge(&elem);
             if !elem.can_be_empty { return; }
         }
@@ -598,30 +606,46 @@ fn compute_first_set(ope: &dyn Ope, out: &mut FirstSet, seen: &mut std::collecti
         return;
     }
     if let Some(ch) = any.downcast_ref::<PrioritizedChoice>() {
-        for c in &ch.opes { compute_first_set(c.as_ref(), out, seen, rules); }
+        for c in &ch.opes { compute_first_set(c.as_ref(), out, seen, cycle_count, cache, rules); }
         return;
     }
     if let Some(rep) = any.downcast_ref::<Repetition>() {
-        compute_first_set(rep.ope.as_ref(), out, seen, rules);
+        compute_first_set(rep.ope.as_ref(), out, seen, cycle_count, cache, rules);
         if rep.min == 0 { out.can_be_empty = true; }
         return;
     }
     if any.downcast_ref::<AndPredicate>().is_some() || any.downcast_ref::<NotPredicate>().is_some() || any.downcast_ref::<Cut>().is_some() { out.can_be_empty = true; return; }
-    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { compute_first_set(tb.ope.as_ref(), out, seen, rules); return; }
-    if let Some(ws) = any.downcast_ref::<Whitespace>() { compute_first_set(ws.ope.as_ref(), out, seen, rules); return; }
-    if let Some(ig) = any.downcast_ref::<Ignore>() { compute_first_set(ig.ope.as_ref(), out, seen, rules); return; }
-    if let Some(cap) = any.downcast_ref::<Capture>() { compute_first_set(cap.ope.as_ref(), out, seen, rules); return; }
-    if let Some(cs) = any.downcast_ref::<CaptureScope>() { compute_first_set(cs.ope.as_ref(), out, seen, rules); return; }
-    if let Some(rec) = any.downcast_ref::<Recovery>() { compute_first_set(rec.ope.as_ref(), out, seen, rules); return; }
+    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { compute_first_set(tb.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
+    if let Some(ws) = any.downcast_ref::<Whitespace>() { compute_first_set(ws.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
+    if let Some(ig) = any.downcast_ref::<Ignore>() { compute_first_set(ig.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
+    if let Some(cap) = any.downcast_ref::<Capture>() { compute_first_set(cap.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
+    if let Some(cs) = any.downcast_ref::<CaptureScope>() { compute_first_set(cs.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
+    if let Some(rec) = any.downcast_ref::<Recovery>() { compute_first_set(rec.ope.as_ref(), out, seen, cycle_count, cache, rules); return; }
     if let Some(h) = any.downcast_ref::<Holder>() {
-        if let Some(o) = &h.ope { compute_first_set(o.as_ref(), out, seen, rules); }
+        if let Some(o) = &h.ope { compute_first_set(o.as_ref(), out, seen, cycle_count, cache, rules); }
         return;
     }
     if let Some(r) = any.downcast_ref::<Reference>() {
         if let Some(id) = r.rule_id {
-            if !seen.insert(id) { return; }
-            if let Some(def) = rules.get(id) { compute_first_set(def.holder.as_ref(), out, seen, rules); }
+            if let Some(cached) = cache.get(&id) {
+                out.merge(cached);
+                return;
+            }
+            if !seen.insert(id) {
+                *cycle_count += 1; // cycle / left recursion on this path
+                return;
+            }
+            let saved = *cycle_count;
+            let mut computed = FirstSet::default();
+            if let Some(def) = rules.get(id) {
+                compute_first_set(def.holder.as_ref(), &mut computed, seen, cycle_count, cache, rules);
+            }
             seen.remove(&id);
+            out.merge(&computed);
+            if *cycle_count == saved {
+                // Cycle-free: the computed first-set is complete; cache for reuse.
+                cache.insert(id, computed);
+            }
         } else {
             out.any_char = true;
         }
