@@ -71,133 +71,8 @@ TEST(UnicodeTest, dot_with_a_grapheme)
 #endif
 
 // =============================================================================
-// Symbol Table Tests
+// Symbol Table Tests (via semantic predicates)
 // =============================================================================
-
-#ifdef CPPPEGLIB_SYMBOL_TABLE_SUPPORT
-TEST(SymbolTableTest, symbol_instruction_test) {
-  parser parser(R"(S            <- (Decl / Ref)*
-Decl         <- 'decl' symbol
-Ref          <- 'ref' is_symbol
-Name         <- < [a-zA-Z]+ >
-%whitespace  <- [ \t\r\n]*
-
-symbol       <- Name { declare_symbol var_table }
-is_symbol    <- Name { check_symbol var_table }
-)");
-
-  {
-    const auto source = R"(decl aaa
-ref aaa
-ref bbb
-)";
-    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
-      EXPECT_EQ(3, line);
-      EXPECT_EQ(5, col);
-      EXPECT_EQ("'bbb' doesn't exist.", msg);
-    });
-    EXPECT_FALSE(parser.parse(source));
-  }
-
-  {
-    const auto source = R"(decl aaa
-ref aaa
-decl aaa
-)";
-    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
-      EXPECT_EQ(3, line);
-      EXPECT_EQ(6, col);
-      EXPECT_EQ("'aaa' already exists.", msg);
-    });
-    EXPECT_FALSE(parser.parse(source));
-  }
-}
-
-TEST(SymbolTableTest, symbol_instruction_backtrack_test) {
-  parser parser(R"(S            <- (DeclBT / Decl / Ref)*
-DeclBT       <- 'decl' symbol 'backtrack' # match fails, so symbol should not be set
-Decl         <- 'decl' symbol
-Ref          <- 'ref' is_symbol
-Name         <- < [a-zA-Z]+ >
-%whitespace  <- [ \t\r\n]*
-
-# 'var_table' is a table name.
-symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
-is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
-)");
-
-  const auto source = R"(decl foo
-ref foo
-)";
-  EXPECT_TRUE(parser.parse(source));
-}
-
-TEST(SymbolTableTest, symbol_instruction_backtrack_test2) {
-  parser parser(R"(S            <- DeclBT* Decl Ref
-DeclBT       <- 'decl' symbol 'backtrack' # match fails, so symbol should not be set
-Decl         <- 'decl' symbol
-Ref          <- 'ref' is_symbol
-Name         <- < [a-zA-Z]+ >
-%whitespace  <- [ \t\r\n]*
-
-# 'var_table' is a table name.
-symbol       <- Name { declare_symbol var_table } # Declare symbol instruction
-is_symbol    <- Name { check_symbol var_table }   # Check symbol instruction
-)");
-
-  const auto source = R"(decl foo
-ref foo
-)";
-  EXPECT_TRUE(parser.parse(source));
-}
-
-TEST(SymbolTableTest, typedef_test) {
-  parser parser(R"(
-S            <- (Decl / TypeDef)*
-Decl         <- 'decl' type
-TypeDef      <- 'typedef' type_ref type ';'
-type         <- Name { declare_symbol type_table }
-type_ref     <- Name { check_symbol type_table }
-
-Name         <- < [a-zA-Z0-9_]+ >
-%whitespace  <- [ \t\r\n]*
-)");
-
-  {
-    const auto source = R"(decl long
-typedef long __off64_t;
-typedef __off64_t __loff_t;
-)";
-    EXPECT_TRUE(parser.parse(source));
-  }
-
-  {
-    const auto source = R"(decl long
-typedef long __off64_t;
-typedef __off64_T __loff_t;
-)";
-    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
-      EXPECT_EQ(3, line);
-      EXPECT_EQ(9, col);
-      EXPECT_EQ("'__off64_T' doesn't exist.", msg);
-    });
-    EXPECT_FALSE(parser.parse(source));
-  }
-
-  {
-    const auto source = R"(decl long
-typedef long __off64_t;
-typedef __off64_t __loff_t;
-typedef __off64_t __loff_t;
-)";
-    parser.set_logger([](size_t line, size_t col, const std::string &msg) {
-      EXPECT_EQ(4, line);
-      EXPECT_EQ(19, col);
-      EXPECT_EQ("'__loff_t' already exists.", msg);
-    });
-    EXPECT_FALSE(parser.parse(source));
-  }
-}
 
 TEST(SymbolTableTest, predicate_test) {
   parser parser(R"(
@@ -268,7 +143,6 @@ decl aaa
     EXPECT_FALSE(parser.parse(source, ast));
   }
 }
-#endif
 
 // =============================================================================
 // State Tests

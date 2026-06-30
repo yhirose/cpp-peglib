@@ -4579,9 +4579,6 @@ private:
           if (types.find(type) == types.end()) {
             data.instructions[name].push_back(instruction);
             types.insert(instruction.type);
-            if (type == "declare_symbol" || type == "check_symbol") {
-              if (!TokenChecker::is_token(*ope)) { ope = tok(ope); }
-            }
           } else {
             data.duplicates_of_instruction.emplace_back(type,
                                                         instruction.sv.data());
