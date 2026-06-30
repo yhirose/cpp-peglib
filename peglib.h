@@ -4356,11 +4356,13 @@ private:
   void make_grammar() {
     // Setup PEG syntax parser
     g["Grammar"] <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-    g["Definition"] <=
-        cho(seq(g["Ignore"], g["IdentCont"], g["Parameters"], g["LEFTARROW"],
-                g["Expression"], opt(g["Instruction"])),
-            seq(g["Ignore"], g["Identifier"], g["LEFTARROW"], g["Expression"],
-                opt(g["Instruction"])));
+    // Left-factored: parse the rule name (IdentCont) once, then optionally the
+    // macro parameter list. `opt(Parameters)` pushes a value only for a macro
+    // (so the value layout matches the old two-alternative form), and Spacing
+    // (~, no value) consumes the gap before LEFTARROW that Identifier used to.
+    g["Definition"] <= seq(g["Ignore"], g["IdentCont"], opt(g["Parameters"]),
+                           g["Spacing"], g["LEFTARROW"], g["Expression"],
+                           opt(g["Instruction"]));
     g["Expression"] <= seq(g["Sequence"], zom(seq(g["SLASH"], g["Sequence"])));
     g["Sequence"] <= zom(cho(g["CUT"], g["Prefix"]));
     g["Prefix"] <= seq(opt(cho(g["AND"], g["NOT"])), g["SuffixWithLabel"]);
@@ -4368,17 +4370,19 @@ private:
         seq(g["Suffix"], opt(seq(g["LABEL"], g["Identifier"])));
     g["Suffix"] <= seq(g["Primary"], opt(g["Loop"]));
     g["Loop"] <= cho(g["QUESTION"], g["STAR"], g["PLUS"], g["Repetition"]);
-    g["Primary"] <= cho(seq(g["Ignore"], g["IdentCont"], g["Arguments"],
-                            npd(g["LEFTARROW"])),
-                        seq(g["Ignore"], g["Identifier"],
-                            npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
-                        seq(g["OPEN"], g["Expression"], g["CLOSE"]),
-                        seq(g["BeginTok"], g["Expression"], g["EndTok"]),
-                        g["CapScope"],
-                        seq(g["BeginCap"], g["Expression"], g["EndCap"]),
-                        g["BackRef"], g["DictionaryI"], g["LiteralI"],
-                        g["Dictionary"], g["Literal"], g["NegatedClassI"],
-                        g["NegatedClass"], g["ClassI"], g["Class"], g["DOT"]);
+    // Left-factored: a macro reference (`Name(args)`) and a plain reference
+    // (`Name`) share the leading `Ignore IdentCont`, so parse it once and let
+    // `opt(Arguments)` decide. opt() pushes the argument list only for a macro
+    // reference, so vs.size() distinguishes the two in the action.
+    g["Primary"] <=
+        cho(seq(g["Ignore"], g["IdentCont"], opt(g["Arguments"]), g["Spacing"],
+                npd(seq(opt(g["Parameters"]), g["LEFTARROW"]))),
+            seq(g["OPEN"], g["Expression"], g["CLOSE"]),
+            seq(g["BeginTok"], g["Expression"], g["EndTok"]), g["CapScope"],
+            seq(g["BeginCap"], g["Expression"], g["EndCap"]), g["BackRef"],
+            g["DictionaryI"], g["LiteralI"], g["Dictionary"], g["Literal"],
+            g["NegatedClassI"], g["NegatedClass"], g["ClassI"], g["Class"],
+            g["DOT"]);
 
     g["Identifier"] <= seq(g["IdentCont"], g["Spacing"]);
     g["IdentCont"] <= tok(seq(g["IdentStart"], zom(g["IdentRest"])));
@@ -4546,7 +4550,10 @@ private:
     g["Definition"] = [&](const SemanticValues &vs, std::any &dt) {
       auto &data = *std::any_cast<Data *>(dt);
 
-      auto is_macro = vs.choice() == 0;
+      // Macro iff the optional Parameters matched: its value (the parameter
+      // name list) then sits at vs[2]. A plain definition has LEFTARROW's value
+      // there instead.
+      auto is_macro = vs[2].type() == typeid(std::vector<std::string>);
       auto ignore = std::any_cast<bool>(vs[0]);
       auto name = std::any_cast<std::string>(vs[1]);
 
@@ -4710,9 +4717,9 @@ private:
       auto &data = *std::any_cast<Data *>(dt);
 
       switch (vs.choice()) {
-      case 0:   // Macro Reference
-      case 1: { // Reference
-        auto is_macro = vs.choice() == 0;
+      case 0: { // Reference / Macro reference (left-factored)
+        // Macro reference iff opt(Arguments) matched and pushed the arg list.
+        auto is_macro = vs.size() > 2;
         auto ignore = std::any_cast<bool>(vs[0]);
         const auto &ident = std::any_cast<std::string>(vs[1]);
 
@@ -4730,16 +4737,16 @@ private:
           return ope;
         }
       }
-      case 2: { // (Expression)
+      case 1: { // (Expression)
         return std::any_cast<std::shared_ptr<Ope>>(vs[0]);
       }
-      case 3: { // TokenBoundary
+      case 2: { // TokenBoundary
         return tok(std::any_cast<std::shared_ptr<Ope>>(vs[0]));
       }
-      case 4: { // CaptureScope
+      case 3: { // CaptureScope
         return csc(std::any_cast<std::shared_ptr<Ope>>(vs[0]));
       }
-      case 5: { // Capture
+      case 4: { // Capture
         const auto &name = std::any_cast<std::string_view>(vs[0]);
         auto ope = std::any_cast<std::shared_ptr<Ope>>(vs[1]);
 

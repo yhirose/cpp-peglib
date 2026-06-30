@@ -1,9 +1,7 @@
 # Setup PEG syntax parser
 Grammar <-  Spacing  Definition+  EndOfFile
 
-Definition <-
-	Ignore  IdentCont  Parameters  LEFTARROW Expression  Instruction?
-	/ Ignore  Identifier  LEFTARROW  Expression Instruction?
+Definition <-  Ignore  IdentCont  Parameters?  Spacing  LEFTARROW  Expression  Instruction?
 
 Expression <-  Sequence  (SLASH  Sequence)*
 
@@ -18,8 +16,7 @@ Suffix <-  Primary  Loop?
 Loop <-  QUESTION /  STAR /  PLUS /  Repetition
 
 Primary <-
-	Ignore  IdentCont  Arguments !LEFTARROW
-	/ Ignore  Identifier !(Parameters?  LEFTARROW)
+	Ignore  IdentCont  Arguments?  Spacing  !(Parameters?  LEFTARROW)
 	/ OPEN  Expression  CLOSE
 	/ BeginTok  Expression  EndTok
 	/ BeginCapScope  Expression  EndCapScope
