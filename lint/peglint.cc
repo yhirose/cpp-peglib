@@ -44,6 +44,7 @@ int main(int argc, const char **argv) {
   auto opt_trace = false;
   auto opt_verbose = false;
   auto opt_profile = false;
+  auto opt_blob = false;
   vector<const char *> path_list;
 
   auto argi = 1;
@@ -73,6 +74,8 @@ int main(int argc, const char **argv) {
       opt_profile = true;
     } else if (string("--verbose") == arg) {
       opt_verbose = true;
+    } else if (string("--blob") == arg) {
+      opt_blob = true;
     } else {
       path_list.push_back(arg);
     }
@@ -90,6 +93,8 @@ int main(int argc, const char **argv) {
     --trace: show concise trace messages
     --profile: show profile report
     --verbose: verbose output for trace and profile
+    --blob: write a serialized grammar blob to stdout (load it later with
+            peg::parser::load_blob to skip the meta-parse on startup)
 )";
 
     return 1;
@@ -111,6 +116,18 @@ int main(int argc, const char **argv) {
   });
 
   if (!parser.load_grammar(syntax.data(), syntax.size())) { return -1; }
+
+  if (opt_blob) {
+    try {
+      auto blob = parser.serialize_grammar();
+      std::cout.write(reinterpret_cast<const char *>(blob.data()),
+                      static_cast<streamsize>(blob.size()));
+    } catch (const std::exception &e) {
+      cerr << "cannot serialize grammar: " << e.what() << endl;
+      return -1;
+    }
+    return 0;
+  }
 
   {
     using namespace peg;

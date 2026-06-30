@@ -29,6 +29,7 @@ add_executable(peglib-test-main
   test_utf8.cc
   test_snapshot.cc
   test_mini_js.cc
+  test_serialize.cc
 )
 
 target_include_directories(peglib-test-main PRIVATE ..)

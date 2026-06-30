@@ -49,6 +49,8 @@
 
 namespace peg {
 
+struct GrammarBlob;
+
 /*-----------------------------------------------------------------------------
  *  scope_exit
  *---------------------------------------------------------------------------*/
@@ -451,6 +453,7 @@ public:
   size_t items_count() const { return items_count_; }
 
   friend struct ComputeFirstSet;
+  friend struct GrammarBlob;
 
 private:
   struct Info {
@@ -1655,6 +1658,7 @@ public:
   void accept(Visitor &v) override;
 
   friend struct ComputeFirstSet;
+  friend struct GrammarBlob;
 
   bool is_ascii_only() const { return is_ascii_only_; }
   const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
@@ -4259,6 +4263,355 @@ inline void FindReference::visit(Reference &ope) {
 }
 
 /*-----------------------------------------------------------------------------
+ *  Grammar serialization
+ *
+ *  Serialize a compiled Grammar (the operator tree) to a byte blob and back,
+ *  letting an application skip the meta-parse on startup by embedding a
+ *  prebuilt blob. Structure only: semantic callbacks (actions / enter / leave /
+ *  predicate, attached by enable_ast() etc.) are NOT serialized and must be
+ *  re-applied after deserialize. References resolve by name (no pointer fixup);
+ *  first-sets and keyword guards are recomputed on load (O(N)). Grammars using
+ *  the `precedence` instruction, the `User` operator, or a Capture with a match
+ *  action are rejected. The blob is specific to this peglib version's layout.
+ *---------------------------------------------------------------------------*/
+
+struct GrammarBlob {
+  enum Tag : uint8_t {
+    T_Sequence,
+    T_Choice,
+    T_Repetition,
+    T_And,
+    T_Not,
+    T_Dictionary,
+    T_Literal,
+    T_CharClass,
+    T_Char,
+    T_AnyChar,
+    T_CaptureScope,
+    T_Capture,
+    T_TokenBoundary,
+    T_Ignore,
+    T_BackRef,
+    T_Reference,
+    T_Whitespace,
+    T_Recovery,
+    T_Cut,
+    T_Null
+  };
+
+  struct Writer {
+    std::vector<uint8_t> b;
+    void u8(uint8_t v) { b.push_back(v); }
+    void u32(uint32_t v) {
+      for (int i = 0; i < 4; i++)
+        b.push_back((v >> (8 * i)) & 0xff);
+    }
+    void u64(uint64_t v) {
+      for (int i = 0; i < 8; i++)
+        b.push_back((v >> (8 * i)) & 0xff);
+    }
+    void str(const std::string &s) {
+      u32((uint32_t)s.size());
+      b.insert(b.end(), s.begin(), s.end());
+    }
+  };
+
+  static void write_ope(Writer &w, const std::shared_ptr<Ope> &o) {
+    if (!o) {
+      w.u8(T_Null);
+      return;
+    }
+    Ope *p = o.get();
+    if (auto x = dynamic_cast<Sequence *>(p)) {
+      w.u8(T_Sequence);
+      w.u32((uint32_t)x->opes_.size());
+      for (auto &c : x->opes_)
+        write_ope(w, c);
+    } else if (auto x = dynamic_cast<PrioritizedChoice *>(p)) {
+      w.u8(T_Choice);
+      w.u8(x->for_label_ ? 1 : 0);
+      w.u32((uint32_t)x->opes_.size());
+      for (auto &c : x->opes_)
+        write_ope(w, c);
+    } else if (auto x = dynamic_cast<Repetition *>(p)) {
+      w.u8(T_Repetition);
+      w.u64(x->min_);
+      w.u64(x->max_);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<AndPredicate *>(p)) {
+      w.u8(T_And);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<NotPredicate *>(p)) {
+      w.u8(T_Not);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<Dictionary *>(p)) {
+      w.u8(T_Dictionary);
+      w.u8(x->trie_.ignore_case_ ? 1 : 0);
+      std::vector<std::string> words;
+      for (auto &kv : x->trie_.dic_)
+        if (kv.second.match) words.push_back(kv.first);
+      w.u32((uint32_t)words.size());
+      for (auto &s : words)
+        w.str(s);
+    } else if (auto x = dynamic_cast<LiteralString *>(p)) {
+      w.u8(T_Literal);
+      w.u8(x->ignore_case_ ? 1 : 0);
+      w.str(x->lit_);
+    } else if (auto x = dynamic_cast<CharacterClass *>(p)) {
+      w.u8(T_CharClass);
+      w.u8(x->negated_ ? 1 : 0);
+      w.u8(x->ignore_case_ ? 1 : 0);
+      w.u32((uint32_t)x->ranges_.size());
+      for (auto &r : x->ranges_) {
+        w.u32((uint32_t)r.first);
+        w.u32((uint32_t)r.second);
+      }
+    } else if (auto x = dynamic_cast<Character *>(p)) {
+      w.u8(T_Char);
+      w.u32((uint32_t)x->ch_);
+    } else if (dynamic_cast<AnyCharacter *>(p)) {
+      w.u8(T_AnyChar);
+    } else if (auto x = dynamic_cast<CaptureScope *>(p)) {
+      w.u8(T_CaptureScope);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<Capture *>(p)) {
+      if (x->match_action_) {
+        throw std::runtime_error(
+            "GrammarBlob: Capture with a match action is not serializable");
+      }
+      w.u8(T_Capture);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<TokenBoundary *>(p)) {
+      w.u8(T_TokenBoundary);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<Ignore *>(p)) {
+      w.u8(T_Ignore);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<BackReference *>(p)) {
+      w.u8(T_BackRef);
+      w.str(x->name_);
+    } else if (auto x = dynamic_cast<Reference *>(p)) {
+      w.u8(T_Reference);
+      w.u8(x->is_macro_ ? 1 : 0);
+      w.str(x->name_);
+      w.u32((uint32_t)x->args_.size());
+      for (auto &a : x->args_)
+        write_ope(w, a);
+    } else if (auto x = dynamic_cast<Whitespace *>(p)) {
+      w.u8(T_Whitespace);
+      write_ope(w, x->ope_);
+    } else if (auto x = dynamic_cast<Recovery *>(p)) {
+      w.u8(T_Recovery);
+      write_ope(w, x->ope_);
+    } else if (dynamic_cast<Cut *>(p)) {
+      w.u8(T_Cut);
+    } else {
+      throw std::runtime_error(
+          "GrammarBlob: operator not serializable (e.g. 'precedence' or a "
+          "custom User operator)");
+    }
+  }
+
+  struct Reader {
+    const uint8_t *p, *end;
+    uint8_t u8() {
+      if (p >= end)
+        throw std::runtime_error("GrammarBlob: unexpected end of blob");
+      return *p++;
+    }
+    uint32_t u32() {
+      uint32_t v = 0;
+      for (int i = 0; i < 4; i++)
+        v |= (uint32_t)u8() << (8 * i);
+      return v;
+    }
+    uint64_t u64() {
+      uint64_t v = 0;
+      for (int i = 0; i < 8; i++)
+        v |= (uint64_t)u8() << (8 * i);
+      return v;
+    }
+    std::string str() {
+      uint32_t n = u32();
+      std::string s((const char *)p, (const char *)p + n);
+      p += n;
+      return s;
+    }
+  };
+
+  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g) {
+    switch (r.u8()) {
+    case T_Null: return nullptr;
+    case T_Sequence: {
+      uint32_t n = r.u32();
+      std::vector<std::shared_ptr<Ope>> v;
+      for (uint32_t i = 0; i < n; i++)
+        v.push_back(read_ope(r, g));
+      return std::make_shared<Sequence>(std::move(v));
+    }
+    case T_Choice: {
+      bool fl = r.u8();
+      uint32_t n = r.u32();
+      std::vector<std::shared_ptr<Ope>> v;
+      for (uint32_t i = 0; i < n; i++)
+        v.push_back(read_ope(r, g));
+      auto c = std::make_shared<PrioritizedChoice>(std::move(v));
+      c->for_label_ = fl;
+      return c;
+    }
+    case T_Repetition: {
+      uint64_t mn = r.u64(), mx = r.u64();
+      auto o = read_ope(r, g);
+      return std::make_shared<Repetition>(o, mn, mx);
+    }
+    case T_And: return std::make_shared<AndPredicate>(read_ope(r, g));
+    case T_Not: return std::make_shared<NotPredicate>(read_ope(r, g));
+    case T_Dictionary: {
+      bool ic = r.u8();
+      uint32_t n = r.u32();
+      std::vector<std::string> words;
+      for (uint32_t i = 0; i < n; i++)
+        words.push_back(r.str());
+      return std::make_shared<Dictionary>(words, ic);
+    }
+    case T_Literal: {
+      bool ic = r.u8();
+      std::string s = r.str();
+      return std::make_shared<LiteralString>(std::move(s), ic);
+    }
+    case T_CharClass: {
+      bool neg = r.u8(), ic = r.u8();
+      uint32_t n = r.u32();
+      std::vector<std::pair<char32_t, char32_t>> ranges;
+      for (uint32_t i = 0; i < n; i++) {
+        auto lo = r.u32(), hi = r.u32();
+        ranges.emplace_back((char32_t)lo, (char32_t)hi);
+      }
+      return std::make_shared<CharacterClass>(ranges, neg, ic);
+    }
+    case T_Char: return std::make_shared<Character>((char32_t)r.u32());
+    case T_AnyChar: return std::make_shared<AnyCharacter>();
+    case T_CaptureScope: return std::make_shared<CaptureScope>(read_ope(r, g));
+    case T_Capture: {
+      auto o = read_ope(r, g);
+      return std::make_shared<Capture>(o, nullptr);
+    }
+    case T_TokenBoundary:
+      return std::make_shared<TokenBoundary>(read_ope(r, g));
+    case T_Ignore: return std::make_shared<Ignore>(read_ope(r, g));
+    case T_BackRef: return std::make_shared<BackReference>(r.str());
+    case T_Reference: {
+      bool im = r.u8();
+      std::string nm = r.str();
+      uint32_t n = r.u32();
+      std::vector<std::shared_ptr<Ope>> args;
+      for (uint32_t i = 0; i < n; i++)
+        args.push_back(read_ope(r, g));
+      return std::make_shared<Reference>(g, nm, nullptr, im, args);
+    }
+    case T_Whitespace: return std::make_shared<Whitespace>(read_ope(r, g));
+    case T_Recovery: return std::make_shared<Recovery>(read_ope(r, g));
+    case T_Cut: return std::make_shared<Cut>();
+    default: throw std::runtime_error("GrammarBlob: bad operator tag");
+    }
+  }
+
+  static const uint32_t MAGIC = 0x50454731; // "PEG1"
+
+  static std::vector<uint8_t> serialize(const Grammar &g,
+                                        const std::string &start) {
+    Writer w;
+    w.u32(MAGIC);
+    w.str(start);
+    w.u32((uint32_t)g.size());
+    for (auto &[name, def] : g) {
+      w.str(name);
+      uint8_t flags =
+          (def.ignoreSemanticValue ? 1 : 0) | (def.is_macro ? 2 : 0) |
+          (def.no_ast_opt ? 4 : 0) | (def.eoi_check ? 8 : 0) |
+          (def.enablePackratParsing ? 16 : 0) |
+          (def.is_left_recursive ? 32 : 0) | (def.can_be_empty ? 64 : 0);
+      w.u8(flags);
+      w.u32((uint32_t)def.params.size());
+      for (auto &s : def.params)
+        w.str(s);
+      w.str(def.ast_name);
+      w.str(def.error_message);
+      write_ope(w, const_cast<Definition &>(def).get_core_operator());
+      write_ope(w, def.whitespaceOpe);
+      write_ope(w, def.wordOpe);
+    }
+    return std::move(w.b);
+  }
+
+  static std::shared_ptr<Grammar> deserialize(const std::vector<uint8_t> &blob,
+                                              std::string &start_out) {
+    Reader r{blob.data(), blob.data() + blob.size()};
+    if (r.u32() != MAGIC)
+      throw std::runtime_error("GrammarBlob: bad magic / not a grammar blob");
+    start_out = r.str();
+    uint32_t ndef = r.u32();
+    auto g = std::make_shared<Grammar>();
+    struct Pending {
+      std::shared_ptr<Ope> body, ws, word;
+      uint8_t flags;
+      std::vector<std::string> params;
+      std::string ast_name, err;
+    };
+    std::vector<std::string> names(ndef);
+    std::vector<Pending> pend(ndef);
+    for (uint32_t i = 0; i < ndef; i++) {
+      names[i] = r.str();
+      uint8_t flags = r.u8();
+      uint32_t np = r.u32();
+      std::vector<std::string> params;
+      for (uint32_t k = 0; k < np; k++)
+        params.push_back(r.str());
+      std::string ast_name = r.str();
+      std::string err = r.str();
+      auto body = read_ope(r, *g);
+      auto ws = read_ope(r, *g);
+      auto word = read_ope(r, *g);
+      pend[i] = {body,
+                 ws,
+                 word,
+                 flags,
+                 std::move(params),
+                 std::move(ast_name),
+                 std::move(err)};
+    }
+    for (uint32_t i = 0; i < ndef; i++) {
+      auto &def = (*g)[names[i]];
+      def.name = names[i];
+      auto &pd = pend[i];
+      def.ignoreSemanticValue = pd.flags & 1;
+      def.is_macro = pd.flags & 2;
+      def.no_ast_opt = pd.flags & 4;
+      def.eoi_check = pd.flags & 8;
+      def.enablePackratParsing = pd.flags & 16;
+      def.is_left_recursive = pd.flags & 32;
+      def.can_be_empty = pd.flags & 64;
+      def.params = std::move(pd.params);
+      def.ast_name = std::move(pd.ast_name);
+      def.error_message = std::move(pd.err);
+      def <= pd.body;
+      def.whitespaceOpe = pd.ws;
+      def.wordOpe = pd.word;
+    }
+    for (auto &x : *g) {
+      LinkReferences vis(*g, x.second.params);
+      x.second.accept(vis);
+    }
+    {
+      SetupFirstSets vis; // shared across rules -> O(N)
+      for (auto &x : *g)
+        x.second.accept(vis);
+    }
+    return g;
+  }
+};
+
+/*-----------------------------------------------------------------------------
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
 
@@ -5669,6 +6022,22 @@ public:
 
   bool load_grammar(std::string_view sv, std::string_view start = {}) {
     return load_grammar(sv.data(), sv.size(), Rules(), start);
+  }
+
+  // Serialize the loaded grammar to a portable byte blob (see GrammarBlob).
+  // Semantic callbacks are not included; throws if the grammar is not
+  // serializable (e.g. uses the `precedence` instruction).
+  std::vector<uint8_t> serialize_grammar() const {
+    return GrammarBlob::serialize(*grammar_, start_);
+  }
+
+  // Load a grammar from a blob produced by serialize_grammar() / GrammarBlob,
+  // skipping the meta-parse. Re-apply enable_ast() etc. afterwards as needed.
+  bool load_blob(const std::vector<uint8_t> &blob) {
+    try {
+      grammar_ = GrammarBlob::deserialize(blob, start_);
+    } catch (const std::exception &) { return false; }
+    return grammar_ != nullptr;
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
