@@ -1,0 +1,56 @@
+[
+  {
+    "name": "unicode_rule_names_japanese",
+    "description": "Rule names (identifiers) may contain non-ASCII (CJK) characters.",
+    "grammar": "文 <- 修飾語? 主語 述語 '。'\n主語 <- 名詞 助詞\n述語 <- 動詞 助詞\n修飾語 <- 形容詞\n名詞 <- 'サーバー' / 'クライアント'\n形容詞 <- '古い' / '新しい'\n助詞 <- 'は' / 'を' / 'が'\n動詞 <- '送る' / '受け取る'\n",
+    "cases": [
+      {
+        "input": "サーバーは送るを。",
+        "match": true
+      },
+      {
+        "input": "古いサーバーは送るを。",
+        "match": true
+      },
+      {
+        "input": "新しいクライアントが受け取るは。",
+        "match": true
+      },
+      {
+        "input": "サーバーは送る。",
+        "match": false
+      },
+      {
+        "input": "サーバー。",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "unicode_rule_names_greek",
+    "description": "Identifiers may use non-ASCII letters (Greek) and character-class ranges.",
+    "grammar": "Δοκιμή <- λέξη+\nλέξη <- [α-ωΑ-Ω]+ ' '?\n",
+    "cases": [
+      {
+        "input": "λεξη",
+        "match": true
+      },
+      {
+        "input": "λεξη λεξη",
+        "match": true
+      },
+      {
+        "input": "αβγ",
+        "match": true
+      },
+      {
+        "input": "λέξη",
+        "match": false
+      },
+      {
+        "input": "",
+        "match": false
+      }
+    ]
+  }
+]
