@@ -987,7 +987,16 @@ impl Ope for Capture {
 
 impl Ope for Ignore {
     fn parse_core(&self, pos: usize, vs: &mut SemanticValues, ctx: &mut Context) -> usize {
-        self.ope.parse_core(pos, vs, ctx)
+        // Parse the child into a throwaway semantic-values scope so its value and
+        // tokens are discarded (mirrors cpp-peglib's `~` ignore operator).
+        let tok_mark = vs.tokens.len();
+        let val_mark = vs.values.len();
+        ctx.push_semantic_values_scope();
+        let len = self.ope.parse_core(pos, vs, ctx);
+        ctx.pop_semantic_values_scope();
+        vs.tokens.truncate(tok_mark);
+        vs.values.truncate(val_mark);
+        len
     }
     fn accept(&self, v: &mut dyn Visitor) { v.visit_ignore(self); }
 }
@@ -1062,9 +1071,14 @@ fn do_parse<'a>(def_id: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>
                             v.downcast::<crate::Ast<'static>>().ok()
                         ).map(|b| *b)
                     }).collect();
-                let tag = crate::str2tag(&sv_ref.name);
+                // `{ ast_name: X }` overrides the node's name/tag.
+                let node_name = {
+                    let an = unsafe { &(&*ctx.rules)[def_id].ast_name };
+                    if an.is_empty() { sv_ref.name.clone() } else { an.clone() }
+                };
+                let tag = crate::str2tag(&node_name);
                 let ast_node = crate::Ast {
-                    name: sv_ref.name.clone(), original_name: sv_ref.name.clone(),
+                    name: node_name.clone(), original_name: node_name,
                     sv: sv_str, tokens, nodes: if info.is_token { Vec::new() } else { nodes },
                     parent: std::ptr::null(),
                     is_token: info.is_token,
@@ -1416,7 +1430,7 @@ impl PrecedenceClimbing {
                     let right = sv.values.pop().unwrap();
                     let left = sv.values.pop().unwrap();
                     let input = unsafe { &*ctx.s };
-                    let rule_name = unsafe { (&*ctx.rules).get(self.rule_id).map(|r| r.name.clone()).unwrap_or_default() };
+                    let rule_name = unsafe { (&*ctx.rules).get(self.rule_id).map(|r| if r.ast_name.is_empty() { r.name.clone() } else { r.ast_name.clone() }).unwrap_or_default() };
                     if let (Some(l), Some(r)) = (
                         left.downcast_ref::<crate::Ast<'static>>(),
                         right.downcast_ref::<crate::Ast<'static>>(),

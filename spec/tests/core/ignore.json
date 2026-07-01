@@ -5,7 +5,11 @@
     "grammar": "START <- ~HELLO WORLD\nHELLO <- 'Hello' _\nWORLD <- 'World' _\n_ <- [ \\t\\r\\n]*",
     "ast": {},
     "cases": [
-      { "input": "Hello World", "match": true }
+      {
+        "input": "Hello World",
+        "match": true,
+        "expected_ast": "+ START\n  + WORLD\n    - _ ()\n"
+      }
     ]
   },
   {
@@ -14,7 +18,11 @@
     "grammar": "START <- _ !DUMMY HELLO_WORLD '.'\nHELLO_WORLD <- HELLO 'World' _\nHELLO <- 'Hello' _\nDUMMY <- 'dummy' _\n~_ <- [ \\t\\r\\n]*",
     "ast": {},
     "cases": [
-      { "input": "Hello World.", "match": true }
+      {
+        "input": "Hello World.",
+        "match": true,
+        "expected_ast": "+ START\n  + HELLO_WORLD\n    + HELLO\n"
+      }
     ]
   },
   {
@@ -23,7 +31,11 @@
     "grammar": "START <- _ &HELLO HELLO_WORLD '.'\nHELLO_WORLD <- HELLO 'World' _\nHELLO <- 'Hello' _\n~_ <- [ \\t\\r\\n]*",
     "ast": {},
     "cases": [
-      { "input": "Hello World.", "match": true }
+      {
+        "input": "Hello World.",
+        "match": true,
+        "expected_ast": "+ START\n  + HELLO_WORLD\n    + HELLO\n"
+      }
     ]
   },
   {
@@ -31,7 +43,10 @@
     "description": "Tilde on whitespace rule ignores its semantic value",
     "grammar": "ROOT <- _ ITEM (',' _ ITEM _)*\nITEM <- ([a-z0-9])+\n~_ <- [ \\t]*",
     "cases": [
-      { "input": " item1, item2 ", "match": true }
+      {
+        "input": " item1, item2 ",
+        "match": true
+      }
     ]
   },
   {
@@ -39,7 +54,49 @@
     "description": "%whitespace auto-skip achieves same result",
     "grammar": "ROOT <- ITEM (',' ITEM)*\nITEM <- < ([a-z0-9])+ >\n%whitespace <- [ \\t]*",
     "cases": [
-      { "input": " item1, item2 ", "match": true }
+      {
+        "input": " item1, item2 ",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "ignore_drops_only_target_in_ast",
+    "description": "~ on a reference drops only that node's AST value, keeping siblings",
+    "grammar": "S <- ~A B\nA <- 'a'\nB <- < 'b' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ab",
+        "match": true,
+        "expected_ast": "+ S\n  - B (b)\n"
+      }
+    ]
+  },
+  {
+    "name": "ignore_middle_reference_in_ast",
+    "description": "~ in the middle of a sequence keeps the non-ignored siblings",
+    "grammar": "S <- A ~B C\nA <- < 'a' >\nB <- 'b'\nC <- < 'c' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "abc",
+        "match": true,
+        "expected_ast": "+ S\n  - A (a)\n  - C (c)\n"
+      }
+    ]
+  },
+  {
+    "name": "ignore_repeated_reference_in_ast",
+    "description": "(~A)+ matches but contributes no AST children",
+    "grammar": "S <- (~A)+\nA <- 'a'\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "aaa",
+        "match": true,
+        "expected_ast": "+ S\n"
+      }
     ]
   }
 ]

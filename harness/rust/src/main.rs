@@ -285,7 +285,7 @@ fn run_group(name: &str, group: &Value, stats: &mut Stats, path: &Path) {
             );
             if ast_optimize {
                 if let Some(ast) = result.ast.take() {
-                    result.ast = Some(peglib::optimize_ast(ast));
+                    result.ast = Some(parser.optimize_ast(ast));
                 }
             }
             if result.ok != expected {

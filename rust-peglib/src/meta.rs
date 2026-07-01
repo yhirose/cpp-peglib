@@ -304,6 +304,21 @@ impl<'a> Meta<'a> {
             if let Some(msg) = extract_error_message(block) {
                 self.grammar.rules[id].error_message = msg;
             }
+            // AST instructions: `{ no_ast_opt }` and `{ ast_name: NodeTag }`,
+            // possibly combined and separated by `;`.
+            let mut set_no_ast_opt = false;
+            let mut ast_name_val: Option<String> = None;
+            for item in block.split(';') {
+                let item = item.trim();
+                if item == "no_ast_opt" {
+                    set_no_ast_opt = true;
+                } else if let Some(rest) = item.strip_prefix("ast_name") {
+                    let tag = rest.trim_start().strip_prefix(':').map(str::trim).unwrap_or("");
+                    if !tag.is_empty() { ast_name_val = Some(tag.to_string()); }
+                }
+            }
+            if set_no_ast_opt { self.grammar.rules[id].no_ast_opt = true; }
+            if let Some(n) = ast_name_val { self.grammar.rules[id].ast_name = n; }
         }
         if is_ignore {
             self.grammar.rules[id].ignore_semantic_value = true;
@@ -370,7 +385,7 @@ impl<'a> Meta<'a> {
             if self.input[self.pos..].starts_with("%recover") { return false; }
             return true;
         }
-        if !is_ident_start(b) && b != b'~' { return false; }
+        if ident_start_len(self.input, self.pos).is_none() && b != b'~' { return false; }
         self.lookahead_is_definition(self.pos)
     }
 
@@ -378,8 +393,8 @@ impl<'a> Meta<'a> {
         let bytes = self.bytes();
         let mut q = start;
         if bytes.get(q).copied() == Some(b'~') { q += 1; }
-        if !bytes.get(q).copied().map_or(false, is_ident_start) { return false; }
-        while q < bytes.len() && is_ident_cont(bytes[q]) { q += 1; }
+        match ident_start_len(self.input, q) { Some(l) => q += l, None => return false }
+        while let Some(l) = ident_cont_len(self.input, q) { q += l; }
         if bytes.get(q).copied() == Some(b'(') {
             let mut depth = 1; q += 1;
             while q < bytes.len() && depth > 0 {
@@ -399,17 +414,19 @@ impl<'a> Meta<'a> {
     }
 
     fn parse_prefix(&mut self) -> Result<Rc<dyn Ope>, String> {
-        while self.consume_byte(b'~') { self.skip_spacing(); }
+        let mut ignore = false;
+        while self.consume_byte(b'~') { ignore = true; self.skip_spacing(); }
         let op = if self.consume_byte(b'&') { Some(true) }
                  else if self.consume_byte(b'!') { Some(false) }
                  else { None };
         self.skip_spacing();
         let suffix = self.parse_suffix()?;
-        Ok(match op {
+        let ope: Rc<dyn Ope> = match op {
             Some(true) => Rc::new(AndPredicate { ope: suffix }),
             Some(false) => Rc::new(NotPredicate { ope: suffix }),
             None => suffix,
-        })
+        };
+        Ok(if ignore { Rc::new(Ignore { ope }) } else { ope })
     }
 
     fn parse_suffix(&mut self) -> Result<Rc<dyn Ope>, String> {
@@ -517,7 +534,7 @@ impl<'a> Meta<'a> {
             return Ok(Rc::new(BackReference { name }));
         }
 
-        if is_ident_start(b) {
+        if ident_start_len(self.input, self.pos).is_some() {
             let name = self.parse_identifier()?;
             // Macro parameter
             if let Some(iarg) = self.current_params.iter().position(|p| p == &name) {
@@ -633,12 +650,11 @@ impl<'a> Meta<'a> {
 
     fn parse_identifier(&mut self) -> Result<String, String> {
         let start = self.pos;
-        let Some(b) = self.peek_byte() else { return Err(self.err("expected identifier")); };
-        if !is_ident_start(b) { return Err(self.err("expected identifier")); }
-        self.pos += 1;
-        while let Some(b) = self.peek_byte() {
-            if is_ident_cont(b) { self.pos += 1; } else { break; }
+        match ident_start_len(self.input, self.pos) {
+            Some(l) => self.pos += l,
+            None => return Err(self.err("expected identifier")),
         }
+        while let Some(l) = ident_cont_len(self.input, self.pos) { self.pos += l; }
         Ok(self.input[start..self.pos].to_string())
     }
 
@@ -689,8 +705,23 @@ impl<'a> Meta<'a> {
     }
 }
 
-fn is_ident_start(b: u8) -> bool { b.is_ascii_alphabetic() || b == b'_' }
-fn is_ident_cont(b: u8) -> bool { is_ident_start(b) || b.is_ascii_digit() }
+// Identifier characters mirror cpp-peglib's meta grammar:
+//   IdentStart <- !'↑' !'⇑' ([a-zA-Z_] / [\u{80}-\u{ffff}])
+//   IdentRest  <- IdentStart / [0-9]
+// so non-ASCII (BMP) codepoints such as Japanese or Greek letters are accepted
+// as rule names, except the cut markers. Each helper returns the byte length of
+// the accepted character at `pos`, or None.
+fn ident_start_len(input: &str, pos: usize) -> Option<usize> {
+    let c = input[pos..].chars().next()?;
+    if c == '\u{2191}' || c == '\u{21D1}' { return None; }
+    let ok = c.is_ascii_alphabetic() || c == '_' || (!c.is_ascii() && (c as u32) <= 0xFFFF);
+    ok.then(|| c.len_utf8())
+}
+fn ident_cont_len(input: &str, pos: usize) -> Option<usize> {
+    let c = input[pos..].chars().next()?;
+    if c.is_ascii_digit() { return Some(1); }
+    ident_start_len(input, pos)
+}
 
 fn parse_precedence_info(block: &str) -> std::collections::HashMap<String, (usize, char)> {
     let mut info = std::collections::HashMap::new();
