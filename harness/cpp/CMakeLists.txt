@@ -56,3 +56,10 @@ include(GoogleTest)
 gtest_discover_tests(spec-harness)
 
 enable_testing()
+
+# Run the whole spec corpus a second time with every compiled grammar
+# round-tripped through a serialize/deserialize blob, as an oracle for
+# GrammarBlob. Behaviour must be identical, so the same assertions apply.
+add_test(NAME spec-harness-serialize-roundtrip COMMAND spec-harness)
+set_tests_properties(spec-harness-serialize-roundtrip PROPERTIES
+  ENVIRONMENT "PEG_SPEC_SERIALIZE_ROUNDTRIP=1")

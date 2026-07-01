@@ -87,13 +87,70 @@ TEST(GrammarBlobTest, RoundTripMacro) {
   }
 }
 
-TEST(GrammarBlobTest, RejectsPrecedence) {
+// A 'precedence' instruction lowers a rule to a PrecedenceClimbing operator
+// whose operator table (levels + associativity) is structural, so it survives a
+// blob round-trip. Compare the parsed AST to prove operator precedence and
+// associativity are reproduced, not just accept/reject parity.
+TEST(GrammarBlobTest, RoundTripPrecedence) {
+  const char *g = R"(
+    EXPRESSION <- ATOM (OPERATOR ATOM)* {
+      precedence
+        L + -
+        L * /
+    }
+    ATOM       <- NUMBER / '(' EXPRESSION ')'
+    OPERATOR   <- < [-+*/] >
+    NUMBER     <- < [0-9]+ >
+    %whitespace <- [ \t]*
+  )";
+  peg::parser p1;
+  ASSERT_TRUE(p1.load_grammar(g));
+  auto blob = p1.serialize_grammar();
+
+  peg::parser p2;
+  ASSERT_TRUE(p2.load_blob(blob));
+  p1.enable_ast();
+  p2.enable_ast();
+
+  for (auto in : {"1", "1 + 2 * 3", "1 * 2 + 3", "1 - 2 - 3", "2 * 3 * 4",
+                  "(1 + 2) * 3", "1 + 2 * 3 - 4 / 2", ""}) {
+    std::shared_ptr<peg::Ast> a1, a2;
+    bool r1 = p1.parse(in, a1);
+    bool r2 = p2.parse(in, a2);
+    EXPECT_EQ(r1, r2) << in;
+    if (r1 && r2) EXPECT_EQ(peg::ast_to_s(a1), peg::ast_to_s(a2)) << in;
+  }
+}
+
+// Macro-based precedence: the binary operator is a macro parameter, so
+// get_reference_for_binop() takes its is_macro path and resolves the operator
+// through the macro arguments. Exercises that the deserialized rule_ reference
+// reports is_macro correctly.
+TEST(GrammarBlobTest, RoundTripPrecedenceMacro) {
   const char *g = "E <- Infix(P, O)\nInfix(A, B) <- A (B A)* {\n  precedence\n "
                   "   L '+' '-'\n}\nP <- [0-9]\nO <- < [-+] >";
-  std::string start;
-  auto orig = load(g, start);
-  ASSERT_TRUE(orig != nullptr);
-  EXPECT_THROW(GrammarBlob::serialize(*orig, start), std::runtime_error);
+  check_rt(g, {"1", "1+2", "1+2-3", "1-2+3", "", "1+", "+1"});
+}
+
+// The %whitespace rule may reference other rules (here a comment rule). Its
+// operator is shared with the %whitespace definition and must be re-linked on
+// load; otherwise the reference inside it dereferences a null rule and crashes.
+// Combined with a macro precedence rule this mirrors grammar/monkey.peg.
+TEST(GrammarBlobTest, RoundTripWhitespaceWithReference) {
+  const char *g = R"(
+    EXPRESSION      <- INFIX(PRIMARY, OPE)
+    INFIX(ATOM, OP) <- ATOM (OP ATOM)* {
+                         precedence
+                           L + -
+                           L * /
+                       }
+    PRIMARY         <- < [0-9]+ >
+    OPE             <- < [-+*/] >
+    COMMENT         <- '#' (!LINE_END .)* &LINE_END
+    LINE_END        <- '\n' / !.
+    %whitespace     <- ([ \t\r\n]+ / COMMENT)*
+  )";
+  check_rt(g, {"1 + 2 * 3", "1 # c\n + 2", "1*2*3", "  1  ", "1 +", ""});
 }
 
 TEST(GrammarBlobTest, RejectsBadMagic) {
@@ -188,6 +245,31 @@ TEST(GrammarBlobTest, RepetitionCounts) {
 TEST(GrammarBlobTest, CaseInsensitiveLiteralAndDictionary) {
   check_rt("S <- 'hello'i / ('cat' | 'dog' | 'fish')",
            {"hello", "HELLO", "HeLLo", "cat", "dog", "fish", "bird", ""});
+}
+
+// A Dictionary reports vs.choice() as the matched word's index in declaration
+// order. The Trie stores words sorted, so serialization must re-emit them by id
+// or the choice index gets renumbered (found via the spec round-trip oracle).
+TEST(GrammarBlobTest, DictionaryChoiceIndexRoundTrip) {
+  const char *g = "S <- 'Jan' | 'January' | 'Feb' | 'February'";
+  peg::parser p1;
+  ASSERT_TRUE(p1.load_grammar(g));
+  peg::parser p2;
+  ASSERT_TRUE(p2.load_blob(p1.serialize_grammar()));
+  auto choice = [](const peg::SemanticValues &vs) -> long {
+    return static_cast<long>(vs.choice());
+  };
+  p1["S"] = choice;
+  p2["S"] = choice;
+  // Declaration order: Jan=0, January=1, Feb=2, February=3.
+  for (auto [in, idx] : std::vector<std::pair<const char *, long>>{
+           {"Jan", 0}, {"January", 1}, {"Feb", 2}, {"February", 3}}) {
+    long v1 = -1, v2 = -2;
+    ASSERT_TRUE(p1.parse(in, v1)) << in;
+    ASSERT_TRUE(p2.parse(in, v2)) << in;
+    EXPECT_EQ(idx, v1) << "source " << in;
+    EXPECT_EQ(idx, v2) << "deserialized " << in;
+  }
 }
 
 TEST(GrammarBlobTest, WordBoundary) {

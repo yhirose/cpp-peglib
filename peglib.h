@@ -1949,6 +1949,10 @@ public:
   std::shared_ptr<Ope> atom_;
   std::shared_ptr<Ope> binop_;
   BinOpeInfo info_;
+  // Owned backing storage for info_ keys when this node is built by
+  // GrammarBlob::deserialize. Grammars parsed from source leave this empty and
+  // point info_ keys into the retained grammar text instead.
+  std::vector<std::string> info_keys_;
   const Definition &rule_;
 
 private:
@@ -4278,9 +4282,10 @@ inline void FindReference::visit(Reference &ope) {
  *  prebuilt blob. Structure only: semantic callbacks (actions / enter / leave /
  *  predicate, attached by enable_ast() etc.) are NOT serialized and must be
  *  re-applied after deserialize. References resolve by name (no pointer fixup);
- *  first-sets and keyword guards are recomputed on load (O(N)). Grammars using
- *  the `precedence` instruction, the `User` operator, or a Capture with a match
- *  action are rejected. The blob is specific to this peglib version's layout.
+ *  first-sets and keyword guards are recomputed on load (O(N)). The
+ *  `precedence` instruction is supported (its operator table is structural).
+ *  Grammars using the `User` operator or a Capture with a match action are
+ *  rejected. The blob is specific to this peglib version's layout.
  *---------------------------------------------------------------------------*/
 
 struct GrammarBlob {
@@ -4304,6 +4309,7 @@ struct GrammarBlob {
     T_Whitespace,
     T_Recovery,
     T_Cut,
+    T_PrecedenceClimbing,
     T_Null
   };
 
@@ -4355,9 +4361,15 @@ struct GrammarBlob {
     } else if (auto x = dynamic_cast<Dictionary *>(p)) {
       w.u8(T_Dictionary);
       w.u8(x->trie_.ignore_case_ ? 1 : 0);
-      std::vector<std::string> words;
+      // Recover words in their original choice-index order. The Trie stores
+      // each full word's id (its index in the constructor vector), which
+      // parse_core reports as vs.choice(). Iterating dic_ directly yields
+      // sorted key order and would renumber the choices, so place each word at
+      // its id.
+      std::vector<std::string> words(x->trie_.items_count());
       for (auto &kv : x->trie_.dic_)
-        if (kv.second.match) words.push_back(kv.first);
+        if (kv.second.match && kv.second.id < words.size())
+          words[kv.second.id] = kv.first;
       w.u32((uint32_t)words.size());
       for (auto &s : words)
         w.str(s);
@@ -4413,10 +4425,20 @@ struct GrammarBlob {
       write_ope(w, x->ope_);
     } else if (dynamic_cast<Cut *>(p)) {
       w.u8(T_Cut);
+    } else if (auto x = dynamic_cast<PrecedenceClimbing *>(p)) {
+      w.u8(T_PrecedenceClimbing);
+      write_ope(w, x->atom_);
+      write_ope(w, x->binop_);
+      w.u32((uint32_t)x->info_.size());
+      for (auto &[key, pri] : x->info_) {
+        w.str(std::string(key));
+        w.u64((uint64_t)pri.first);
+        w.u8((uint8_t)pri.second);
+      }
     } else {
       throw std::runtime_error(
-          "GrammarBlob: operator not serializable (e.g. 'precedence' or a "
-          "custom User operator)");
+          "GrammarBlob: operator not serializable (a custom User operator or "
+          "a Capture with a match action)");
     }
   }
 
@@ -4447,14 +4469,15 @@ struct GrammarBlob {
     }
   };
 
-  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g) {
+  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g,
+                                       Definition *owner) {
     switch (r.u8()) {
     case T_Null: return nullptr;
     case T_Sequence: {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g));
+        v.push_back(read_ope(r, g, owner));
       return std::make_shared<Sequence>(std::move(v));
     }
     case T_Choice: {
@@ -4462,18 +4485,18 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g));
+        v.push_back(read_ope(r, g, owner));
       auto c = std::make_shared<PrioritizedChoice>(std::move(v));
       c->for_label_ = fl;
       return c;
     }
     case T_Repetition: {
       uint64_t mn = r.u64(), mx = r.u64();
-      auto o = read_ope(r, g);
+      auto o = read_ope(r, g, owner);
       return std::make_shared<Repetition>(o, mn, mx);
     }
-    case T_And: return std::make_shared<AndPredicate>(read_ope(r, g));
-    case T_Not: return std::make_shared<NotPredicate>(read_ope(r, g));
+    case T_And: return std::make_shared<AndPredicate>(read_ope(r, g, owner));
+    case T_Not: return std::make_shared<NotPredicate>(read_ope(r, g, owner));
     case T_Dictionary: {
       bool ic = r.u8();
       uint32_t n = r.u32();
@@ -4499,14 +4522,15 @@ struct GrammarBlob {
     }
     case T_Char: return std::make_shared<Character>((char32_t)r.u32());
     case T_AnyChar: return std::make_shared<AnyCharacter>();
-    case T_CaptureScope: return std::make_shared<CaptureScope>(read_ope(r, g));
+    case T_CaptureScope:
+      return std::make_shared<CaptureScope>(read_ope(r, g, owner));
     case T_Capture: {
-      auto o = read_ope(r, g);
+      auto o = read_ope(r, g, owner);
       return std::make_shared<Capture>(o, nullptr);
     }
     case T_TokenBoundary:
-      return std::make_shared<TokenBoundary>(read_ope(r, g));
-    case T_Ignore: return std::make_shared<Ignore>(read_ope(r, g));
+      return std::make_shared<TokenBoundary>(read_ope(r, g, owner));
+    case T_Ignore: return std::make_shared<Ignore>(read_ope(r, g, owner));
     case T_BackRef: return std::make_shared<BackReference>(r.str());
     case T_Reference: {
       bool im = r.u8();
@@ -4514,12 +4538,36 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> args;
       for (uint32_t i = 0; i < n; i++)
-        args.push_back(read_ope(r, g));
+        args.push_back(read_ope(r, g, owner));
       return std::make_shared<Reference>(g, nm, nullptr, im, args);
     }
-    case T_Whitespace: return std::make_shared<Whitespace>(read_ope(r, g));
-    case T_Recovery: return std::make_shared<Recovery>(read_ope(r, g));
+    case T_Whitespace:
+      return std::make_shared<Whitespace>(read_ope(r, g, owner));
+    case T_Recovery: return std::make_shared<Recovery>(read_ope(r, g, owner));
     case T_Cut: return std::make_shared<Cut>();
+    case T_PrecedenceClimbing: {
+      if (!owner) {
+        throw std::runtime_error(
+            "GrammarBlob: 'precedence' operator outside a rule body");
+      }
+      auto atom = read_ope(r, g, owner);
+      auto binop = read_ope(r, g, owner);
+      uint32_t n = r.u32();
+      auto pc = std::make_shared<PrecedenceClimbing>(
+          atom, binop, PrecedenceClimbing::BinOpeInfo{}, *owner);
+      // info_ keys are string_views; back them with owned strings whose
+      // addresses stay stable (reserve avoids reallocation, and the node is
+      // never moved once held by shared_ptr).
+      pc->info_keys_.reserve(n);
+      for (uint32_t i = 0; i < n; i++) {
+        std::string key = r.str();
+        auto level = (size_t)r.u64();
+        auto assoc = (char)r.u8();
+        pc->info_keys_.push_back(std::move(key));
+        pc->info_[pc->info_keys_.back()] = std::pair(level, assoc);
+      }
+      return pc;
+    }
     default: throw std::runtime_error("GrammarBlob: bad operator tag");
     }
   }
@@ -4538,7 +4586,8 @@ struct GrammarBlob {
           (def.ignoreSemanticValue ? 1 : 0) | (def.is_macro ? 2 : 0) |
           (def.no_ast_opt ? 4 : 0) | (def.eoi_check ? 8 : 0) |
           (def.enablePackratParsing ? 16 : 0) |
-          (def.is_left_recursive ? 32 : 0) | (def.can_be_empty ? 64 : 0);
+          (def.is_left_recursive ? 32 : 0) | (def.can_be_empty ? 64 : 0) |
+          (def.disable_action ? 128 : 0);
       w.u8(flags);
       w.u32((uint32_t)def.params.size());
       for (auto &s : def.params)
@@ -4546,8 +4595,6 @@ struct GrammarBlob {
       w.str(def.ast_name);
       w.str(def.error_message);
       write_ope(w, const_cast<Definition &>(def).get_core_operator());
-      write_ope(w, def.whitespaceOpe);
-      write_ope(w, def.wordOpe);
     }
     return std::move(w.b);
   }
@@ -4560,16 +4607,11 @@ struct GrammarBlob {
     start_out = r.str();
     uint32_t ndef = r.u32();
     auto g = std::make_shared<Grammar>();
-    struct Pending {
-      std::shared_ptr<Ope> body, ws, word;
-      uint8_t flags;
-      std::vector<std::string> params;
-      std::string ast_name, err;
-    };
-    std::vector<std::string> names(ndef);
-    std::vector<Pending> pend(ndef);
+    // Create each Definition before reading its body: a PrecedenceClimbing node
+    // needs a stable reference to its owning rule at construction. Grammar is a
+    // node-based map, so references stay valid as later rules are inserted.
     for (uint32_t i = 0; i < ndef; i++) {
-      names[i] = r.str();
+      std::string name = r.str();
       uint8_t flags = r.u8();
       uint32_t np = r.u32();
       std::vector<std::string> params;
@@ -4577,43 +4619,51 @@ struct GrammarBlob {
         params.push_back(r.str());
       std::string ast_name = r.str();
       std::string err = r.str();
-      auto body = read_ope(r, *g);
-      auto ws = read_ope(r, *g);
-      auto word = read_ope(r, *g);
-      pend[i] = {body,
-                 ws,
-                 word,
-                 flags,
-                 std::move(params),
-                 std::move(ast_name),
-                 std::move(err)};
-    }
-    for (uint32_t i = 0; i < ndef; i++) {
-      auto &def = (*g)[names[i]];
-      def.name = names[i];
-      auto &pd = pend[i];
-      def.ignoreSemanticValue = pd.flags & 1;
-      def.is_macro = pd.flags & 2;
-      def.no_ast_opt = pd.flags & 4;
-      def.eoi_check = pd.flags & 8;
-      def.enablePackratParsing = pd.flags & 16;
-      def.is_left_recursive = pd.flags & 32;
-      def.can_be_empty = pd.flags & 64;
-      def.params = std::move(pd.params);
-      def.ast_name = std::move(pd.ast_name);
-      def.error_message = std::move(pd.err);
-      def <= pd.body;
-      def.whitespaceOpe = pd.ws;
-      def.wordOpe = pd.word;
+
+      auto &def = (*g)[name];
+      def.name = name;
+      def.ignoreSemanticValue = flags & 1;
+      def.is_macro = flags & 2;
+      def.no_ast_opt = flags & 4;
+      def.eoi_check = flags & 8;
+      def.enablePackratParsing = flags & 16;
+      def.is_left_recursive = flags & 32;
+      def.can_be_empty = flags & 64;
+      def.disable_action = flags & 128;
+      def.params = std::move(params);
+      def.ast_name = std::move(ast_name);
+      def.error_message = std::move(err);
+
+      auto body = read_ope(r, *g, &def);
+      def <= body;
     }
     for (auto &x : *g) {
       LinkReferences vis(*g, x.second.params);
       x.second.accept(vis);
+      // TraversalVisitor descends only into a PrecedenceClimbing's atom_. In
+      // the from-source path binop_ is linked while the body is still a
+      // Sequence, before precedence lowering; a deserialized node is built
+      // already lowered so its binop_ reference must be linked explicitly here.
+      auto core = x.second.get_core_operator();
+      if (auto pc = std::dynamic_pointer_cast<PrecedenceClimbing>(core)) {
+        pc->binop_->accept(vis);
+      }
     }
     {
       SetupFirstSets vis; // shared across rules -> O(N)
       for (auto &x : *g)
         x.second.accept(vis);
+    }
+    // Re-derive automatic whitespace/word skipping on the start rule from the
+    // %whitespace / %word definitions, exactly as ParserGenerator does. Sharing
+    // the (already linked and first-set) definition operators avoids leaving
+    // references inside the skipping ope unlinked, and keeps the blob smaller.
+    if (g->count(WHITESPACE_DEFINITION_NAME)) {
+      (*g)[start_out].whitespaceOpe =
+          wsp((*g)[WHITESPACE_DEFINITION_NAME].get_core_operator());
+    }
+    if (g->count(WORD_DEFINITION_NAME)) {
+      (*g)[start_out].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
     }
     return g;
   }
@@ -6036,7 +6086,7 @@ public:
 
   // Serialize the loaded grammar to a portable byte blob (see GrammarBlob).
   // Semantic callbacks are not included; throws if the grammar is not
-  // serializable (e.g. uses the `precedence` instruction).
+  // serializable (uses the `User` operator or a Capture with a match action).
   std::vector<uint8_t> serialize_grammar() const {
     return GrammarBlob::serialize(*grammar_, start_);
   }

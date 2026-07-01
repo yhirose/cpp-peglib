@@ -582,6 +582,29 @@ static void run_test_group(const json &group, TestContext ctx) {
       continue;
     }
 
+    // Optional serialize/deserialize oracle: round-trip the compiled grammar
+    // through a blob in place, so every assertion below also validates the
+    // deserialized grammar. Reuses the curated spec corpus as coverage for
+    // GrammarBlob without adding anything implementation-specific to the spec.
+    // Enable with PEG_SPEC_SERIALIZE_ROUNDTRIP=1. Grammars that are
+    // legitimately non-serializable (User operator, match-action capture) throw
+    // on serialize and are left compiled from source.
+    static const bool serialize_roundtrip =
+        env_flag("PEG_SPEC_SERIALIZE_ROUNDTRIP");
+    if (serialize_roundtrip) {
+      try {
+        auto blob = pg.serialize_grammar();
+        if (!pg.load_blob(blob)) {
+          ADD_FAILURE() << "Grammar blob failed to load back"
+                        << format_context(ctx) << "  Grammar:\n"
+                        << indent_lines(ctx.grammar, "    ");
+          continue;
+        }
+      } catch (const std::exception &) {
+        // Non-serializable grammar: keep the grammar compiled from source.
+      }
+    }
+
     // Enable packrat if specified
     if (group.contains("packrat") && group["packrat"].get<bool>()) {
       pg.enable_packrat_parsing();
