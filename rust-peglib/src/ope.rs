@@ -1018,6 +1018,15 @@ struct HolderInfo<'a> {
     error_msg: &'a str,
 }
 
+fn body_is_choice_like(body: &dyn Ope) -> bool {
+    let mut ope: &dyn Ope = body;
+    if let Some(tb) = ope.as_any().downcast_ref::<TokenBoundary>() {
+        ope = tb.ope.as_ref();
+    }
+    ope.as_any().downcast_ref::<PrioritizedChoice>().is_some()
+        || ope.as_any().downcast_ref::<Dictionary>().is_some()
+}
+
 fn do_parse<'a>(def_id: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>,
             vs: &mut SemanticValues, ctx: &mut Context) -> (usize, Option<Box<dyn Any>>) {
     let has_action = unsafe {
@@ -1053,6 +1062,13 @@ fn do_parse<'a>(def_id: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>
         if success(len) && !ctx.recovered && !info.ignore {
             ctx.value_stack[idx].sv = pos..pos + len;
             ctx.value_stack[idx].name = info.rule_name.to_string();
+            // A rule node carries choice info only when its body is
+            // choice-like (PrioritizedChoice / Dictionary), unwrapping a token
+            // boundary; otherwise a nested choice would leak (mirrors cpp).
+            if !body_is_choice_like(body) {
+                ctx.value_stack[idx].choice_count = 0;
+                ctx.value_stack[idx].choice = 0;
+            }
 
             // reduce: action > AST > first child
             let result = if has_action {

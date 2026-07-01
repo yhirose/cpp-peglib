@@ -1,0 +1,115 @@
+[
+  {
+    "name": "choice_suffix_top_level",
+    "description": "A rule whose body is a choice carries the /N choice suffix.",
+    "grammar": "S <- A / B\nA <- < 'a' >\nB <- < 'b' >\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "a",
+        "match": true,
+        "expected_ast": "+ S/0\n  - A (a)\n"
+      },
+      {
+        "input": "b",
+        "match": true,
+        "expected_ast": "+ S/1\n  - B (b)\n"
+      }
+    ]
+  },
+  {
+    "name": "no_choice_suffix_nested_in_sequence",
+    "description": "A choice nested inside a sequence does not leak a choice suffix onto the rule node.",
+    "grammar": "S <- (A / B) C\nA <- < 'a' >\nB <- < 'b' >\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ac",
+        "match": true,
+        "expected_ast": "+ S\n  - A (a)\n  - C (c)\n"
+      },
+      {
+        "input": "bc",
+        "match": true,
+        "expected_ast": "+ S\n  - B (b)\n  - C (c)\n"
+      }
+    ]
+  },
+  {
+    "name": "no_choice_suffix_choice_at_sequence_end",
+    "description": "A trailing choice inside a sequence still does not add a choice suffix.",
+    "grammar": "S <- A (B / C)\nA <- < 'a' >\nB <- < 'b' >\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ab",
+        "match": true,
+        "expected_ast": "+ S\n  - A (a)\n  - B (b)\n"
+      },
+      {
+        "input": "ac",
+        "match": true,
+        "expected_ast": "+ S\n  - A (a)\n  - C (c)\n"
+      }
+    ]
+  },
+  {
+    "name": "choice_of_sequences",
+    "description": "A top-level choice of sequences carries the choice suffix.",
+    "grammar": "S <- A B / C D\nA <- < 'a' >\nB <- < 'b' >\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ab",
+        "match": true,
+        "expected_ast": "+ S/0\n  - A (a)\n  - B (b)\n"
+      },
+      {
+        "input": "cd",
+        "match": true,
+        "expected_ast": "+ S/1\n  - C (c)\n  - D (d)\n"
+      }
+    ]
+  },
+  {
+    "name": "token_boundary_over_choice",
+    "description": "A token boundary is unwrapped: an inner choice still carries the suffix.",
+    "grammar": "S <- < A / B >\nA <- < 'a' >\nB <- < 'b' >\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "a",
+        "match": true,
+        "expected_ast": "- S/0 (a)\n"
+      },
+      {
+        "input": "b",
+        "match": true,
+        "expected_ast": "- S/1 (b)\n"
+      }
+    ]
+  },
+  {
+    "name": "dictionary_choice_suffix",
+    "description": "A dictionary is choice-like and carries the choice suffix.",
+    "grammar": "S <- 'a' | 'b' | 'c'\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "a",
+        "match": true,
+        "expected_ast": "- S/0 (a)\n"
+      },
+      {
+        "input": "b",
+        "match": true,
+        "expected_ast": "- S/1 (b)\n"
+      },
+      {
+        "input": "c",
+        "match": true,
+        "expected_ast": "- S/2 (c)\n"
+      }
+    ]
+  }
+]
