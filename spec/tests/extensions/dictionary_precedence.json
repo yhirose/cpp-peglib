@@ -1,0 +1,144 @@
+[
+  {
+    "name": "pipe_binds_tighter_than_slash",
+    "description": "`|` binds tighter than `/`: 'a' | 'b' / 'c' means ('a' | 'b') / 'c'.",
+    "grammar": "S <- 'a' | 'b' / 'a' 'c'\n",
+    "cases": [
+      {
+        "input": "a",
+        "match": true
+      },
+      {
+        "input": "b",
+        "match": true
+      },
+      {
+        "input": "ac",
+        "match": false
+      },
+      {
+        "input": "c",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "pipe_binds_tighter_than_sequence",
+    "description": "`|` binds tighter than sequence: 'a' 'b' | 'c' means 'a' ('b' | 'c').",
+    "grammar": "S <- 'a' 'b' | 'c'\n",
+    "cases": [
+      {
+        "input": "ab",
+        "match": true
+      },
+      {
+        "input": "ac",
+        "match": true
+      },
+      {
+        "input": "c",
+        "match": false
+      },
+      {
+        "input": "a",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "pure_dictionary",
+    "description": "A run of `|` literals is a dictionary.",
+    "grammar": "S <- 'a' | 'bb' | 'ccc'\n",
+    "cases": [
+      {
+        "input": "a",
+        "match": true
+      },
+      {
+        "input": "bb",
+        "match": true
+      },
+      {
+        "input": "ccc",
+        "match": true
+      },
+      {
+        "input": "b",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "dictionary_case_insensitive",
+    "description": "Case-insensitive dictionary members.",
+    "grammar": "S <- 'cat'i | 'dog'i\n",
+    "cases": [
+      {
+        "input": "cat",
+        "match": true
+      },
+      {
+        "input": "CAT",
+        "match": true
+      },
+      {
+        "input": "Dog",
+        "match": true
+      },
+      {
+        "input": "fish",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "mixed_pipe_slash_chain",
+    "description": "Mixing `|` and `/` across a choice chain.",
+    "grammar": "S <- 'a' | 'b' / 'c' | 'd'\n",
+    "cases": [
+      {
+        "input": "a",
+        "match": true
+      },
+      {
+        "input": "b",
+        "match": true
+      },
+      {
+        "input": "c",
+        "match": true
+      },
+      {
+        "input": "d",
+        "match": true
+      },
+      {
+        "input": "e",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "dictionary_ast",
+    "description": "AST of a mixed dictionary/choice keeps the dictionary as one node.",
+    "grammar": "S <- ('a' | 'b') C / D\nC <- < 'c' >\nD <- < 'd' >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ac",
+        "match": true,
+        "expected_ast": "+ S/0\n  - C (c)\n"
+      },
+      {
+        "input": "bc",
+        "match": true,
+        "expected_ast": "+ S/0\n  - C (c)\n"
+      },
+      {
+        "input": "d",
+        "match": true,
+        "expected_ast": "+ S/1\n  - D (d)\n"
+      }
+    ]
+  }
+]

@@ -344,30 +344,13 @@ impl<'a> Meta<'a> {
     fn parse_expression(&mut self) -> Result<Rc<dyn Ope>, String> {
         let first = self.parse_sequence()?;
         let mut alts = vec![first];
-        let mut saw_pipe = false;
-        let mut saw_slash = false;
         loop {
             self.skip_spacing();
-            if self.consume_byte(b'/') { saw_slash = true; }
-            else if self.consume_byte(b'|') { saw_pipe = true; }
-            else { break; }
+            if !self.consume_byte(b'/') { break; }
             self.skip_spacing();
             alts.push(self.parse_sequence()?);
         }
         if alts.len() == 1 { return Ok(alts.into_iter().next().unwrap()); }
-        if saw_pipe {
-            if saw_slash { return Err(self.err("cannot mix `|` and `/`")); }
-            let lits: Vec<&LiteralString> = alts.iter().filter_map(|a| {
-                a.as_any().downcast_ref::<LiteralString>()
-            }).collect();
-            if lits.len() != alts.len() { return Err(self.err("`|` requires literal alternatives")); }
-            let first_ci = lits[0].ignore_case;
-            if !lits.iter().all(|l| l.ignore_case == first_ci) {
-                return Err(self.err("`|` dictionary alternatives must share case-sensitivity"));
-            }
-            let literals: Vec<Vec<u8>> = lits.iter().map(|l| l.lit.clone()).collect();
-            return Ok(Rc::new(Dictionary { trie: Trie::new(&literals, first_ci) }));
-        }
         Ok(Rc::new(PrioritizedChoice::new(alts)))
     }
 
@@ -507,7 +490,7 @@ impl<'a> Meta<'a> {
             if !self.consume_byte(b'>') { return Err(self.err("expected '>'")); }
             return Ok(Rc::new(TokenBoundary { ope: e }));
         }
-        if b == b'\'' || b == b'"' { return Ok(self.parse_literal()?); }
+        if b == b'\'' || b == b'"' { return self.parse_literal_or_dictionary(); }
         if b == b'[' { return Ok(self.parse_char_class()?); }
         if b == b'.' { self.pos += 1; return Ok(Rc::new(AnyCharacter)); }
 
@@ -572,6 +555,36 @@ impl<'a> Meta<'a> {
         }
 
         Err(self.err("expected a primary expression"))
+    }
+
+    // A string literal, or a dictionary `'a' | 'b' | ...`. The `|` operator
+    // binds at the primary level (tighter than sequence and `/`), matching
+    // cpp-peglib, so it may be freely mixed with `/`.
+    fn parse_literal_or_dictionary(&mut self) -> Result<Rc<dyn Ope>, String> {
+        let mut lits: Vec<Rc<dyn Ope>> = vec![self.parse_literal()?];
+        loop {
+            let save = self.pos;
+            self.skip_spacing();
+            if self.peek_byte() != Some(b'|') { self.pos = save; break; }
+            self.pos += 1;
+            self.skip_spacing();
+            match self.peek_byte() {
+                Some(b'\'') | Some(b'"') => lits.push(self.parse_literal()?),
+                _ => { self.pos = save; break; } // `|` not followed by a literal
+            }
+        }
+        if lits.len() == 1 {
+            return Ok(lits.into_iter().next().unwrap());
+        }
+        let refs: Vec<&LiteralString> = lits.iter()
+            .map(|a| a.as_any().downcast_ref::<LiteralString>().unwrap())
+            .collect();
+        let first_ci = refs[0].ignore_case;
+        if !refs.iter().all(|l| l.ignore_case == first_ci) {
+            return Err(self.err("`|` dictionary alternatives must share case-sensitivity"));
+        }
+        let literals: Vec<Vec<u8>> = refs.iter().map(|l| l.lit.clone()).collect();
+        Ok(Rc::new(Dictionary { trie: Trie::new(&literals, first_ci) }))
     }
 
     fn parse_literal(&mut self) -> Result<Rc<dyn Ope>, String> {
