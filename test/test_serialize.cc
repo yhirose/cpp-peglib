@@ -130,6 +130,38 @@ TEST(GrammarBlobTest, ParserLoadBlobWithAst) {
   }
 }
 
+// Regression: load_blob() must restore the parser-level packrat flag from the
+// blob so a subsequent enable_packrat_parsing() re-applies packrat instead of
+// clearing the flag baked into the blob. Previously load_blob left the parser
+// member at its false default, so enable_packrat_parsing() silently disabled
+// packrat on the start rule after a blob round-trip.
+TEST(GrammarBlobTest, LoadBlobPreservesPackrat) {
+  const char *g = R"(
+    Expr   <- Sum
+    Sum    <- Product (('+' / '-') Product)*
+    Product<- Value (('*' / '/') Value)*
+    Value  <- < [0-9]+ > / '(' Expr ')'
+    %whitespace <- [ \t]*
+  )";
+  peg::parser p1;
+  ASSERT_TRUE(p1.load_grammar(g));
+  p1.enable_packrat_parsing();
+  auto blob = p1.serialize_grammar(); // start rule has packrat baked in
+
+  std::string start1;
+  auto g1 = GrammarBlob::deserialize(blob, start1);
+  ASSERT_TRUE((*g1)[start1].enablePackratParsing);
+
+  peg::parser p2;
+  ASSERT_TRUE(p2.load_blob(blob));
+  p2.enable_packrat_parsing(); // must NOT clear the blob's packrat flag
+  auto blob2 = p2.serialize_grammar();
+
+  std::string start2;
+  auto g2 = GrammarBlob::deserialize(blob2, start2);
+  EXPECT_TRUE((*g2)[start2].enablePackratParsing);
+}
+
 TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
   peg::parser p;
   std::vector<uint8_t> junk = {9, 9, 9, 9};

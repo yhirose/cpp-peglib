@@ -6047,6 +6047,12 @@ public:
     try {
       grammar_ = GrammarBlob::deserialize(blob, start_);
     } catch (const std::exception &) { return false; }
+    if (grammar_ != nullptr) {
+      // Symmetry with load_grammar(): restore the parser-level packrat flag
+      // from the blob so a later enable_packrat_parsing() re-applies it
+      // instead of resetting the start rule to the false member default.
+      enablePackratParsing_ = (*grammar_)[start_].enablePackratParsing;
+    }
     return grammar_ != nullptr;
   }
 
