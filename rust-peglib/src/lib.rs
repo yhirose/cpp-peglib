@@ -461,7 +461,9 @@ fn mark_kw(ope: &dyn Ope, word: &dyn Ope) {
         let empty_rules: Vec<Definition> = Vec::new();
         let mut ctx = Context::new(text, &empty_rules, 0, false);
         let consumed = word.parse_core(0, &mut vs, &mut ctx);
-        if success(consumed) && consumed >= lit.lit.len() {
+        // A literal is treated as a word if %word matches its start (mirrors
+        // cpp, which uses success of the match, not full coverage).
+        if success(consumed) {
             lit.is_word.set(true);
         }
         return;

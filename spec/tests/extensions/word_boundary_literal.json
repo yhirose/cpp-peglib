@@ -1,0 +1,40 @@
+[
+  {
+    "name": "word_literal_needs_boundary_dollar",
+    "description": "With `$` in %word, the word-literal '${' requires a word boundary, so '${x}' does not interpolate.",
+    "grammar": "Doc <- Span*\nSpan <- '${' Ident '}'\n      / Ch+\nCh <- !('${') .\nIdent <- [a-z]+\n%word <- [a-zA-Z0-9_$]\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "ab",
+        "match": true,
+        "expected_ast": "+ Doc\n  + Span/1\n    - Ch (a)\n    - Ch (b)\n"
+      },
+      {
+        "input": "${x}",
+        "match": true,
+        "expected_ast": "+ Doc\n  + Span/1\n    - Ch ($)\n    - Ch ({)\n    - Ch (x)\n    - Ch (})\n"
+      },
+      {
+        "input": "a${x}b",
+        "match": true,
+        "expected_ast": "+ Doc\n  + Span/1\n    - Ch (a)\n    - Ch ($)\n    - Ch ({)\n    - Ch (x)\n    - Ch (})\n    - Ch (b)\n"
+      }
+    ]
+  },
+  {
+    "name": "keyword_literal_boundary",
+    "description": "A word-literal keyword only matches at a word boundary.",
+    "grammar": "S <- KW_IF / IDENT\nKW_IF <- 'if'\nIDENT <- < [a-z]+ >\n%word <- [a-zA-Z0-9_]\n",
+    "cases": [
+      {
+        "input": "if",
+        "match": true
+      },
+      {
+        "input": "iffy",
+        "match": true
+      }
+    ]
+  }
+]
