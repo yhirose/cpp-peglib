@@ -111,5 +111,21 @@
       { "input": "key=value", "match": true },
       { "input": "key=other", "match": false }
     ]
+  },
+  {
+    "name": "macro_with_left_recursion",
+    "description": "A macro invoked from a left-recursive rule (cpp InteractionTest.Macro_with_left_recursion)",
+    "grammar": "EXPR <- EXPR '+' TERM / TERM\nTERM <- T([0-9]+)\nT(S) <- < S > _\n~_ <- [ \\t]*",
+    "cases": [
+      { "input": "1+2+3", "match": true }
+    ]
+  },
+  {
+    "name": "nested_macro_with_left_recursion",
+    "description": "A two-level nested macro invoked from a left-recursive rule",
+    "grammar": "EXPR <- EXPR '+' NUM / NUM\nNUM <- WRAP([0-9]+)\nWRAP(X) <- TOK(X)\nTOK(Y) <- < Y > _\n~_ <- [ \\t]*",
+    "cases": [
+      { "input": "1+2+3+4", "match": true }
+    ]
   }
 ]
