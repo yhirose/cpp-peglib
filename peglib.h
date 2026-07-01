@@ -4950,7 +4950,9 @@ private:
         rule.is_macro = is_macro;
         rule.params = params;
 
-        if (data.start.empty()) {
+        // Reserved `%`-prefixed rules (%whitespace, %word, ...) are directives,
+        // not parseable entry points, so they must not become the start rule.
+        if (data.start.empty() && name[0] != '%') {
           data.start = rule.name;
           data.start_pos = rule.s_;
         }

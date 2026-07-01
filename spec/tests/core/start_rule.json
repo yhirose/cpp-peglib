@@ -1,0 +1,20 @@
+[
+  {
+    "name": "word_directive_not_default_start",
+    "description": "A reserved %word directive defined first must not become the default start rule; the first ordinary rule (S) is the start.",
+    "grammar": "%word <- [a-z]+\nS <- 'cat'\n",
+    "cases": [
+      { "input": "cat", "match": true },
+      { "input": "dog", "match": false }
+    ]
+  },
+  {
+    "name": "whitespace_directive_not_default_start",
+    "description": "A reserved %whitespace directive defined first must not become the default start rule.",
+    "grammar": "%whitespace <- [ ]*\nS <- 'cat'\n",
+    "cases": [
+      { "input": "cat", "match": true },
+      { "input": "dog", "match": false }
+    ]
+  }
+]
