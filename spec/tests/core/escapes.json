@@ -1,0 +1,128 @@
+[
+  {
+    "name": "class_escaped_dash_is_literal",
+    "description": "\\- inside a character class is a literal dash, not a range operator.",
+    "grammar": "S <- [\\-]+\n",
+    "cases": [
+      {
+        "input": "-",
+        "match": true
+      },
+      {
+        "input": "--",
+        "match": true
+      },
+      {
+        "input": "a",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "class_escaped_caret_is_literal",
+    "description": "\\^ inside a character class is a literal caret.",
+    "grammar": "S <- [\\^]+\n",
+    "cases": [
+      {
+        "input": "^",
+        "match": true
+      },
+      {
+        "input": "^^",
+        "match": true
+      },
+      {
+        "input": "a",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "class_escaped_dash_in_set",
+    "description": "[a\\-z] is the set {a, -, z}, not the range a-z (dash is escaped/literal).",
+    "grammar": "S <- [a\\-z]+\n",
+    "cases": [
+      {
+        "input": "a",
+        "match": true
+      },
+      {
+        "input": "z",
+        "match": true
+      },
+      {
+        "input": "-",
+        "match": true
+      },
+      {
+        "input": "a-z",
+        "match": true
+      },
+      {
+        "input": "b",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "literal_escaped_dash_and_caret",
+    "description": "\\- and \\^ are literal - and ^ in string literals.",
+    "grammar": "S <- '\\-' '\\^'\n",
+    "cases": [
+      {
+        "input": "-^",
+        "match": true
+      },
+      {
+        "input": "-",
+        "match": false
+      },
+      {
+        "input": "^",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "class_form_feed_and_vtab",
+    "description": "\\f (form feed) and \\v (vertical tab) escapes match the control characters.",
+    "grammar": "S <- [\\f\\v]+\n",
+    "cases": [
+      {
+        "input": "\f",
+        "match": true
+      },
+      {
+        "input": "\u000b",
+        "match": true
+      },
+      {
+        "input": "\f\u000b",
+        "match": true
+      },
+      {
+        "input": "f",
+        "match": false
+      },
+      {
+        "input": "v",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "literal_form_feed",
+    "description": "\\f in a string literal matches U+000C.",
+    "grammar": "S <- 'a\\fb'\n",
+    "cases": [
+      {
+        "input": "a\fb",
+        "match": true
+      },
+      {
+        "input": "afb",
+        "match": false
+      }
+    ]
+  }
+]

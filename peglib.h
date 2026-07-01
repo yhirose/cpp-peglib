@@ -340,6 +340,14 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
         r += ']';
         i++;
         break;
+      case '^':
+        r += '^';
+        i++;
+        break;
+      case '-':
+        r += '-';
+        i++;
+        break;
       case '\\':
         r += '\\';
         i++;
