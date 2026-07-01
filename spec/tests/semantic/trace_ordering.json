@@ -153,5 +153,76 @@
         ]
       }
     ]
+  },
+  {
+    "name": "trace_left_recursion",
+    "description": "A left-recursive rule fires enter/leave per seed/grow iteration; recursive memo hits fire nothing.",
+    "grammar": "E <- E '+' T / T\nT <- < [0-9] >\n",
+    "trace": {
+      "rules": [
+        "E",
+        "T"
+      ],
+      "events": [
+        "enter",
+        "leave"
+      ]
+    },
+    "cases": [
+      {
+        "input": "1",
+        "match": true,
+        "expected_trace": [
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E"
+        ]
+      },
+      {
+        "input": "1+2",
+        "match": true,
+        "expected_trace": [
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E"
+        ]
+      },
+      {
+        "input": "1+2+3",
+        "match": true,
+        "expected_trace": [
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E",
+          "enter_E",
+          "enter_T",
+          "leave_T",
+          "leave_E"
+        ]
+      }
+    ]
   }
 ]

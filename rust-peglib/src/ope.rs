@@ -1025,6 +1025,24 @@ struct HolderInfo<'a> {
     error_msg: &'a str,
 }
 
+fn fire_enter(ctx: &mut Context, rule_name: &str, pos: usize) {
+    if let Some(h) = ctx.handlers {
+        unsafe { (*h).on_enter(rule_name); }
+    }
+    if let Some(t) = ctx.tracer {
+        if let Some(ref enter) = unsafe { &*t }.enter { enter(rule_name, pos); }
+    }
+}
+
+fn fire_leave(ctx: &mut Context, rule_name: &str, pos: usize, ok: bool) {
+    if let Some(h) = ctx.handlers {
+        unsafe { (*h).on_leave(rule_name, ok); }
+    }
+    if let Some(t) = ctx.tracer {
+        if let Some(ref leave) = unsafe { &*t }.leave { leave(rule_name, pos, ok); }
+    }
+}
+
 fn body_is_choice_like(body: &dyn Ope) -> bool {
     let mut ope: &dyn Ope = body;
     if let Some(tb) = ope.as_any().downcast_ref::<TokenBoundary>() {
@@ -1161,13 +1179,32 @@ impl Ope for Holder {
             ignore: self.ignore, rule_name, has_error_msg, error_msg,
         };
 
-        if let Some(h) = ctx.handlers {
-            unsafe { (*h).on_enter(rule_name); }
-        }
-        if let Some(t) = ctx.tracer {
-            if let Some(ref enter) = unsafe { &*t }.enter {
-                enter(rule_name, pos);
+        // Left-recursion memo hit (a recursive reference): return the cached
+        // value without firing enter/leave, mirroring cpp whose LR memo check
+        // precedes the enter/leave in do_parse.
+        if self.is_lr {
+            let lr_key = (def_id, pos);
+            if let Some((memo_len, memo_ast)) = ctx.lr_memo.get(&lr_key) {
+                ctx.lr_refs_hit.insert(def_id);
+                let len = *memo_len;
+                let ast = memo_ast.as_ref().map(|b| clone_any_box(b));
+                if let Some(boxed) = ast {
+                    if ctx.value_stack_size > 0 {
+                        ctx.value_stack[ctx.value_stack_size - 1].values.push(boxed);
+                    } else {
+                        ctx.root_ast = Some(boxed);
+                    }
+                }
+                ctx.depth -= 1;
+                return len;
             }
+        }
+
+        // Non-LR rules trace once here (before the packrat check, so cache
+        // hits still trace like cpp's uncached re-parse). LR rules trace per
+        // seed/grow iteration inside parse_left_recursive instead.
+        if !self.is_lr {
+            fire_enter(ctx, rule_name, pos);
         }
 
         let tok_mark = vs.tokens.len();
@@ -1212,13 +1249,8 @@ impl Ope for Holder {
 
         vs.tokens.truncate(tok_mark);
 
-        if let Some(h) = ctx.handlers {
-            unsafe { (*h).on_leave(rule_name, success(len)); }
-        }
-        if let Some(t) = ctx.tracer {
-            if let Some(ref leave) = unsafe { &*t }.leave {
-                leave(rule_name, pos, success(len));
-            }
+        if !self.is_lr {
+            fire_leave(ctx, rule_name, pos, success(len));
         }
 
         ctx.depth -= 1;
@@ -1240,7 +1272,9 @@ fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &Holder
     ctx.lr_active_seeds.insert(lr_key);
     let saved_refs = std::mem::take(&mut ctx.lr_refs_hit);
 
+    fire_enter(ctx, info.rule_name, pos);
     let (initial_len, initial_ast) = do_parse(id, pos, body, info, vs, ctx);
+    fire_leave(ctx, info.rule_name, pos, success(initial_len));
 
     let mut cycle_rules = std::mem::take(&mut ctx.lr_refs_hit);
     if !cycle_rules.is_empty() { cycle_rules.insert(id); }
@@ -1258,7 +1292,9 @@ fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &Holder
                 .copied().collect();
             for k in stale { ctx.lr_memo.remove(&k); }
 
+            fire_enter(ctx, info.rule_name, pos);
             let (new_len, new_ast) = do_parse(id, pos, body, info, vs, ctx);
+            fire_leave(ctx, info.rule_name, pos, success(new_len));
             if !success(new_len) || new_len <= len { break; }
             len = new_len;
             ast = new_ast;
