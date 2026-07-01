@@ -1,0 +1,123 @@
+[
+  {
+    "name": "reject_unknown_escape_literal",
+    "description": "An undefined escape sequence in a literal is rejected.",
+    "grammar": "S <- '\\z'\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_unknown_escape_class",
+    "description": "An undefined escape sequence in a character class is rejected.",
+    "grammar": "S <- [\\q]\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_reversed_char_range",
+    "description": "A character class range whose low bound exceeds its high bound is rejected.",
+    "grammar": "S <- [z-a]\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_unknown_instruction",
+    "description": "An unrecognized instruction in { } is rejected.",
+    "grammar": "S <- 'a' { bogus_instr }\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_double_ignore",
+    "description": "More than one leading ~ ignore operator is rejected.",
+    "grammar": "S <- ~~A\nA <- 'a'\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_duplicate_whitespace",
+    "description": "Defining %whitespace twice is rejected.",
+    "grammar": "%whitespace <- [ ]*\n%whitespace <- [.]*\nS <- 'a'\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "reject_duplicate_word",
+    "description": "Defining %word twice is rejected.",
+    "grammar": "%word <- [a-z]+\n%word <- [0-9]+\nS <- 'a'\n",
+    "cases": [
+      {
+        "input": "",
+        "grammar_error": true
+      }
+    ]
+  },
+  {
+    "name": "accept_all_defined_escapes",
+    "description": "All defined escapes remain valid.",
+    "grammar": "S <- '\\n\\t\\f\\v\\-\\^\\[\\]\\\\'\n",
+    "cases": [
+      {
+        "input": "\n\t\f\u000b-^[]\\",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "accept_single_ignore",
+    "description": "A single ~ ignore operator is valid.",
+    "grammar": "S <- ~A B\nA <- 'a'\nB <- < 'b' >\n",
+    "cases": [
+      {
+        "input": "ab",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "accept_known_instruction",
+    "description": "A recognized instruction is accepted.",
+    "grammar": "S <- < [a-z]+ > { no_ast_opt }\n",
+    "cases": [
+      {
+        "input": "abc",
+        "match": true
+      }
+    ]
+  },
+  {
+    "name": "accept_char_range",
+    "description": "A well-ordered character range is accepted.",
+    "grammar": "S <- [a-z]+\n",
+    "cases": [
+      {
+        "input": "abc",
+        "match": true
+      }
+    ]
+  }
+]

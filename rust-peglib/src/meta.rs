@@ -271,10 +271,16 @@ impl<'a> Meta<'a> {
         let mut body = body_result?;
 
         if is_special && name == "whitespace" {
+            if self.whitespace.is_some() {
+                return Err("'%whitespace' is already defined".to_string());
+            }
             self.whitespace = Some(Rc::new(Whitespace { ope: body }));
             return Ok(());
         }
         if is_special && name == "word" {
+            if self.word.is_some() {
+                return Err("'%word' is already defined".to_string());
+            }
             self.word = Some(body);
             return Ok(());
         }
@@ -310,11 +316,15 @@ impl<'a> Meta<'a> {
             let mut ast_name_val: Option<String> = None;
             for item in block.split(';') {
                 let item = item.trim();
-                if item == "no_ast_opt" {
+                if item.is_empty() {
+                    continue;
+                } else if item == "no_ast_opt" {
                     set_no_ast_opt = true;
                 } else if let Some(rest) = item.strip_prefix("ast_name") {
                     let tag = rest.trim_start().strip_prefix(':').map(str::trim).unwrap_or("");
                     if !tag.is_empty() { ast_name_val = Some(tag.to_string()); }
+                } else if !(item.starts_with("precedence") || item.starts_with("error_message")) {
+                    return Err(format!("unknown instruction: '{item}'"));
                 }
             }
             if set_no_ast_opt { self.grammar.rules[id].no_ast_opt = true; }
@@ -414,8 +424,8 @@ impl<'a> Meta<'a> {
     }
 
     fn parse_prefix(&mut self) -> Result<Rc<dyn Ope>, String> {
-        let mut ignore = false;
-        while self.consume_byte(b'~') { ignore = true; self.skip_spacing(); }
+        let ignore = self.consume_byte(b'~');
+        if ignore { self.skip_spacing(); }
         let op = if self.consume_byte(b'&') { Some(true) }
                  else if self.consume_byte(b'!') { Some(false) }
                  else { None };
@@ -604,6 +614,9 @@ impl<'a> Meta<'a> {
             let hi = if self.peek_byte() == Some(b'-') && self.bytes().get(self.pos + 1) != Some(&b']') {
                 self.pos += 1; self.parse_class_char()?
             } else { lo };
+            if (lo as u32) > (hi as u32) {
+                return Err(self.err("character class range is out of order"));
+            }
             ranges.push((lo, hi));
         }
         Err(self.err("unterminated character class"))
@@ -630,14 +643,15 @@ impl<'a> Meta<'a> {
             self.pos = end;
             return Ok(char::from_u32(n));
         }
-        self.pos += 1;
-        Ok(Some(match e {
+        let c = match e {
             b'n' => '\n', b'r' => '\r', b't' => '\t',
             b'f' => '\u{0c}', b'v' => '\u{0b}',
             b'\\' => '\\', b'\'' => '\'', b'"' => '"',
             b'[' => '[', b']' => ']', b'-' => '-', b'^' => '^',
-            other => other as char,
-        }))
+            _ => return Err(self.err("unknown escape sequence")),
+        };
+        self.pos += 1;
+        Ok(Some(c))
     }
 
     fn parse_class_char(&mut self) -> Result<char, String> {
