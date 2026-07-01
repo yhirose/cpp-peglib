@@ -1,0 +1,40 @@
+[
+  {
+    "name": "ignore_shifts_sv_index",
+    "description": "A ~ignored child leaves no semantic value, so later children shift down in the sv index.",
+    "grammar": "S <- ~A '+' B\nA <- < [0-9]+ >\nB <- < [0-9]+ >",
+    "actions": {
+      "A": { "op": "token_to_number", "type": "long" },
+      "B": { "op": "token_to_number", "type": "long" },
+      "S": { "op": "passthrough", "index": 0 }
+    },
+    "cases": [
+      { "input": "1+2", "match": true, "expected_value": 2 },
+      { "input": "10+20", "match": true, "expected_value": 20 }
+    ]
+  },
+  {
+    "name": "choice_index_value",
+    "description": "vs.choice() reflects which alternative matched.",
+    "grammar": "S <- 'a' / 'b' / 'c'",
+    "actions": { "S": { "op": "choice" } },
+    "cases": [
+      { "input": "a", "match": true, "expected_value": 0 },
+      { "input": "b", "match": true, "expected_value": 1 },
+      { "input": "c", "match": true, "expected_value": 2 }
+    ]
+  },
+  {
+    "name": "passthrough_first_child",
+    "description": "passthrough returns the first child's value.",
+    "grammar": "S <- A B\nA <- < [0-9] >\nB <- < [0-9] >",
+    "actions": {
+      "A": { "op": "token_to_number", "type": "long" },
+      "B": { "op": "token_to_number", "type": "long" },
+      "S": { "op": "passthrough", "index": 1 }
+    },
+    "cases": [
+      { "input": "12", "match": true, "expected_value": 2 }
+    ]
+  }
+]
