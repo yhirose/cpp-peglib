@@ -865,7 +865,14 @@ impl Ope for NotPredicate {
         vs.sv = save_sv;
         ctx.capture_entries.truncate(save_cl);
         if ctx.value_stack_size > 0 { ctx.value_stack[ctx.value_stack_size - 1].values.truncate(save_sv_vl); }
-        if success(len) { FAIL } else { 0 }
+        if success(len) {
+            // The guarded expression matched, so this position is unexpected;
+            // record it (with the current rule) like cpp-peglib.
+            ctx.set_error_pos(pos, None);
+            FAIL
+        } else {
+            0
+        }
     }
     fn accept(&self, v: &mut dyn Visitor) { v.visit_not_predicate(self); }
 }

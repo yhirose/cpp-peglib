@@ -281,6 +281,13 @@ impl Parser {
         let len = start_def.holder.parse_core(ws, &mut vs, &mut ctx);
         let eoi = self.grammar.rules[self.grammar.start].eoi_check;
         let structural_ok = success(len) && (!eoi || ws + len == input.len());
+        // Trailing input after a successful match reports "expected end of
+        // input" (unless a deeper error was recorded), mirroring cpp-peglib.
+        if success(len) && eoi && ws + len < input.len()
+            && ctx.error_info.error_pos < ws + len {
+            ctx.error_info.message = "expected end of input".to_string();
+            ctx.error_info.message_pos = ws + len;
+        }
         let ok = structural_ok && !ctx.recovered;
         let mut errors: Vec<ErrorReport> = ctx.predicate_errors.iter().map(|(pos, m)| {
             let (line, col) = line_col(input, *pos);
@@ -290,7 +297,9 @@ impl Parser {
         let fail_pos = if structural_ok {
             if ok { None } else { Some(ctx.error_info.error_pos) }
         } else if success(len) {
-            Some(ws + len)
+            // Trailing input: point at the deeper recorded error if it lies
+            // past the match end, else at the match end (expected end of input).
+            Some(ctx.error_info.error_pos.max(ws + len))
         } else {
             Some(ctx.error_info.error_pos)
         };

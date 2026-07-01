@@ -1,0 +1,100 @@
+[
+  {
+    "name": "trailing_input_reports_eoi",
+    "description": "Extra input after a full match reports 'expected end of input'.",
+    "grammar": "S <- 'a'\n",
+    "cases": [
+      {
+        "input": "a",
+        "match": true
+      },
+      {
+        "input": "ab",
+        "match": false,
+        "expected_error": {
+          "line": 1,
+          "col": 2,
+          "message": "expected end of input"
+        }
+      },
+      {
+        "input": "a ",
+        "match": false,
+        "expected_error": {
+          "line": 1,
+          "col": 2,
+          "message": "expected end of input"
+        }
+      }
+    ]
+  },
+  {
+    "name": "trailing_after_repetition",
+    "description": "Trailing input after a greedy repetition reports 'expected end of input'.",
+    "grammar": "S <- [0-9]+\n",
+    "cases": [
+      {
+        "input": "12",
+        "match": true
+      },
+      {
+        "input": "12x",
+        "match": false,
+        "expected_error": {
+          "line": 1,
+          "col": 3,
+          "message": "expected end of input"
+        }
+      },
+      {
+        "input": "12 ",
+        "match": false,
+        "expected_error": {
+          "line": 1,
+          "col": 3,
+          "message": "expected end of input"
+        }
+      }
+    ]
+  },
+  {
+    "name": "deeper_error_past_match_wins",
+    "description": "When a nested attempt fails past the accepted match, that deeper error (with its position) is reported instead of end-of-input.",
+    "grammar": "S <- Line+\nLine <- [a-z]+ '\\n'\n",
+    "cases": [
+      {
+        "input": "ab\ncd\n",
+        "match": true
+      },
+      {
+        "input": "ab\nde",
+        "match": false,
+        "expected_error": {
+          "line": 2,
+          "col": 3,
+          "message": "syntax error, expecting '\n'."
+        }
+      }
+    ]
+  },
+  {
+    "name": "not_predicate_failure_names_rule",
+    "description": "A leading negative lookahead that fails reports the unexpected token and the expected rule.",
+    "grammar": "S <- !'x' [a-z] 'y'\n",
+    "cases": [
+      {
+        "input": "ay",
+        "match": true
+      },
+      {
+        "input": "xy",
+        "match": false,
+        "expected_error": {
+          "line": 1,
+          "col": 1,
+          "message": "syntax error, unexpected 'xy', expecting <S>."
+        }
+      }
+    ]
+  }
+]
