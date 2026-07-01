@@ -19,9 +19,8 @@ Primary <-
 	Ignore  IdentCont  Arguments?  Spacing  !(Parameters?  LEFTARROW)
 	/ OPEN  Expression  CLOSE
 	/ BeginTok  Expression  EndTok
-	/ BeginCapScope  Expression  EndCapScope
-	/ BeginCap  Expression  EndCap
 	/ CapScope
+	/ BeginCap  Expression  EndCap
 	/ BackRef
 	/ DictionaryI
 	/ LiteralI
@@ -70,7 +69,7 @@ NegatedClassI <-  "[^" <(!']'  Range)+>  ']i' Spacing
 Range <-  (Char  '-'  ! ']' Char) /  Char
 
 Char <-
-	'\\'  [nrt'\"[\]\\^]
+	'\\'  [fnrtv'\"[\]\\^-]
 	/ '\\'  [0-3]  [0-7]  [0-7]
 	/ '\\'  [0-7]  [0-7]?
 	/ "\\x"  [0-9a-fA-F]  [0-9a-fA-F]?
@@ -132,7 +131,7 @@ Arguments <-  OPEN  Expression (COMMA  Expression)*  CLOSE
 # Instruction grammars
 Instruction <-
 	BeginBracket (InstructionItem  (InstructionItemSeparator InstructionItem)*)? EndBracket
-InstructionItem <- PrecedenceClimbing /  ErrorMessage /  NoAstOpt
+InstructionItem <- PrecedenceClimbing /  ErrorMessage /  NoAstOpt /  AstName
 ~InstructionItemSeparator <-  ';'  Spacing
 
 ~SpacesZom <-  Space*
@@ -150,7 +149,10 @@ PrecedenceOpe <-
 PrecedenceAssoc <-  [LR]
 
 # Error message instruction
-ErrorMessage <- "message"  SpacesOom  LiteralD  SpacesZom
+ErrorMessage <- "error_message"  SpacesOom  LiteralD  SpacesZom
 
 # No Ast node optimization instruction
 NoAstOpt <-  "no_ast_opt"  SpacesZom
+
+# AST node name override instruction
+AstName <-  "ast_name"  SpacesZom  ":"  SpacesZom  Identifier  SpacesZom

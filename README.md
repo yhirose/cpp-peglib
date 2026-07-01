@@ -862,6 +862,47 @@ Number      <- < [0-9]+ >
 [commandline]:1:3: syntax error
 ```
 
+### Serialize a grammar for fast startup
+
+A compiled grammar can be serialized to a portable byte blob and later restored
+without re-running the meta-parse. Deserializing a blob is roughly 40x faster
+than `load_grammar`, so an application can embed a prebuilt blob and skip the
+grammar parsing on startup.
+
+```cpp
+peg::parser parser(R"(
+  ROOT <- _ TOKEN (',' _ TOKEN)*
+  ...
+)");
+
+// Serialize the loaded grammar to a byte blob.
+std::vector<uint8_t> blob = parser.serialize_grammar();
+
+// ...store/embed the blob, then later:
+
+peg::parser parser2;
+parser2.load_blob(blob); // skips the meta-parse
+
+// Re-apply semantic actions / enable_ast() etc. as needed:
+parser2["TOKEN"] = [](const SemanticValues& vs) { /* ... */ };
+```
+
+Notes:
+
+- Only the grammar *structure* is serialized. Semantic actions, `enable_ast()`,
+  and other callbacks are **not** included and must be re-applied after
+  `load_blob`.
+- First-sets are recomputed on load, and references are resolved by name.
+- Grammars that use the `precedence` instruction, a capture / back-reference, or
+  a User operator are not serializable (`serialize_grammar()` throws;
+  `load_blob()` returns `false` on a bad or incompatible blob).
+
+`peglint` can emit a blob with the `--blob` option:
+
+```
+> peglint --blob a.peg > a.blob
+```
+
 ### AST
 
 ```
