@@ -1137,6 +1137,15 @@ impl Ope for Holder {
         if ctx.depth >= ctx.max_depth { return FAIL; }
         ctx.depth += 1;
         let def_id = self.outer;
+        if self.is_macro {
+            // Macros are transparent: parse the body directly without firing
+            // enter/leave, pushing a scope, or running actions (mirrors cpp).
+            ctx.rule_stack.push(def_id);
+            let len = body.parse_core(pos, vs, ctx);
+            ctx.rule_stack.pop();
+            ctx.depth -= 1;
+            return len;
+        }
         // rule_name and error_msg still need pointer lookup (strings on Definition)
         let (rule_name, has_error_msg, error_msg) = unsafe {
             let rules = &*ctx.rules;

@@ -1,0 +1,157 @@
+[
+  {
+    "name": "trace_macro_is_transparent",
+    "description": "A macro rule fires no enter/leave; only the expanded body's rules do.",
+    "grammar": "S <- Rep(A)\nRep(X) <- X+\nA <- < 'a' >\n",
+    "trace": {
+      "rules": [
+        "S",
+        "Rep",
+        "A"
+      ],
+      "events": [
+        "enter",
+        "leave"
+      ]
+    },
+    "cases": [
+      {
+        "input": "aa",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      },
+      {
+        "input": "a",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trace_backtracking_alternatives",
+    "description": "Each backtracked alternative fires enter/leave for the rules it tries.",
+    "grammar": "S <- A 'x' / A 'y'\nA <- < 'a' >\n",
+    "trace": {
+      "rules": [
+        "S",
+        "A"
+      ],
+      "events": [
+        "enter",
+        "leave"
+      ]
+    },
+    "cases": [
+      {
+        "input": "ax",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      },
+      {
+        "input": "ay",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trace_repetition_final_attempt",
+    "description": "A repetition fires enter/leave for every attempt, including the final failing one.",
+    "grammar": "S <- A+\nA <- < 'a' >\n",
+    "trace": {
+      "rules": [
+        "S",
+        "A"
+      ],
+      "events": [
+        "enter",
+        "leave"
+      ]
+    },
+    "cases": [
+      {
+        "input": "a",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      },
+      {
+        "input": "aa",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trace_predicate",
+    "description": "enter/leave fire for rules referenced inside predicates.",
+    "grammar": "S <- &A A\nA <- < 'a' >\n",
+    "trace": {
+      "rules": [
+        "S",
+        "A"
+      ],
+      "events": [
+        "enter",
+        "leave"
+      ]
+    },
+    "cases": [
+      {
+        "input": "a",
+        "match": true,
+        "expected_trace": [
+          "enter_S",
+          "enter_A",
+          "leave_A",
+          "enter_A",
+          "leave_A",
+          "leave_S"
+        ]
+      }
+    ]
+  }
+]
