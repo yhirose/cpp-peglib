@@ -774,7 +774,16 @@ fn check_is_token(ope: &dyn Ope) -> bool {
 
 fn check_is_token_walk(ope: &dyn Ope, has_tb: &mut bool, has_rule: &mut bool) {
     let any = ope.as_any();
-    if any.downcast_ref::<Reference>().is_some() { *has_rule = true; return; }
+    if let Some(r) = any.downcast_ref::<Reference>() {
+        // A macro reference is not itself a rule for token purposes; recurse
+        // into its arguments instead (mirrors cpp's TokenChecker).
+        if r.is_macro {
+            for a in &r.args { check_is_token_walk(a.as_ref(), has_tb, has_rule); }
+        } else {
+            *has_rule = true;
+        }
+        return;
+    }
     if let Some(h) = any.downcast_ref::<Holder>() {
         if let Some(ref o) = h.ope { check_is_token_walk(o.as_ref(), has_tb, has_rule); }
         return;
@@ -783,8 +792,9 @@ fn check_is_token_walk(ope: &dyn Ope, has_tb: &mut bool, has_rule: &mut bool) {
     if let Some(seq) = any.downcast_ref::<Sequence>() { for o in &seq.opes { check_is_token_walk(o.as_ref(), has_tb, has_rule); } return; }
     if let Some(ch) = any.downcast_ref::<PrioritizedChoice>() { for o in &ch.opes { check_is_token_walk(o.as_ref(), has_tb, has_rule); } return; }
     if let Some(rep) = any.downcast_ref::<Repetition>() { check_is_token_walk(rep.ope.as_ref(), has_tb, has_rule); return; }
-    if let Some(p) = any.downcast_ref::<AndPredicate>() { check_is_token_walk(p.ope.as_ref(), has_tb, has_rule); return; }
-    if let Some(p) = any.downcast_ref::<NotPredicate>() { check_is_token_walk(p.ope.as_ref(), has_tb, has_rule); return; }
+    // Predicates contribute nothing to token-ness (mirrors cpp's TokenChecker).
+    if any.downcast_ref::<AndPredicate>().is_some() { return; }
+    if any.downcast_ref::<NotPredicate>().is_some() { return; }
     if let Some(cap) = any.downcast_ref::<Capture>() { check_is_token_walk(cap.ope.as_ref(), has_tb, has_rule); return; }
     if let Some(cs) = any.downcast_ref::<CaptureScope>() { check_is_token_walk(cs.ope.as_ref(), has_tb, has_rule); return; }
     if let Some(ig) = any.downcast_ref::<Ignore>() { check_is_token_walk(ig.ope.as_ref(), has_tb, has_rule); return; }

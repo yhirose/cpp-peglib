@@ -1,0 +1,41 @@
+[
+  {
+    "name": "macro_reference_rule_is_token",
+    "description": "A rule whose only reference is a macro call is a token (the macro ref recurses into its args).",
+    "grammar": "S <- KW\nKW <- K('let')\nK(X) <- < X >\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "let",
+        "match": true,
+        "expected_ast": "+ S\n  - KW (let)\n"
+      }
+    ]
+  },
+  {
+    "name": "predicate_reference_does_not_block_token",
+    "description": "References that appear only inside a predicate do not make a rule a non-token.",
+    "grammar": "S <- WILD\nWILD <- '_' !Ident\nIdent <- [a-z]+\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "_",
+        "match": true,
+        "expected_ast": "+ S\n  - WILD (_)\n"
+      }
+    ]
+  },
+  {
+    "name": "keyword_guard_is_token",
+    "description": "A keyword literal guarded by a negative lookahead over a rule is still a token.",
+    "grammar": "S <- KW\nKW <- 'let' !IdentChar\nIdentChar <- [a-zA-Z0-9_]\n",
+    "ast": {},
+    "cases": [
+      {
+        "input": "let",
+        "match": true,
+        "expected_ast": "+ S\n  - KW (let)\n"
+      }
+    ]
+  }
+]
