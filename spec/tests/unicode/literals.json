@@ -1,0 +1,25 @@
+[
+  {
+    "name": "unicode_rule_names_and_literals",
+    "description": "Rule names and string literals may be non-ASCII (Japanese).",
+    "grammar": "文 <- 修飾語? 主語 述語 '。'\n主語 <- 名詞 助詞\n述語 <- 動詞 助詞\n修飾語 <- 形容詞\n名詞 <- 'サーバー' / 'クライアント'\n形容詞 <- '古い' / '新しい'\n動詞 <- '落ち' / '復旧し'\n助詞 <- 'が' / 'を' / 'た' / 'ます' / 'に'\n",
+    "cases": [
+      {
+        "input": "サーバーを復旧します。",
+        "match": true
+      },
+      {
+        "input": "古いサーバーが落ちた。",
+        "match": true
+      },
+      {
+        "input": "サーバー。",
+        "match": false
+      },
+      {
+        "input": "",
+        "match": false
+      }
+    ]
+  }
+]

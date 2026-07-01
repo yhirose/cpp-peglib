@@ -1,0 +1,29 @@
+[
+  {
+    "name": "dot_matches_one_codepoint",
+    "description": "The dot operator matches a single (possibly multi-byte) codepoint.",
+    "grammar": "S <- 'a' . 'b'\n",
+    "cases": [
+      {
+        "input": "aあb",
+        "match": true
+      },
+      {
+        "input": "aåb",
+        "match": true
+      },
+      {
+        "input": "aXb",
+        "match": true
+      },
+      {
+        "input": "ab",
+        "match": false
+      },
+      {
+        "input": "aああb",
+        "match": false
+      }
+    ]
+  }
+]

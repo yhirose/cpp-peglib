@@ -1,0 +1,73 @@
+[
+  {
+    "name": "unicode_character_class_ranges",
+    "description": "Character classes with non-ASCII (CJK) ranges and ASCII ranges.",
+    "grammar": "S <- 'a' [い-おAさC-Eた-とは] 'b'\n",
+    "cases": [
+      {
+        "input": "aいb",
+        "match": true
+      },
+      {
+        "input": "aうb",
+        "match": true
+      },
+      {
+        "input": "aおb",
+        "match": true
+      },
+      {
+        "input": "aかb",
+        "match": false
+      },
+      {
+        "input": "aAb",
+        "match": true
+      },
+      {
+        "input": "aBb",
+        "match": false
+      },
+      {
+        "input": "aEb",
+        "match": true
+      },
+      {
+        "input": "aFb",
+        "match": false
+      },
+      {
+        "input": "aそb",
+        "match": false
+      },
+      {
+        "input": "aたb",
+        "match": true
+      },
+      {
+        "input": "aちb",
+        "match": true
+      },
+      {
+        "input": "aとb",
+        "match": true
+      },
+      {
+        "input": "aなb",
+        "match": false
+      },
+      {
+        "input": "aはb",
+        "match": true
+      },
+      {
+        "input": "a?b",
+        "match": false
+      },
+      {
+        "input": "aあb",
+        "match": false
+      }
+    ]
+  }
+]

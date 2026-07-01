@@ -1,0 +1,32 @@
+[
+  {
+    "name": "no_ast_opt_instruction",
+    "description": "A rule marked { no_ast_opt } is not collapsed by optimization.",
+    "grammar": "S <- Wrapped\nWrapped <- Inner { no_ast_opt }\nInner <- < [a-z]+ >\n",
+    "ast": {
+      "optimize": true
+    },
+    "cases": [
+      {
+        "input": "abc",
+        "match": true,
+        "expected_ast": "+ S[Wrapped]\n  - Inner (abc)\n"
+      }
+    ]
+  },
+  {
+    "name": "ast_name_instruction",
+    "description": "{ ast_name: X } overrides the node's emitted name.",
+    "grammar": "S <- Item\nItem <- < [a-z]+ > { ast_name: Word }\n",
+    "ast": {
+      "optimize": false
+    },
+    "cases": [
+      {
+        "input": "abc",
+        "match": true,
+        "expected_ast": "+ S\n  - Word (abc)\n"
+      }
+    ]
+  }
+]

@@ -1,0 +1,85 @@
+[
+  {
+    "name": "single_child_chain_raw",
+    "description": "Without optimization, a single-child chain keeps every node.",
+    "grammar": "A <- B\nB <- C\nC <- < [a-z]+ >\n",
+    "ast": {
+      "optimize": false
+    },
+    "cases": [
+      {
+        "input": "hello",
+        "match": true,
+        "expected_ast": "+ A\n  + B\n    - C (hello)\n"
+      },
+      {
+        "input": "",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "single_child_chain_optimized",
+    "description": "Optimization collapses a single-child chain to one node.",
+    "grammar": "A <- B\nB <- C\nC <- < [a-z]+ >\n",
+    "ast": {
+      "optimize": true
+    },
+    "cases": [
+      {
+        "input": "hello",
+        "match": true,
+        "expected_ast": "- A[C] (hello)\n"
+      },
+      {
+        "input": "a",
+        "match": true,
+        "expected_ast": "- A[C] (a)\n"
+      }
+    ]
+  },
+  {
+    "name": "multiple_children_optimized",
+    "description": "Nodes with multiple children are kept under optimization.",
+    "grammar": "S <- A B C\nA <- 'a'\nB <- 'b'\nC <- 'c'\n",
+    "ast": {
+      "optimize": true
+    },
+    "cases": [
+      {
+        "input": "abc",
+        "match": true,
+        "expected_ast": "+ S\n  - A (a)\n  - B (b)\n  - C (c)\n"
+      },
+      {
+        "input": "ab",
+        "match": false
+      }
+    ]
+  },
+  {
+    "name": "arithmetic_optimized",
+    "description": "Operator-precedence grammar, optimized AST.",
+    "grammar": "EXPR <- TERM ('+' TERM)*\nTERM <- FACTOR ('*' FACTOR)*\nFACTOR <- < [0-9]+ >\n",
+    "ast": {
+      "optimize": true
+    },
+    "cases": [
+      {
+        "input": "1+2*3",
+        "match": true,
+        "expected_ast": "+ EXPR\n  - TERM[FACTOR] (1)\n  + TERM\n    - FACTOR (2)\n    - FACTOR (3)\n"
+      },
+      {
+        "input": "1",
+        "match": true,
+        "expected_ast": "- EXPR[FACTOR] (1)\n"
+      },
+      {
+        "input": "12+3",
+        "match": true,
+        "expected_ast": "+ EXPR\n  - TERM[FACTOR] (12)\n  - TERM[FACTOR] (3)\n"
+      }
+    ]
+  }
+]
