@@ -1036,8 +1036,13 @@ public:
 
   const size_t def_count;
   const bool enablePackratParsing;
+  const std::vector<int32_t> *packrat_index; // def_id -> cache slot or -1
+  size_t packrat_cached_count;               // number of memoized rules
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
+  // Innermost active start position per rule; re-entry guard for rules that
+  // are not memoized (replaces the per-position bitvector for them).
+  std::vector<const char *> active_pos;
 
   PackratCache cache_values;
 
@@ -1056,10 +1061,19 @@ public:
   // Protected from having their lr_memo erased by inner growers.
   std::set<std::pair<const Definition *, const char *>> lr_active_seeds;
 
+  // Map a def_id to its slot in the cache tables, or -1 for guard-only
+  // rules (not memoized).
+  int32_t cache_slot(size_t def_id) const {
+    if (!packrat_index) { return static_cast<int32_t>(def_id); }
+    return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
+  }
+
   void clear_packrat_cache(const char *pos, size_t def_id) {
     if (!enablePackratParsing) { return; }
+    auto slot = cache_slot(def_id);
+    if (slot < 0) { return; }
     auto col = static_cast<size_t>(pos - s);
-    auto idx = def_count * col + def_id;
+    auto idx = packrat_cached_count * col + static_cast<size_t>(slot);
     if (idx < cache_registered.size()) {
       cache_registered[idx] = false;
       cache_success[idx] = false;
@@ -1070,8 +1084,11 @@ public:
   void write_packrat_cache(const char *pos, size_t def_id, size_t len,
                            const std::any &val) {
     if (!enablePackratParsing) { return; }
+    auto slot = cache_slot(def_id);
+    if (slot < 0) { return; }
     auto col = pos - s;
-    auto idx = def_count * static_cast<size_t>(col) + def_id;
+    auto idx = packrat_cached_count * static_cast<size_t>(col) +
+               static_cast<size_t>(slot);
     if (idx >= cache_registered.size()) { return; }
     cache_registered[idx] = true;
     cache_success[idx] = true;
@@ -1095,12 +1112,20 @@ public:
           std::shared_ptr<Ope> whitespaceOpe, std::shared_ptr<Ope> wordOpe,
           bool enablePackratParsing, TracerEnter tracer_enter,
           TracerLeave tracer_leave, std::any trace_data, bool verbose_trace,
-          Log log, ErrorReporter error_reporter = nullptr)
+          Log log, ErrorReporter error_reporter = nullptr,
+          const std::vector<int32_t> *packrat_index = nullptr,
+          size_t packrat_cached_count = 0)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
         def_count(def_count), enablePackratParsing(enablePackratParsing),
-        cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
-        cache_success(enablePackratParsing ? def_count * (l + 1) : 0),
-        cache_values(enablePackratParsing ? l / 2 : 0),
+        packrat_index(packrat_index),
+        packrat_cached_count(packrat_index ? packrat_cached_count : def_count),
+        cache_registered(
+            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
+        cache_success(
+            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
+        active_pos(enablePackratParsing ? def_count : 0, nullptr),
+        cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
+                                          : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
         has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
         verbose_trace(verbose_trace), log(log), error_reporter(error_reporter) {
@@ -1129,11 +1154,6 @@ public:
   };
   std::vector<PackratStats> *packrat_stats = nullptr;
 
-  // Per-rule packrat filter: if set, only rules with filter[def_id]=true
-  // use full memoization (cache_values map). Others use bitvector-only
-  // re-entry guard.
-  const std::vector<bool> *packrat_rule_filter = nullptr;
-
   template <typename T>
   void packrat(const char *a_s, size_t def_id, size_t &len, std::any &val,
                T fn) {
@@ -1142,8 +1162,30 @@ public:
       return;
     }
 
+    auto slot = cache_slot(def_id);
+    if (slot < 0) {
+      // Guard-only rule: no memoization. Recursion at the same position is
+      // caught by the per-rule active-position guard.
+      if (active_pos[def_id] == a_s) {
+        if (packrat_stats && def_id < packrat_stats->size()) {
+          (*packrat_stats)[def_id].hits++;
+        }
+        len = static_cast<size_t>(-1);
+        return;
+      }
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].misses++;
+      }
+      auto save = active_pos[def_id];
+      active_pos[def_id] = a_s;
+      fn(val);
+      active_pos[def_id] = save;
+      return;
+    }
+
     auto col = a_s - s;
-    auto idx = def_count * static_cast<size_t>(col) + def_id;
+    auto idx = packrat_cached_count * static_cast<size_t>(col) +
+               static_cast<size_t>(slot);
 
     if (cache_registered[idx]) {
       if (packrat_stats && def_id < packrat_stats->size()) {
@@ -1160,7 +1202,7 @@ public:
         return;
       }
     } else {
-      // Pre-register as failure (re-entry guard for all rules)
+      // Pre-register as failure (re-entry guard + failure memoization)
       cache_registered[idx] = true;
       cache_success[idx] = false;
 
@@ -1170,15 +1212,7 @@ public:
 
       fn(val);
 
-      bool full_memo =
-          !packrat_rule_filter || (def_id < packrat_rule_filter->size() &&
-                                   (*packrat_rule_filter)[def_id]);
-      if (full_memo) {
-        if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
-      } else {
-        // Guard-only: undo registration so future calls re-parse
-        cache_registered[idx] = false;
-      }
+      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
       return;
     }
   }
@@ -3056,20 +3090,26 @@ private:
       if (tracer_end) { tracer_end(trace_data); }
     });
 
+    const std::vector<int32_t> *packrat_index = nullptr;
+    size_t packrat_cached_count = 0;
+    if (enablePackratParsing) {
+      initialize_packrat_filter();
+      if (!packrat_index_.empty()) {
+        packrat_index = &packrat_index_;
+        packrat_cached_count = packrat_cached_count_;
+      } else {
+        packrat_cached_count = definition_ids_.size();
+      }
+    }
+
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
-              verbose_trace, log, error_reporter);
+              verbose_trace, log, error_reporter, packrat_index,
+              packrat_cached_count);
 
     if (collect_packrat_stats) {
       packrat_stats_.resize(definition_ids_.size());
       c.packrat_stats = &packrat_stats_;
-    }
-
-    if (enablePackratParsing) {
-      initialize_packrat_filter();
-      if (!packrat_filter_.empty()) {
-        c.packrat_rule_filter = &packrat_filter_;
-      }
     }
 
     size_t i = 0;
@@ -3110,7 +3150,8 @@ private:
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
   mutable std::once_flag packrat_filter_init_;
-  mutable std::vector<bool> packrat_filter_;
+  mutable std::vector<int32_t> packrat_index_; // def_id -> cache slot or -1
+  mutable size_t packrat_cached_count_ = 0;
 };
 
 /*
@@ -4309,17 +4350,31 @@ inline void Definition::initialize_packrat_filter() const {
     auto def_count = definition_ids_.size();
     if (def_count == 0) { return; }
 
-    // Collect rule IDs reachable from an Ope subtree (bitvector indexed by
-    // def_id)
-    struct CollectReachableRules : public TraversalVisitor {
+    // Collect rule IDs that can be invoked at the *same start position* as
+    // the given Ope subtree (leftmost reachability). A packrat cache hit
+    // requires the same rule to be queried twice at the same position, and
+    // in a PEG that only happens when alternatives of a choice share a
+    // leftmost prefix — rules reachable only past a consuming element can
+    // never be re-queried by a sibling alternative.
+    struct CollectLeftmostRules : public TraversalVisitor {
       using TraversalVisitor::visit;
       std::vector<bool> reachable; // indexed by def_id
       std::vector<bool>
           visited_rules; // indexed by def_id; guards Holder cycles
 
-      CollectReachableRules(size_t n)
+      CollectLeftmostRules(size_t n)
           : reachable(n, false), visited_rules(n, false) {}
 
+      void visit(Sequence &ope) override {
+        // Only elements up to (and including) the first one that must
+        // consume input are at the start position.
+        for (auto &op : ope.opes_) {
+          op->accept(*this);
+          ComputeCanBeEmpty empty_vis;
+          op->accept(empty_vis);
+          if (!empty_vis.result) { break; }
+        }
+      }
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < reachable.size()) {
@@ -4344,7 +4399,8 @@ inline void Definition::initialize_packrat_filter() const {
       }
     };
 
-    // Find rules that benefit: reachable from 2+ alternatives of same choice
+    // Find rules that benefit: leftmost-reachable from 2+ alternatives of
+    // the same choice
     std::vector<bool> benefits(def_count, false);
 
     struct FindBacktrackRules : public TraversalVisitor {
@@ -4357,15 +4413,15 @@ inline void Definition::initialize_packrat_filter() const {
           : benefits(b), def_count(n), visited_rules(n, false) {}
 
       void visit(PrioritizedChoice &ope) override {
-        // For each alternative, collect reachable rules as bitvectors
+        // For each alternative, collect leftmost-reachable rules
         std::vector<std::vector<bool>> alt_reachable;
         for (auto &op : ope.opes_) {
-          CollectReachableRules crr(def_count);
-          op->accept(crr);
-          alt_reachable.push_back(std::move(crr.reachable));
+          CollectLeftmostRules clr(def_count);
+          op->accept(clr);
+          alt_reachable.push_back(std::move(clr.reachable));
         }
 
-        // Mark rules reachable from 2+ alternatives
+        // Mark rules leftmost-reachable from 2+ alternatives
         for (size_t id = 0; id < def_count; id++) {
           size_t count = 0;
           for (auto &alt : alt_reachable) {
@@ -4396,7 +4452,20 @@ inline void Definition::initialize_packrat_filter() const {
     if (whitespaceOpe) { whitespaceOpe->accept(finder); }
     if (wordOpe) { wordOpe->accept(finder); }
 
-    packrat_filter_ = std::move(benefits);
+    // Left-recursive rules read and write the packrat cache directly during
+    // seed-growing, so they must stay in the cached set.
+    for (const auto &[ptr, id] : definition_ids_) {
+      auto *def = static_cast<Definition *>(ptr);
+      if (def->is_left_recursive && id < def_count) { benefits[id] = true; }
+    }
+
+    // Compact index: def_id -> slot in the cache tables (-1 = guard only)
+    packrat_index_.assign(def_count, -1);
+    int32_t k = 0;
+    for (size_t id = 0; id < def_count; id++) {
+      if (benefits[id]) { packrat_index_[id] = k++; }
+    }
+    packrat_cached_count_ = static_cast<size_t>(k);
   });
 }
 
