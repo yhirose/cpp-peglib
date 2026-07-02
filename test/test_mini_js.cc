@@ -30,12 +30,25 @@ static std::string find_grammar() {
 class MiniJsTest : public ::testing::Test {
 protected:
   static parser *pg;
+  static std::string setup_error;
 
   static void SetUpTestSuite() {
-    auto grammar = read_file(find_grammar());
-    pg = new parser(grammar);
-    ASSERT_TRUE(*pg) << "mini-js grammar failed to compile";
-    pg->enable_packrat_parsing();
+    // Report setup problems through each test via parse() instead of failing
+    // here: a fatal failure in SetUpTestSuite makes GoogleTest skip the whole
+    // suite, which ctest then reports as passing (#341).
+    try {
+      auto grammar = read_file(find_grammar());
+      pg = new parser(grammar);
+      if (!*pg) {
+        delete pg;
+        pg = nullptr;
+        setup_error = "mini-js grammar failed to compile";
+      } else {
+        pg->enable_packrat_parsing();
+      }
+    } catch (const std::exception &e) {
+      setup_error = std::string("mini-js grammar not found: ") + e.what();
+    }
   }
 
   static void TearDownTestSuite() {
@@ -43,10 +56,17 @@ protected:
     pg = nullptr;
   }
 
-  bool parse(const char *input) { return pg->parse(input); }
+  bool parse(const char *input) {
+    if (!pg) {
+      ADD_FAILURE() << setup_error;
+      return false;
+    }
+    return pg->parse(input);
+  }
 };
 
 parser *MiniJsTest::pg = nullptr;
+std::string MiniJsTest::setup_error;
 
 // --- Statements ---
 
