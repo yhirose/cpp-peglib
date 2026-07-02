@@ -21,6 +21,8 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `~` (Ignore operator)
 * `\x20` (Hex number char)
 * `\u10FFFF` (Unicode char)
+* `[\d\w\s]`, `[\D\W\S]` (Predefined character classes in a character class, ASCII semantics)
+* `[[:alpha:]]`, `[[:^alpha:]]` (POSIX character classes in a character class, ASCII semantics: `alnum`, `alpha`, `ascii`, `blank`, `cntrl`, `digit`, `graph`, `lower`, `print`, `punct`, `space`, `upper`, `word`, `xdigit`)
 * `%whitespace` (Automatic whitespace skipping)
 * `%word` (Word expression)
 * `$name(` ... `)` (Capture scope operator)

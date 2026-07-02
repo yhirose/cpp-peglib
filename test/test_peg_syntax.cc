@@ -180,6 +180,68 @@ TEST(PEGTest, PEG_Negated_Class) {
   EXPECT_TRUE(ParserGenerator::parse_test("NegatedClass", "[^^]"));
 }
 
+TEST(PEGTest, PEG_Class_Escape) {
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[\\d]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[\\w\\s]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[\\D\\S\\W]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[a-z\\d_]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("NegatedClass", "[^\\d]"));
+  EXPECT_FALSE(ParserGenerator::parse_test("Class", "[\\q]"));
+}
+
+TEST(PEGTest, PEG_Posix_Class) {
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[[:alpha:]]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[[:^digit:]]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[[:alpha:][:digit:]]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[a-z[:digit:]_]"));
+  EXPECT_TRUE(ParserGenerator::parse_test("NegatedClass", "[^[:space:]]"));
+  // Not a POSIX class; falls back to the literal chars '[' and ':'
+  EXPECT_TRUE(ParserGenerator::parse_test("Class", "[[:]"));
+}
+
+TEST(PredefinedClassTest, Class_escape_match) {
+  parser pg(R"(S <- [\d]+ '-' [\w]+ '-' [^\s]+)");
+  ASSERT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("123-abc_09-x!y"));
+  EXPECT_FALSE(pg.parse("12a-abc-x"));
+  EXPECT_FALSE(pg.parse("123-a c-x"));
+  EXPECT_FALSE(pg.parse("123-abc-x y"));
+}
+
+TEST(PredefinedClassTest, Negated_class_escape_match) {
+  parser pg(R"(S <- [\D]+)");
+  ASSERT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("abc!"));
+  EXPECT_TRUE(pg.parse(u8"あいう"));
+  EXPECT_FALSE(pg.parse("a1b"));
+}
+
+TEST(PredefinedClassTest, Posix_class_match) {
+  parser pg(R"(S <- [[:alpha:]]+ [[:digit:]]+ [[:^space:]])");
+  ASSERT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("abc123!"));
+  EXPECT_FALSE(pg.parse("abc123 "));
+  EXPECT_FALSE(pg.parse("123abc!"));
+}
+
+TEST(PredefinedClassTest, Posix_class_case_insensitive) {
+  parser pg(R"(S <- [[:upper:]]i+)");
+  ASSERT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("AbC"));
+  EXPECT_FALSE(pg.parse("ab1"));
+}
+
+TEST(PredefinedClassTest, Unknown_posix_class_is_error) {
+  parser pg(R"(S <- [[:foo:]])");
+  EXPECT_FALSE(!!pg);
+}
+
+TEST(PredefinedClassTest, Ascii_only_semantics) {
+  parser pg(R"(S <- [\w]+)");
+  ASSERT_TRUE(!!pg);
+  EXPECT_FALSE(pg.parse(u8"あ")); // \w is ASCII-only
+}
+
 TEST(PEGTest, PEG_Range) {
   EXPECT_TRUE(ParserGenerator::parse_test("Range", "a"));
   EXPECT_TRUE(ParserGenerator::parse_test("Range", "a-z"));

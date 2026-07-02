@@ -374,6 +374,46 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
   return r;
 }
 
+/*
+ * Predefined character classes (ASCII semantics)
+ */
+inline const std::vector<std::pair<char32_t, char32_t>> *
+predefined_character_class(std::string_view name) {
+  static const std::map<std::string_view,
+                        std::vector<std::pair<char32_t, char32_t>>>
+      table = {
+          {"alnum", {{'0', '9'}, {'A', 'Z'}, {'a', 'z'}}},
+          {"alpha", {{'A', 'Z'}, {'a', 'z'}}},
+          {"ascii", {{0x00, 0x7F}}},
+          {"blank", {{'\t', '\t'}, {' ', ' '}}},
+          {"cntrl", {{0x00, 0x1F}, {0x7F, 0x7F}}},
+          {"digit", {{'0', '9'}}},
+          {"graph", {{0x21, 0x7E}}},
+          {"lower", {{'a', 'z'}}},
+          {"print", {{0x20, 0x7E}}},
+          {"punct", {{0x21, 0x2F}, {0x3A, 0x40}, {0x5B, 0x60}, {0x7B, 0x7E}}},
+          {"space", {{'\t', '\r'}, {' ', ' '}}},
+          {"upper", {{'A', 'Z'}}},
+          {"word", {{'0', '9'}, {'A', 'Z'}, {'_', '_'}, {'a', 'z'}}},
+          {"xdigit", {{'0', '9'}, {'A', 'F'}, {'a', 'f'}}},
+      };
+  auto it = table.find(name);
+  return it != table.end() ? &it->second : nullptr;
+}
+
+// Ranges must be sorted and non-overlapping.
+inline std::vector<std::pair<char32_t, char32_t>> complement_character_ranges(
+    const std::vector<std::pair<char32_t, char32_t>> &ranges) {
+  std::vector<std::pair<char32_t, char32_t>> r;
+  char32_t next = 0;
+  for (const auto &[lo, hi] : ranges) {
+    if (lo > next) { r.emplace_back(next, lo - 1); }
+    next = hi + 1;
+  }
+  if (next <= 0x10FFFF) { r.emplace_back(next, 0x10FFFF); }
+  return r;
+}
+
 /*-----------------------------------------------------------------------------
  *  token_to_number_ - This function should be removed eventually
  *---------------------------------------------------------------------------*/
@@ -4842,8 +4882,12 @@ private:
 
     // NOTE: This is different from The original Brian Ford's paper, and this
     // modification allows us to specify `[+-]` as a valid char class.
-    g["Range"] <=
-        cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]), g["Char"]);
+    g["Range"] <= cho(seq(g["Char"], chr('-'), npd(chr(']')), g["Char"]),
+                      g["ClassEscape"], g["PosixClass"], g["Char"]);
+
+    g["ClassEscape"] <= seq(chr('\\'), cls("dDwWsS"));
+    g["PosixClass"] <=
+        seq(lit("[:"), opt(chr('^')), oom(cls("a-z")), lit(":]"));
 
     g["Char"] <=
         cho(seq(chr('\\'), cls("fnrtv'\"[]\\^-")),
@@ -5203,23 +5247,36 @@ private:
       return resolve_escape_sequence(tok.data(), tok.size());
     };
 
-    g["Class"] = [](const SemanticValues &vs) {
-      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
-      return cls(ranges);
+    // A Range produces either a single range (std::pair) or a range list
+    // (std::vector<std::pair>) for `\d`-style escapes and POSIX classes.
+    auto collect_ranges = [](const SemanticValues &vs) {
+      std::vector<std::pair<char32_t, char32_t>> ranges;
+      for (const auto &v : vs) {
+        if (v.type() == typeid(std::pair<char32_t, char32_t>)) {
+          ranges.push_back(std::any_cast<std::pair<char32_t, char32_t>>(v));
+        } else {
+          const auto &vec =
+              std::any_cast<const std::vector<std::pair<char32_t, char32_t>> &>(
+                  v);
+          ranges.insert(ranges.end(), vec.begin(), vec.end());
+        }
+      }
+      return ranges;
     };
-    g["ClassI"] = [](const SemanticValues &vs) {
-      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
-      return cls(ranges, true);
+
+    g["Class"] = [collect_ranges](const SemanticValues &vs) {
+      return cls(collect_ranges(vs));
     };
-    g["NegatedClass"] = [](const SemanticValues &vs) {
-      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
-      return ncls(ranges);
+    g["ClassI"] = [collect_ranges](const SemanticValues &vs) {
+      return cls(collect_ranges(vs), true);
     };
-    g["NegatedClassI"] = [](const SemanticValues &vs) {
-      auto ranges = vs.transform<std::pair<char32_t, char32_t>>();
-      return ncls(ranges, true);
+    g["NegatedClass"] = [collect_ranges](const SemanticValues &vs) {
+      return ncls(collect_ranges(vs));
     };
-    g["Range"] = [](const SemanticValues &vs) {
+    g["NegatedClassI"] = [collect_ranges](const SemanticValues &vs) {
+      return ncls(collect_ranges(vs), true);
+    };
+    g["Range"] = [](const SemanticValues &vs) -> std::any {
       switch (vs.choice()) {
       case 0: {
         auto s1 = std::any_cast<std::string>(vs[0]);
@@ -5232,13 +5289,43 @@ private:
         }
         return std::pair(cp1, cp2);
       }
-      case 1: {
+      case 1: // ClassEscape
+      case 2: // PosixClass
+        return vs[0];
+      case 3: {
         auto s = std::any_cast<std::string>(vs[0]);
         auto cp = decode_codepoint(s.data(), s.length());
         return std::pair(cp, cp);
       }
       }
       return std::pair<char32_t, char32_t>(0, 0);
+    };
+    g["ClassEscape"] = [](const SemanticValues &vs) {
+      auto ch = vs.sv()[1];
+      const char *name = nullptr;
+      switch (ch) {
+      case 'd':
+      case 'D': name = "digit"; break;
+      case 's':
+      case 'S': name = "space"; break;
+      default: name = "word"; break;
+      }
+      auto ranges = *predefined_character_class(name);
+      if (ch == 'D' || ch == 'S' || ch == 'W') {
+        ranges = complement_character_ranges(ranges);
+      }
+      return ranges;
+    };
+    g["PosixClass"] = [](const SemanticValues &vs) {
+      auto sv = vs.sv(); // `[:name:]` or `[:^name:]`
+      auto negated = sv[2] == '^';
+      auto name = sv.substr(negated ? 3 : 2, sv.size() - (negated ? 5 : 4));
+      auto ranges = predefined_character_class(name);
+      if (!ranges) {
+        auto msg = "invalid POSIX character class '" + std::string(name) + "'";
+        throw SyntaxErrorException(msg.c_str(), vs.line_info());
+      }
+      return negated ? complement_character_ranges(*ranges) : *ranges;
     };
     g["Char"] = [](const SemanticValues &vs) {
       return resolve_escape_sequence(vs.sv().data(), vs.sv().length());

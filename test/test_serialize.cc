@@ -55,6 +55,11 @@ TEST(GrammarBlobTest, RoundTripBasic) {
   }
 }
 
+TEST(GrammarBlobTest, RoundTripPredefinedClasses) {
+  check_rt("S <- [\\d]+ '-' [[:alpha:]]+ '-' [^\\s]+",
+           {"12-ab-x!", "a2-ab-x", "12-a1-x", "12-ab-x y", "12-ab-"});
+}
+
 TEST(GrammarBlobTest, RoundTripWhitespaceAndDictionary) {
   const char *g = R"(
     Program     <- Word+

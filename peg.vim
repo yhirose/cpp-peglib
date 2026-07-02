@@ -10,7 +10,7 @@ syn match pegLineComment '#.*'
 
 syn region pegStringD start=/\v"/ skip=/\v\\./ end=/\v"/
 syn region pegStringS start=/\v'/ skip=/\v\\./ end=/\v'/
-syn region pegClass start=/\v\[/ skip=/\v\\./ end=/\v]/
+syn region pegClass start=/\v\[/ skip=/\v\\.|\[:\^?[a-z]+:\]/ end=/\v]/
 
 "syn match pegOperator /\(*\|?\|+\|!\|\.\|\~\)/
 
