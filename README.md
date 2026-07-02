@@ -37,6 +37,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
 * `label { error_message "..." }` (Error message instruction)
 * `{ no_ast_opt }` (No AST node optimization instruction)
+* `{ no_whitespace }` (Disable `%whitespace` skipping inside the rule)
 * `{ ast_name: NodeTag }` (AST node name override instruction)
 
 'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
@@ -356,18 +357,25 @@ ARGS    <- '(' ')'
 NAME    <- < [a-zA-Z_][a-zA-Z0-9_]* >   # OK: token boundary skips trailing whitespace
 ```
 
-**A literal skips whitespace before a following predicate sees the input.** ([#319](https://github.com/yhirose/cpp-peglib/issues/319)) In `KEYWORD <- "create" !IDCHAR`, the literal `"create"` eats the whitespace after it, so `!IDCHAR` tests the character of the *next* word and the keyword check misfires on input like `create a`. Put the whole thing in a token boundary to keep the predicate right next to the literal:
+**A literal skips whitespace before a following predicate sees the input.** ([#319](https://github.com/yhirose/cpp-peglib/issues/319)) In `KEYWORD <- "create" !IDCHAR`, the literal `"create"` eats the whitespace after it, so `!IDCHAR` tests the character of the *next* word and the keyword check misfires on input like `create a`. Put the whole thing in a token boundary, or mark the rule with `{ no_whitespace }`, to keep the predicate right next to the literal (`peglint` warns about this pattern):
 
 ```
 KEYWORD <- < "create" !IDCHAR >
+KEYWORD <- "create" !IDCHAR  { no_whitespace }
 ```
 
-**To preserve whitespace locally** (e.g. inside string literals), use nested token boundaries: the outer `<` ... `>` disables whitespace skipping for everything inside, and the inner one selects the text for `token()`. ([#44](https://github.com/yhirose/cpp-peglib/issues/44))
+**To preserve whitespace locally** (e.g. inside string literals), mark the rule with the `{ no_whitespace }` instruction: whitespace skipping is disabled inside the rule and resumes after it, like a token boundary without the token capture. ([#44](https://github.com/yhirose/cpp-peglib/issues/44))
+
+```
+StrQuot   <- '"' (StrEscape / StrChars)* '"'  { no_whitespace }
+StrEscape <- '\\' .
+StrChars  <- (!'"' !'\\' .)+
+```
+
+The same can be written with nested token boundaries — the outer `<` ... `>` disables whitespace skipping for everything inside, and the inner one selects the text for `token()`:
 
 ```
 StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
-StrEscape <- '\\' .
-StrChars  <- (!'"' !'\\' .)+
 ```
 
 **Rules whose name starts with `_` are hidden from error messages.** If you define `%whitespace` in terms of sub-rules (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))

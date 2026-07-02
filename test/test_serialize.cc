@@ -60,6 +60,13 @@ TEST(GrammarBlobTest, RoundTripPredefinedClasses) {
            {"12-ab-x!", "a2-ab-x", "12-a1-x", "12-ab-x y", "12-ab-"});
 }
 
+TEST(GrammarBlobTest, RoundTripNoWhitespace) {
+  check_rt("S <- 'x' T 'y'\n"
+           "T <- '\"' (!'\"' .)* '\"' { no_whitespace }\n"
+           "%whitespace <- [ \\t]*",
+           {"x \" a b \" y", "x \"ab\" y", "x \" a b \"y", "x\"\"y", "xy"});
+}
+
 TEST(GrammarBlobTest, RoundTripWhitespaceAndDictionary) {
   const char *g = R"(
     Program     <- Word+

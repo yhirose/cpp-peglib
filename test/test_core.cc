@@ -315,6 +315,88 @@ TEST(GeneralTest, WHITESPACE_test3) {
   EXPECT_TRUE(ret);
 }
 
+TEST(NoWhitespaceTest, Preserve_whitespace_in_rule) {
+  parser parser(R"(
+        S           <- 'x' Str 'y'
+        Str         <- '"' < (!'"' .)* > '"'  { no_whitespace }
+        %whitespace <- [ \t]*
+    )");
+  ASSERT_TRUE(!!parser);
+
+  std::string tok;
+  parser["Str"] = [&](const SemanticValues &vs) { tok = vs.token_to_string(); };
+
+  EXPECT_TRUE(parser.parse(R"(x "  a b  " y)"));
+  EXPECT_EQ("  a b  ", tok);
+}
+
+TEST(NoWhitespaceTest, Predicate_after_literal) {
+  auto make = [](const char *kw_rule) {
+    return std::string(R"(
+        START   <- (KEYWORD / ID)*
+        )") +
+           kw_rule + R"(
+        IDCHAR  <- [A-Za-z0-9_]
+        ID      <- !KEYWORD < [A-Za-z_] IDCHAR* >
+        %whitespace <- [ \t\r\n]*
+    )";
+  };
+
+  // Without no_whitespace, "create" eats its trailing whitespace before
+  // !IDCHAR tests the input, so the keyword is never recognized.
+  {
+    parser parser(make(R"(KEYWORD <- "create" !IDCHAR)").c_str());
+    ASSERT_TRUE(!!parser);
+    auto count = 0;
+    parser["KEYWORD"] = [&](const SemanticValues &) { count++; };
+    EXPECT_TRUE(parser.parse("I will create a deleter"));
+    EXPECT_EQ(0, count);
+  }
+  {
+    parser parser(
+        make(R"(KEYWORD <- "create" !IDCHAR  { no_whitespace })").c_str());
+    ASSERT_TRUE(!!parser);
+    auto count = 0;
+    parser["KEYWORD"] = [&](const SemanticValues &) { count++; };
+    EXPECT_TRUE(parser.parse("I will create a deleter"));
+    EXPECT_EQ(1, count);
+  }
+}
+
+TEST(NoWhitespaceTest, Trailing_whitespace_is_skipped_after_rule) {
+  parser parser(R"(
+        S           <- KW KW
+        KW          <- 'a' 'b'  { no_whitespace }
+        %whitespace <- [ \t]*
+    )");
+  ASSERT_TRUE(!!parser);
+  EXPECT_TRUE(parser.parse("ab ab"));   // whitespace after the rule is skipped
+  EXPECT_FALSE(parser.parse("a b ab")); // but not inside the rule
+}
+
+TEST(NoWhitespaceTest, Combined_with_other_instructions) {
+  parser parser(R"(
+        S           <- KW
+        KW          <- 'a' 'b'  { no_whitespace; no_ast_opt }
+        %whitespace <- [ \t]*
+    )");
+  ASSERT_TRUE(!!parser);
+  EXPECT_TRUE(parser.parse("ab"));
+  EXPECT_FALSE(parser.parse("a b"));
+}
+
+TEST(NoWhitespaceTest, With_packrat) {
+  parser parser(R"(
+        S           <- 'x' Str 'y' / 'x' Str 'z'
+        Str         <- '"' < (!'"' .)* > '"'  { no_whitespace }
+        %whitespace <- [ \t]*
+    )");
+  ASSERT_TRUE(!!parser);
+  parser.enable_packrat_parsing();
+  EXPECT_TRUE(parser.parse(R"(x " a " z)"));
+  EXPECT_FALSE(parser.parse(R"(x " a " w)"));
+}
+
 TEST(GeneralTest, WHITESPACE_test4) {
   parser parser(R"(
         ROOT         <-  HELLO OPE WORLD

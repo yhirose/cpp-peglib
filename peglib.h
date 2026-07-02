@@ -2984,6 +2984,8 @@ public:
 
   std::string error_message;
   bool no_ast_opt = false;
+  bool no_whitespace = false; // Disable %whitespace skipping inside this rule
+                              // (like a token boundary, without capturing)
   std::string ast_name; // When non-empty, AST nodes produced by this rule carry
                         // this name/tag instead of the rule's own name
 
@@ -3400,7 +3402,23 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     });
 
     c.rule_stack.push_back(outer_);
-    parse_len = ope_->parse(s, n, chvs, c, dt);
+    if (outer_->no_whitespace) {
+      {
+        c.in_token_boundary_count++;
+        auto se2 = scope_exit([&]() { c.in_token_boundary_count--; });
+        parse_len = ope_->parse(s, n, chvs, c, dt);
+      }
+      if (success(parse_len)) {
+        auto wl = c.skip_whitespace(s + parse_len, n - parse_len, chvs, dt);
+        if (fail(wl)) {
+          parse_len = wl;
+        } else {
+          parse_len += wl;
+        }
+      }
+    } else {
+      parse_len = ope_->parse(s, n, chvs, c, dt);
+    }
     c.rule_stack.pop_back();
 
     if (success(parse_len)) {
@@ -4612,7 +4630,7 @@ struct GrammarBlob {
     }
   }
 
-  static const uint32_t MAGIC = 0x50454731; // "PEG1"
+  static const uint32_t MAGIC = 0x50454732; // "PEG2"
 
   static std::vector<uint8_t> serialize(const Grammar &g,
                                         const std::string &start) {
@@ -4629,6 +4647,8 @@ struct GrammarBlob {
           (def.is_left_recursive ? 32 : 0) | (def.can_be_empty ? 64 : 0) |
           (def.disable_action ? 128 : 0);
       w.u8(flags);
+      uint8_t flags2 = (def.no_whitespace ? 1 : 0);
+      w.u8(flags2);
       w.u32((uint32_t)def.params.size());
       for (auto &s : def.params)
         w.str(s);
@@ -4653,6 +4673,7 @@ struct GrammarBlob {
     for (uint32_t i = 0; i < ndef; i++) {
       std::string name = r.str();
       uint8_t flags = r.u8();
+      uint8_t flags2 = r.u8();
       uint32_t np = r.u32();
       std::vector<std::string> params;
       for (uint32_t k = 0; k < np; k++)
@@ -4670,6 +4691,7 @@ struct GrammarBlob {
       def.is_left_recursive = flags & 32;
       def.can_be_empty = flags & 64;
       def.disable_action = flags & 128;
+      def.no_whitespace = flags2 & 1;
       def.params = std::move(params);
       def.ast_name = std::move(ast_name);
       def.error_message = std::move(err);
@@ -4958,7 +4980,7 @@ private:
                                                   g["InstructionItem"])))),
             g["EndBracket"]);
     g["InstructionItem"] <= cho(g["PrecedenceClimbing"], g["ErrorMessage"],
-                                g["NoAstOpt"], g["AstName"]);
+                                g["NoAstOpt"], g["NoWhitespace"], g["AstName"]);
     ~g["InstructionItemSeparator"] <= seq(chr(';'), g["Spacing"]);
 
     ~g["SpacesZom"] <= zom(g["Space"]);
@@ -4990,6 +5012,9 @@ private:
 
     // No Ast node optimization instruction
     g["NoAstOpt"] <= seq(lit("no_ast_opt"), g["SpacesZom"]);
+
+    // No whitespace skipping instruction
+    g["NoWhitespace"] <= seq(lit("no_whitespace"), g["SpacesZom"]);
 
     // AST node name override instruction: `{ ast_name: NodeTag }`
     g["AstName"] <= seq(lit("ast_name"), g["SpacesZom"], lit(":"),
@@ -5456,6 +5481,13 @@ private:
       return instruction;
     };
 
+    g["NoWhitespace"] = [](const SemanticValues &vs) {
+      Instruction instruction;
+      instruction.type = "no_whitespace";
+      instruction.sv = vs.sv();
+      return instruction;
+    };
+
     g["AstName"] = [](const SemanticValues &vs) {
       Instruction instruction;
       instruction.type = "ast_name";
@@ -5767,6 +5799,8 @@ private:
           rule.error_message = std::any_cast<std::string>(instruction.data);
         } else if (instruction.type == "no_ast_opt") {
           rule.no_ast_opt = true;
+        } else if (instruction.type == "no_whitespace") {
+          rule.no_whitespace = true;
         } else if (instruction.type == "ast_name") {
           rule.ast_name = std::any_cast<std::string>(instruction.data);
         }

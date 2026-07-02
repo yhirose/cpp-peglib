@@ -254,6 +254,61 @@ int main(int argc, const char **argv) {
                       "'; consider left-factoring.");
       }
     }
+
+    // With %whitespace, a literal skips its trailing whitespace before a
+    // following predicate tests the input, so `"kw" !IDCHAR` checks the
+    // wrong position (issue #319). Detect that pattern outside token
+    // boundaries.
+    if (grammar.count("%whitespace")) {
+      struct FindLiteralBeforePredicate : public TraversalVisitor {
+        using TraversalVisitor::visit;
+        bool found = false;
+        size_t token_depth = 0;
+        void visit(TokenBoundary &ope) override {
+          token_depth++;
+          ope.ope_->accept(*this);
+          token_depth--;
+        }
+        void visit(Sequence &ope) override {
+          if (token_depth == 0) {
+            for (size_t i = 0; i + 1 < ope.opes_.size(); i++) {
+              if (!dynamic_cast<LiteralString *>(ope.opes_[i].get())) {
+                continue;
+              }
+              auto next = ope.opes_[i + 1].get();
+              Ope *pred_ope = nullptr;
+              if (auto npd = dynamic_cast<NotPredicate *>(next)) {
+                pred_ope = npd->ope_.get();
+              } else if (auto apd = dynamic_cast<AndPredicate *>(next)) {
+                pred_ope = apd->ope_.get();
+              }
+              // `!.` (end of input) is a legitimate idiom; skip it.
+              if (pred_ope && !dynamic_cast<AnyCharacter *>(pred_ope)) {
+                found = true;
+              }
+            }
+          }
+          for (auto &o : ope.opes_) {
+            o->accept(*this);
+          }
+        }
+        void visit(Reference &) override {} // per-rule check
+      };
+
+      for (auto &[rule_name, def] : grammar) {
+        if (rule_name == "%whitespace" || rule_name == "%word") continue;
+        if (def.no_whitespace) continue;
+        FindLiteralBeforePredicate vis;
+        def.get_core_operator()->accept(vis);
+        if (vis.found) {
+          warn(def, "'" + rule_name +
+                        "' has a literal followed by a predicate; the literal "
+                        "skips trailing %whitespace before the predicate tests "
+                        "the input. Wrap them in a token boundary '< ... >' or "
+                        "add { no_whitespace } to the rule.");
+        }
+      }
+    }
   }
 
   if (path_list.size() < 2 && !opt_source) { return 0; }

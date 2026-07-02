@@ -135,7 +135,7 @@ Arguments <-  OPEN  Expression (COMMA  Expression)*  CLOSE
 # Instruction grammars
 Instruction <-
 	BeginBracket (InstructionItem  (InstructionItemSeparator InstructionItem)*)? EndBracket
-InstructionItem <- PrecedenceClimbing /  ErrorMessage /  NoAstOpt /  AstName
+InstructionItem <- PrecedenceClimbing /  ErrorMessage /  NoAstOpt /  NoWhitespace /  AstName
 ~InstructionItemSeparator <-  ';'  Spacing
 
 ~SpacesZom <-  Space*
@@ -157,6 +157,8 @@ ErrorMessage <- "error_message"  SpacesOom  LiteralD  SpacesZom
 
 # No Ast node optimization instruction
 NoAstOpt <-  "no_ast_opt"  SpacesZom
+
+NoWhitespace <-  "no_whitespace"  SpacesZom
 
 # AST node name override instruction
 AstName <-  "ast_name"  SpacesZom  ":"  SpacesZom  Identifier  SpacesZom
