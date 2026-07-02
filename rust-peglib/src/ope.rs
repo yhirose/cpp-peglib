@@ -258,11 +258,18 @@ pub struct Context {
     pub(crate) word_ope: Option<Rc<dyn Ope>>,
     pub(crate) capture_entries: Vec<(String, String)>,
     pub(crate) cut_stack: Vec<bool>,
+    #[allow(dead_code)]
     pub(crate) def_count: usize,
     pub(crate) enable_packrat: bool,
+    // def_id -> cache slot, or -1 for guard-only rules (empty = cache all).
+    pub(crate) packrat_index: *const [i32],
+    pub(crate) packrat_cached_count: usize,
     pub(crate) cache_registered: BitVec,
     pub(crate) cache_success: BitVec,
     pub(crate) cache_values: PackratCache,
+    // Innermost active start position for guard-only rules (re-entry guard
+    // replacing the per-position bitvector). usize::MAX = not active.
+    pub(crate) active_pos: Vec<usize>,
     pub(crate) lr_memo: std::collections::HashMap<(usize, usize), (usize, Option<Box<dyn Any>>)>,
     pub(crate) lr_refs_hit: std::collections::HashSet<usize>,
     pub(crate) lr_active_seeds: std::collections::HashSet<(usize, usize)>,
@@ -287,13 +294,24 @@ pub struct ErrorInfo {
 
 impl Context {
     pub fn new(s: &str, rules: &[crate::Definition], def_count: usize, enable_packrat: bool) -> Self {
+        Self::new_filtered(s, rules, def_count, enable_packrat, &[], 0)
+    }
+
+    pub fn new_filtered(s: &str, rules: &[crate::Definition], def_count: usize,
+                        enable_packrat: bool, packrat_index: &[i32],
+                        packrat_cached_count: usize) -> Self {
         let l = s.len();
+        // When a filter is present, only cached_count rules get cache rows;
+        // otherwise fall back to caching all rules (slot == def_id).
+        let has_filter = !packrat_index.is_empty();
+        let cached_count = if has_filter { packrat_cached_count } else { def_count };
         let (cr, cs) = if enable_packrat {
-            let sz = def_count * (l + 1);
+            let sz = cached_count * (l + 1);
             (BitVec::new(sz), BitVec::new(sz))
         } else {
             (BitVec::new(0), BitVec::new(0))
         };
+        let active_pos = if enable_packrat { vec![usize::MAX; def_count] } else { Vec::new() };
         Self {
             s: s as *const str, l,
             rules: rules as *const [crate::Definition],
@@ -308,8 +326,11 @@ impl Context {
             capture_entries: Vec::new(),
             cut_stack: Vec::new(),
             def_count, enable_packrat,
+            packrat_index: packrat_index as *const [i32],
+            packrat_cached_count: cached_count,
             cache_registered: cr, cache_success: cs,
-            cache_values: PackratCache::new(if enable_packrat { l / 2 } else { 0 }),
+            cache_values: PackratCache::new(if enable_packrat { if has_filter { l / 8 + 16 } else { l / 2 } } else { 0 }),
+            active_pos,
             lr_memo: std::collections::HashMap::new(),
             lr_refs_hit: std::collections::HashSet::new(),
             lr_active_seeds: std::collections::HashSet::new(),
@@ -346,9 +367,25 @@ impl Context {
         if fail(len) { 0 } else { len }
     }
 
+    // Map a def_id to its cache slot, or -1 for guard-only rules. An empty
+    // filter means "cache all" (slot == def_id).
+    #[inline]
+    pub(crate) fn cache_slot(&self, def_id: usize) -> i32 {
+        let index = unsafe { &*self.packrat_index };
+        if index.is_empty() {
+            def_id as i32
+        } else if def_id < index.len() {
+            index[def_id]
+        } else {
+            -1
+        }
+    }
+
     #[inline]
     fn packrat_idx(&self, pos: usize, def_id: usize) -> usize {
-        self.def_count * pos + def_id
+        // Only called for cached rules; caller has checked cache_slot >= 0.
+        let slot = self.cache_slot(def_id) as usize;
+        self.packrat_cached_count * pos + slot
     }
 
     pub fn packrat_len<F>(&mut self, pos: usize, def_id: usize, fn_: F) -> usize
@@ -374,6 +411,7 @@ impl Context {
 
     pub fn clear_packrat_cache(&mut self, pos: usize, def_id: usize) {
         if !self.enable_packrat { return; }
+        if self.cache_slot(def_id) < 0 { return; }
         let idx = self.packrat_idx(pos, def_id);
         self.cache_registered.set(idx, false);
         self.cache_success.set(idx, false);
@@ -382,6 +420,7 @@ impl Context {
 
     pub fn write_packrat_cache(&mut self, pos: usize, def_id: usize, len: usize, val: Option<Box<dyn Any>>) {
         if !self.enable_packrat { return; }
+        if self.cache_slot(def_id) < 0 { return; }
         let idx = self.packrat_idx(pos, def_id);
         self.cache_registered.set(idx, true);
         self.cache_success.set(idx, true);
@@ -1210,6 +1249,18 @@ impl Ope for Holder {
         let tok_mark = vs.tokens.len();
         let (len, ast) = if self.is_lr {
             parse_left_recursive(def_id, pos, body.as_ref(), &info, vs, ctx)
+        } else if ctx.enable_packrat && !self.is_macro && ctx.cache_slot(def_id) < 0 {
+            // Guard-only rule: not memoized. Re-entry at the same position is
+            // caught by the per-rule active-position guard.
+            if ctx.active_pos[def_id] == pos {
+                (FAIL, None)
+            } else {
+                let save = ctx.active_pos[def_id];
+                ctx.active_pos[def_id] = pos;
+                let r = do_parse(def_id, pos, body.as_ref(), &info, vs, ctx);
+                ctx.active_pos[def_id] = save;
+                r
+            }
         } else if ctx.enable_packrat && !self.is_macro {
             let idx = ctx.packrat_idx(pos, def_id);
             if ctx.cache_registered.get(idx) {

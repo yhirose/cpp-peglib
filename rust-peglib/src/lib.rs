@@ -71,6 +71,9 @@ pub struct Grammar {
     pub start: usize,
     pub whitespace_ope: Option<Rc<dyn Ope>>,
     pub word_ope: Option<Rc<dyn Ope>>,
+    // Selective packrat: def_id -> cache slot, or -1 for guard-only rules.
+    pub(crate) packrat_index: Vec<i32>,
+    pub(crate) packrat_cached_count: usize,
 }
 
 impl Grammar {
@@ -89,6 +92,8 @@ impl Grammar {
             start: 0,
             whitespace_ope: None,
             word_ope: None,
+            packrat_index: Vec::new(),
+            packrat_cached_count: 0,
         }
     }
 
@@ -103,6 +108,7 @@ impl Grammar {
         }
         setup_is_token(&mut self.rules);
         setup_first_sets(&self.rules);
+        initialize_packrat_filter(self);
         // Precompute Holder flags to avoid per-call pointer indirection
         for i in 0..self.rules.len() {
             let d = &self.rules[i];
@@ -131,7 +137,8 @@ impl Grammar {
     }
 
     pub fn parse(&self, input: &str) -> bool {
-        let mut ctx = Context::new(input, &self.rules, self.rules.len(), true);
+        let mut ctx = Context::new_filtered(input, &self.rules, self.rules.len(), true,
+            &self.packrat_index, self.packrat_cached_count);
         ctx.whitespace_ope = self.whitespace_ope.clone();
         ctx.word_ope = self.word_ope.clone();
         let ws = ctx.skip_whitespace(0);
@@ -143,7 +150,8 @@ impl Grammar {
     }
 
     pub fn parse_with_value<T: 'static>(&self, input: &str, val: &mut T) -> bool {
-        let mut ctx = Context::new(input, &self.rules, self.rules.len(), true);
+        let mut ctx = Context::new_filtered(input, &self.rules, self.rules.len(), true,
+            &self.packrat_index, self.packrat_cached_count);
         ctx.whitespace_ope = self.whitespace_ope.clone();
         ctx.word_ope = self.word_ope.clone();
         // Actions need SV scopes
@@ -266,7 +274,8 @@ impl Parser {
         enable_ast: bool,
         mut handlers: Option<&mut dyn Handlers>,
     ) -> ParseResult<'input> {
-        let mut ctx = Context::new(input, &self.grammar.rules, self.grammar.rules.len(), true);
+        let mut ctx = Context::new_filtered(input, &self.grammar.rules, self.grammar.rules.len(), true,
+            &self.grammar.packrat_index, self.grammar.packrat_cached_count);
         ctx.whitespace_ope = self.grammar.whitespace_ope.clone();
         ctx.word_ope = self.grammar.word_ope.clone();
         ctx.enable_ast = enable_ast;
@@ -931,6 +940,142 @@ pub fn can_be_empty_ope(ope: &dyn Ope, rules: &[Definition]) -> bool {
         if let Some(id) = r.rule_id { return rules.get(id).map_or(false, |d| d.can_be_empty); }
     }
     false
+}
+
+// Selective packrat filter. A packrat cache hit requires the same rule to be
+// queried twice at the same position, which in a PEG only happens when
+// alternatives of a choice share a leftmost prefix. So a rule is worth
+// memoizing only if it is leftmost-reachable (considering nullable prefixes)
+// from 2+ alternatives of the same PrioritizedChoice.
+fn initialize_packrat_filter(g: &mut Grammar) {
+    let def_count = g.rules.len();
+    if def_count == 0 {
+        g.packrat_index = Vec::new();
+        g.packrat_cached_count = 0;
+        return;
+    }
+
+    let mut benefits = vec![false; def_count];
+
+    // Walk every rule body looking for choices.
+    for i in 0..def_count {
+        let body = g.rules[i].holder.clone();
+        find_backtrack_rules(body.as_ref(), &g.rules, &mut benefits);
+    }
+    if let Some(ws) = g.whitespace_ope.clone() {
+        find_backtrack_rules(ws.as_ref(), &g.rules, &mut benefits);
+    }
+    if let Some(word) = g.word_ope.clone() {
+        find_backtrack_rules(word.as_ref(), &g.rules, &mut benefits);
+    }
+
+    // Left-recursive rules read/write the cache directly during seed-growing,
+    // so they must stay in the cached set.
+    for i in 0..def_count {
+        if g.rules[i].is_left_recursive {
+            benefits[i] = true;
+        }
+    }
+
+    let mut index = vec![-1i32; def_count];
+    let mut k = 0i32;
+    for id in 0..def_count {
+        if benefits[id] {
+            index[id] = k;
+            k += 1;
+        }
+    }
+    g.packrat_index = index;
+    g.packrat_cached_count = k as usize;
+}
+
+// Mark rules leftmost-reachable from 2+ alternatives of the same choice.
+fn find_backtrack_rules(ope: &dyn Ope, rules: &[Definition], benefits: &mut [bool]) {
+    let any = ope.as_any();
+    if let Some(ch) = any.downcast_ref::<PrioritizedChoice>() {
+        let def_count = rules.len();
+        let mut counts = vec![0u32; def_count];
+        for op in &ch.opes {
+            let mut reachable = vec![false; def_count];
+            let mut visited = vec![false; def_count];
+            collect_leftmost_rules(op.as_ref(), rules, &mut reachable, &mut visited);
+            for id in 0..def_count {
+                if reachable[id] { counts[id] += 1; }
+            }
+        }
+        for id in 0..def_count {
+            if counts[id] >= 2 { benefits[id] = true; }
+        }
+        for op in &ch.opes {
+            find_backtrack_rules(op.as_ref(), rules, benefits);
+        }
+        return;
+    }
+    if let Some(h) = any.downcast_ref::<Holder>() {
+        if let Some(o) = &h.ope { find_backtrack_rules(o.as_ref(), rules, benefits); }
+        return;
+    }
+    if let Some(seq) = any.downcast_ref::<Sequence>() {
+        for o in &seq.opes { find_backtrack_rules(o.as_ref(), rules, benefits); }
+        return;
+    }
+    if let Some(rep) = any.downcast_ref::<Repetition>() { find_backtrack_rules(rep.ope.as_ref(), rules, benefits); return; }
+    if let Some(a) = any.downcast_ref::<AndPredicate>() { find_backtrack_rules(a.ope.as_ref(), rules, benefits); return; }
+    if let Some(n) = any.downcast_ref::<NotPredicate>() { find_backtrack_rules(n.ope.as_ref(), rules, benefits); return; }
+    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { find_backtrack_rules(tb.ope.as_ref(), rules, benefits); return; }
+    if let Some(ws) = any.downcast_ref::<Whitespace>() { find_backtrack_rules(ws.ope.as_ref(), rules, benefits); return; }
+    if let Some(ig) = any.downcast_ref::<Ignore>() { find_backtrack_rules(ig.ope.as_ref(), rules, benefits); return; }
+    if let Some(cap) = any.downcast_ref::<Capture>() { find_backtrack_rules(cap.ope.as_ref(), rules, benefits); return; }
+    if let Some(cs) = any.downcast_ref::<CaptureScope>() { find_backtrack_rules(cs.ope.as_ref(), rules, benefits); return; }
+    if let Some(rec) = any.downcast_ref::<Recovery>() { find_backtrack_rules(rec.ope.as_ref(), rules, benefits); return; }
+    // Reference: don't descend into the referenced rule here; each rule body
+    // is visited independently by the outer loop.
+}
+
+// Collect rule ids invocable at the same start position as this subtree.
+fn collect_leftmost_rules(ope: &dyn Ope, rules: &[Definition], reachable: &mut [bool], visited: &mut [bool]) {
+    let any = ope.as_any();
+    if let Some(seq) = any.downcast_ref::<Sequence>() {
+        // Only elements up to (and including) the first that must consume input.
+        for o in &seq.opes {
+            collect_leftmost_rules(o.as_ref(), rules, reachable, visited);
+            if !can_be_empty_ope(o.as_ref(), rules) { break; }
+        }
+        return;
+    }
+    if let Some(h) = any.downcast_ref::<Holder>() {
+        let id = h.outer;
+        if id < reachable.len() {
+            reachable[id] = true;
+            if visited[id] { return; }
+            visited[id] = true;
+        }
+        if let Some(o) = &h.ope { collect_leftmost_rules(o.as_ref(), rules, reachable, visited); }
+        return;
+    }
+    if let Some(ch) = any.downcast_ref::<PrioritizedChoice>() {
+        for o in &ch.opes { collect_leftmost_rules(o.as_ref(), rules, reachable, visited); }
+        return;
+    }
+    if let Some(rep) = any.downcast_ref::<Repetition>() { collect_leftmost_rules(rep.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(a) = any.downcast_ref::<AndPredicate>() { collect_leftmost_rules(a.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(n) = any.downcast_ref::<NotPredicate>() { collect_leftmost_rules(n.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(tb) = any.downcast_ref::<TokenBoundary>() { collect_leftmost_rules(tb.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(ws) = any.downcast_ref::<Whitespace>() { collect_leftmost_rules(ws.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(ig) = any.downcast_ref::<Ignore>() { collect_leftmost_rules(ig.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(cap) = any.downcast_ref::<Capture>() { collect_leftmost_rules(cap.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(cs) = any.downcast_ref::<CaptureScope>() { collect_leftmost_rules(cs.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(rec) = any.downcast_ref::<Recovery>() { collect_leftmost_rules(rec.ope.as_ref(), rules, reachable, visited); return; }
+    if let Some(r) = any.downcast_ref::<Reference>() {
+        if let Some(id) = r.rule_id {
+            if id < reachable.len() && !reachable[id] {
+                reachable[id] = true;
+                let body = rules[id].holder.clone();
+                collect_leftmost_rules(body.as_ref(), rules, reachable, visited);
+            }
+        }
+        return;
+    }
 }
 
 fn detect_left_recursion(rules: &mut [Definition]) {
