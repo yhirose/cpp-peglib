@@ -334,6 +334,54 @@ PHRASE       <- < '"' (!'"' .)* '"' >
 %whitespace  <-  [ \t\r\n]*
 ```
 
+### How `%whitespace` works exactly
+
+Whitespace is skipped at exactly three points, and nowhere else:
+
+1. once at the beginning of the input text
+2. right after every matched literal string (`'...'`, `"..."`)
+3. right after every closed token boundary (`<` ... `>`)
+
+Inside a token boundary, whitespace skipping is completely disabled. Character classes (`[...]`) and `.` never skip whitespace by themselves. Knowing these rules explains most surprises with `%whitespace`:
+
+**A rule made only of character classes doesn't skip trailing whitespace.** ([#327](https://github.com/yhirose/cpp-peglib/issues/327)) With the grammar below, `main()` parses but `main ()` doesn't, because `NAME` is not a token — nothing skips the space after it. Wrap lexical rules in a token boundary.
+
+```
+DECL    <- NAME ARGS?    # `main ()` fails: whitespace after NAME is not skipped
+NAME    <- [a-zA-Z_][a-zA-Z0-9_]*
+ARGS    <- '(' ')'
+```
+
+```
+NAME    <- < [a-zA-Z_][a-zA-Z0-9_]* >   # OK: token boundary skips trailing whitespace
+```
+
+**A literal skips whitespace before a following predicate sees the input.** ([#319](https://github.com/yhirose/cpp-peglib/issues/319)) In `KEYWORD <- "create" !IDCHAR`, the literal `"create"` eats the whitespace after it, so `!IDCHAR` tests the character of the *next* word and the keyword check misfires on input like `create a`. Put the whole thing in a token boundary to keep the predicate right next to the literal:
+
+```
+KEYWORD <- < "create" !IDCHAR >
+```
+
+**To preserve whitespace locally** (e.g. inside string literals), use nested token boundaries: the outer `<` ... `>` disables whitespace skipping for everything inside, and the inner one selects the text for `token()`. ([#44](https://github.com/yhirose/cpp-peglib/issues/44))
+
+```
+StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
+StrEscape <- '\\' .
+StrChars  <- (!'"' !'\\' .)+
+```
+
+**Rules whose name starts with `_` are hidden from error messages.** If you define `%whitespace` in terms of sub-rules (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
+
+```
+%whitespace <- (_SPACE / _COMMENT)*
+_SPACE      <- [ \t\r\n]
+_COMMENT    <- '#' (!'\n' .)*
+```
+
+**Keyword-like operators need `%word`.** In a scannerless parser, `'and'` happily matches the first three letters of `android`. Declare `%word` so literals that look like words are checked against a word boundary. ([#328](https://github.com/yhirose/cpp-peglib/issues/328)) See the next section.
+
+**Operators in `precedence` instructions must be literal tokens.** When using the infix-expression `precedence` feature, write the operators as plain literals (optionally wrapped in a token boundary in the OPERATOR rule) rather than as rules that manage whitespace themselves. ([#325](https://github.com/yhirose/cpp-peglib/issues/325))
+
 Word expression
 ---------------
 
