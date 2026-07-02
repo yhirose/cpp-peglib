@@ -779,6 +779,25 @@ using Log = std::function<void(size_t line, size_t col, const std::string &msg,
                                const std::string &rule)>;
 
 /*
+ * ErrorReport - structured error information passed to an ErrorReporter.
+ * Unlike Log, nothing is flattened into a display string, so applications
+ * can map errors to their own error types, localize messages, or feed
+ * diagnostics to IDEs.
+ */
+struct ErrorReport {
+  size_t line = 0;              // 1-based
+  size_t col = 1;               // 1-based
+  size_t position = 0;          // byte offset in the input
+  std::string unexpected_token; // heuristic token at the error position
+  std::vector<std::string> expected_literals;
+  std::vector<std::string> expected_rules; // rules starting with '_' excluded
+  std::string message; // custom error_message if any (placeholders resolved)
+  std::string label;   // rule name or recovery label the error belongs to
+};
+
+using ErrorReporter = std::function<void(const ErrorReport &report)>;
+
+/*
  * ErrorInfo
  */
 class Definition;
@@ -806,7 +825,11 @@ struct ErrorInfo {
     expected_tokens.emplace_back(error_literal, error_rule);
   }
 
-  void output_log(const Log &log, const char *s, size_t n);
+  void output_log(const Log &log, const char *s, size_t n) {
+    output_log(log, nullptr, s, n);
+  }
+  void output_log(const Log &log, const ErrorReporter &reporter, const char *s,
+                  size_t n);
 
 private:
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
@@ -1066,12 +1089,13 @@ public:
   unsigned char tolower_table[256];
 
   Log log;
+  ErrorReporter error_reporter;
 
   Context(const char *path, const char *s, size_t l, size_t def_count,
           std::shared_ptr<Ope> whitespaceOpe, std::shared_ptr<Ope> wordOpe,
           bool enablePackratParsing, TracerEnter tracer_enter,
           TracerLeave tracer_leave, std::any trace_data, bool verbose_trace,
-          Log log)
+          Log log, ErrorReporter error_reporter = nullptr)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
         def_count(def_count), enablePackratParsing(enablePackratParsing),
         cache_registered(enablePackratParsing ? def_count * (l + 1) : 0),
@@ -1079,7 +1103,7 @@ public:
         cache_values(enablePackratParsing ? l / 2 : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
         has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
-        verbose_trace(verbose_trace), log(log) {
+        verbose_trace(verbose_trace), log(log), error_reporter(error_reporter) {
 
     for (size_t i = 0; i < 256; i++) {
       tolower_table[i] =
@@ -1430,7 +1454,8 @@ public:
         const auto &fs = first_sets_[id];
         if (!fs.any_char && !fs.can_be_empty &&
             !fs.chars.test(static_cast<unsigned char>(*s))) {
-          if (c.log && (fs.first_literal || fs.first_rule)) {
+          if ((c.log || c.error_reporter) &&
+              (fs.first_literal || fs.first_rule)) {
             if (c.error_info.error_pos <= s) {
               if (c.error_info.error_pos < s || !(id > 0)) {
                 c.error_info.error_pos = s;
@@ -2812,37 +2837,40 @@ public:
   }
 
   Result parse(const char *s, size_t n, const char *path = nullptr,
-               Log log = nullptr) const {
+               Log log = nullptr,
+               ErrorReporter error_reporter = nullptr) const {
     SemanticValues vs;
     std::any dt;
-    return parse_core(s, n, vs, dt, path, log);
+    return parse_core(s, n, vs, dt, path, log, error_reporter);
   }
 
-  Result parse(const char *s, const char *path = nullptr,
-               Log log = nullptr) const {
+  Result parse(const char *s, const char *path = nullptr, Log log = nullptr,
+               ErrorReporter error_reporter = nullptr) const {
     auto n = strlen(s);
-    return parse(s, n, path, log);
+    return parse(s, n, path, log, error_reporter);
   }
 
   Result parse(const char *s, size_t n, std::any &dt,
-               const char *path = nullptr, Log log = nullptr) const {
+               const char *path = nullptr, Log log = nullptr,
+               ErrorReporter error_reporter = nullptr) const {
     SemanticValues vs;
-    return parse_core(s, n, vs, dt, path, log);
+    return parse_core(s, n, vs, dt, path, log, error_reporter);
   }
 
   Result parse(const char *s, std::any &dt, const char *path = nullptr,
-               Log log = nullptr) const {
+               Log log = nullptr,
+               ErrorReporter error_reporter = nullptr) const {
     auto n = strlen(s);
-    return parse(s, n, dt, path, log);
+    return parse(s, n, dt, path, log, error_reporter);
   }
 
   template <typename T>
   Result parse_and_get_value(const char *s, size_t n, T &val,
-                             const char *path = nullptr,
-                             Log log = nullptr) const {
+                             const char *path = nullptr, Log log = nullptr,
+                             ErrorReporter error_reporter = nullptr) const {
     SemanticValues vs;
     std::any dt;
-    auto r = parse_core(s, n, vs, dt, path, log);
+    auto r = parse_core(s, n, vs, dt, path, log, error_reporter);
     if (r.ret && !vs.empty() && vs.front().has_value()) {
       val = std::any_cast<T>(vs[0]);
     }
@@ -2851,17 +2879,18 @@ public:
 
   template <typename T>
   Result parse_and_get_value(const char *s, T &val, const char *path = nullptr,
-                             Log log = nullptr) const {
+                             Log log = nullptr,
+                             ErrorReporter error_reporter = nullptr) const {
     auto n = strlen(s);
-    return parse_and_get_value(s, n, val, path, log);
+    return parse_and_get_value(s, n, val, path, log, error_reporter);
   }
 
   template <typename T>
   Result parse_and_get_value(const char *s, size_t n, std::any &dt, T &val,
-                             const char *path = nullptr,
-                             Log log = nullptr) const {
+                             const char *path = nullptr, Log log = nullptr,
+                             ErrorReporter error_reporter = nullptr) const {
     SemanticValues vs;
-    auto r = parse_core(s, n, vs, dt, path, log);
+    auto r = parse_core(s, n, vs, dt, path, log, error_reporter);
     if (r.ret && !vs.empty() && vs.front().has_value()) {
       val = std::any_cast<T>(vs[0]);
     }
@@ -2870,10 +2899,10 @@ public:
 
   template <typename T>
   Result parse_and_get_value(const char *s, std::any &dt, T &val,
-                             const char *path = nullptr,
-                             Log log = nullptr) const {
+                             const char *path = nullptr, Log log = nullptr,
+                             ErrorReporter error_reporter = nullptr) const {
     auto n = strlen(s);
-    return parse_and_get_value(s, n, dt, val, path, log);
+    return parse_and_get_value(s, n, dt, val, path, log, error_reporter);
   }
 
 #if defined(__cpp_lib_char8_t)
@@ -3015,7 +3044,8 @@ private:
   void initialize_packrat_filter() const;
 
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
-                    const char *path, Log log) const {
+                    const char *path, Log log,
+                    ErrorReporter error_reporter = nullptr) const {
     initialize_definition_ids();
 
     std::shared_ptr<Ope> ope = holder_;
@@ -3028,7 +3058,7 @@ private:
 
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
-              verbose_trace, log);
+              verbose_trace, log, error_reporter);
 
     if (collect_packrat_stats) {
       packrat_stats_.resize(definition_ids_.size());
@@ -3151,14 +3181,15 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
   return c_->line_info(sv_.data());
 }
 
-inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
+inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
+                                  const char *s, size_t n) {
   if (message_pos) {
     if (message_pos > last_output_pos) {
       last_output_pos = message_pos;
       auto line = line_info(s, message_pos);
       std::string msg;
-      if (auto unexpected_token = heuristic_error_token(s, n, message_pos);
-          !unexpected_token.empty()) {
+      auto unexpected_token = heuristic_error_token(s, n, message_pos);
+      if (!unexpected_token.empty()) {
         msg = replace_all(message, "%t", unexpected_token);
 
         auto unexpected_char = unexpected_token.substr(
@@ -3169,12 +3200,27 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
       } else {
         msg = message;
       }
-      log(line.first, line.second, msg, label);
+      if (reporter) {
+        ErrorReport report;
+        report.line = line.first;
+        report.col = line.second;
+        report.position = static_cast<size_t>(message_pos - s);
+        report.unexpected_token = unexpected_token;
+        report.message = msg;
+        report.label = label;
+        reporter(report);
+      }
+      if (log) { log(line.first, line.second, msg, label); }
     }
   } else if (error_pos) {
     if (error_pos > last_output_pos) {
       last_output_pos = error_pos;
       auto line = line_info(s, error_pos);
+
+      ErrorReport report;
+      report.line = line.first;
+      report.col = line.second;
+      report.position = static_cast<size_t>(error_pos - s);
 
       std::string msg;
       if (expected_tokens.empty()) {
@@ -3188,6 +3234,7 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
           msg += ", unexpected '";
           msg += unexpected_token;
           msg += "'";
+          report.unexpected_token = unexpected_token;
         }
 
         auto first_item = true;
@@ -3202,9 +3249,11 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
               msg += "'";
               msg += error_literal;
               msg += "'";
+              report.expected_literals.emplace_back(error_literal);
             } else {
               msg += "<" + error_rule->name + ">";
               if (label.empty()) { label = error_rule->name; }
+              report.expected_rules.emplace_back(error_rule->name);
             }
             first_item = false;
           }
@@ -3213,7 +3262,11 @@ inline void ErrorInfo::output_log(const Log &log, const char *s, size_t n) {
         }
         msg += ".";
       }
-      log(line.first, line.second, msg, label);
+      if (reporter) {
+        report.label = label;
+        reporter(report);
+      }
+      if (log) { log(line.first, line.second, msg, label); }
     }
   }
 }
@@ -3228,7 +3281,7 @@ inline size_t Context::skip_whitespace(const char *a_s, size_t n,
 }
 
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
-  if (log) {
+  if (log || error_reporter) {
     if (error_info.error_pos <= a_s) {
       if (error_info.error_pos < a_s || !error_info.keep_previous_token) {
         error_info.error_pos = a_s;
@@ -3370,6 +3423,46 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
   return len;
 }
 
+// Resolve `%{name}` placeholders in a custom error message against the
+// named captures recorded so far ($name<...>). Unknown names resolve to an
+// empty string. `%t` / `%c` are resolved later, at log-output time.
+inline std::string resolve_capture_placeholders(const std::string &msg,
+                                                const Context &c) {
+  auto pos = msg.find("%{");
+  if (pos == std::string::npos) { return msg; }
+
+  std::string r;
+  size_t i = 0;
+  while (pos != std::string::npos) {
+    auto end = msg.find('}', pos + 2);
+    if (end == std::string::npos) { break; }
+    r.append(msg, i, pos - i);
+    auto name = std::string_view(msg).substr(pos + 2, end - (pos + 2));
+    for (auto it = c.capture_entries.rbegin(); it != c.capture_entries.rend();
+         ++it) {
+      if (it->first == name) {
+        // The captured span can include whitespace skipped after a token
+        // boundary; trim it for display.
+        auto v = std::string_view(it->second);
+        while (!v.empty() &&
+               std::isspace(static_cast<unsigned char>(v.back()))) {
+          v.remove_suffix(1);
+        }
+        while (!v.empty() &&
+               std::isspace(static_cast<unsigned char>(v.front()))) {
+          v.remove_prefix(1);
+        }
+        r += v;
+        break;
+      }
+    }
+    i = end + 1;
+    pos = msg.find("%{", i);
+  }
+  r.append(msg, i, msg.size() - i);
+  return r;
+}
+
 inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
                                  Context &c, std::any &dt) const {
   if (!ope_) {
@@ -3438,7 +3531,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       std::any predicate_data;
       if (outer_->predicate) {
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
-          if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+          if ((c.log || c.error_reporter) && !msg.empty() &&
+              c.error_info.message_pos < s) {
             c.error_info.message_pos = s;
             c.error_info.message = msg;
             c.error_info.label = outer_->name;
@@ -3450,17 +3544,19 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (success(parse_len)) {
         if (!c.recovered) { parse_val = reduce(chvs, dt, predicate_data); }
       } else {
-        if (c.log && !msg.empty() && c.error_info.message_pos < s) {
+        if ((c.log || c.error_reporter) && !msg.empty() &&
+            c.error_info.message_pos < s) {
           c.error_info.message_pos = s;
           c.error_info.message = msg;
           c.error_info.label = outer_->name;
         }
       }
     } else {
-      if (c.log && !outer_->error_message.empty() &&
+      if ((c.log || c.error_reporter) && !outer_->error_message.empty() &&
           c.error_info.message_pos < s) {
         c.error_info.message_pos = s;
-        c.error_info.message = outer_->error_message;
+        c.error_info.message =
+            resolve_capture_placeholders(outer_->error_message, c);
         c.error_info.label = outer_->name;
       }
     }
@@ -3765,11 +3861,12 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   const auto &rule = dynamic_cast<Reference &>(*ope_);
 
   // Custom error message
-  if (c.log) {
+  if (c.log || c.error_reporter) {
     auto label = dynamic_cast<Reference *>(rule.args_[0].get());
     if (label && !label->rule_->error_message.empty()) {
       c.error_info.message_pos = s;
-      c.error_info.message = label->rule_->error_message;
+      c.error_info.message =
+          resolve_capture_placeholders(label->rule_->error_message, c);
       c.error_info.label = label->rule_->name;
     }
   }
@@ -3778,8 +3875,13 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   auto len = static_cast<size_t>(-1);
   {
     auto save_log = c.log;
+    auto save_reporter = c.error_reporter;
     c.log = nullptr;
-    auto se = scope_exit([&]() { c.log = save_log; });
+    c.error_reporter = nullptr;
+    auto se = scope_exit([&]() {
+      c.log = save_log;
+      c.error_reporter = save_reporter;
+    });
 
     SemanticValues dummy_vs;
     std::any dummy_dt;
@@ -3790,8 +3892,8 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   if (success(len)) {
     c.recovered = true;
 
-    if (c.log) {
-      c.error_info.output_log(c.log, c.s, c.l);
+    if (c.log || c.error_reporter) {
+      c.error_info.output_log(c.log, c.error_reporter, c.s, c.l);
       c.error_info.clear();
     }
   }
@@ -6230,7 +6332,7 @@ public:
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse(s, n, path, log_);
+      auto result = rule.parse(s, n, path, log_, error_reporter_);
       return post_process(s, n, result);
     }
     return false;
@@ -6240,7 +6342,7 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse(s, n, dt, path, log_);
+      auto result = rule.parse(s, n, dt, path, log_, error_reporter_);
       return post_process(s, n, result);
     }
     return false;
@@ -6251,7 +6353,8 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse_and_get_value(s, n, val, path, log_);
+      auto result =
+          rule.parse_and_get_value(s, n, val, path, log_, error_reporter_);
       return post_process(s, n, result);
     }
     return false;
@@ -6262,7 +6365,8 @@ public:
                const char *path = nullptr) const {
     if (grammar_ != nullptr) {
       const auto &rule = (*grammar_)[start_];
-      auto result = rule.parse_and_get_value(s, n, dt, val, path, log_);
+      auto result =
+          rule.parse_and_get_value(s, n, dt, val, path, log_, error_reporter_);
       return post_process(s, n, result);
     }
     return false;
@@ -6379,6 +6483,12 @@ public:
 
   void set_logger(Log log) { log_ = log; }
 
+  // Receive structured error information instead of (or in addition to) the
+  // formatted string passed to the logger.
+  void set_error_reporter(ErrorReporter reporter) {
+    error_reporter_ = reporter;
+  }
+
   void set_logger(
       std::function<void(size_t line, size_t col, const std::string &msg)>
           log) {
@@ -6388,7 +6498,9 @@ public:
 
 private:
   bool post_process(const char *s, size_t n, Definition::Result &r) const {
-    if (log_ && !r.ret) { r.error_info.output_log(log_, s, n); }
+    if ((log_ || error_reporter_) && !r.ret) {
+      r.error_info.output_log(log_, error_reporter_, s, n);
+    }
     return r.ret && !r.recovered;
   }
 
@@ -6409,6 +6521,7 @@ private:
   bool enableLeftRecursion_ = true;
   bool enablePackratParsing_ = false;
   Log log_;
+  ErrorReporter error_reporter_;
 };
 
 /*-----------------------------------------------------------------------------

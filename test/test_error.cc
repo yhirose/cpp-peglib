@@ -884,4 +884,129 @@ TEST(RecoveryTest, Recovery_with_AST) {
 }
 
 // =============================================================================
+// Structured Error Report Tests (ErrorReporter / %{name} placeholder)
+// =============================================================================
+
+TEST(ErrorReporterTest, Custom_message_report) {
+  parser pg(R"(
+    Enums <- Enum*
+    Enum  <- 'enum' $name<NAME> '{' NAME+^enum_count '}'
+    NAME  <- < [A-Za-z_][A-Za-z0-9_]* >
+    %whitespace <- [ \t\r\n]*
+    enum_count <- '' { error_message "enum '%{name}' is empty" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  ErrorReport report;
+  pg.set_error_reporter([&](const ErrorReport &r) { report = r; });
+  EXPECT_FALSE(pg.parse("enum Color { }"));
+
+  EXPECT_EQ(1, report.line);
+  EXPECT_EQ(14, report.col);
+  EXPECT_EQ(13, report.position);
+  EXPECT_EQ("enum_count", report.label);
+  EXPECT_EQ("enum 'Color' is empty", report.message);
+}
+
+TEST(ErrorReporterTest, Syntax_error_report) {
+  parser pg(R"(
+    Enum <- 'enum' NAME '{' NAME '}'
+    NAME <- < [A-Za-z_][A-Za-z0-9_]* >
+    %whitespace <- [ \t\r\n]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  ErrorReport report;
+  pg.set_error_reporter([&](const ErrorReport &r) { report = r; });
+  EXPECT_FALSE(pg.parse("enum 123 {}"));
+
+  EXPECT_EQ("123", report.unexpected_token);
+  ASSERT_EQ(1, report.expected_rules.size());
+  EXPECT_EQ("NAME", report.expected_rules[0]);
+  EXPECT_TRUE(report.expected_literals.empty());
+  EXPECT_TRUE(report.message.empty());
+}
+
+TEST(ErrorReporterTest, Expected_literals_report) {
+  parser pg(R"(S <- 'a' ('b' / 'c'))");
+  ASSERT_TRUE(!!pg);
+
+  ErrorReport report;
+  pg.set_error_reporter([&](const ErrorReport &r) { report = r; });
+  EXPECT_FALSE(pg.parse("ax"));
+
+  ASSERT_EQ(2, report.expected_literals.size());
+  EXPECT_EQ("b", report.expected_literals[0]);
+  EXPECT_EQ("c", report.expected_literals[1]);
+}
+
+TEST(ErrorReporterTest, Works_together_with_logger) {
+  parser pg("S <- 'a' 'b'");
+  ASSERT_TRUE(!!pg);
+
+  auto logs = 0, reports = 0;
+  pg.set_logger([&](size_t, size_t, const std::string &, const std::string &) {
+    logs++;
+  });
+  pg.set_error_reporter([&](const ErrorReport &) { reports++; });
+  EXPECT_FALSE(pg.parse("ax"));
+  EXPECT_EQ(1, logs);
+  EXPECT_EQ(1, reports);
+}
+
+TEST(ErrorReporterTest, Multiple_reports_with_recovery) {
+  parser pg(R"(
+    START <- ENTRY+
+    ENTRY <- '[' NUM^num ']'
+    NUM   <- < [0-9]+ >
+    %whitespace <- [ \t\r\n]*
+    num   <- (!']' .)* { error_message "bad number" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<ErrorReport> reports;
+  pg.set_error_reporter([&](const ErrorReport &r) { reports.push_back(r); });
+  EXPECT_FALSE(pg.parse("[1] [x] [3] [y] [5]"));
+
+  ASSERT_EQ(2, reports.size());
+  EXPECT_EQ("bad number", reports[0].message);
+  EXPECT_EQ(6, reports[0].col);
+  EXPECT_EQ(14, reports[1].col);
+}
+
+TEST(ErrorReporterTest, Named_capture_in_error_message) {
+  parser pg(R"(
+    Enums <- Enum*
+    Enum  <- 'enum' $name<NAME> '{' NAME+^enum_count '}'
+    NAME  <- < [A-Za-z_][A-Za-z0-9_]* >
+    %whitespace <- [ \t\r\n]*
+    enum_count <- '' { error_message "enum '%{name}' must contain at least one member" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::string msg;
+  pg.set_logger([&](size_t, size_t, const std::string &m, const std::string &) {
+    msg = m;
+  });
+  EXPECT_FALSE(pg.parse("enum Color { }"));
+  EXPECT_EQ("enum 'Color' must contain at least one member", msg);
+}
+
+TEST(ErrorReporterTest, Unknown_capture_resolves_to_empty) {
+  parser pg(R"(
+    S <- 'a' T
+    T <- 'b' { error_message "missing %{nope}b here" }
+    %whitespace <- [ ]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::string msg;
+  pg.set_logger([&](size_t, size_t, const std::string &m, const std::string &) {
+    msg = m;
+  });
+  EXPECT_FALSE(pg.parse("a c"));
+  EXPECT_EQ("missing b here", msg);
+}
+
+// =============================================================================
 // Enter/Leave Handler Tests

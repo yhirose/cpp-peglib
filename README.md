@@ -744,7 +744,12 @@ cpp-peglib supports the furthest failure error position report as described in t
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
-The custom message supports `%t` which is a placeholder for the unexpected token, and `%c` for the unexpected Unicode char.
+The custom message supports `%t` which is a placeholder for the unexpected token, and `%c` for the unexpected Unicode char. It can also reference a named capture with `%{name}`, which expands to the text captured by `$name<...>` earlier in the parse (an unknown name expands to an empty string):
+
+```peg
+Enum       <- 'enum' $name<NAME> '{' NAME+^enum_count '}'
+enum_count <- '' { error_message "enum '%{name}' must contain at least one member" }
+```
 
 Here is an example of Java-like grammar:
 
@@ -822,6 +827,24 @@ custom_message.txt:1:8: code format error...
 ```
 
 NOTE: If there is more than one element with an error message instruction in a prioritized choice, this feature may not work as you expect.
+
+### Structured error reports
+
+`set_logger` receives errors as formatted strings. To build tooling on top of the parser — error codes, localized messages, IDE diagnostics — use `set_error_reporter` instead, which receives the same errors as structured data before they are flattened into a display string:
+
+```cpp
+parser.set_error_reporter([](const peg::ErrorReport &r) {
+  // r.line, r.col          : 1-based error position
+  // r.position             : byte offset in the input
+  // r.unexpected_token     : the token found at the error position
+  // r.expected_literals    : e.g. {"}", ";"}
+  // r.expected_rules       : e.g. {"NAME"} (rules starting with '_' excluded)
+  // r.message              : custom error_message if any (placeholders resolved)
+  // r.label                : rule name or recovery label the error belongs to
+});
+```
+
+Both callbacks can be set at the same time; each error is delivered to both. With error recovery, the reporter is called once per recovered error, so a single parse can produce multiple reports. Mapping `r.label` to an application-defined error enum is the intended way to get typed errors.
 
 Change the Start Definition Rule
 --------------------------------
