@@ -70,8 +70,13 @@ HEAD_SHA=$(git rev-parse HEAD)
 HEAD_SHORT=$(git rev-parse --short HEAD)
 echo "    Latest commit: $HEAD_SHORT"
 
-# Fetch all workflow runs for the HEAD commit
-RUNS=$(gh run list --commit "$HEAD_SHA" --json name,status,conclusion,headSha)
+# Fetch all workflow runs for the HEAD commit. A commit can accumulate
+# multiple runs of the same workflow (reruns, superseded page deploys that
+# GitHub cancels via concurrency groups), so judge only the most recent run
+# of each workflow.
+RUNS=$(gh run list --commit "$HEAD_SHA" \
+         --json name,status,conclusion,headSha,createdAt |
+       jq '[group_by(.name)[] | max_by(.createdAt)]')
 
 NUM_RUNS=$(echo "$RUNS" | jq 'length')
 
