@@ -914,8 +914,10 @@ private:
   };
 
   static size_t mix(size_t key) {
-    auto h = key * static_cast<size_t>(0x9E3779B97F4A7C15ull);
-    return h ^ (h >> 32);
+    // Mix in 64 bits so `h >> 32` stays well-defined where size_t is 32-bit
+    // (wasm32); on 64-bit targets this is bit-identical to the size_t mix.
+    auto h = static_cast<uint64_t>(key) * 0x9E3779B97F4A7C15ull;
+    return static_cast<size_t>(h ^ (h >> 32));
   }
 
   void grow() {
