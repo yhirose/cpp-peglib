@@ -318,6 +318,42 @@ TEST(GrammarBlobTest, SerializationIsDeterministic) {
             GrammarBlob::serialize(*g, start));
 }
 
+// Grammar is an unordered_map, so serializing in its iteration order would
+// give a different byte sequence on another standard library. The definitions
+// go out sorted by name, which keeps a checked-in blob byte-comparable across
+// platforms. Iteration order almost never puts the smallest name first, so
+// checking the leading record catches a return to raw map order.
+TEST(GrammarBlobTest, DefinitionsAreSerializedInNameOrder) {
+  std::string start;
+  auto g = load("S <- Zed / Alpha\nZed <- 'z'\nAlpha <- 'a'", start);
+  ASSERT_TRUE(g != nullptr);
+  auto blob = GrammarBlob::serialize(*g, start);
+
+  std::string smallest;
+  for (auto &kv : *g)
+    if (smallest.empty() || kv.first < smallest)
+      smallest = kv.first;
+
+  // Header: magic (u32), start rule (u32 length + bytes), definition count
+  // (u32); then each definition, name first.
+  size_t pos = 4;
+  auto read_u32 = [&]() {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++)
+      v |= (uint32_t)blob[pos++] << (8 * i);
+    return v;
+  };
+  auto read_str = [&]() {
+    auto n = read_u32();
+    std::string s((const char *)blob.data() + pos, n);
+    pos += n;
+    return s;
+  };
+  EXPECT_EQ(read_str(), start);
+  EXPECT_EQ(read_u32(), (uint32_t)g->size());
+  EXPECT_EQ(read_str(), smallest);
+}
+
 TEST(GrammarBlobTest, TruncatedBlobThrows) {
   std::string start;
   auto g = load("S <- 'abcdef' B+\nB <- [0-9]", start);

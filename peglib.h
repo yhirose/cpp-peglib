@@ -4811,7 +4811,21 @@ struct GrammarBlob {
     w.u32(MAGIC);
     w.str(start);
     w.u32((uint32_t)g.size());
-    for (auto &[name, def] : g) {
+    // Grammar is an unordered_map, whose iteration order is implementation
+    // defined: walking it directly yields different bytes for the same grammar
+    // on different standard libraries, so a blob generated on one platform
+    // cannot be byte-compared on another. Emit the definitions by name.
+    // deserialize() rebuilds the map from the names, so the order carries no
+    // meaning of its own.
+    std::vector<const Grammar::value_type *> defs;
+    defs.reserve(g.size());
+    for (auto &kv : g)
+      defs.push_back(&kv);
+    std::sort(defs.begin(), defs.end(),
+              [](const auto *a, const auto *b) { return a->first < b->first; });
+    for (auto *kv : defs) {
+      const auto &name = kv->first;
+      const auto &def = kv->second;
       w.str(name);
       uint8_t flags =
           (def.ignoreSemanticValue ? 1 : 0) | (def.is_macro ? 2 : 0) |
