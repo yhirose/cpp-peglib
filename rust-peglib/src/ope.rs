@@ -448,18 +448,13 @@ impl Context {
         *self.macro_inst_stack.last().unwrap_or(&0)
     }
 
-    // Identify a macro invocation by what its resolved arguments denote: a
-    // reference by the rule it names, anything else by node identity. `M(N)`
-    // written at two call sites is one instantiation, and a macro passing its
-    // own parameter through resolves back to the caller's argument, so a self
-    // reference finds the seed of the invocation it came from.
+    // Identify a macro invocation by what its resolved arguments denote (see
+    // macro_inst_key). `M(N)` written at two call sites is one instantiation,
+    // and a macro passing its own parameter through resolves back to the
+    // caller's argument, so a self reference finds the seed of the invocation
+    // it came from.
     pub(crate) fn intern_macro_inst(&mut self, def_id: usize, args: &[Rc<dyn Ope>]) -> usize {
-        let key: Vec<(bool, usize)> = args.iter().map(|a| {
-            match a.as_any().downcast_ref::<Reference>().and_then(|r| r.rule_id) {
-                Some(id) => (true, id),
-                None => (false, Rc::as_ptr(a) as *const () as usize),
-            }
-        }).collect();
+        let key = macro_inst_key(args);
         let next = self.next_macro_inst;
         let id = *self.macro_inst_ids.entry((def_id, key)).or_insert(next);
         if id == next { self.next_macro_inst += 1; }
@@ -866,6 +861,18 @@ fn parse_keyword_guarded(kw: &KeywordGuardData, pos: usize, vs: &mut SemanticVal
     Some(id_len + wl)
 }
 
+// Key a macro instantiation by what each argument denotes rather than by the
+// node that spells it: `M(N)` written at two call sites builds two Reference
+// nodes for the same rule N, and those are the same instantiation.
+pub(crate) fn macro_inst_key(args: &[Rc<dyn Ope>]) -> Vec<(bool, usize)> {
+    args.iter().map(|a| {
+        match a.as_any().downcast_ref::<Reference>().and_then(|r| r.rule_id) {
+            Some(id) => (true, id),
+            None => (false, Rc::as_ptr(a) as *const () as usize),
+        }
+    }).collect()
+}
+
 pub(crate) fn resolve_macro_arg(ope: &Rc<dyn Ope>, args_stack: &[Vec<Rc<dyn Ope>>]) -> Rc<dyn Ope> {
     let any = ope.as_any();
     if let Some(r) = any.downcast_ref::<Reference>() {
@@ -1092,10 +1099,7 @@ impl Ope for WeakHolder {
 }
 
 struct HolderInfo<'a> {
-    // `is_macro` means "transparent macro": false for a left-recursive one,
-    // which forms a scope. `is_macro_def` is the plain fact of being a macro.
     is_macro: bool,
-    is_macro_def: bool,
     is_token: bool,
     ignore: bool,
     rule_name: &'a str,
@@ -1137,7 +1141,7 @@ fn do_parse<'a>(def_id: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>
         def_id < rules.len() && rules[def_id].action.is_some() && !rules[def_id].disable_action
     };
     let any_action = ctx.value_stack_size > 0 || has_action;
-    let need_scope = !info.is_macro && (ctx.enable_ast || any_action);
+    let need_scope = ctx.enable_ast || any_action;
     let sv_idx = if need_scope { Some(ctx.push_semantic_values_scope()) } else { None };
     ctx.rule_stack.push(def_id);
     let mut len = body.parse_core(pos, vs, ctx);
@@ -1255,8 +1259,7 @@ impl Ope for Holder {
             } else { ("", false, "") }
         };
         let info = HolderInfo {
-            is_macro: self.is_macro && !self.is_lr, is_macro_def: self.is_macro,
-            is_token: self.is_token,
+            is_macro: self.is_macro, is_token: self.is_token,
             ignore: self.ignore, rule_name, has_error_msg, error_msg,
         };
 
@@ -1356,12 +1359,6 @@ fn parse_left_recursive<'a>(id: usize, inst: usize, pos: usize, body: &dyn Ope, 
                         vs: &mut SemanticValues, ctx: &mut Context) -> (usize, Option<Box<dyn Any>>) {
     let lr_key = (id, inst, pos);
     let lr_rule = (id, inst);
-    if let Some((memo_len, memo_ast)) = ctx.lr_memo.get(&lr_key) {
-        ctx.lr_refs_hit.insert(lr_rule);
-        let len = *memo_len;
-        let ast = memo_ast.as_ref().map(|b| clone_any_box(b));
-        return (len, ast);
-    }
     ctx.lr_memo.insert(lr_key, (FAIL, None));
     ctx.lr_active_seeds.insert(lr_key);
     let saved_refs = std::mem::take(&mut ctx.lr_refs_hit);
@@ -1382,7 +1379,7 @@ fn parse_left_recursive<'a>(id: usize, inst: usize, pos: usize, body: &dyn Ope, 
         loop {
             // A macro is never written to the packrat cache (keyed by rule id
             // alone, which cannot tell two instantiations apart).
-            if !info.is_macro_def { ctx.clear_packrat_cache(pos, id); }
+            if !info.is_macro { ctx.clear_packrat_cache(pos, id); }
             let stale: Vec<_> = ctx.lr_memo.keys()
                 .filter(|(rid, ri, p)| *p == pos && (*rid, *ri) != lr_rule
                         && cycle_rules.contains(&(*rid, *ri))
@@ -1400,7 +1397,7 @@ fn parse_left_recursive<'a>(id: usize, inst: usize, pos: usize, body: &dyn Ope, 
         }
     }
     ctx.lr_active_seeds.remove(&lr_key);
-    if success(len) && !info.is_macro_def {
+    if success(len) && !info.is_macro {
         let val = ast.as_ref().map(|v| clone_any_box(v));
         ctx.write_packrat_cache(pos, id, len, val);
     }

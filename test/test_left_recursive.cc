@@ -950,3 +950,31 @@ TEST(LeftRecursionMacroTest, Packrat_parsing_agrees_with_plain_parsing) {
     EXPECT_EQ(plain.parse(input), packrat.parse(input)) << "input: " << input;
   }
 }
+
+TEST(LeftRecursionMacroTest, Scope_follows_whether_the_macro_recurses) {
+  // A plain macro is transparent; a left-recursive one forms a scope. Pin the
+  // difference: the same macro shape, with and without the cycle.
+  parser transparent(R"(
+        S      <- Sum(N)
+        Sum(A) <- A ('+' A)*
+        N      <- [0-9]
+    )");
+  transparent.enable_ast();
+
+  parser scoped(R"(
+        S      <- Sum(N)
+        Sum(A) <- Sum(A) '+' A / A
+        N      <- [0-9]
+    )");
+  scoped.enable_ast();
+
+  std::shared_ptr<Ast> transparent_ast;
+  std::shared_ptr<Ast> scoped_ast;
+  EXPECT_TRUE(transparent.parse("1+2", transparent_ast));
+  EXPECT_TRUE(scoped.parse("1+2", scoped_ast));
+
+  EXPECT_EQ("S", transparent_ast->name);
+  EXPECT_EQ("N", transparent_ast->nodes[0]->name);
+  EXPECT_EQ("S", scoped_ast->name);
+  EXPECT_EQ("Sum", scoped_ast->nodes[0]->name);
+}

@@ -1023,8 +1023,14 @@ public:
   size_t value_stack_size = 0;
 
   std::vector<Definition *> rule_stack;
-  std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
-  std::vector<size_t> macro_inst_stack;
+
+  // One frame per rule reference: the macro arguments in scope, and the
+  // instantiation they identify (0 for anything but a left-recursive macro).
+  struct ArgsFrame {
+    std::vector<std::shared_ptr<Ope>> args;
+    size_t macro_inst = 0;
+  };
+  std::vector<ArgsFrame> args_stack;
 
   size_t in_token_boundary_count = 0;
 
@@ -1259,21 +1265,17 @@ public:
   // Arguments
   void push_args(std::vector<std::shared_ptr<Ope>> &&args,
                  size_t macro_inst = 0) {
-    args_stack.emplace_back(std::move(args));
-    macro_inst_stack.emplace_back(macro_inst);
+    args_stack.push_back({std::move(args), macro_inst});
   }
 
-  void pop_args() {
-    args_stack.pop_back();
-    macro_inst_stack.pop_back();
-  }
+  void pop_args() { args_stack.pop_back(); }
 
   const std::vector<std::shared_ptr<Ope>> &top_args() const {
-    return args_stack[args_stack.size() - 1];
+    return args_stack[args_stack.size() - 1].args;
   }
 
   size_t top_macro_inst() const {
-    return macro_inst_stack[macro_inst_stack.size() - 1];
+    return args_stack[args_stack.size() - 1].macro_inst;
   }
 
   // Identify a macro invocation by what its resolved arguments denote (see
@@ -2484,7 +2486,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
 private:
   std::string name_;
-  std::set<std::pair<std::string, size_t>> refs_;
+  std::set<std::pair<const Definition *, size_t>> refs_;
   std::map<std::vector<const void *>, size_t> macro_inst_ids_;
   size_t next_macro_inst_ = 1;
   bool done_ = false;
@@ -4111,20 +4113,17 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
       resolved->accept(*this);
       if (done_ == false) { return; }
     }
-  } else {
-    auto inst = ope.is_macro_ ? intern_macro_inst(ope) : size_t(0);
-    auto ref_key = std::make_pair(ope.name_, inst);
-    auto too_deep =
-        ope.is_macro_ && macro_args_stack_.size() >= max_macro_inst_depth;
-    if (!refs_.count(ref_key) && !too_deep) {
-      refs_.insert(ref_key);
-      if (ope.rule_) {
-        if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
-        ope.rule_->accept(*this);
-        if (ope.is_macro_) { macro_args_stack_.pop_back(); }
-        if (done_ == false) { return; }
-      }
-    }
+  } else if (ope.is_macro_ &&
+             macro_args_stack_.size() >= max_macro_inst_depth) {
+    // Unbounded instantiation chain; stop descending.
+  } else if (ope.rule_ &&
+             refs_
+                 .emplace(ope.rule_, ope.is_macro_ ? intern_macro_inst(ope) : 0)
+                 .second) {
+    if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
+    ope.rule_->accept(*this);
+    if (ope.is_macro_) { macro_args_stack_.pop_back(); }
+    if (done_ == false) { return; }
   }
   // If the referenced rule can match empty, don't mark as done —
   // the sequence may continue past this element to find LR.

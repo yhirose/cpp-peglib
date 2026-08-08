@@ -972,7 +972,7 @@ fn initialize_packrat_filter(g: &mut Grammar) {
     // Left-recursive rules read/write the cache directly during seed-growing,
     // so they must stay in the cached set.
     for i in 0..def_count {
-        if g.rules[i].is_left_recursive {
+        if g.rules[i].is_left_recursive && !g.rules[i].is_macro {
             benefits[i] = true;
         }
     }
@@ -1121,6 +1121,15 @@ impl LrCtx {
     // parameter that resolves to another parameter continues at the parent
     // level; running out of levels means the operator is unknown here, which
     // ends the descent instead of resolving to itself forever.
+    fn resolve_arg(&self, arg: &std::rc::Rc<dyn Ope>) -> std::rc::Rc<dyn Ope> {
+        match arg.as_any().downcast_ref::<Reference>() {
+            Some(r) if r.rule_id.is_none() => {
+                self.resolve_param(r.iarg).unwrap_or_else(|| arg.clone())
+            }
+            _ => arg.clone(),
+        }
+    }
+
     fn resolve_param(&self, mut iarg: usize) -> Option<std::rc::Rc<dyn Ope>> {
         for frame in self.args_stack.iter().rev() {
             let arg = frame.get(iarg)?;
@@ -1136,12 +1145,7 @@ impl LrCtx {
     }
 
     fn intern_inst(&mut self, def_id: usize, args: &[std::rc::Rc<dyn Ope>]) -> usize {
-        let key: Vec<(bool, usize)> = args.iter().map(|a| {
-            match a.as_any().downcast_ref::<Reference>().and_then(|r| r.rule_id) {
-                Some(id) => (true, id),
-                None => (false, std::rc::Rc::as_ptr(a) as *const () as usize),
-            }
-        }).collect();
+        let key = crate::ope::macro_inst_key(args);
         let next = self.next_inst;
         let id = *self.inst_ids.entry((def_id, key)).or_insert(next);
         if id == next { self.next_inst += 1; }
@@ -1183,19 +1187,21 @@ fn visit_lr(ope: &dyn Ope, c: &mut LrCtx, rules: &[Definition]) {
     if let Some(r) = any.downcast_ref::<Reference>() {
         if let Some(id) = r.rule_id {
             if id == c.target { c.found = true; c.done = true; return; }
-            let resolved: Vec<std::rc::Rc<dyn Ope>> = if r.is_macro {
-                r.args.iter().map(|a| crate::ope::resolve_macro_arg(a, &c.args_stack)).collect()
+            if r.is_macro && c.args_stack.len() >= MAX_MACRO_INST_DEPTH {
+                // Unbounded instantiation chain; stop descending.
             } else {
-                Vec::new()
-            };
-            let inst = if r.is_macro { c.intern_inst(id, &resolved) } else { 0 };
-            let too_deep = r.is_macro && c.args_stack.len() >= MAX_MACRO_INST_DEPTH;
-            if !too_deep && c.refs.insert((id, inst)) {
-                if let Some(def) = rules.get(id) {
-                    if r.is_macro { c.args_stack.push(resolved); }
-                    visit_lr(def.holder.as_ref(), c, rules);
-                    if r.is_macro { c.args_stack.pop(); }
-                    if c.found { return; }
+                let resolved = r.is_macro.then(|| {
+                    r.args.iter().map(|a| c.resolve_arg(a)).collect::<Vec<_>>()
+                });
+                let inst = resolved.as_ref().map_or(0, |a| c.intern_inst(id, a));
+                if c.refs.insert((id, inst)) {
+                    if let Some(def) = rules.get(id) {
+                        let pushed = resolved.is_some();
+                        if let Some(a) = resolved { c.args_stack.push(a); }
+                        visit_lr(def.holder.as_ref(), c, rules);
+                        if pushed { c.args_stack.pop(); }
+                        if c.found { return; }
+                    }
                 }
             }
             c.done = !rules.get(id).map_or(false, |d| d.can_be_empty);
