@@ -588,6 +588,17 @@ A <- B 'a'
 B <- A 'b' / 'b'
 ```
 
+A macro may also take part in the cycle. Each instantiation grows its own seed, so the same macro used with different arguments stays independent:
+
+```peg
+S      <- Sum(Digit) / Sum(Letter)
+Sum(A) <- Sum(A) '+' A / A
+Digit  <- [0-9]
+Letter <- [a-z]
+```
+
+A plain macro is transparent to semantic values, but a left-recursive one forms its own scope: an action attached to it fires and its node appears in the AST, exactly as for the equivalent non-macro rule.
+
 Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 
 ```cpp

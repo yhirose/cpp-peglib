@@ -746,3 +746,207 @@ TEST(LeftRecursiveTest, Left_recursive_with_empty_string_test) {
 
   EXPECT_FALSE(p);
 }
+
+// ---------------------------------------------------------------------------
+// Macros inside the left-recursive cycle
+//
+// A macro invoked *from* an LR rule always worked; a macro that is itself part
+// of the cycle used to recurse until the stack ran out. Seeds are grown per
+// instantiation, so Sum(D) and Sum(L) never share one.
+// ---------------------------------------------------------------------------
+
+TEST(LeftRecursionMacroTest, Directly_left_recursive_macro) {
+  parser p(R"(
+        S      <- Sum(N)
+        Sum(A) <- Sum(A) '+' A / A
+        N      <- [0-9]
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("1"));
+  EXPECT_TRUE(p.parse("1+2"));
+  EXPECT_TRUE(p.parse("1+2+3"));
+  EXPECT_FALSE(p.parse("1+"));
+  EXPECT_FALSE(p.parse("+1"));
+}
+
+TEST(LeftRecursionMacroTest, Two_instantiations_at_the_same_position) {
+  parser p(R"(
+        S      <- Sum(D) / Sum(L)
+        Sum(A) <- Sum(A) '+' A / A
+        D      <- [0-9]
+        L      <- [a-z]
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("1+2"));
+  // Sum(D) fails here; its seed must not answer for Sum(L).
+  EXPECT_TRUE(p.parse("a+b"));
+  EXPECT_FALSE(p.parse("1+b"));
+}
+
+TEST(LeftRecursionMacroTest, Instantiation_is_not_shared_across_arguments) {
+  parser p(R"(
+        S      <- Sum(D) 'x' / Sum(L)
+        Sum(A) <- Sum(A) '+' A / A
+        D      <- [0-9]
+        L      <- [a-z]
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("1+2x"));
+  EXPECT_TRUE(p.parse("a+b"));
+  // Sum(D) matches "1+2" and then 'x' fails; Sum(L) must not reuse that seed.
+  EXPECT_FALSE(p.parse("1+2"));
+}
+
+TEST(LeftRecursionMacroTest, Indirectly_left_recursive_macro) {
+  parser p(R"(
+        S      <- M(N)
+        M(A)   <- R '+' A / A
+        R      <- M(N)
+        N      <- [0-9]
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("1"));
+  EXPECT_TRUE(p.parse("1+2"));
+  EXPECT_TRUE(p.parse("1+2+3"));
+}
+
+TEST(LeftRecursionMacroTest, Left_recursion_through_a_macro_argument) {
+  parser p(R"(
+        S    <- A
+        A    <- W(A) / 'x'
+        W(X) <- X 'w'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("x"));
+  EXPECT_TRUE(p.parse("xw"));
+  EXPECT_TRUE(p.parse("xww"));
+}
+
+TEST(LeftRecursionMacroTest, Detection_sees_every_instantiation) {
+  // Visiting W with 'z' says nothing about W with A: the second instantiation
+  // is what closes the cycle, and it used to be pruned by name.
+  parser p(R"(
+        S    <- A
+        A    <- W('z') / W(A) / 'x'
+        W(X) <- X 'w'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("x"));
+  EXPECT_TRUE(p.parse("xw"));
+  EXPECT_TRUE(p.parse("zw"));
+
+  parser off;
+  off.enable_left_recursion(false);
+  off.load_grammar(R"(
+        S    <- A
+        A    <- W('z') / W(A) / 'x'
+        W(X) <- X 'w'
+    )");
+  EXPECT_FALSE(!!off);
+}
+
+TEST(LeftRecursionMacroTest, Left_recursive_macro_is_rejected_when_disabled) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        S      <- Sum(N)
+        Sum(A) <- Sum(A) '+' A / A
+        N      <- [0-9]
+    )");
+
+  EXPECT_FALSE(!!p);
+}
+
+TEST(LeftRecursionMacroTest, Semantic_values_match_the_plain_rule) {
+  auto sum = [](const SemanticValues &vs) -> long {
+    if (vs.choice() == 0) {
+      return std::any_cast<long>(vs[0]) + std::any_cast<long>(vs[1]);
+    }
+    return std::any_cast<long>(vs[0]);
+  };
+  auto num = [](const SemanticValues &vs) -> long {
+    return std::stol(std::string(vs.token()));
+  };
+
+  parser macro(R"(
+        S      <- Sum(N)
+        Sum(A) <- Sum(A) '+' A / A
+        N      <- [0-9]
+    )");
+  macro["Sum"] = sum;
+  macro["N"] = num;
+
+  parser plain(R"(
+        S   <- Sum
+        Sum <- Sum '+' N / N
+        N   <- [0-9]
+    )");
+  plain["Sum"] = sum;
+  plain["N"] = num;
+
+  long macro_val = 0;
+  long plain_val = 0;
+  EXPECT_TRUE(macro.parse("1+2+3", macro_val));
+  EXPECT_TRUE(plain.parse("1+2+3", plain_val));
+  EXPECT_EQ(6, macro_val);
+  EXPECT_EQ(plain_val, macro_val);
+}
+
+TEST(LeftRecursionMacroTest, Ast_matches_the_plain_rule) {
+  parser macro(R"(
+        S      <- Sum(N)
+        Sum(A) <- Sum(A) '+' A / A
+        N      <- [0-9]
+    )");
+  macro.enable_ast();
+
+  parser plain(R"(
+        S   <- Sum
+        Sum <- Sum '+' N / N
+        N   <- [0-9]
+    )");
+  plain.enable_ast();
+
+  std::shared_ptr<Ast> macro_ast;
+  std::shared_ptr<Ast> plain_ast;
+  EXPECT_TRUE(macro.parse("1+2+3", macro_ast));
+  EXPECT_TRUE(plain.parse("1+2+3", plain_ast));
+  EXPECT_EQ(ast_to_s(plain_ast), ast_to_s(macro_ast));
+}
+
+TEST(LeftRecursionMacroTest, Nested_macro_in_the_cycle) {
+  parser p(R"(
+        S       <- Sum(N)
+        Sum(A)  <- Wrap(A) '+' A / A
+        Wrap(X) <- Sum(X)
+        N       <- [0-9]
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("1"));
+  EXPECT_TRUE(p.parse("1+2"));
+  EXPECT_TRUE(p.parse("1+2+3"));
+}
+
+TEST(LeftRecursionMacroTest, Packrat_parsing_agrees_with_plain_parsing) {
+  auto grammar = R"(
+        S      <- Sum(D) / Sum(L)
+        Sum(A) <- Sum(A) '+' A / A
+        D      <- [0-9]
+        L      <- [a-z]
+    )";
+
+  parser plain(grammar);
+  parser packrat(grammar);
+  packrat.enable_packrat_parsing();
+
+  for (auto input : {"1", "1+2+3", "a+b", "1+b", "+", ""}) {
+    EXPECT_EQ(plain.parse(input), packrat.parse(input)) << "input: " << input;
+  }
+}

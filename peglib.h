@@ -1024,6 +1024,7 @@ public:
 
   std::vector<Definition *> rule_stack;
   std::vector<std::vector<std::shared_ptr<Ope>>> args_stack;
+  std::vector<size_t> macro_inst_stack;
 
   size_t in_token_boundary_count = 0;
 
@@ -1053,15 +1054,26 @@ public:
     size_t len = static_cast<size_t>(-1);
     std::any val;
   };
-  std::map<std::pair<const Definition *, const char *>, LRMemo> lr_memo;
+
+  // A left-recursive rule instance: the definition plus, for a macro, the
+  // instantiation it was invoked with (0 for a plain rule). Two
+  // instantiations of the same macro grow independent seeds.
+  using LRRule = std::pair<const Definition *, size_t>;
+  using LRKey = std::pair<LRRule, const char *>;
+
+  std::map<LRKey, LRMemo> lr_memo;
 
   // Rules whose lr_memo was hit during the current parse scope.
   // Used to track LR cycle membership.
-  std::set<const Definition *> lr_refs_hit;
+  std::set<LRRule> lr_refs_hit;
 
   // Rules currently in their seeding/growing phase at a given position.
   // Protected from having their lr_memo erased by inner growers.
-  std::set<std::pair<const Definition *, const char *>> lr_active_seeds;
+  std::set<LRKey> lr_active_seeds;
+
+  // Interned macro instantiations: (definition, resolved arguments) -> id.
+  std::map<std::vector<const void *>, size_t> macro_inst_ids;
+  size_t next_macro_inst_ = 1;
 
   // Map a def_id to its slot in the cache tables, or -1 for guard-only
   // rules (not memoized).
@@ -1245,14 +1257,35 @@ public:
   void pop_semantic_values_scope() { value_stack_size--; }
 
   // Arguments
-  void push_args(std::vector<std::shared_ptr<Ope>> &&args) {
+  void push_args(std::vector<std::shared_ptr<Ope>> &&args,
+                 size_t macro_inst = 0) {
     args_stack.emplace_back(std::move(args));
+    macro_inst_stack.emplace_back(macro_inst);
   }
 
-  void pop_args() { args_stack.pop_back(); }
+  void pop_args() {
+    args_stack.pop_back();
+    macro_inst_stack.pop_back();
+  }
 
   const std::vector<std::shared_ptr<Ope>> &top_args() const {
     return args_stack[args_stack.size() - 1];
+  }
+
+  size_t top_macro_inst() const {
+    return macro_inst_stack[macro_inst_stack.size() - 1];
+  }
+
+  // Identify a macro invocation by what its resolved arguments denote (see
+  // macro_inst_key). `Sum(A)` inside `Sum(N)`'s own body resolves A back to
+  // the argument the outer call was given, so both invocations intern to the
+  // same id and the inner one finds the outer's seed — which is what makes
+  // growing terminate.
+  size_t intern_macro_inst(std::vector<const void *> &&key) {
+    auto [it, inserted] =
+        macro_inst_ids.emplace(std::move(key), next_macro_inst_);
+    if (inserted) { next_macro_inst_++; }
+    return it->second;
   }
 
   // Snapshot/Rollback
@@ -2436,9 +2469,24 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   std::shared_ptr<Ope> resolve_macro_arg(size_t iarg) const;
 
+  // A macro's body depends on its arguments, so "already visited" has to be
+  // per instantiation, not per name: in `A <- W('z') / W(A)`, visiting W with
+  // 'z' says nothing about W with A. Instantiations are identified by their
+  // resolved arguments, the same way as at parse time.
+  size_t intern_macro_inst(const Reference &ope);
+
+  // A macro that instantiates itself with a growing argument
+  // (`M(s) <- M(s / 'x')`) has no finite set of instantiations. Stop
+  // descending instead of looping forever; the rule is then reported as
+  // non-left-recursive, which is what this analysis did for every macro
+  // before it became instantiation-aware.
+  static const size_t max_macro_inst_depth = 32;
+
 private:
   std::string name_;
-  std::unordered_set<std::string> refs_;
+  std::set<std::pair<std::string, size_t>> refs_;
+  std::map<std::vector<const void *>, size_t> macro_inst_ids_;
+  size_t next_macro_inst_ = 1;
   bool done_ = false;
   std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
 };
@@ -3512,8 +3560,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     throw std::logic_error("Uninitialized definition ope was used...");
   }
 
-  // Macro reference
-  if (outer_->is_macro) {
+  // Macro reference. A left-recursive macro cannot take this path: it needs
+  // the seed-growing below, which in turn needs its own semantic value scope
+  // to memoise. Such a macro forms a scope like a plain rule does.
+  if (outer_->is_macro && !outer_->is_left_recursive) {
     c.rule_stack.push_back(outer_);
     auto len = ope_->parse(s, n, vs, c, dt);
     c.rule_stack.pop_back();
@@ -3608,7 +3658,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   };
 
   if (outer_->is_left_recursive) {
-    auto lr_key = std::make_pair(outer_, s);
+    // A macro grows one seed per instantiation: Sum(D) and Sum(L) are
+    // different rules as far as the memo is concerned.
+    auto lr_rule = Context::LRRule(outer_, c.top_macro_inst());
+    auto lr_key = Context::LRKey(lr_rule, s);
 
     // Check LR memo first
     auto it = c.lr_memo.find(lr_key);
@@ -3621,7 +3674,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
       // Record that this rule's lr_memo was accessed.
       // Any LR rule currently seeding will know we're in its cycle.
-      c.lr_refs_hit.insert(outer_);
+      c.lr_refs_hit.insert(lr_rule);
     } else {
       // Seed with FAIL
       c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
@@ -3643,7 +3696,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       // the cycle, so add self — this lets parent seeders see us as
       // a transitive cycle member.
       auto cycle_rules = c.lr_refs_hit;
-      if (!cycle_rules.empty()) { cycle_rules.insert(outer_); }
+      if (!cycle_rules.empty()) { cycle_rules.insert(lr_rule); }
 
       // Restore parent's refs and propagate cycle info upward
       c.lr_refs_hit = std::move(saved_refs);
@@ -3659,15 +3712,17 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         c.lr_memo[lr_key] = {len, val};
 
         while (true) {
-          // Clear this rule's packrat cache
-          c.clear_packrat_cache(s, outer_->id);
+          // Clear this rule's packrat cache. A macro is never written there
+          // (that cache is keyed by rule id alone, which cannot tell two
+          // instantiations apart), so there is nothing to clear for one.
+          if (!outer_->is_macro) { c.clear_packrat_cache(s, outer_->id); }
 
           // Clear lr_memo for cycle-dependent rules at this position,
           // but NOT for rules currently in their own seeding phase
           // (lr_active_seeds) — those are outer growers we must not
           // interfere with.
           for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
-            if (memo_it->first.second == s && memo_it->first.first != outer_ &&
+            if (memo_it->first.second == s && memo_it->first.first != lr_rule &&
                 cycle_rules.count(memo_it->first.first) &&
                 !c.lr_active_seeds.count(memo_it->first)) {
               memo_it = c.lr_memo.erase(memo_it);
@@ -3690,7 +3745,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
       // Write final result to packrat cache (lr_memo entry is kept as
       // the primary lookup for LR rules at this position)
-      if (success(len)) { c.write_packrat_cache(s, outer_->id, len, val); }
+      if (success(len) && !outer_->is_macro) {
+        c.write_packrat_cache(s, outer_->id, len, val);
+      }
     }
   } else {
     if (c.enablePackratParsing) {
@@ -3704,7 +3761,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     } else {
       // Without packrat, use lr_memo as re-entry guard to prevent
       // stack overflow from undetected left recursion.
-      auto guard_key = std::make_pair(outer_, s);
+      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
       if (c.lr_memo.count(guard_key)) {
         len = static_cast<size_t>(-1);
       } else {
@@ -3746,6 +3803,23 @@ inline const std::string &Holder::trace_name() const {
   return trace_name_;
 }
 
+// Key a macro instantiation by what each argument denotes rather than by the
+// node that spells it: `M(N)` written at two call sites builds two Reference
+// nodes for the same rule N, and those are the same instantiation.
+inline std::vector<const void *>
+macro_inst_key(const Definition *def,
+               const std::vector<std::shared_ptr<Ope>> &args) {
+  std::vector<const void *> key;
+  key.reserve(args.size() + 1);
+  key.push_back(def);
+  for (const auto &arg : args) {
+    auto ref = dynamic_cast<Reference *>(arg.get());
+    key.push_back(ref && ref->rule_ ? static_cast<const void *>(ref->rule_)
+                                    : static_cast<const void *>(arg.get()));
+  }
+  return key;
+}
+
 inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
                                     Context &c, std::any &dt) const {
   auto save_ignore_trace_state = c.ignore_trace_state;
@@ -3768,7 +3842,10 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
         args.emplace_back(std::move(vis.found_ope));
       }
 
-      c.push_args(std::move(args));
+      auto inst = rule_->is_left_recursive
+                      ? c.intern_macro_inst(macro_inst_key(rule_, args))
+                      : 0;
+      c.push_args(std::move(args), inst);
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
@@ -4034,13 +4111,19 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
       resolved->accept(*this);
       if (done_ == false) { return; }
     }
-  } else if (!refs_.count(ope.name_)) {
-    refs_.insert(ope.name_);
-    if (ope.rule_) {
-      if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
-      ope.rule_->accept(*this);
-      if (ope.is_macro_) { macro_args_stack_.pop_back(); }
-      if (done_ == false) { return; }
+  } else {
+    auto inst = ope.is_macro_ ? intern_macro_inst(ope) : size_t(0);
+    auto ref_key = std::make_pair(ope.name_, inst);
+    auto too_deep =
+        ope.is_macro_ && macro_args_stack_.size() >= max_macro_inst_depth;
+    if (!refs_.count(ref_key) && !too_deep) {
+      refs_.insert(ref_key);
+      if (ope.rule_) {
+        if (ope.is_macro_) { macro_args_stack_.push_back(&ope.args_); }
+        ope.rule_->accept(*this);
+        if (ope.is_macro_) { macro_args_stack_.pop_back(); }
+        if (done_ == false) { return; }
+      }
     }
   }
   // If the referenced rule can match empty, don't mark as done —
@@ -4057,6 +4140,25 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   } else {
     done_ = !(ope.rule_ && ope.rule_->can_be_empty);
   }
+}
+
+inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
+  // Resolve bare parameter references to what the enclosing instantiation was
+  // given, so a macro passing its own parameter through interns to the same
+  // instantiation instead of a fresh one at every nesting level.
+  std::vector<std::shared_ptr<Ope>> args;
+  args.reserve(ope.args_.size());
+  for (const auto &arg : ope.args_) {
+    auto ref = dynamic_cast<Reference *>(arg.get());
+    auto resolved = ref && !ref->rule_ && !macro_args_stack_.empty()
+                        ? resolve_macro_arg(ref->iarg_)
+                        : nullptr;
+    args.push_back(resolved ? resolved : arg);
+  }
+  auto [it, inserted] = macro_inst_ids_.emplace(macro_inst_key(ope.rule_, args),
+                                                next_macro_inst_);
+  if (inserted) { next_macro_inst_++; }
+  return it->second;
 }
 
 inline std::shared_ptr<Ope>
@@ -4455,10 +4557,13 @@ inline void Definition::initialize_packrat_filter() const {
     if (wordOpe) { wordOpe->accept(finder); }
 
     // Left-recursive rules read and write the packrat cache directly during
-    // seed-growing, so they must stay in the cached set.
+    // seed-growing, so they must stay in the cached set. Macros are the
+    // exception: they use lr_memo only, keyed by instantiation.
     for (const auto &[ptr, id] : definition_ids_) {
       auto *def = static_cast<Definition *>(ptr);
-      if (def->is_left_recursive && id < def_count) { benefits[id] = true; }
+      if (def->is_left_recursive && !def->is_macro && id < def_count) {
+        benefits[id] = true;
+      }
     }
 
     // Compact index: def_id -> slot in the cache tables (-1 = guard only)
