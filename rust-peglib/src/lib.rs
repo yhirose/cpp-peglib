@@ -1125,23 +1125,27 @@ impl LrCtx {
     // ends the descent instead of resolving to itself forever.
     fn resolve_arg(&self, arg: &std::rc::Rc<dyn Ope>) -> std::rc::Rc<dyn Ope> {
         match arg.as_any().downcast_ref::<Reference>() {
-            Some(r) if r.rule_id.is_none() => {
-                self.resolve_param(r.iarg).unwrap_or_else(|| arg.clone())
-            }
+            Some(r) if r.rule_id.is_none() => self
+                .resolve_param(r.iarg)
+                .map_or_else(|| arg.clone(), |(a, _)| a),
             _ => arg.clone(),
         }
     }
 
-    fn resolve_param(&self, mut iarg: usize) -> Option<std::rc::Rc<dyn Ope>> {
-        for frame in self.args_stack.iter().rev() {
-            let arg = frame.get(iarg)?;
+    // Returns what the parameter denotes together with the frame it was found
+    // at. The frame matters: the argument stored there was written one level
+    // further out, so a parameter reference *inside* it has to resolve against
+    // the frames below -- see the bare-parameter arm of visit_lr.
+    fn resolve_param(&self, mut iarg: usize) -> Option<(std::rc::Rc<dyn Ope>, usize)> {
+        for i in (0..self.args_stack.len()).rev() {
+            let arg = self.args_stack[i].get(iarg)?;
             if let Some(r) = arg.as_any().downcast_ref::<Reference>() {
                 if r.rule_id.is_none() {
                     iarg = r.iarg;
                     continue;
                 }
             }
-            return Some(arg.clone());
+            return Some((arg.clone(), i));
         }
         None
     }
@@ -1192,27 +1196,40 @@ fn visit_lr(ope: &dyn Ope, c: &mut LrCtx, rules: &[Definition]) {
             if r.is_macro && c.args_stack.len() >= MAX_MACRO_INST_DEPTH {
                 // Unbounded instantiation chain; stop descending.
             } else {
-                let resolved = r.is_macro.then(|| {
-                    r.args.iter().map(|a| c.resolve_arg(a)).collect::<Vec<_>>()
-                });
-                let inst = resolved.as_ref().map_or(0, |a| c.intern_inst(id, a));
+                // Instantiation identity needs the arguments resolved; the
+                // frame itself keeps them as written, so that a parameter
+                // reference inside one resolves against the scope it was
+                // written in (cpp pushes `ope.args_` for the same reason).
+                let inst = if r.is_macro {
+                    let resolved =
+                        r.args.iter().map(|a| c.resolve_arg(a)).collect::<Vec<_>>();
+                    c.intern_inst(id, &resolved)
+                } else {
+                    0
+                };
                 if c.refs.insert((id, inst)) {
                     if let Some(def) = rules.get(id) {
-                        let pushed = resolved.is_some();
-                        if let Some(a) = resolved { c.args_stack.push(a); }
+                        if r.is_macro { c.args_stack.push(r.args.clone()); }
                         visit_lr(def.holder.as_ref(), c, rules);
-                        if pushed { c.args_stack.pop(); }
+                        if r.is_macro { c.args_stack.pop(); }
                         if c.found { return; }
                     }
                 }
             }
             c.done = !rules.get(id).map_or(false, |d| d.can_be_empty);
         } else {
-            // Macro parameter: follow what the enclosing instantiation passed.
-            // Arguments are substituted eagerly, so the resolved operator holds
-            // no parameter references of its own.
+            // Macro parameter: follow what the enclosing instantiation passed,
+            // in the scope that argument was written in -- the frames below
+            // the one holding it. `W(X) <- Y(X / 'x')` passes Y an argument
+            // whose own `X` means W's parameter, not Y's; keeping Y's frame
+            // visible would resolve that `X` right back to `X / 'x'`, forever.
             match c.resolve_param(r.iarg) {
-                Some(a) => visit_lr(a.as_ref(), c, rules),
+                Some((a, depth)) => {
+                    let outer = c.args_stack[..depth].to_vec();
+                    let saved = std::mem::replace(&mut c.args_stack, outer);
+                    visit_lr(a.as_ref(), c, rules);
+                    c.args_stack = saved;
+                }
                 None => c.done = true,
             }
         }

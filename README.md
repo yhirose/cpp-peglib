@@ -601,6 +601,8 @@ A plain macro is transparent to semantic values, but a left-recursive one forms 
 
 Detection follows macro instantiations 32 levels deep before it stops descending. This bounds the case that has no finite depth to begin with — a macro that instantiates itself with a growing argument, such as `M(s) <- M(s / 'x') / s` — but the same counter also caps any other chain of nested macro calls, so 32 macros wrapping one another the way `Sum` wraps `Digit` above would hit it too. That is intentionally generous for real grammars; when it is hit, detection silently treats the rule as not left recursive, which is the pre-fix behavior of recursing until the stack overflows.
 
+The growing-argument shape has a second limit, at parse time this one: a *left-recursive* macro whose own recursive call wraps its parameter in a larger expression, as in `Sum(A) <- Sum(A / 'x') '+' A / A`, builds a new argument at every level, so no two levels share an instantiation and the seed memo never recognises the recursion. Pass the parameter through unchanged (`Sum(A)`) in the recursive call; wrapping it is fine for a call to some *other*, non-left-recursive macro.
+
 Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 
 ```cpp

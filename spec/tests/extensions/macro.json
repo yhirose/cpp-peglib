@@ -127,5 +127,36 @@
     "cases": [
       { "input": "1+2+3+4", "match": true }
     ]
+  },
+  {
+    "name": "macro_argument_referring_to_own_parameter",
+    "description": "W hands Y an argument whose own X means W's parameter, so it must be read in W's scope, not Y's",
+    "grammar": "S <- W('a')\nW(X) <- Y(X / 'x')\nY(Z) <- Z 'y'",
+    "cases": [
+      { "input": "ay", "match": true },
+      { "input": "xy", "match": true },
+      { "input": "by", "match": false }
+    ]
+  },
+  {
+    "name": "macro_argument_referring_to_own_parameter_under_left_recursion",
+    "description": "The same argument shape inside a left-recursive rule, so seed growing runs over it",
+    "grammar": "S <- W('a')\nW(X) <- W(X) 'w' / Y(X / 'x')\nY(Z) <- Z 'y'",
+    "cases": [
+      { "input": "ay", "match": true },
+      { "input": "ayw", "match": true },
+      { "input": "ayww", "match": true },
+      { "input": "a", "match": false }
+    ]
+  },
+  {
+    "name": "macro_parameter_forwarded_through_two_macros",
+    "description": "R chases up to B's frame and finds P / 'x'; that P resolves one level below, in A's frame",
+    "grammar": "S <- A('z')\nA(P) <- B(P / 'x')\nB(Q) <- C(Q)\nC(R) <- R 'r'",
+    "cases": [
+      { "input": "zr", "match": true },
+      { "input": "xr", "match": true },
+      { "input": "yr", "match": false }
+    ]
   }
 ]

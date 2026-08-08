@@ -978,3 +978,55 @@ TEST(LeftRecursionMacroTest, Scope_follows_whether_the_macro_recurses) {
   EXPECT_EQ("S", scoped_ast->name);
   EXPECT_EQ("Sum", scoped_ast->nodes[0]->name);
 }
+
+// ---------------------------------------------------------------------------
+// Macro arguments that reference the passing macro's own parameter
+//
+// `W(X) <- Y(X / 'x')` hands Y an argument whose `X` means W's parameter. The
+// analysis has to read it in W's scope; reading it in Y's -- where the
+// argument itself lives -- resolves `X` back to `X / 'x'` without end.
+// ---------------------------------------------------------------------------
+
+TEST(MacroArgumentScopeTest, Composite_argument_referring_to_own_parameter) {
+  parser p(R"(
+        S    <- W('a')
+        W(X) <- Y(X / 'x')
+        Y(Z) <- Z 'y'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("ay")); // X resolved to 'a', as written by S
+  EXPECT_TRUE(p.parse("xy")); // the alternative inside the argument
+  EXPECT_FALSE(p.parse("by"));
+}
+
+TEST(MacroArgumentScopeTest, Composite_argument_inside_a_left_recursive_rule) {
+  parser p(R"(
+        S    <- W('a')
+        W(X) <- W(X) 'w' / Y(X / 'x')
+        Y(Z) <- Z 'y'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p["W"].is_left_recursive);
+  EXPECT_TRUE(p.parse("ay"));
+  EXPECT_TRUE(p.parse("ayw"));
+  EXPECT_TRUE(p.parse("ayww"));
+  EXPECT_FALSE(p.parse("a"));
+}
+
+TEST(MacroArgumentScopeTest, Parameter_forwarded_through_two_macros) {
+  // C's R chases up to B's frame, finds `P / 'x'` there, and its `P` must
+  // resolve in A's frame -- one level below where it was found.
+  parser p(R"(
+        S    <- A('z')
+        A(P) <- B(P / 'x')
+        B(Q) <- C(Q)
+        C(R) <- R 'r'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("zr"));
+  EXPECT_TRUE(p.parse("xr"));
+  EXPECT_FALSE(p.parse("yr"));
+}

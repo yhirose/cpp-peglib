@@ -2469,7 +2469,15 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   const char *error_s = nullptr;
 
-  std::shared_ptr<Ope> resolve_macro_arg(size_t iarg) const;
+  // What a bare parameter reference denotes, and the frame it was found at.
+  // The frame matters: the argument stored there was written one level
+  // further out, so any parameter reference *inside* it has to resolve
+  // against the frames below -- see visit(Reference &).
+  struct ResolvedArg {
+    std::shared_ptr<Ope> ope;
+    size_t depth = 0;
+  };
+  ResolvedArg resolve_macro_arg(size_t iarg) const;
 
   // A macro's body depends on its arguments, so "already visited" has to be
   // per instantiation, not per name: in `A <- W('z') / W(A)`, visiting W with
@@ -4111,8 +4119,17 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
     // Macro parameter reference: resolve through nested macro arg
     // stacks (e.g. B(X) <- C(X) where X is itself a param ref).
     auto resolved = resolve_macro_arg(ope.iarg_);
-    if (resolved) {
-      resolved->accept(*this);
+    if (resolved.ope) {
+      // Visit it in the scope it was written in: the frames below the one
+      // holding it. `W(X) <- Y(X / 'x')` passes Y an argument whose own `X`
+      // means W's parameter, not Y's -- keeping Y's frame visible would
+      // resolve that `X` right back to `X / 'x'`, forever.
+      auto outer = std::vector<const std::vector<std::shared_ptr<Ope>> *>(
+          macro_args_stack_.begin(),
+          macro_args_stack_.begin() + static_cast<long>(resolved.depth));
+      std::swap(macro_args_stack_, outer);
+      resolved.ope->accept(*this);
+      std::swap(macro_args_stack_, outer);
       if (done_ == false) { return; }
     }
   } else if (ope.is_macro_ &&
@@ -4131,9 +4148,9 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   // the sequence may continue past this element to find LR.
   if (!ope.rule_ && !macro_args_stack_.empty()) {
     auto resolved = resolve_macro_arg(ope.iarg_);
-    if (resolved) {
+    if (resolved.ope) {
       ComputeCanBeEmpty cbe;
-      resolved->accept(cbe);
+      resolved.ope->accept(cbe);
       done_ = !cbe.result;
     } else {
       done_ = true;
@@ -4152,7 +4169,7 @@ inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
   for (const auto &arg : ope.args_) {
     auto ref = dynamic_cast<Reference *>(arg.get());
     auto resolved = ref && !ref->rule_ && !macro_args_stack_.empty()
-                        ? resolve_macro_arg(ref->iarg_)
+                        ? resolve_macro_arg(ref->iarg_).ope
                         : nullptr;
     args.push_back(resolved ? resolved : arg);
   }
@@ -4162,20 +4179,20 @@ inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
   return it->second;
 }
 
-inline std::shared_ptr<Ope>
+inline DetectLeftRecursion::ResolvedArg
 DetectLeftRecursion::resolve_macro_arg(size_t iarg) const {
   for (int i = static_cast<int>(macro_args_stack_.size()) - 1; i >= 0; i--) {
     auto &args = *macro_args_stack_[i];
-    if (iarg >= args.size()) { return nullptr; }
+    if (iarg >= args.size()) { return {}; }
     auto ref = dynamic_cast<Reference *>(args[iarg].get());
     if (ref && !ref->rule_) {
       // Another param ref — resolve using parent level's args
       iarg = ref->iarg_;
       continue;
     }
-    return args[iarg];
+    return {args[iarg], static_cast<size_t>(i)};
   }
-  return nullptr;
+  return {};
 }
 
 inline void HasEmptyElement::visit(Sequence &ope) {
