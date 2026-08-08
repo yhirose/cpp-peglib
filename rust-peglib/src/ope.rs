@@ -270,9 +270,14 @@ pub struct Context {
     // Innermost active start position for guard-only rules (re-entry guard
     // replacing the per-position bitvector). usize::MAX = not active.
     pub(crate) active_pos: Vec<usize>,
-    pub(crate) lr_memo: std::collections::HashMap<(usize, usize), (usize, Option<Box<dyn Any>>)>,
-    pub(crate) lr_refs_hit: std::collections::HashSet<usize>,
-    pub(crate) lr_active_seeds: std::collections::HashSet<(usize, usize)>,
+    // Keys carry the macro instantiation (0 for a plain rule) so that two
+    // instantiations of one macro grow independent seeds.
+    pub(crate) lr_memo: std::collections::HashMap<(usize, usize, usize), (usize, Option<Box<dyn Any>>)>,
+    pub(crate) lr_refs_hit: std::collections::HashSet<(usize, usize)>,
+    pub(crate) lr_active_seeds: std::collections::HashSet<(usize, usize, usize)>,
+    pub(crate) macro_inst_stack: Vec<usize>,
+    pub(crate) macro_inst_ids: std::collections::HashMap<(usize, Vec<(bool, usize)>), usize>,
+    pub(crate) next_macro_inst: usize,
     pub(crate) depth: usize,
     pub(crate) max_depth: usize,
     pub(crate) handlers: Option<*mut dyn crate::Handlers>,
@@ -320,6 +325,9 @@ impl Context {
             value_stack: Vec::new(), value_stack_size: 0,
             rule_stack: Vec::new(),
             args_stack: Vec::new(),
+            macro_inst_stack: Vec::new(),
+            macro_inst_ids: std::collections::HashMap::new(),
+            next_macro_inst: 1,
             in_token_boundary_count: 0,
             whitespace_ope: None, in_whitespace: false,
             word_ope: None,
@@ -427,8 +435,36 @@ impl Context {
         self.cache_values.insert_or_assign(idx, len, val);
     }
 
-    pub fn push_args(&mut self, args: Vec<Rc<dyn Ope>>) { self.args_stack.push(args); }
-    pub fn pop_args(&mut self) { self.args_stack.pop(); }
+    pub fn push_args(&mut self, args: Vec<Rc<dyn Ope>>, macro_inst: usize) {
+        self.args_stack.push(args);
+        self.macro_inst_stack.push(macro_inst);
+    }
+    pub fn pop_args(&mut self) {
+        self.args_stack.pop();
+        self.macro_inst_stack.pop();
+    }
+
+    pub(crate) fn top_macro_inst(&self) -> usize {
+        *self.macro_inst_stack.last().unwrap_or(&0)
+    }
+
+    // Identify a macro invocation by what its resolved arguments denote: a
+    // reference by the rule it names, anything else by node identity. `M(N)`
+    // written at two call sites is one instantiation, and a macro passing its
+    // own parameter through resolves back to the caller's argument, so a self
+    // reference finds the seed of the invocation it came from.
+    pub(crate) fn intern_macro_inst(&mut self, def_id: usize, args: &[Rc<dyn Ope>]) -> usize {
+        let key: Vec<(bool, usize)> = args.iter().map(|a| {
+            match a.as_any().downcast_ref::<Reference>().and_then(|r| r.rule_id) {
+                Some(id) => (true, id),
+                None => (false, Rc::as_ptr(a) as *const () as usize),
+            }
+        }).collect();
+        let next = self.next_macro_inst;
+        let id = *self.macro_inst_ids.entry((def_id, key)).or_insert(next);
+        if id == next { self.next_macro_inst += 1; }
+        id
+    }
 
     pub fn set_error_pos(&mut self, pos: usize, literal: Option<*const str>) {
         use std::cmp::Ordering;
@@ -830,7 +866,7 @@ fn parse_keyword_guarded(kw: &KeywordGuardData, pos: usize, vs: &mut SemanticVal
     Some(id_len + wl)
 }
 
-fn resolve_macro_arg(ope: &Rc<dyn Ope>, args_stack: &[Vec<Rc<dyn Ope>>]) -> Rc<dyn Ope> {
+pub(crate) fn resolve_macro_arg(ope: &Rc<dyn Ope>, args_stack: &[Vec<Rc<dyn Ope>>]) -> Rc<dyn Ope> {
     let any = ope.as_any();
     if let Some(r) = any.downcast_ref::<Reference>() {
         if r.rule_id.is_none() {
@@ -1056,7 +1092,10 @@ impl Ope for WeakHolder {
 }
 
 struct HolderInfo<'a> {
+    // `is_macro` means "transparent macro": false for a left-recursive one,
+    // which forms a scope. `is_macro_def` is the plain fact of being a macro.
     is_macro: bool,
+    is_macro_def: bool,
     is_token: bool,
     ignore: bool,
     rule_name: &'a str,
@@ -1194,9 +1233,11 @@ impl Ope for Holder {
         if ctx.depth >= ctx.max_depth { return FAIL; }
         ctx.depth += 1;
         let def_id = self.outer;
-        if self.is_macro {
+        if self.is_macro && !self.is_lr {
             // Macros are transparent: parse the body directly without firing
             // enter/leave, pushing a scope, or running actions (mirrors cpp).
+            // A left-recursive one is the exception: it needs a scope to
+            // memoise, so it falls through and behaves like a plain rule.
             ctx.rule_stack.push(def_id);
             let len = body.parse_core(pos, vs, ctx);
             ctx.rule_stack.pop();
@@ -1214,7 +1255,8 @@ impl Ope for Holder {
             } else { ("", false, "") }
         };
         let info = HolderInfo {
-            is_macro: self.is_macro, is_token: self.is_token,
+            is_macro: self.is_macro && !self.is_lr, is_macro_def: self.is_macro,
+            is_token: self.is_token,
             ignore: self.ignore, rule_name, has_error_msg, error_msg,
         };
 
@@ -1222,9 +1264,9 @@ impl Ope for Holder {
         // value without firing enter/leave, mirroring cpp whose LR memo check
         // precedes the enter/leave in do_parse.
         if self.is_lr {
-            let lr_key = (def_id, pos);
+            let lr_key = (def_id, ctx.top_macro_inst(), pos);
             if let Some((memo_len, memo_ast)) = ctx.lr_memo.get(&lr_key) {
-                ctx.lr_refs_hit.insert(def_id);
+                ctx.lr_refs_hit.insert((def_id, lr_key.1));
                 let len = *memo_len;
                 let ast = memo_ast.as_ref().map(|b| clone_any_box(b));
                 if let Some(boxed) = ast {
@@ -1248,7 +1290,7 @@ impl Ope for Holder {
 
         let tok_mark = vs.tokens.len();
         let (len, ast) = if self.is_lr {
-            parse_left_recursive(def_id, pos, body.as_ref(), &info, vs, ctx)
+            parse_left_recursive(def_id, ctx.top_macro_inst(), pos, body.as_ref(), &info, vs, ctx)
         } else if ctx.enable_packrat && !self.is_macro && ctx.cache_slot(def_id) < 0 {
             // Guard-only rule: not memoized. Re-entry at the same position is
             // caught by the per-rule active-position guard.
@@ -1310,11 +1352,12 @@ impl Ope for Holder {
     fn accept(&self, v: &mut dyn Visitor) { v.visit_holder(self); }
 }
 
-fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>,
+fn parse_left_recursive<'a>(id: usize, inst: usize, pos: usize, body: &dyn Ope, info: &HolderInfo<'a>,
                         vs: &mut SemanticValues, ctx: &mut Context) -> (usize, Option<Box<dyn Any>>) {
-    let lr_key = (id, pos);
+    let lr_key = (id, inst, pos);
+    let lr_rule = (id, inst);
     if let Some((memo_len, memo_ast)) = ctx.lr_memo.get(&lr_key) {
-        ctx.lr_refs_hit.insert(id);
+        ctx.lr_refs_hit.insert(lr_rule);
         let len = *memo_len;
         let ast = memo_ast.as_ref().map(|b| clone_any_box(b));
         return (len, ast);
@@ -1328,7 +1371,7 @@ fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &Holder
     fire_leave(ctx, info.rule_name, pos, success(initial_len));
 
     let mut cycle_rules = std::mem::take(&mut ctx.lr_refs_hit);
-    if !cycle_rules.is_empty() { cycle_rules.insert(id); }
+    if !cycle_rules.is_empty() { cycle_rules.insert(lr_rule); }
     ctx.lr_refs_hit = saved_refs;
     for r in &cycle_rules { ctx.lr_refs_hit.insert(*r); }
 
@@ -1337,9 +1380,13 @@ fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &Holder
     if success(len) {
         ctx.lr_memo.insert(lr_key, (len, ast.as_ref().map(|b| clone_any_box(b))));
         loop {
-            ctx.clear_packrat_cache(pos, id);
+            // A macro is never written to the packrat cache (keyed by rule id
+            // alone, which cannot tell two instantiations apart).
+            if !info.is_macro_def { ctx.clear_packrat_cache(pos, id); }
             let stale: Vec<_> = ctx.lr_memo.keys()
-                .filter(|(rid, p)| *p == pos && *rid != id && cycle_rules.contains(rid) && !ctx.lr_active_seeds.contains(&(*rid, *p)))
+                .filter(|(rid, ri, p)| *p == pos && (*rid, *ri) != lr_rule
+                        && cycle_rules.contains(&(*rid, *ri))
+                        && !ctx.lr_active_seeds.contains(&(*rid, *ri, *p)))
                 .copied().collect();
             for k in stale { ctx.lr_memo.remove(&k); }
 
@@ -1353,7 +1400,7 @@ fn parse_left_recursive<'a>(id: usize, pos: usize, body: &dyn Ope, info: &Holder
         }
     }
     ctx.lr_active_seeds.remove(&lr_key);
-    if success(len) {
+    if success(len) && !info.is_macro_def {
         let val = ast.as_ref().map(|v| clone_any_box(v));
         ctx.write_packrat_cache(pos, id, len, val);
     }
@@ -1383,17 +1430,18 @@ impl Ope for Reference {
             return FAIL;
         }
         let rule_id = self.rule_id.unwrap();
-        let holder = unsafe {
+        let (holder, is_lr) = unsafe {
             let rules = &*ctx.rules;
             if rule_id >= rules.len() { return FAIL; }
-            rules[rule_id].holder.clone()
+            (rules[rule_id].holder.clone(), rules[rule_id].is_left_recursive)
         };
         if self.is_macro {
             // Resolve param refs in args against the current (outer) frame
             let resolved: Vec<Rc<dyn Ope>> = self.args.iter().map(|a| {
                 resolve_macro_arg(a, &ctx.args_stack)
             }).collect();
-            ctx.push_args(resolved);
+            let inst = if is_lr { ctx.intern_macro_inst(rule_id, &resolved) } else { 0 };
+            ctx.push_args(resolved, inst);
             let len = holder.parse_core(pos, vs, ctx);
             ctx.pop_args();
             len

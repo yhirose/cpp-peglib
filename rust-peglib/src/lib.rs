@@ -1081,7 +1081,15 @@ fn collect_leftmost_rules(ope: &dyn Ope, rules: &[Definition], reachable: &mut [
 fn detect_left_recursion(rules: &mut [Definition]) {
     for i in 0..rules.len() {
         let body = rules[i].holder.clone();
-        let mut ctx = LrCtx { target: i, refs: std::collections::HashSet::new(), done: false, found: false };
+        let mut ctx = LrCtx {
+            target: i,
+            refs: std::collections::HashSet::new(),
+            args_stack: Vec::new(),
+            inst_ids: std::collections::HashMap::new(),
+            next_inst: 1,
+            done: false,
+            found: false,
+        };
         visit_lr(body.as_ref(), &mut ctx, rules);
         if ctx.found {
             rules[i].is_left_recursive = true;
@@ -1089,7 +1097,57 @@ fn detect_left_recursion(rules: &mut [Definition]) {
     }
 }
 
-struct LrCtx { target: usize, refs: std::collections::HashSet<usize>, done: bool, found: bool }
+// A macro's body depends on its arguments, so "already visited" is per
+// instantiation, not per rule: in `A <- W('z') / W(A)`, visiting W with 'z'
+// says nothing about W with A. Instantiations are identified by what their
+// resolved arguments denote, exactly as at parse time.
+struct LrCtx {
+    target: usize,
+    refs: std::collections::HashSet<(usize, usize)>,
+    args_stack: Vec<Vec<std::rc::Rc<dyn Ope>>>,
+    inst_ids: std::collections::HashMap<(usize, Vec<(bool, usize)>), usize>,
+    next_inst: usize,
+    done: bool,
+    found: bool,
+}
+
+// A macro that instantiates itself with a growing argument
+// (`M(s) <- M(s / 'x')`) has no finite set of instantiations; stop descending
+// rather than loop forever.
+const MAX_MACRO_INST_DEPTH: usize = 32;
+
+impl LrCtx {
+    // Resolve a parameter reference through the enclosing instantiations. A
+    // parameter that resolves to another parameter continues at the parent
+    // level; running out of levels means the operator is unknown here, which
+    // ends the descent instead of resolving to itself forever.
+    fn resolve_param(&self, mut iarg: usize) -> Option<std::rc::Rc<dyn Ope>> {
+        for frame in self.args_stack.iter().rev() {
+            let arg = frame.get(iarg)?;
+            if let Some(r) = arg.as_any().downcast_ref::<Reference>() {
+                if r.rule_id.is_none() {
+                    iarg = r.iarg;
+                    continue;
+                }
+            }
+            return Some(arg.clone());
+        }
+        None
+    }
+
+    fn intern_inst(&mut self, def_id: usize, args: &[std::rc::Rc<dyn Ope>]) -> usize {
+        let key: Vec<(bool, usize)> = args.iter().map(|a| {
+            match a.as_any().downcast_ref::<Reference>().and_then(|r| r.rule_id) {
+                Some(id) => (true, id),
+                None => (false, std::rc::Rc::as_ptr(a) as *const () as usize),
+            }
+        }).collect();
+        let next = self.next_inst;
+        let id = *self.inst_ids.entry((def_id, key)).or_insert(next);
+        if id == next { self.next_inst += 1; }
+        id
+    }
+}
 
 fn visit_lr(ope: &dyn Ope, c: &mut LrCtx, rules: &[Definition]) {
     if c.done || c.found { return; }
@@ -1125,12 +1183,30 @@ fn visit_lr(ope: &dyn Ope, c: &mut LrCtx, rules: &[Definition]) {
     if let Some(r) = any.downcast_ref::<Reference>() {
         if let Some(id) = r.rule_id {
             if id == c.target { c.found = true; c.done = true; return; }
-            if c.refs.insert(id) {
-                if let Some(def) = rules.get(id) { visit_lr(def.holder.as_ref(), c, rules); if c.found { return; } }
+            let resolved: Vec<std::rc::Rc<dyn Ope>> = if r.is_macro {
+                r.args.iter().map(|a| crate::ope::resolve_macro_arg(a, &c.args_stack)).collect()
+            } else {
+                Vec::new()
+            };
+            let inst = if r.is_macro { c.intern_inst(id, &resolved) } else { 0 };
+            let too_deep = r.is_macro && c.args_stack.len() >= MAX_MACRO_INST_DEPTH;
+            if !too_deep && c.refs.insert((id, inst)) {
+                if let Some(def) = rules.get(id) {
+                    if r.is_macro { c.args_stack.push(resolved); }
+                    visit_lr(def.holder.as_ref(), c, rules);
+                    if r.is_macro { c.args_stack.pop(); }
+                    if c.found { return; }
+                }
             }
             c.done = !rules.get(id).map_or(false, |d| d.can_be_empty);
         } else {
-            c.done = true;
+            // Macro parameter: follow what the enclosing instantiation passed.
+            // Arguments are substituted eagerly, so the resolved operator holds
+            // no parameter references of its own.
+            match c.resolve_param(r.iarg) {
+                Some(a) => visit_lr(a.as_ref(), c, rules),
+                None => c.done = true,
+            }
         }
         return;
     }

@@ -357,5 +357,77 @@
       { "input": "1+2*3-4*5+6/2", "match": true, "expected_value": -10 },
       { "input": "1+2+3+4", "match": true, "expected_value": 10 }
     ]
+  },
+  {
+    "name": "left_recursive_macro",
+    "description": "A macro that is itself part of the cycle grows a seed per instantiation",
+    "grammar": "S <- Sum(N)\nSum(A) <- Sum(A) '+' A / A\nN <- [0-9]",
+    "cases": [
+      { "input": "1", "match": true },
+      { "input": "1+2", "match": true },
+      { "input": "1+2+3", "match": true },
+      { "input": "1+", "match": false },
+      { "input": "+1", "match": false }
+    ]
+  },
+  {
+    "name": "left_recursive_macro_two_instantiations",
+    "description": "Sum(D) and Sum(L) are separate instantiations; one seed must not answer for the other",
+    "grammar": "S <- Sum(D) / Sum(L)\nSum(A) <- Sum(A) '+' A / A\nD <- [0-9]\nL <- [a-z]",
+    "cases": [
+      { "input": "1+2", "match": true },
+      { "input": "a+b", "match": true },
+      { "input": "1+b", "match": false }
+    ]
+  },
+  {
+    "name": "left_recursive_macro_instantiation_not_shared",
+    "description": "Sum(D) matches and then 'x' fails; Sum(L) must not reuse that seed",
+    "grammar": "S <- Sum(D) 'x' / Sum(L)\nSum(A) <- Sum(A) '+' A / A\nD <- [0-9]\nL <- [a-z]",
+    "cases": [
+      { "input": "1+2x", "match": true },
+      { "input": "a+b", "match": true },
+      { "input": "1+2", "match": false }
+    ]
+  },
+  {
+    "name": "indirect_left_recursion_through_macro",
+    "description": "The cycle runs macro -> rule -> macro",
+    "grammar": "S <- M(N)\nM(A) <- R '+' A / A\nR <- M(N)\nN <- [0-9]",
+    "cases": [
+      { "input": "1", "match": true },
+      { "input": "1+2", "match": true },
+      { "input": "1+2+3", "match": true }
+    ]
+  },
+  {
+    "name": "left_recursion_through_macro_argument",
+    "description": "A rule is left recursive by passing itself as a macro argument",
+    "grammar": "S <- A\nA <- W(A) / 'x'\nW(X) <- X 'w'",
+    "cases": [
+      { "input": "x", "match": true },
+      { "input": "xw", "match": true },
+      { "input": "xww", "match": true }
+    ]
+  },
+  {
+    "name": "left_recursion_detected_per_instantiation",
+    "description": "Visiting W with 'z' says nothing about W with A: the second instantiation closes the cycle",
+    "grammar": "S <- A\nA <- W('z') / W(A) / 'x'\nW(X) <- X 'w'",
+    "cases": [
+      { "input": "x", "match": true },
+      { "input": "xw", "match": true },
+      { "input": "zw", "match": true }
+    ]
+  },
+  {
+    "name": "nested_macro_in_left_recursive_cycle",
+    "description": "Two macros inside the cycle",
+    "grammar": "S <- Sum(N)\nSum(A) <- Wrap(A) '+' A / A\nWrap(X) <- Sum(X)\nN <- [0-9]",
+    "cases": [
+      { "input": "1", "match": true },
+      { "input": "1+2", "match": true },
+      { "input": "1+2+3", "match": true }
+    ]
   }
 ]
