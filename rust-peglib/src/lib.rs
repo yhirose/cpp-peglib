@@ -1113,7 +1113,9 @@ struct LrCtx {
 
 // A macro that instantiates itself with a growing argument
 // (`M(s) <- M(s / 'x')`) has no finite set of instantiations; stop descending
-// rather than loop forever.
+// rather than loop forever. This bound is on nesting depth in general, not
+// self-recursion specifically, so it also caps any other chain of nested
+// macro calls -- generously, for real grammars.
 const MAX_MACRO_INST_DEPTH: usize = 32;
 
 impl LrCtx {

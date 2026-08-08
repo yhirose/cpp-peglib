@@ -599,6 +599,8 @@ Letter <- [a-z]
 
 A plain macro is transparent to semantic values, but a left-recursive one forms its own scope: an action attached to it fires and its node appears in the AST, exactly as for the equivalent non-macro rule.
 
+Detection follows macro instantiations 32 levels deep before it stops descending. This bounds the case that has no finite depth to begin with — a macro that instantiates itself with a growing argument, such as `M(s) <- M(s / 'x') / s` — but the same counter also caps any other chain of nested macro calls, so 32 macros wrapping one another the way `Sum` wraps `Digit` above would hit it too. That is intentionally generous for real grammars; when it is hit, detection silently treats the rule as not left recursive, which is the pre-fix behavior of recursing until the stack overflows.
+
 Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 
 ```cpp

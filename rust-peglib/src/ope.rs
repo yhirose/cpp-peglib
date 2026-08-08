@@ -1443,7 +1443,14 @@ impl Ope for Reference {
             ctx.pop_args();
             len
         } else {
-            holder.parse_core(pos, vs, ctx)
+            // A plain rule reference still opens a frame with inst 0, so a
+            // left-recursive rule called from inside a macro body keys its
+            // own memo independently of the enclosing instantiation (mirrors
+            // cpp: peglib.h's Reference::parse_core does the same).
+            ctx.push_args(Vec::new(), 0);
+            let len = holder.parse_core(pos, vs, ctx);
+            ctx.pop_args();
+            len
         }
     }
     fn accept(&self, v: &mut dyn Visitor) { v.visit_reference(self); }

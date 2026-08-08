@@ -2481,7 +2481,9 @@ struct DetectLeftRecursion : public TraversalVisitor {
   // (`M(s) <- M(s / 'x')`) has no finite set of instantiations. Stop
   // descending instead of looping forever; the rule is then reported as
   // non-left-recursive, which is what this analysis did for every macro
-  // before it became instantiation-aware.
+  // before it became instantiation-aware. The bound is on nesting depth in
+  // general, not self-recursion specifically, so it also caps any other
+  // chain of nested macro calls -- generously, for real grammars.
   static const size_t max_macro_inst_depth = 32;
 
 private:
