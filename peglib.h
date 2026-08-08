@@ -2469,15 +2469,14 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   const char *error_s = nullptr;
 
-  // What a bare parameter reference denotes, and the frame it was found at.
-  // The frame matters: the argument stored there was written one level
-  // further out, so any parameter reference *inside* it has to resolve
-  // against the frames below -- see visit(Reference &).
+  // What a bare parameter reference denotes, plus the frame it was found at
+  // -- see visit_in_defining_scope.
   struct ResolvedArg {
     std::shared_ptr<Ope> ope;
     size_t depth = 0;
   };
   ResolvedArg resolve_macro_arg(size_t iarg) const;
+  void visit_in_defining_scope(const ResolvedArg &arg);
 
   // A macro's body depends on its arguments, so "already visited" has to be
   // per instantiation, not per name: in `A <- W('z') / W(A)`, visiting W with
@@ -4113,25 +4112,17 @@ inline void ComputeCanBeEmpty::visit(Reference &ope) {
 }
 
 inline void DetectLeftRecursion::visit(Reference &ope) {
+  // Macro parameter reference: what it denotes lives in an enclosing
+  // instantiation (e.g. B(X) <- C(X) where X is itself a param ref).
+  auto param = !ope.rule_ && !macro_args_stack_.empty()
+                   ? resolve_macro_arg(ope.iarg_)
+                   : ResolvedArg{};
+
   if (ope.name_ == name_) {
     error_s = ope.s_;
-  } else if (!ope.rule_ && !macro_args_stack_.empty()) {
-    // Macro parameter reference: resolve through nested macro arg
-    // stacks (e.g. B(X) <- C(X) where X is itself a param ref).
-    auto resolved = resolve_macro_arg(ope.iarg_);
-    if (resolved.ope) {
-      // Visit it in the scope it was written in: the frames below the one
-      // holding it. `W(X) <- Y(X / 'x')` passes Y an argument whose own `X`
-      // means W's parameter, not Y's -- keeping Y's frame visible would
-      // resolve that `X` right back to `X / 'x'`, forever.
-      auto outer = std::vector<const std::vector<std::shared_ptr<Ope>> *>(
-          macro_args_stack_.begin(),
-          macro_args_stack_.begin() + static_cast<long>(resolved.depth));
-      std::swap(macro_args_stack_, outer);
-      resolved.ope->accept(*this);
-      std::swap(macro_args_stack_, outer);
-      if (done_ == false) { return; }
-    }
+  } else if (param.ope) {
+    visit_in_defining_scope(param);
+    if (done_ == false) { return; }
   } else if (ope.is_macro_ &&
              macro_args_stack_.size() >= max_macro_inst_depth) {
     // Unbounded instantiation chain; stop descending.
@@ -4147,10 +4138,11 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   // If the referenced rule can match empty, don't mark as done —
   // the sequence may continue past this element to find LR.
   if (!ope.rule_ && !macro_args_stack_.empty()) {
-    auto resolved = resolve_macro_arg(ope.iarg_);
-    if (resolved.ope) {
+    if (param.ope) {
+      // ComputeCanBeEmpty never consults the frame stack, so the scope it
+      // runs in cannot matter.
       ComputeCanBeEmpty cbe;
-      resolved.ope->accept(cbe);
+      param.ope->accept(cbe);
       done_ = !cbe.result;
     } else {
       done_ = true;
@@ -4177,6 +4169,18 @@ inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
                                                 next_macro_inst_);
   if (inserted) { next_macro_inst_++; }
   return it->second;
+}
+
+inline void
+DetectLeftRecursion::visit_in_defining_scope(const ResolvedArg &arg) {
+  // The frames below the one holding it are the scope it was written in.
+  // `W(X) <- Y(X / 'x')` passes Y an argument whose own `X` means W's
+  // parameter, not Y's -- leaving Y's frame visible would resolve that `X`
+  // right back to `X / 'x'`, forever.
+  auto saved = macro_args_stack_;
+  auto se = scope_exit([&]() { macro_args_stack_ = std::move(saved); });
+  macro_args_stack_.resize(arg.depth);
+  arg.ope->accept(*this);
 }
 
 inline DetectLeftRecursion::ResolvedArg

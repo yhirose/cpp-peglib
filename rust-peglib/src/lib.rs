@@ -1127,7 +1127,8 @@ impl LrCtx {
         match arg.as_any().downcast_ref::<Reference>() {
             Some(r) if r.rule_id.is_none() => self
                 .resolve_param(r.iarg)
-                .map_or_else(|| arg.clone(), |(a, _)| a),
+                .map(|(a, _)| a)
+                .unwrap_or_else(|| arg.clone()),
             _ => arg.clone(),
         }
     }
@@ -1225,10 +1226,9 @@ fn visit_lr(ope: &dyn Ope, c: &mut LrCtx, rules: &[Definition]) {
             // visible would resolve that `X` right back to `X / 'x'`, forever.
             match c.resolve_param(r.iarg) {
                 Some((a, depth)) => {
-                    let outer = c.args_stack[..depth].to_vec();
-                    let saved = std::mem::replace(&mut c.args_stack, outer);
+                    let inner = c.args_stack.split_off(depth);
                     visit_lr(a.as_ref(), c, rules);
-                    c.args_stack = saved;
+                    c.args_stack.extend(inner);
                 }
                 None => c.done = true,
             }
