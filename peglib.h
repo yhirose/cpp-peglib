@@ -2630,8 +2630,7 @@ private:
     s += ')';
   }
   void opaque(const void *p) {
-    s += "(opq " +
-         std::to_string(reinterpret_cast<std::uintptr_t>(p)) + ")";
+    s += "(opq " + std::to_string(reinterpret_cast<std::uintptr_t>(p)) + ")";
   }
 };
 
