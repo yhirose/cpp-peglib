@@ -1107,4 +1107,4 @@ Programming languages using cpp-peglib
 License
 -------
 
-MIT license (© 2022 Yuji Hirose)
+MIT license (© 2026 Yuji Hirose)
