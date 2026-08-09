@@ -4591,16 +4591,19 @@ inline void Definition::initialize_packrat_filter() const {
       CollectLeftmostRules(size_t n)
           : reachable(n, false), visited_rules(n, false) {}
 
-      void visit(Sequence &ope) override {
-        // Only elements up to (and including) the first one that must
-        // consume input are at the start position.
-        for (auto &op : ope.opes_) {
-          op->accept(*this);
+      // Collect from the position element `from` starts at: element `from`
+      // itself, plus what follows for as long as elements can match empty —
+      // only up to (and including) the first one that must consume input.
+      void collect(const std::vector<std::shared_ptr<Ope>> &opes, size_t from) {
+        for (auto i = from; i < opes.size(); i++) {
+          opes[i]->accept(*this);
           ComputeCanBeEmpty empty_vis;
-          op->accept(empty_vis);
+          opes[i]->accept(empty_vis);
           if (!empty_vis.result) { break; }
         }
       }
+
+      void visit(Sequence &ope) override { collect(ope.opes_, 0); }
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < reachable.size()) {
@@ -4641,27 +4644,12 @@ inline void Definition::initialize_packrat_filter() const {
       using Elements = std::vector<std::shared_ptr<Ope>>;
 
       // An alternative's top-level elements, so a shared prefix can be walked
-      // element by element.
-      static const Elements &elements_of(const std::shared_ptr<Ope> &alt,
-                                         Elements &scratch) {
+      // element by element. By value: this runs once per grammar.
+      static Elements elements_of(const std::shared_ptr<Ope> &alt) {
         if (auto *seq = dynamic_cast<Sequence *>(alt.get())) {
           return seq->opes_;
         }
-        scratch.assign(1, alt);
-        return scratch;
-      }
-
-      // Rules the parser can query at the position element `k` starts at:
-      // element k itself, plus what follows for as long as the elements
-      // before it can match empty.
-      static void collect_from(const Elements &seq, size_t k,
-                               CollectLeftmostRules &clr) {
-        for (auto i = k; i < seq.size(); i++) {
-          seq[i]->accept(clr);
-          ComputeCanBeEmpty empty_vis;
-          seq[i]->accept(empty_vis);
-          if (!empty_vis.result) { break; }
-        }
+        return {alt};
       }
 
       // `group` holds alternatives that agree on their first `k` elements, so
@@ -4669,14 +4657,14 @@ inline void Definition::initialize_packrat_filter() const {
       // is exactly when a packrat cache entry can hit. k == 0 is the plain
       // "alternatives of one choice" case; deeper k is what a shared prefix
       // like `'(' _ PATTERN _ ',' _` hides.
-      void mark_aligned(const std::vector<const Elements *> &group, size_t k) {
+      void mark_aligned(const std::vector<Elements> &group, size_t k) {
         if (group.size() < 2) { return; }
 
         std::vector<std::vector<bool>> reachable;
         reachable.reserve(group.size());
-        for (const auto *seq : group) {
+        for (const auto &seq : group) {
           CollectLeftmostRules clr(def_count);
-          collect_from(*seq, k, clr);
+          clr.collect(seq, k);
           reachable.push_back(std::move(clr.reachable));
         }
         for (size_t id = 0; id < def_count; id++) {
@@ -4688,10 +4676,10 @@ inline void Definition::initialize_packrat_filter() const {
         }
 
         // Only alternatives that also agree on element k stay aligned past it.
-        std::map<std::string, std::vector<const Elements *>> aligned;
-        for (const auto *seq : group) {
-          if (k < seq->size()) {
-            aligned[OpeSignature::get(*(*seq)[k])].push_back(seq);
+        std::map<std::string, std::vector<Elements>> aligned;
+        for (const auto &seq : group) {
+          if (k < seq.size()) {
+            aligned[OpeSignature::get(*seq[k])].push_back(seq);
           }
         }
         for (const auto &[sig, sub] : aligned) {
@@ -4700,11 +4688,10 @@ inline void Definition::initialize_packrat_filter() const {
       }
 
       void visit(PrioritizedChoice &ope) override {
-        std::vector<Elements> scratch(ope.opes_.size());
-        std::vector<const Elements *> group;
+        std::vector<Elements> group;
         group.reserve(ope.opes_.size());
-        for (size_t i = 0; i < ope.opes_.size(); i++) {
-          group.push_back(&elements_of(ope.opes_[i], scratch[i]));
+        for (const auto &op : ope.opes_) {
+          group.push_back(elements_of(op));
         }
         mark_aligned(group, 0);
 
