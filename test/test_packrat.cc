@@ -130,5 +130,46 @@ TEST(PackratTest, Packrat_cache_with_choice_backtracking) {
   EXPECT_EQ(1, a_count); // Packrat should cache A's result
 }
 
+TEST(PackratTest, Packrat_cache_across_shared_consuming_prefix) {
+  parser pg(R"(
+    S <- '(' A ',' A ')' / '(' A ',' ')'
+    A <- 'a'
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  size_t a_count = 0;
+  pg["A"] = [&](const SemanticValues &) {
+    a_count++;
+    return std::string("a");
+  };
+
+  // The first alternative matches A, fails at the second one, and the second
+  // alternative queries A again at the same position. The shared `'('` in
+  // front of it must not hide that from the packrat filter.
+  EXPECT_TRUE(pg.parse("(a,)"));
+  EXPECT_EQ(1, a_count);
+}
+
+TEST(PackratTest, Packrat_shared_consuming_prefix_is_not_exponential) {
+  parser pg(R"(
+    S <- '(' S ',' S ')' / '(' S ',' ')' / 'x'
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  // Each level re-parses S from the second alternative, so an unmemoized S
+  // costs 2^depth. Completing at all is the assertion.
+  std::string input;
+  for (auto i = 0; i < 100; i++) {
+    input += '(';
+  }
+  input += 'x';
+  for (auto i = 0; i < 100; i++) {
+    input += ",)";
+  }
+  EXPECT_TRUE(pg.parse(input));
+}
+
 // =============================================================================
 // Lookahead Predicate Tests

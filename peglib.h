@@ -1803,6 +1803,7 @@ public:
 
   friend struct ComputeFirstSet;
   friend struct GrammarBlob;
+  friend struct OpeSignature;
 
   bool is_ascii_only() const { return is_ascii_only_; }
   const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
@@ -2533,6 +2534,105 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result = false; }
   void visit(Cut &) override { result = false; }
+};
+
+// Structural signature of an Ope. Two alternatives whose first k elements
+// have equal signatures consume the same text, so their (k+1)-th elements
+// start at the same position. Opes whose state cannot be serialized get
+// their address instead: that only ever reads as "these differ", which
+// costs an optimization rather than adding one.
+struct OpeSignature : public Ope::Visitor {
+  using Ope::Visitor::visit;
+  std::string s;
+
+  void visit(Sequence &ope) override { group("seq", ope.opes_); }
+  void visit(PrioritizedChoice &ope) override { group("cho", ope.opes_); }
+  void visit(Repetition &ope) override {
+    s += "(rep " + std::to_string(ope.min_) + " " +
+         (ope.max_ == std::numeric_limits<size_t>::max()
+              ? std::string("inf")
+              : std::to_string(ope.max_));
+    wrap(*ope.ope_);
+  }
+  void visit(AndPredicate &ope) override { unary("and", *ope.ope_); }
+  void visit(NotPredicate &ope) override { unary("not", *ope.ope_); }
+  void visit(CaptureScope &ope) override { unary("cps", *ope.ope_); }
+  void visit(Capture &ope) override { unary("cap", *ope.ope_); }
+  void visit(TokenBoundary &ope) override { unary("tok", *ope.ope_); }
+  void visit(Ignore &ope) override { unary("ign", *ope.ope_); }
+  void visit(Whitespace &ope) override { unary("wsp", *ope.ope_); }
+  void visit(Recovery &ope) override { unary("rec", *ope.ope_); }
+  // A rule is named, never expanded — that is what keeps a recursive
+  // grammar's signature finite. WeakHolder only ever wraps a Holder, so
+  // descending through it lands on a name too.
+  void visit(Holder &ope) override { s += "(hld " + ope.name() + ")"; }
+  void visit(WeakHolder &ope) override {
+    if (auto p = ope.weak_.lock()) {
+      unary("wek", *p);
+    } else {
+      opaque(&ope);
+    }
+  }
+  void visit(Reference &ope) override {
+    s += "(ref " + ope.name_;
+    for (auto &arg : ope.args_) {
+      s += ' ';
+      arg->accept(*this);
+    }
+    s += ')';
+  }
+  void visit(LiteralString &ope) override {
+    s += "(lit " + std::to_string(ope.ignore_case_) + " " + ope.lit_ + ")";
+  }
+  void visit(CharacterClass &ope) override {
+    s += "(cls " + std::to_string(ope.negated_) + " " +
+         std::to_string(ope.ignore_case_);
+    for (const auto &[lo, hi] : ope.ranges_) {
+      s += " " + std::to_string(static_cast<uint32_t>(lo)) + "-" +
+           std::to_string(static_cast<uint32_t>(hi));
+    }
+    s += ')';
+  }
+  void visit(Character &ope) override {
+    s += "(chr " + std::to_string(static_cast<uint32_t>(ope.ch_)) + ")";
+  }
+  void visit(AnyCharacter &) override { s += "(any)"; }
+  void visit(Dictionary &ope) override { opaque(&ope); }
+  void visit(User &ope) override { opaque(&ope); }
+  void visit(BackReference &ope) override { opaque(&ope); }
+  void visit(PrecedenceClimbing &ope) override { opaque(&ope); }
+  void visit(Cut &ope) override { opaque(&ope); }
+
+  static std::string get(Ope &ope) {
+    OpeSignature vis;
+    ope.accept(vis);
+    return std::move(vis.s);
+  }
+
+private:
+  void group(const char *tag, const std::vector<std::shared_ptr<Ope>> &v) {
+    s += '(';
+    s += tag;
+    for (const auto &op : v) {
+      s += ' ';
+      op->accept(*this);
+    }
+    s += ')';
+  }
+  void unary(const char *tag, Ope &inner) {
+    s += '(';
+    s += tag;
+    wrap(inner);
+  }
+  void wrap(Ope &inner) {
+    s += ' ';
+    inner.accept(*this);
+    s += ')';
+  }
+  void opaque(const void *p) {
+    s += "(opq " +
+         std::to_string(reinterpret_cast<std::uintptr_t>(p)) + ")";
+  }
 };
 
 struct HasEmptyElement : public TraversalVisitor {
@@ -4525,8 +4625,8 @@ inline void Definition::initialize_packrat_filter() const {
       }
     };
 
-    // Find rules that benefit: leftmost-reachable from 2+ alternatives of
-    // the same choice
+    // Find rules that benefit: queried by 2+ alternatives of the same choice
+    // at the same position
     std::vector<bool> benefits(def_count, false);
 
     struct FindBacktrackRules : public TraversalVisitor {
@@ -4538,23 +4638,75 @@ inline void Definition::initialize_packrat_filter() const {
       FindBacktrackRules(std::vector<bool> &b, size_t n)
           : benefits(b), def_count(n), visited_rules(n, false) {}
 
-      void visit(PrioritizedChoice &ope) override {
-        // For each alternative, collect leftmost-reachable rules
-        std::vector<std::vector<bool>> alt_reachable;
-        for (auto &op : ope.opes_) {
-          CollectLeftmostRules clr(def_count);
-          op->accept(clr);
-          alt_reachable.push_back(std::move(clr.reachable));
-        }
+      using Elements = std::vector<std::shared_ptr<Ope>>;
 
-        // Mark rules leftmost-reachable from 2+ alternatives
+      // An alternative's top-level elements, so a shared prefix can be walked
+      // element by element.
+      static const Elements &elements_of(const std::shared_ptr<Ope> &alt,
+                                         Elements &scratch) {
+        if (auto *seq = dynamic_cast<Sequence *>(alt.get())) {
+          return seq->opes_;
+        }
+        scratch.assign(1, alt);
+        return scratch;
+      }
+
+      // Rules the parser can query at the position element `k` starts at:
+      // element k itself, plus what follows for as long as the elements
+      // before it can match empty.
+      static void collect_from(const Elements &seq, size_t k,
+                               CollectLeftmostRules &clr) {
+        for (auto i = k; i < seq.size(); i++) {
+          seq[i]->accept(clr);
+          ComputeCanBeEmpty empty_vis;
+          seq[i]->accept(empty_vis);
+          if (!empty_vis.result) { break; }
+        }
+      }
+
+      // `group` holds alternatives that agree on their first `k` elements, so
+      // every one of them reaches element k at the same input position — that
+      // is exactly when a packrat cache entry can hit. k == 0 is the plain
+      // "alternatives of one choice" case; deeper k is what a shared prefix
+      // like `'(' _ PATTERN _ ',' _` hides.
+      void mark_aligned(const std::vector<const Elements *> &group, size_t k) {
+        if (group.size() < 2) { return; }
+
+        std::vector<std::vector<bool>> reachable;
+        reachable.reserve(group.size());
+        for (const auto *seq : group) {
+          CollectLeftmostRules clr(def_count);
+          collect_from(*seq, k, clr);
+          reachable.push_back(std::move(clr.reachable));
+        }
         for (size_t id = 0; id < def_count; id++) {
           size_t count = 0;
-          for (auto &alt : alt_reachable) {
+          for (const auto &alt : reachable) {
             if (alt[id]) { count++; }
           }
           if (count >= 2) { benefits[id] = true; }
         }
+
+        // Only alternatives that also agree on element k stay aligned past it.
+        std::map<std::string, std::vector<const Elements *>> aligned;
+        for (const auto *seq : group) {
+          if (k < seq->size()) {
+            aligned[OpeSignature::get(*(*seq)[k])].push_back(seq);
+          }
+        }
+        for (const auto &[sig, sub] : aligned) {
+          mark_aligned(sub, k + 1);
+        }
+      }
+
+      void visit(PrioritizedChoice &ope) override {
+        std::vector<Elements> scratch(ope.opes_.size());
+        std::vector<const Elements *> group;
+        group.reserve(ope.opes_.size());
+        for (size_t i = 0; i < ope.opes_.size(); i++) {
+          group.push_back(&elements_of(ope.opes_[i], scratch[i]));
+        }
+        mark_aligned(group, 0);
 
         // Recurse into alternatives
         for (auto &op : ope.opes_) {
