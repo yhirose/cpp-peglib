@@ -1139,7 +1139,7 @@ public:
   // invocations then skip all semantic-value bookkeeping and parse
   // straight into the caller's scope. Decided at parse start (callbacks
   // can be attached between parses).
-  bool recognizer = false;
+  bool recognize_only = false;
 
   // True when error reporting or tracing is active, i.e. when rule_stack
   // must reflect the full chain of rules being parsed. Without them only
@@ -1530,7 +1530,9 @@ private:
       }
     }
     // Success: emit token and consume trailing whitespace
-    if (!c.recognizer) { vs.tokens.emplace_back(std::string_view(s, id_len)); }
+    if (!c.recognize_only) {
+      vs.tokens.emplace_back(std::string_view(s, id_len));
+    }
     auto wl = c.skip_whitespace(s + id_len, n - id_len, vs, dt);
     if (fail(wl)) { return wl; }
     return id_len + wl;
@@ -3368,15 +3370,15 @@ private:
     // rule invocations skip the semantic-value machinery entirely. The
     // callback scan runs per parse; actions can be attached between parses.
     if (!has_opaque_ope_ && !c.has_tracer && !c.needs_rule_stack) {
-      auto recognizer = true;
+      auto recognize_only = true;
       for (const auto &entry : definition_ids_) {
         auto def = static_cast<Definition *>(entry.first);
         if (def->action || def->enter || def->leave || def->predicate) {
-          recognizer = false;
+          recognize_only = false;
           break;
         }
       }
-      c.recognizer = recognizer;
+      c.recognize_only = recognize_only;
     }
 
     size_t i = 0;
@@ -3724,7 +3726,7 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
   }
 
   if (success(len)) {
-    if (!c.recognizer) { vs.tokens.emplace_back(std::string_view(s, len)); }
+    if (!c.recognize_only) { vs.tokens.emplace_back(std::string_view(s, len)); }
 
     auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
     if (fail(wl)) { return wl; }
@@ -3828,7 +3830,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // Recognizer fast path: no semantic-value scope, no reduce, no value
   // emplace; the rule body parses straight into the caller's scope.
   // Left-recursive rules keep the full seed-growing machinery below.
-  if (c.recognizer && !outer_->is_left_recursive) {
+  if (c.recognize_only && !outer_->is_left_recursive) {
     auto do_recognize = [&](std::any &) {
       len = parse_ope_body(s, n, vs, c, dt);
     };
@@ -4021,7 +4023,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   }
 
   if (success(len)) {
-    if (!outer_->ignoreSemanticValue && !c.recognizer) {
+    if (!outer_->ignoreSemanticValue && !c.recognize_only) {
       vs.emplace_back(std::move(val));
       vs.tags.emplace_back(str2tag(outer_->name));
     }
