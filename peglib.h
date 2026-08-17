@@ -1010,7 +1010,10 @@ public:
     std::vector<std::shared_ptr<Ope>> args;
     size_t macro_inst = 0;
   };
+  // Popped frames stay in the vector so their args keep their capacity for
+  // the next push at the same depth (same reuse scheme as value_stack).
   std::vector<ArgsFrame> args_stack;
+  size_t args_stack_size = 0;
 
   size_t in_token_boundary_count = 0;
 
@@ -1156,7 +1159,7 @@ public:
           static_cast<unsigned char>(std::tolower(static_cast<int>(i)));
     }
 
-    push_args({});
+    push_empty_args();
   }
 
   ~Context() {
@@ -1262,19 +1265,47 @@ public:
   void pop_semantic_values_scope() { value_stack_size--; }
 
   // Arguments
-  void push_args(std::vector<std::shared_ptr<Ope>> &&args,
-                 size_t macro_inst = 0) {
-    args_stack.push_back({std::move(args), macro_inst});
+  // Borrow the retained vector of the frame the next push will occupy, so a
+  // caller can fill it before pushing without a fresh heap allocation.
+  std::vector<std::shared_ptr<Ope>> take_args_buffer() {
+    if (args_stack_size < args_stack.size()) {
+      auto v = std::move(args_stack[args_stack_size].args);
+      v.clear();
+      return v;
+    }
+    return {};
   }
 
-  void pop_args() { args_stack.pop_back(); }
+  void push_args(std::vector<std::shared_ptr<Ope>> &&args,
+                 size_t macro_inst = 0) {
+    if (args_stack_size == args_stack.size()) {
+      args_stack.push_back({std::move(args), macro_inst});
+    } else {
+      auto &frame = args_stack[args_stack_size];
+      frame.args = std::move(args);
+      frame.macro_inst = macro_inst;
+    }
+    args_stack_size++;
+  }
+
+  // An empty argument scope keeps the frame's retained vector (just
+  // cleared), where push_args({}) would deallocate it.
+  void push_empty_args() {
+    if (args_stack_size == args_stack.size()) { args_stack.emplace_back(); }
+    auto &frame = args_stack[args_stack_size];
+    frame.args.clear();
+    frame.macro_inst = 0;
+    args_stack_size++;
+  }
+
+  void pop_args() { args_stack_size--; }
 
   const std::vector<std::shared_ptr<Ope>> &top_args() const {
-    return args_stack[args_stack.size() - 1].args;
+    return args_stack[args_stack_size - 1].args;
   }
 
   size_t top_macro_inst() const {
-    return args_stack[args_stack.size() - 1].macro_inst;
+    return args_stack[args_stack_size - 1].macro_inst;
   }
 
   // Identify a macro invocation by what its resolved arguments denote (see
@@ -3944,8 +3975,9 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
       // Macro
       FindReference vis(c.top_args(), c.rule_stack.back()->params);
 
-      // Collect arguments
-      std::vector<std::shared_ptr<Ope>> args;
+      // Collect arguments (into the retained buffer of the frame the push
+      // below will occupy, so no allocation happens on a warm path)
+      auto args = c.take_args_buffer();
       for (const auto &arg : args_) {
         arg->accept(vis);
         args.emplace_back(std::move(vis.found_ope));
@@ -3959,7 +3991,7 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
       // Definition
-      c.push_args(std::vector<std::shared_ptr<Ope>>());
+      c.push_empty_args();
       auto se2 = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     }
