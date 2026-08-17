@@ -1530,7 +1530,7 @@ private:
       }
     }
     // Success: emit token and consume trailing whitespace
-    vs.tokens.emplace_back(std::string_view(s, id_len));
+    if (!c.recognizer) { vs.tokens.emplace_back(std::string_view(s, id_len)); }
     auto wl = c.skip_whitespace(s + id_len, n - id_len, vs, dt);
     if (fail(wl)) { return wl; }
     return id_len + wl;
