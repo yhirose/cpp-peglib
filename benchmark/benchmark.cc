@@ -149,6 +149,27 @@ static BenchResult bench_sql_parse(const string &name,
   return bench(name, iterations, [&]() { pg.parse(sql_input); });
 }
 
+// Same grammar and input, but building an AST. libpg_query returns a parse
+// tree, so the recognition-only benchmark above is not a like-for-like
+// comparison against it; this one is.
+static BenchResult bench_sql_parse_ast(const string &name,
+                                       const string &sql_grammar,
+                                       const string &sql_input,
+                                       int iterations) {
+  parser pg(sql_grammar);
+  if (!pg) {
+    cerr << "Error: failed to parse SQL grammar" << endl;
+    exit(1);
+  }
+  pg.enable_packrat_parsing();
+  pg.enable_ast();
+
+  return bench(name, iterations, [&]() {
+    shared_ptr<Ast> ast;
+    pg.parse(sql_input, ast);
+  });
+}
+
 // PostgreSQL YACC (libpg_query) benchmarks
 #ifdef HAS_PG_QUERY
 static BenchResult bench_yacc_parse(const string &name, const string &sql_input,
@@ -440,6 +461,11 @@ int main(int argc, char *argv[]) {
   results.push_back(
       bench_sql_parse("PEG: big.sql (~1MB)", sql_grammar, big_sql, iterations));
 
+  cout << "[" << test_num++ << "] PEG-ast: big.sql (" << big_sql.size()
+       << " bytes)" << endl;
+  results.push_back(bench_sql_parse_ast("PEG-ast: big.sql (~1MB)", sql_grammar,
+                                        big_sql, iterations));
+
   // Optimized grammar benchmarks
   {
     auto opt_grammar = read_file(data_dir + "/sql-optimized.peg");
@@ -485,11 +511,16 @@ int main(int argc, char *argv[]) {
 
 #ifdef HAS_PG_QUERY
   auto peg_big = find_result("PEG: big.sql (~1MB)");
+  auto peg_ast_big = find_result("PEG-ast: big.sql (~1MB)");
   auto yacc_big = find_result("YACC: big.sql (~1MB)");
   if (peg_big > 0 && yacc_big > 0) {
     cout << endl
          << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
-         << peg_big / yacc_big << "x" << endl;
+         << peg_big / yacc_big << "x (recognition only)" << endl;
+  }
+  if (peg_ast_big > 0 && yacc_big > 0) {
+    cout << "  Ratio (big.sql): PEG-ast/YACC = " << fixed << setprecision(1)
+         << peg_ast_big / yacc_big << "x (both build a tree)" << endl;
   }
 #endif
 
