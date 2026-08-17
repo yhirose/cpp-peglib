@@ -1133,6 +1133,14 @@ public:
   std::any trace_data;
   const bool verbose_trace;
 
+  // True when nothing in this parse can observe semantic values: no
+  // action/enter/leave/predicate on any reachable rule, no User or
+  // PrecedenceClimbing ope, no tracer, log, or error reporter. Rule
+  // invocations then skip all semantic-value bookkeeping and parse
+  // straight into the caller's scope. Decided at parse start (callbacks
+  // can be attached between parses).
+  bool recognizer = false;
+
   // True when error reporting or tracing is active, i.e. when rule_stack
   // must reflect the full chain of rules being parsed. Without them only
   // rules whose body invokes a macro need to appear on the stack (their
@@ -2420,10 +2428,15 @@ struct AssignIDToDefinition : public TraversalVisitor {
     has_cut = true;
     TraversalVisitor::visit(ope);
   }
+  void visit(User &) override { has_opaque_ope = true; }
 
   std::unordered_map<void *, size_t> ids;
   Definition *current_def = nullptr; // rule whose body is being walked
   bool has_cut = false;              // grammar contains a Cut or Recovery ope
+  // Grammar contains an ope whose semantic-value use cannot be seen from
+  // Definition callbacks alone (User callbacks, PrecedenceClimbing's
+  // in-parse action swapping); disqualifies recognizer mode.
+  bool has_opaque_ope = false;
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3306,6 +3319,7 @@ private:
       if (wordOpe) { wordOpe->accept(vis); }
       definition_ids_.swap(vis.ids);
       has_cut_ = vis.has_cut;
+      has_opaque_ope_ = vis.has_opaque_ope;
     });
   }
 
@@ -3346,6 +3360,21 @@ private:
       c.packrat_stats = &packrat_stats_;
     }
 
+    // Recognizer mode: nothing in this parse observes semantic values, so
+    // rule invocations skip the semantic-value machinery entirely. The
+    // callback scan runs per parse; actions can be attached between parses.
+    if (!has_opaque_ope_ && !c.has_tracer && !c.needs_rule_stack) {
+      auto recognizer = true;
+      for (const auto &entry : definition_ids_) {
+        auto def = static_cast<Definition *>(entry.first);
+        if (def->action || def->enter || def->leave || def->predicate) {
+          recognizer = false;
+          break;
+        }
+      }
+      c.recognizer = recognizer;
+    }
+
     size_t i = 0;
 
     if (whitespaceOpe) {
@@ -3384,6 +3413,7 @@ private:
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
   mutable bool has_cut_ = false;
+  mutable bool has_opaque_ope_ = false;
   mutable std::once_flag packrat_filter_init_;
   mutable std::vector<int32_t> packrat_index_; // def_id -> cache slot or -1
   mutable size_t packrat_cached_count_ = 0;
@@ -3690,7 +3720,7 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
   }
 
   if (success(len)) {
-    vs.tokens.emplace_back(std::string_view(s, len));
+    if (!c.recognizer) { vs.tokens.emplace_back(std::string_view(s, len)); }
 
     auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
     if (fail(wl)) { return wl; }
@@ -3757,6 +3787,50 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
   size_t len;
   std::any val;
+
+  // Recognizer fast path: no semantic-value scope, no reduce, no value
+  // emplace; the rule body parses straight into the caller's scope.
+  // Left-recursive rules keep the full seed-growing machinery below.
+  if (c.recognizer && !outer_->is_left_recursive) {
+    auto do_recognize = [&](std::any &) {
+      // needs_rule_stack is false in recognizer mode by construction.
+      auto push_rule = outer_->has_macro_ref;
+      if (push_rule) { c.rule_stack.push_back(outer_); }
+      if (outer_->no_whitespace) {
+        {
+          c.in_token_boundary_count++;
+          auto se = scope_exit([&]() { c.in_token_boundary_count--; });
+          len = ope_->parse(s, n, vs, c, dt);
+        }
+        if (success(len)) {
+          auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
+          if (fail(wl)) {
+            len = wl;
+          } else {
+            len += wl;
+          }
+        }
+      } else {
+        len = ope_->parse(s, n, vs, c, dt);
+      }
+      if (push_rule) { c.rule_stack.pop_back(); }
+    };
+
+    if (c.enablePackratParsing) {
+      c.packrat(s, outer_->id, len, val, do_recognize);
+    } else {
+      // Same re-entry guard as the general no-packrat path below.
+      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
+      if (c.lr_memo.count(guard_key)) {
+        len = static_cast<size_t>(-1);
+      } else {
+        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
+        do_recognize(val);
+        c.lr_memo.erase(guard_key);
+      }
+    }
+    return len;
+  }
 
   // Shared parse body: invokes enter/leave callbacks, parses the rule's
   // operator, handles actions/predicates/errors, and calls reduce.
@@ -3952,7 +4026,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   }
 
   if (success(len)) {
-    if (!outer_->ignoreSemanticValue) {
+    if (!outer_->ignoreSemanticValue && !c.recognizer) {
       vs.emplace_back(std::move(val));
       vs.tags.emplace_back(str2tag(outer_->name));
     }
@@ -4277,6 +4351,7 @@ inline void AssignIDToDefinition::visit(Reference &ope) {
 }
 
 inline void AssignIDToDefinition::visit(PrecedenceClimbing &ope) {
+  has_opaque_ope = true;
   ope.atom_->accept(*this);
   ope.binop_->accept(*this);
 }
