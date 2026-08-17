@@ -584,7 +584,7 @@ struct SemanticValues : protected std::vector<std::any> {
   std::string_view sv() const { return sv_; }
 
   // Definition name
-  const std::string &name() const { return name_; }
+  const std::string &name() const { return *name_; }
 
   std::vector<unsigned int> tags;
 
@@ -659,11 +659,19 @@ private:
   friend class Holder;
   friend class PrecedenceClimbing;
 
+  static const std::string &empty_name() {
+    static const std::string name;
+    return name;
+  }
+
   Context *c_ = nullptr;
   std::string_view sv_;
   size_t choice_count_ = 0;
   size_t choice_ = 0;
-  std::string name_;
+  // Points at the matched rule's name (owned by the Definition, which
+  // outlives the parse); assigning a pointer beats copying a string on
+  // every successful rule match.
+  const std::string *name_ = &empty_name();
 };
 
 /*
@@ -1254,22 +1262,24 @@ public:
   SemanticValues &push_semantic_values_scope() {
     assert(value_stack_size <= value_stack.size());
     if (value_stack_size == value_stack.size()) {
+      // path and ss are fixed for the whole parse, so a frame only needs
+      // them set once, on creation.
       value_stack.emplace_back(std::make_unique<SemanticValues>(this));
-    } else {
-      auto &vs = *value_stack[value_stack_size];
-      if (!vs.empty()) {
-        vs.clear();
-        if (!vs.tags.empty()) { vs.tags.clear(); }
-      }
-      vs.sv_ = std::string_view();
-      vs.choice_count_ = 0;
-      vs.choice_ = 0;
-      if (!vs.tokens.empty()) { vs.tokens.clear(); }
+      auto &vs = *value_stack[value_stack_size++];
+      vs.path = path;
+      vs.ss = s;
+      return vs;
     }
 
     auto &vs = *value_stack[value_stack_size++];
-    vs.path = path;
-    vs.ss = s;
+    if (!vs.empty()) {
+      vs.clear();
+      if (!vs.tags.empty()) { vs.tags.clear(); }
+    }
+    vs.sv_ = std::string_view();
+    vs.choice_count_ = 0;
+    vs.choice_ = 0;
+    if (!vs.tokens.empty()) { vs.tokens.clear(); }
     return vs;
   }
 
@@ -3766,7 +3776,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
     if (success(parse_len)) {
       chvs.sv_ = std::string_view(s, parse_len);
-      chvs.name_ = outer_->name;
+      chvs.name_ = &outer_->name;
 
       auto ope_ptr = ope_.get();
       if (ope_ptr->is_token_boundary) {
