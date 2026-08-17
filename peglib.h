@@ -1032,6 +1032,9 @@ public:
 
   std::vector<std::pair<std::string_view, std::string>> capture_entries;
 
+  // False when the grammar contains no Cut or Recovery ope (determined once
+  // at id-assignment time); lets PrioritizedChoice skip all cut_stack work.
+  const bool has_cut;
   std::vector<bool> cut_stack;
 
   const size_t def_count;
@@ -1149,9 +1152,10 @@ public:
           TracerLeave tracer_leave, std::any trace_data, bool verbose_trace,
           Log log, ErrorReporter error_reporter = nullptr,
           const std::vector<int32_t> *packrat_index = nullptr,
-          size_t packrat_cached_count = 0)
+          size_t packrat_cached_count = 0, bool has_cut = true)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
-        def_count(def_count), enablePackratParsing(enablePackratParsing),
+        has_cut(has_cut), def_count(def_count),
+        enablePackratParsing(enablePackratParsing),
         packrat_index(packrat_index),
         packrat_cached_count(packrat_index ? packrat_cached_count : def_count),
         cache_registered(
@@ -1564,9 +1568,10 @@ public:
                     std::any &dt) const override {
     size_t len = static_cast<size_t>(-1);
 
-    if (!for_label_) { c.cut_stack.push_back(false); }
+    const auto track_cut = c.has_cut && !for_label_;
+    if (track_cut) { c.cut_stack.push_back(false); }
     auto se = scope_exit([&]() {
-      if (!for_label_) { c.cut_stack.pop_back(); }
+      if (track_cut) { c.cut_stack.pop_back(); }
     });
 
     size_t id = 0;
@@ -1595,7 +1600,7 @@ public:
         }
       }
 
-      if (!c.cut_stack.empty()) { c.cut_stack.back() = false; }
+      if (c.has_cut && !c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
       auto snap = c.snapshot(vs);
       c.error_info.keep_previous_token = id > 0;
@@ -1610,7 +1615,7 @@ public:
 
       c.rollback(vs, snap);
 
-      if (!c.cut_stack.empty() && c.cut_stack.back()) { break; }
+      if (c.has_cut && !c.cut_stack.empty() && c.cut_stack.back()) { break; }
 
       id++;
     }
@@ -2404,9 +2409,17 @@ struct AssignIDToDefinition : public TraversalVisitor {
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
   void visit(PrecedenceClimbing &ope) override;
+  void visit(Cut &) override { has_cut = true; }
+  void visit(Recovery &ope) override {
+    // Recovery also raises the cut flag on success, so it counts as a cut
+    // source for the static cut_stack skip.
+    has_cut = true;
+    TraversalVisitor::visit(ope);
+  }
 
   std::unordered_map<void *, size_t> ids;
   Definition *current_def = nullptr; // rule whose body is being walked
+  bool has_cut = false;              // grammar contains a Cut or Recovery ope
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3288,6 +3301,7 @@ private:
       if (whitespaceOpe) { whitespaceOpe->accept(vis); }
       if (wordOpe) { wordOpe->accept(vis); }
       definition_ids_.swap(vis.ids);
+      has_cut_ = vis.has_cut;
     });
   }
 
@@ -3321,7 +3335,7 @@ private:
     Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
               verbose_trace, log, error_reporter, packrat_index,
-              packrat_cached_count);
+              packrat_cached_count, has_cut_);
 
     if (collect_packrat_stats) {
       packrat_stats_.resize(definition_ids_.size());
@@ -3365,6 +3379,7 @@ private:
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
+  mutable bool has_cut_ = false;
   mutable std::once_flag packrat_filter_init_;
   mutable std::vector<int32_t> packrat_index_; // def_id -> cache slot or -1
   mutable size_t packrat_cached_count_ = 0;
