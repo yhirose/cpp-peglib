@@ -26,6 +26,7 @@
 #if __has_include(<charconv>)
 #include <charconv>
 #endif
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -885,13 +886,13 @@ using TracerLeave = std::function<void(
 
 using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 
-// Packrat memoization table: open-addressing hash map keyed by the fused
-// (position * rule count + rule id) index. The insert-heavy access pattern
-// makes node-based containers a bottleneck, so keys and lengths live in one
-// flat array of 16-byte POD slots probed linearly; semantic values go into a
-// parallel array that is never allocated when no cached result carries a
-// value. Erased slots become tombstones (erase only happens during
-// left-recursion cache invalidation).
+// Semantic values of memoized parse results: open-addressing hash map keyed
+// by the fused (position * rule count + rule id) index. Match lengths live in
+// a dense per-index array in Context (validity is tracked by its
+// registered/success bitvectors), so this map only holds the entries whose
+// result carries a std::any value — a grammar without semantic actions never
+// allocates it. Keys are probed linearly in a flat array; erased slots become
+// tombstones (erase only happens during left-recursion cache invalidation).
 class PackratCache {
 public:
   explicit PackratCache(size_t expected_entries) {
@@ -900,69 +901,54 @@ public:
     }
   }
 
-  bool find(size_t key, size_t &len, std::any &val) const {
-    if (slots_.empty()) { return false; }
-    auto mask = slots_.size() - 1;
+  bool find(size_t key, std::any &val) const {
+    if (keys_.empty()) { return false; }
+    auto mask = keys_.size() - 1;
     auto i = mix(key) & mask;
     while (true) {
-      auto &slot = slots_[i];
-      if (slot.key == key) {
-        len = slot.len;
-        if (!vals_.empty()) {
-          val = vals_[i];
-        } else {
-          val.reset();
-        }
+      if (keys_[i] == key) {
+        val = vals_[i];
         return true;
       }
-      if (slot.key == kEmpty) { return false; }
+      if (keys_[i] == kEmpty) { return false; }
       i = (i + 1) & mask;
     }
   }
 
-  void insert_or_assign(size_t key, size_t len, const std::any &val) {
-    if (slots_.empty() || (used_ + 1) * 4 > slots_.size() * 3) { grow(); }
-    auto mask = slots_.size() - 1;
+  void insert_or_assign(size_t key, const std::any &val) {
+    if (keys_.empty() || (used_ + 1) * 4 > keys_.size() * 3) { grow(); }
+    auto mask = keys_.size() - 1;
     auto i = mix(key) & mask;
     auto insert_pos = kEmpty;
     while (true) {
-      auto &slot = slots_[i];
-      if (slot.key == key) {
+      if (keys_[i] == key) {
         insert_pos = i;
         break;
       }
-      if (slot.key == kTombstone) {
+      if (keys_[i] == kTombstone) {
         if (insert_pos == kEmpty) { insert_pos = i; }
-      } else if (slot.key == kEmpty) {
+      } else if (keys_[i] == kEmpty) {
         if (insert_pos == kEmpty) { insert_pos = i; }
-        if (slots_[insert_pos].key == kEmpty) { used_++; }
+        if (keys_[insert_pos] == kEmpty) { used_++; }
         break;
       }
       i = (i + 1) & mask;
     }
-    auto &dest = slots_[insert_pos];
-    dest.key = key;
-    dest.len = len;
-    if (val.has_value()) {
-      if (vals_.empty()) { vals_.resize(slots_.size()); }
-      vals_[insert_pos] = val;
-    } else if (!vals_.empty()) {
-      vals_[insert_pos].reset();
-    }
+    keys_[insert_pos] = key;
+    vals_[insert_pos] = val;
   }
 
   void erase(size_t key) {
-    if (slots_.empty()) { return; }
-    auto mask = slots_.size() - 1;
+    if (keys_.empty()) { return; }
+    auto mask = keys_.size() - 1;
     auto i = mix(key) & mask;
     while (true) {
-      auto &slot = slots_[i];
-      if (slot.key == key) {
-        slot.key = kTombstone;
-        if (!vals_.empty()) { vals_[i].reset(); }
+      if (keys_[i] == key) {
+        keys_[i] = kTombstone;
+        vals_[i].reset();
         return;
       }
-      if (slot.key == kEmpty) { return; }
+      if (keys_[i] == kEmpty) { return; }
       i = (i + 1) & mask;
     }
   }
@@ -970,11 +956,6 @@ public:
 private:
   static constexpr size_t kEmpty = static_cast<size_t>(-1);
   static constexpr size_t kTombstone = static_cast<size_t>(-2);
-
-  struct Slot {
-    size_t key = kEmpty;
-    size_t len = 0;
-  };
 
   static size_t mix(size_t key) {
     // Mix in 64 bits so `h >> 32` stays well-defined where size_t is 32-bit
@@ -984,28 +965,27 @@ private:
   }
 
   void grow() {
-    auto new_cap = slots_.empty() ? initial_capacity_ : slots_.size() * 2;
-    std::vector<Slot> old_slots = std::move(slots_);
+    auto new_cap = keys_.empty() ? initial_capacity_ : keys_.size() * 2;
+    std::vector<size_t> old_keys = std::move(keys_);
     std::vector<std::any> old_vals = std::move(vals_);
-    slots_.assign(new_cap, Slot{});
-    if (!old_vals.empty()) { vals_.assign(new_cap, std::any()); }
+    keys_.assign(new_cap, kEmpty);
+    vals_.assign(new_cap, std::any());
     used_ = 0;
     auto mask = new_cap - 1;
-    for (size_t j = 0; j < old_slots.size(); j++) {
-      auto &slot = old_slots[j];
-      if (slot.key == kEmpty || slot.key == kTombstone) { continue; }
-      auto i = mix(slot.key) & mask;
-      while (slots_[i].key != kEmpty) {
+    for (size_t j = 0; j < old_keys.size(); j++) {
+      if (old_keys[j] == kEmpty || old_keys[j] == kTombstone) { continue; }
+      auto i = mix(old_keys[j]) & mask;
+      while (keys_[i] != kEmpty) {
         i = (i + 1) & mask;
       }
-      slots_[i] = slot;
-      if (!old_vals.empty()) { vals_[i] = std::move(old_vals[j]); }
+      keys_[i] = old_keys[j];
+      vals_[i] = std::move(old_vals[j]);
       used_++;
     }
   }
 
   size_t initial_capacity_ = 1024;
-  std::vector<Slot> slots_;
+  std::vector<size_t> keys_;
   std::vector<std::any> vals_;
   size_t used_ = 0; // occupied + tombstone slots
 };
@@ -1049,6 +1029,10 @@ public:
   size_t packrat_cached_count;               // number of memoized rules
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
+  // Match length per (position, memoized rule), indexed like the bitvectors
+  // above. Left uninitialized on purpose: a slot is only read once
+  // cache_success marks it, which happens after it is written.
+  std::unique_ptr<uint32_t[]> cache_len;
   // Innermost active start position per rule; re-entry guard for rules that
   // are not memoized (replaces the per-position bitvector for them).
   std::vector<const char *> active_pos;
@@ -1110,9 +1094,23 @@ public:
     auto idx = packrat_cached_count * static_cast<size_t>(col) +
                static_cast<size_t>(slot);
     if (idx >= cache_registered.size()) { return; }
+    if (sizeof(size_t) > sizeof(uint32_t) &&
+        len > static_cast<size_t>(UINT32_MAX)) {
+      // A match too long for the 32-bit memo: forget the pre-registered
+      // failure so the rule simply re-parses at this position.
+      cache_registered[idx] = false;
+      return;
+    }
     cache_registered[idx] = true;
     cache_success[idx] = true;
-    cache_values.insert_or_assign(idx, len, val);
+    cache_len[idx] = static_cast<uint32_t>(len);
+    if (val.has_value()) {
+      cache_values.insert_or_assign(idx, val);
+    } else {
+      // A regrow of a left-recursive seed may replace a value-carrying
+      // result with an empty one; drop the stale value if any was stored.
+      cache_values.erase(idx);
+    }
   }
 
   TracerEnter tracer_enter;
@@ -1143,6 +1141,9 @@ public:
             enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
         cache_success(
             enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
+        cache_len(enablePackratParsing && this->packrat_cached_count
+                      ? new uint32_t[this->packrat_cached_count * (l + 1)]
+                      : nullptr),
         active_pos(enablePackratParsing ? def_count : 0, nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
                                           : 0),
@@ -1212,10 +1213,8 @@ public:
         (*packrat_stats)[def_id].hits++;
       }
       if (cache_success[idx]) {
-        if (!cache_values.find(idx, len, val)) {
-          len = 0;
-          val.reset();
-        }
+        len = cache_len[idx];
+        if (!cache_values.find(idx, val)) { val.reset(); }
         return;
       } else {
         len = static_cast<size_t>(-1);
