@@ -2071,6 +2071,10 @@ public:
   mutable std::string trace_name_;
 
   friend class Definition;
+
+private:
+  size_t parse_ope_body(const char *s, size_t n, SemanticValues &vs, Context &c,
+                        std::any &dt) const;
 };
 
 using Grammar = std::unordered_map<std::string, Definition>;
@@ -3769,6 +3773,39 @@ inline std::string resolve_capture_placeholders(const std::string &msg,
   return r;
 }
 
+// Parses the rule's operator into the given scope, maintaining the rule
+// stack and honouring no_whitespace. The rule stack feeds error reports,
+// user tracers, and the resolution of macro arguments written in this
+// rule's body; a rule that serves none of those skips the bookkeeping.
+inline size_t Holder::parse_ope_body(const char *s, size_t n,
+                                     SemanticValues &vs, Context &c,
+                                     std::any &dt) const {
+  const auto push_rule = c.needs_rule_stack || outer_->has_macro_ref;
+  if (push_rule) { c.rule_stack.push_back(outer_); }
+
+  size_t len;
+  if (outer_->no_whitespace) {
+    {
+      c.in_token_boundary_count++;
+      auto se = scope_exit([&]() { c.in_token_boundary_count--; });
+      len = ope_->parse(s, n, vs, c, dt);
+    }
+    if (success(len)) {
+      auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
+      if (fail(wl)) {
+        len = wl;
+      } else {
+        len += wl;
+      }
+    }
+  } else {
+    len = ope_->parse(s, n, vs, c, dt);
+  }
+
+  if (push_rule) { c.rule_stack.pop_back(); }
+  return len;
+}
+
 inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
                                  Context &c, std::any &dt) const {
   if (!ope_) {
@@ -3793,27 +3830,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // Left-recursive rules keep the full seed-growing machinery below.
   if (c.recognizer && !outer_->is_left_recursive) {
     auto do_recognize = [&](std::any &) {
-      // needs_rule_stack is false in recognizer mode by construction.
-      auto push_rule = outer_->has_macro_ref;
-      if (push_rule) { c.rule_stack.push_back(outer_); }
-      if (outer_->no_whitespace) {
-        {
-          c.in_token_boundary_count++;
-          auto se = scope_exit([&]() { c.in_token_boundary_count--; });
-          len = ope_->parse(s, n, vs, c, dt);
-        }
-        if (success(len)) {
-          auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
-          if (fail(wl)) {
-            len = wl;
-          } else {
-            len += wl;
-          }
-        }
-      } else {
-        len = ope_->parse(s, n, vs, c, dt);
-      }
-      if (push_rule) { c.rule_stack.pop_back(); }
+      len = parse_ope_body(s, n, vs, c, dt);
     };
 
     if (c.enablePackratParsing) {
@@ -3843,29 +3860,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (outer_->leave) { outer_->leave(c, s, n, parse_len, parse_val, dt); }
     });
 
-    // The rule stack feeds error reports, user tracers, and the resolution
-    // of macro arguments written in this rule's body; a rule that serves
-    // none of those skips the bookkeeping.
-    auto push_rule = c.needs_rule_stack || outer_->has_macro_ref;
-    if (push_rule) { c.rule_stack.push_back(outer_); }
-    if (outer_->no_whitespace) {
-      {
-        c.in_token_boundary_count++;
-        auto se2 = scope_exit([&]() { c.in_token_boundary_count--; });
-        parse_len = ope_->parse(s, n, chvs, c, dt);
-      }
-      if (success(parse_len)) {
-        auto wl = c.skip_whitespace(s + parse_len, n - parse_len, chvs, dt);
-        if (fail(wl)) {
-          parse_len = wl;
-        } else {
-          parse_len += wl;
-        }
-      }
-    } else {
-      parse_len = ope_->parse(s, n, chvs, c, dt);
-    }
-    if (push_rule) { c.rule_stack.pop_back(); }
+    parse_len = parse_ope_body(s, n, chvs, c, dt);
 
     if (success(parse_len)) {
       chvs.sv_ = std::string_view(s, parse_len);
