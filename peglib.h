@@ -2090,6 +2090,10 @@ public:
 
   Definition *rule_;
   size_t iarg_;
+
+private:
+  size_t parse_dispatch(const char *s, size_t n, SemanticValues &vs, Context &c,
+                        std::any &dt) const;
 };
 
 class Whitespace : public Ope {
@@ -3995,13 +3999,23 @@ macro_inst_key(const Definition *def,
 
 inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
                                     Context &c, std::any &dt) const {
-  auto save_ignore_trace_state = c.ignore_trace_state;
-  if (rule_ && rule_->ignoreSemanticValue) {
-    c.ignore_trace_state = !c.verbose_trace;
+  // ignore_trace_state is only ever read when a tracer is attached, so the
+  // save/flip/restore dance is skipped entirely without one.
+  if (c.has_tracer) {
+    auto save_ignore_trace_state = c.ignore_trace_state;
+    if (rule_ && rule_->ignoreSemanticValue) {
+      c.ignore_trace_state = !c.verbose_trace;
+    }
+    auto se =
+        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    return parse_dispatch(s, n, vs, c, dt);
   }
-  auto se =
-      scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+  return parse_dispatch(s, n, vs, c, dt);
+}
 
+inline size_t Reference::parse_dispatch(const char *s, size_t n,
+                                        SemanticValues &vs, Context &c,
+                                        std::any &dt) const {
   if (rule_) {
     // Reference rule
     if (rule_->is_macro) {
@@ -4023,7 +4037,16 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
-      // Definition
+      // Definition. The empty argument scope only exists to shadow the
+      // caller's frame for readers inside the callee: a macro invocation in
+      // its body (FindReference/top_args, tracked by has_macro_ref) and the
+      // top_macro_inst reads in the left-recursion machinery and the
+      // no-packrat re-entry guard. A callee with no such reader parses
+      // directly on the caller's frame.
+      if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
+          c.enablePackratParsing) {
+        return rule_->holder_->parse(s, n, vs, c, dt);
+      }
       c.push_empty_args();
       auto se2 = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
