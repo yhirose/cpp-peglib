@@ -1122,6 +1122,12 @@ public:
   std::any trace_data;
   const bool verbose_trace;
 
+  // True when error reporting or tracing is active, i.e. when rule_stack
+  // must reflect the full chain of rules being parsed. Without them only
+  // rules whose body invokes a macro need to appear on the stack (their
+  // arguments resolve against the innermost rule's params).
+  const bool needs_rule_stack;
+
   // Byte-wise tolower frozen at parse start, so case-insensitive matching
   // avoids a locale-sensitive libc call per input byte.
   unsigned char tolower_table[256];
@@ -1152,7 +1158,12 @@ public:
                                           : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
         has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
-        verbose_trace(verbose_trace), log(log), error_reporter(error_reporter) {
+        verbose_trace(verbose_trace),
+        needs_rule_stack(static_cast<bool>(tracer_enter) ||
+                         static_cast<bool>(tracer_leave) ||
+                         static_cast<bool>(log) ||
+                         static_cast<bool>(error_reporter)),
+        log(log), error_reporter(error_reporter) {
 
     for (size_t i = 0; i < 256; i++) {
       tolower_table[i] =
@@ -2385,6 +2396,7 @@ struct AssignIDToDefinition : public TraversalVisitor {
   void visit(PrecedenceClimbing &ope) override;
 
   std::unordered_map<void *, size_t> ids;
+  Definition *current_def = nullptr; // rule whose body is being walked
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3228,6 +3240,10 @@ public:
   bool disable_action = false;
   bool is_left_recursive = false;
   bool can_be_empty = false;
+  // Body contains a macro invocation, whose arguments resolve against the
+  // innermost rule on rule_stack; computed by AssignIDToDefinition. The
+  // conservative default keeps the stack maintained until then.
+  bool has_macro_ref = true;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -3715,11 +3731,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
   // Shared parse body: invokes enter/leave callbacks, parses the rule's
   // operator, handles actions/predicates/errors, and calls reduce.
-  // Returns {parse_len, parse_val}.
-  auto do_parse = [&]() {
-    size_t parse_len;
-    std::any parse_val;
-
+  // Writes into parse_len / parse_val (parse_val only on success).
+  auto do_parse = [&](size_t &parse_len, std::any &parse_val) {
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
@@ -3727,7 +3740,11 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (outer_->leave) { outer_->leave(c, s, n, parse_len, parse_val, dt); }
     });
 
-    c.rule_stack.push_back(outer_);
+    // The rule stack feeds error reports, user tracers, and the resolution
+    // of macro arguments written in this rule's body; a rule that serves
+    // none of those skips the bookkeeping.
+    auto push_rule = c.needs_rule_stack || outer_->has_macro_ref;
+    if (push_rule) { c.rule_stack.push_back(outer_); }
     if (outer_->no_whitespace) {
       {
         c.in_token_boundary_count++;
@@ -3745,7 +3762,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     } else {
       parse_len = ope_->parse(s, n, chvs, c, dt);
     }
-    c.rule_stack.pop_back();
+    if (push_rule) { c.rule_stack.pop_back(); }
 
     if (success(parse_len)) {
       chvs.sv_ = std::string_view(s, parse_len);
@@ -3760,9 +3777,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         chvs.choice_ = 0;
       }
 
-      std::string msg;
-      std::any predicate_data;
       if (outer_->predicate) {
+        std::string msg;
+        std::any predicate_data;
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
           if ((c.log || c.error_reporter) && !msg.empty() &&
               c.error_info.message_pos < s) {
@@ -3771,18 +3788,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
             c.error_info.label = outer_->name;
           }
           parse_len = static_cast<size_t>(-1);
+        } else if (!c.recovered) {
+          parse_val = reduce(chvs, dt, predicate_data);
         }
-      }
-
-      if (success(parse_len)) {
-        if (!c.recovered) { parse_val = reduce(chvs, dt, predicate_data); }
-      } else {
-        if ((c.log || c.error_reporter) && !msg.empty() &&
-            c.error_info.message_pos < s) {
-          c.error_info.message_pos = s;
-          c.error_info.message = msg;
-          c.error_info.label = outer_->name;
-        }
+      } else if (!c.recovered) {
+        std::any predicate_data;
+        parse_val = reduce(chvs, dt, predicate_data);
       }
     } else {
       if ((c.log || c.error_reporter) && !outer_->error_message.empty() &&
@@ -3793,8 +3804,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         c.error_info.label = outer_->name;
       }
     }
-
-    return std::make_pair(parse_len, std::move(parse_val));
   };
 
   if (outer_->is_left_recursive) {
@@ -3829,7 +3838,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       c.lr_refs_hit.clear();
 
       // Initial parse (self-references will hit the FAIL seed)
-      auto [initial_len, initial_val] = do_parse();
+      size_t initial_len;
+      std::any initial_val;
+      do_parse(initial_len, initial_val);
 
       // Rules whose lr_memo was hit during our parse are in our cycle.
       // If we detected cycle members, we ourselves are also part of
@@ -3871,7 +3882,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
             }
           }
 
-          auto [new_len, new_val] = do_parse();
+          size_t new_len;
+          std::any new_val;
+          do_parse(new_len, new_val);
 
           if (!success(new_len) || new_len <= len) {
             break; // No improvement, done growing
@@ -3893,11 +3906,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     if (c.enablePackratParsing) {
       // Packrat cache acts as re-entry guard (pre-registered as
       // failure before fn is called).
-      c.packrat(s, outer_->id, len, val, [&](std::any &a_val) {
-        auto [parse_len, parse_val] = do_parse();
-        len = parse_len;
-        if (success(len)) { a_val = std::move(parse_val); }
-      });
+      c.packrat(s, outer_->id, len, val,
+                [&](std::any &a_val) { do_parse(len, a_val); });
     } else {
       // Without packrat, use lr_memo as re-entry guard to prevent
       // stack overflow from undetected left recursion.
@@ -3906,9 +3916,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         len = static_cast<size_t>(-1);
       } else {
         c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
-        auto [parse_len, parse_val] = do_parse();
-        len = parse_len;
-        val = std::move(parse_val);
+        do_parse(len, val);
         c.lr_memo.erase(guard_key);
       }
     }
@@ -4201,11 +4209,18 @@ inline void AssignIDToDefinition::visit(Holder &ope) {
   auto id = ids.size();
   ids[p] = id;
   ope.outer_->id = id;
+  ope.outer_->has_macro_ref = false; // set below when the body walk finds one
+  auto save = current_def;
+  current_def = ope.outer_;
   ope.ope_->accept(*this);
+  current_def = save;
 }
 
 inline void AssignIDToDefinition::visit(Reference &ope) {
   if (ope.rule_) {
+    if (ope.rule_->is_macro && current_def) {
+      current_def->has_macro_ref = true;
+    }
     for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
