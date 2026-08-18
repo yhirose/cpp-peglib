@@ -182,6 +182,23 @@ static BenchResult bench_yacc_parse(const string &name, const string &sql_input,
     pg_query_free_parse_result(result);
   });
 }
+
+// Same parser and tree build as bench_yacc_parse, but without the JSON
+// serialization step: pg_query_parse() also stringifies the whole tree to
+// JSON (6.9MB for big.sql), which the PEG side never does. This is the
+// like-for-like counterpart to bench_sql_parse (recognition only) and
+// bench_sql_parse_ast (tree construction only).
+static BenchResult bench_yacc_parse_only(const string &name,
+                                         const string &sql_input,
+                                         int iterations) {
+  return bench(name, iterations, [&]() {
+    PgQuerySplitResult result = pg_query_split_with_parser(sql_input.c_str());
+    if (result.error) {
+      cerr << "YACC parse error: " << result.error->message << endl;
+    }
+    pg_query_free_split_result(result);
+  });
+}
 #endif
 
 // Profile subcommand: per-rule self-time profiling
@@ -493,6 +510,11 @@ int main(int argc, char *argv[]) {
        << " bytes)" << endl;
   results.push_back(
       bench_yacc_parse("YACC: big.sql (~1MB)", big_sql, iterations));
+
+  cout << "[" << test_num++ << "] YACC-parse: big.sql (" << big_sql.size()
+       << " bytes, tree build only, no JSON)" << endl;
+  results.push_back(
+      bench_yacc_parse_only("YACC-parse: big.sql (~1MB)", big_sql, iterations));
 #endif
 
   cout << endl << string(80, '=') << endl;
@@ -513,14 +535,32 @@ int main(int argc, char *argv[]) {
   auto peg_big = find_result("PEG: big.sql (~1MB)");
   auto peg_ast_big = find_result("PEG-ast: big.sql (~1MB)");
   auto yacc_big = find_result("YACC: big.sql (~1MB)");
-  if (peg_big > 0 && yacc_big > 0) {
+  auto yacc_parse_big = find_result("YACC-parse: big.sql (~1MB)");
+  // pg_query_parse() (YACC: big.sql) also serializes the whole tree to
+  // JSON, which neither PEG row does; that inflates it relative to both, so
+  // it is not a like-for-like baseline for either ratio below.
+  if (peg_big > 0 && yacc_parse_big > 0) {
     cout << endl
-         << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
-         << peg_big / yacc_big << "x (recognition only)" << endl;
+         << "  Ratio (big.sql): PEG/YACC-parse = " << fixed << setprecision(1)
+         << peg_big / yacc_parse_big
+         << "x (recognition vs. YACC parse+tree, no JSON on either side)"
+         << endl;
+  }
+  if (peg_ast_big > 0 && yacc_parse_big > 0) {
+    cout << "  Ratio (big.sql): PEG-ast/YACC-parse = " << fixed
+         << setprecision(1) << peg_ast_big / yacc_parse_big
+         << "x (both build a tree, no JSON on either side)" << endl;
+  }
+  if (peg_big > 0 && yacc_big > 0) {
+    cout << "  Ratio (big.sql): PEG/YACC = " << fixed << setprecision(1)
+         << peg_big / yacc_big
+         << "x (recognition vs. YACC parse+tree+JSON; not like-for-like)"
+         << endl;
   }
   if (peg_ast_big > 0 && yacc_big > 0) {
     cout << "  Ratio (big.sql): PEG-ast/YACC = " << fixed << setprecision(1)
-         << peg_ast_big / yacc_big << "x (both build a tree)" << endl;
+         << peg_ast_big / yacc_big
+         << "x (tree vs. YACC parse+tree+JSON; not like-for-like)" << endl;
   }
 #endif
 
