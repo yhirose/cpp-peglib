@@ -1398,20 +1398,32 @@ public:
 
   // Line info
   std::pair<size_t, size_t> line_info(const char *cur) const {
-    std::call_once(source_line_index_init_, [this]() {
+    // A Context belongs to one parse on one thread, so a plain flag is
+    // enough here; std::call_once would pay for an atomic on every node.
+    if (!source_line_index_ready_) {
       for (size_t pos = 0; pos < l; pos++) {
         if (s[pos] == '\n') { source_line_index.push_back(pos); }
       }
       source_line_index.push_back(l);
-    });
+      source_line_index_ready_ = true;
+    }
 
     auto pos = static_cast<size_t>(std::distance(s, cur));
 
-    auto it = std::lower_bound(
-        source_line_index.begin(), source_line_index.end(), pos,
-        [](size_t element, size_t value) { return element < value; });
+    // Callers walk the input in bursts (building an AST asks for one
+    // position per node), so the previous answer is usually still the right
+    // line. Checking it turns most lookups into two compares instead of a
+    // binary search over every line start in the input.
+    auto id = line_info_hint_;
+    if (!(id < source_line_index.size() && pos <= source_line_index[id] &&
+          (id == 0 || pos > source_line_index[id - 1]))) {
+      auto it = std::lower_bound(
+          source_line_index.begin(), source_line_index.end(), pos,
+          [](size_t element, size_t value) { return element < value; });
+      id = static_cast<size_t>(std::distance(source_line_index.begin(), it));
+      line_info_hint_ = id;
+    }
 
-    auto id = static_cast<size_t>(std::distance(source_line_index.begin(), it));
     auto off = pos - (id == 0 ? 0 : source_line_index[id - 1] + 1);
     return std::pair(id + 1, off + 1);
   }
@@ -1419,8 +1431,9 @@ public:
   size_t next_trace_id = 0;
   std::vector<size_t> trace_ids;
   bool ignore_trace_state = false;
-  mutable std::once_flag source_line_index_init_;
+  mutable bool source_line_index_ready_ = false;
   mutable std::vector<size_t> source_line_index;
+  mutable size_t line_info_hint_ = 0;
 };
 
 /*
