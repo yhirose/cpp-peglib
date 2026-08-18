@@ -621,6 +621,7 @@ struct SemanticValues : protected std::vector<std::any> {
                            size_t end = static_cast<size_t>(-1)) const {
     std::vector<T> r;
     end = (std::min)(end, size());
+    if (end > beg) { r.reserve(end - beg); }
     for (size_t i = beg; i < end; i++) {
       r.emplace_back(std::any_cast<T>((*this)[i]));
     }
@@ -6622,11 +6623,14 @@ template <typename T = Ast> void add_ast_action(Definition &rule) {
           vs.choice_count(), vs.choice(), rule.no_ast_opt);
     }
 
-    auto ast = std::make_shared<T>(vs.path, line.first, line.second, node_name,
-                                   vs.transform<std::shared_ptr<T>>(),
-                                   std::distance(vs.ss, vs.sv().data()),
-                                   vs.sv().length(), vs.choice_count(),
-                                   vs.choice(), rule.no_ast_opt);
+    // Construct with no children, then move the collected ones in: passing
+    // the vector to the constructor would bind to its `const &` parameter
+    // and copy the whole thing (plus a reference count bump per child).
+    auto ast = std::make_shared<T>(
+        vs.path, line.first, line.second, node_name,
+        std::vector<std::shared_ptr<T>>(), std::distance(vs.ss, vs.sv().data()),
+        vs.sv().length(), vs.choice_count(), vs.choice(), rule.no_ast_opt);
+    ast->nodes = vs.transform<std::shared_ptr<T>>();
 
     for (auto &node : ast->nodes) {
       node->parent = ast;
