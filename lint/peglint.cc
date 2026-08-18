@@ -52,6 +52,9 @@ int main(int argc, const char **argv) {
     auto arg = argv[argi++];
     if (string("--help") == arg) {
       opt_help = true;
+    } else if (string("--version") == arg) {
+      cout << "peglint " << CPPPEGLIB_VERSION << endl;
+      return 0;
     } else if (string("--packrat") == arg) {
       opt_packrat = true;
     } else if (string("--ast") == arg) {
@@ -95,6 +98,7 @@ int main(int argc, const char **argv) {
     --verbose: verbose output for trace and profile
     --blob: write a serialized grammar blob to stdout (load it later with
             peg::parser::load_blob to skip the meta-parse on startup)
+    --version: show version information
 )";
 
     return 1;

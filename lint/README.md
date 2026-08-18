@@ -15,6 +15,7 @@ usage: grammar_file_path [source_file_path]
     --trace: show concise trace messages
     --profile: show profile report
     --verbose: verbose output for trace and profile
+    --version: show version information
 ```
 
 ### Build peglint
