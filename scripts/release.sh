@@ -190,8 +190,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
   echo "==> Dry run complete. No changes were made."
 else
   echo "==> Updating peglib.h..."
-  sed -i '' "s/#define CPPPEGLIB_VERSION \"[^\"]*\"/#define CPPPEGLIB_VERSION \"$NEW_VERSION\"/" peglib.h
-  sed -i '' "s/#define CPPPEGLIB_VERSION_NUM \"0x[0-9a-fA-F]*\"/#define CPPPEGLIB_VERSION_NUM \"$VERSION_HEX\"/" peglib.h
+  # `-i.bak` is the in-place form GNU and BSD sed both accept (`-i ''` is
+  # BSD-only: GNU sed reads the '' as the script).
+  sed -i.bak "s/#define CPPPEGLIB_VERSION \"[^\"]*\"/#define CPPPEGLIB_VERSION \"$NEW_VERSION\"/" peglib.h
+  sed -i.bak "s/#define CPPPEGLIB_VERSION_NUM \"0x[0-9a-fA-F]*\"/#define CPPPEGLIB_VERSION_NUM \"$VERSION_HEX\"/" peglib.h
+  rm -f peglib.h.bak
   echo "    CPPPEGLIB_VERSION     = \"$NEW_VERSION\""
   echo "    CPPPEGLIB_VERSION_NUM = \"$VERSION_HEX\""
 
