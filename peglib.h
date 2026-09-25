@@ -896,9 +896,9 @@ using TracerLeave = std::function<void(
 using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 
 // Semantic values of memoized parse results: open-addressing hash map keyed
-// by the fused (position * rule count + rule id) index. Match lengths live in
-// a dense per-index array in Context (validity is tracked by its
-// registered/success bitvectors), so this map only holds the entries whose
+// by the fused (cache slot, position) index from Context::cache_index. Match
+// lengths live in a dense per-index array in Context (validity is tracked by
+// its registered/success bitvectors), so this map only holds the entries whose
 // result carries a std::any value — a grammar without semantic actions never
 // allocates it. Keys are probed linearly in a flat array; erased slots become
 // tombstones (erase only happens during left-recursion cache invalidation).
@@ -1044,9 +1044,9 @@ public:
   size_t packrat_cached_count;               // number of memoized rules
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
-  // Match length per (position, memoized rule), indexed like the bitvectors
-  // above. Left uninitialized on purpose: a slot is only read once
-  // cache_success marks it, which happens after it is written.
+  // Match length per (memoized rule, position), indexed like the bitvectors
+  // above (see cache_index). Left uninitialized on purpose: a slot is only
+  // read once cache_success marks it, which happens after it is written.
   std::unique_ptr<uint32_t[]> cache_len;
   // Innermost active start position per rule; re-entry guard for rules that
   // are not memoized (replaces the per-position bitvector for them).
@@ -1087,12 +1087,19 @@ public:
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
   }
 
+  // Rule-major: each memoized rule owns a contiguous run of l + 1 entries.
+  // cache_len is left uninitialized, so pages of a rule that rarely succeeds
+  // are never touched and never become resident; a position-major layout
+  // interleaves all rules and ends up touching every page.
+  size_t cache_index(int32_t slot, size_t col) const {
+    return static_cast<size_t>(slot) * (l + 1) + col;
+  }
+
   void clear_packrat_cache(const char *pos, size_t def_id) {
     if (!enablePackratParsing) { return; }
     auto slot = cache_slot(def_id);
     if (slot < 0) { return; }
-    auto col = static_cast<size_t>(pos - s);
-    auto idx = packrat_cached_count * col + static_cast<size_t>(slot);
+    auto idx = cache_index(slot, static_cast<size_t>(pos - s));
     if (idx < cache_registered.size()) {
       cache_registered[idx] = false;
       cache_success[idx] = false;
@@ -1105,9 +1112,7 @@ public:
     if (!enablePackratParsing) { return; }
     auto slot = cache_slot(def_id);
     if (slot < 0) { return; }
-    auto col = pos - s;
-    auto idx = packrat_cached_count * static_cast<size_t>(col) +
-               static_cast<size_t>(slot);
+    auto idx = cache_index(slot, static_cast<size_t>(pos - s));
     if (idx >= cache_registered.size()) { return; }
     if (sizeof(size_t) > sizeof(uint32_t) &&
         len > static_cast<size_t>(UINT32_MAX)) {
@@ -1239,9 +1244,7 @@ public:
       return;
     }
 
-    auto col = a_s - s;
-    auto idx = packrat_cached_count * static_cast<size_t>(col) +
-               static_cast<size_t>(slot);
+    auto idx = cache_index(slot, static_cast<size_t>(a_s - s));
 
     if (cache_registered[idx]) {
       if (packrat_stats && def_id < packrat_stats->size()) {
