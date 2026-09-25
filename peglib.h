@@ -3340,7 +3340,10 @@ private:
       holder_->accept(vis);
       if (whitespaceOpe) { whitespaceOpe->accept(vis); }
       if (wordOpe) { wordOpe->accept(vis); }
-      definition_ids_.swap(vis.ids);
+      definition_ids_.reserve(vis.ids.size());
+      for (const auto &[ptr, id] : vis.ids) {
+        definition_ids_.emplace_back(static_cast<Definition *>(ptr), id);
+      }
       has_cut_ = vis.has_cut;
       has_opaque_ope_ = vis.has_opaque_ope;
     });
@@ -3348,10 +3351,42 @@ private:
 
   void initialize_packrat_filter() const;
 
+  // Rule ids live on the shared Definitions, but each start rule numbers the
+  // rules it reaches on its own. Parsing from another start rule renumbers
+  // the ones they share, and a stale id would index this parse's tables out
+  // of range or land on another rule's packrat slot, so a parse applies its
+  // start rule's numbering first. Nothing is written when it is intact.
+  // Overwritten ids are appended to `displaced` so they can be put back.
+  void restore_definition_ids(
+      std::vector<std::pair<Definition *, size_t>> &displaced) const {
+    for (const auto &[def, id] : definition_ids_) {
+      if (def->id != id) {
+        displaced.emplace_back(def, def->id);
+        def->id = id;
+      }
+    }
+  }
+
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log,
                     ErrorReporter error_reporter = nullptr) const {
     initialize_definition_ids();
+
+    // A parse started from an action or predicate of an enclosing parse on
+    // this thread gives the enclosing parse its ids back when it returns.
+    // A top-level parse leaves its numbering in place, so the next parse
+    // from the same start rule finds it intact and writes nothing.
+    static thread_local size_t parse_depth = 0;
+    std::vector<std::pair<Definition *, size_t>> displaced;
+    restore_definition_ids(displaced);
+    if (parse_depth == 0) { displaced.clear(); }
+    parse_depth++;
+    auto give_back = scope_exit([&]() {
+      parse_depth--;
+      for (const auto &[def, id] : displaced) {
+        def->id = id;
+      }
+    });
 
     std::shared_ptr<Ope> ope = holder_;
 
@@ -3388,8 +3423,7 @@ private:
     // callback scan runs per parse; actions can be attached between parses.
     if (!has_opaque_ope_ && !c.has_tracer && !c.needs_rule_stack) {
       auto recognize_only = true;
-      for (const auto &entry : definition_ids_) {
-        auto def = static_cast<Definition *>(entry.first);
+      for (const auto &[def, id] : definition_ids_) {
         if (def->action || def->enter || def->leave || def->predicate) {
           recognize_only = false;
           break;
@@ -3434,7 +3468,8 @@ private:
   mutable bool is_token_ = false;
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
-  mutable std::unordered_map<void *, size_t> definition_ids_;
+  // This start rule's numbering of the rules it reaches: (rule, id).
+  mutable std::vector<std::pair<Definition *, size_t>> definition_ids_;
   mutable bool has_cut_ = false;
   mutable bool has_opaque_ope_ = false;
   mutable std::once_flag packrat_filter_init_;
@@ -4343,7 +4378,6 @@ inline void AssignIDToDefinition::visit(Holder &ope) {
   if (ids.count(p)) { return; }
   auto id = ids.size();
   ids[p] = id;
-  ope.outer_->id = id;
   ope.outer_->has_macro_ref = false; // set below when the body walk finds one
   auto save = current_def;
   current_def = ope.outer_;
@@ -4991,8 +5025,7 @@ inline void Definition::initialize_packrat_filter() const {
     // Left-recursive rules read and write the packrat cache directly during
     // seed-growing, so they must stay in the cached set. Macros are the
     // exception: they use lr_memo only, keyed by instantiation.
-    for (const auto &[ptr, id] : definition_ids_) {
-      auto *def = static_cast<Definition *>(ptr);
+    for (const auto &[def, id] : definition_ids_) {
       if (def->is_left_recursive && !def->is_macro && id < def_count) {
         benefits[id] = true;
       }

@@ -229,12 +229,65 @@ TEST(PackratTest, Packrat_after_another_start_rule_reassigned_ids) {
   EXPECT_TRUE(pg);
 
   // Parsing from Sub numbers the shared rules (Expr, Num) past Top's ID
-  // space. Top's packrat filter is only set up afterwards, and must not
-  // recurse forever through the left-recursive Expr it can no longer track.
+  // space. Top's packrat tables are only set up afterwards, so Top has to
+  // restore its own numbering before indexing them.
   EXPECT_TRUE(pg.parse("1+2;"));
   EXPECT_TRUE(pg.get_grammar().at("Sub").parse("abcde1+2").ret);
   pg.enable_packrat_parsing();
   EXPECT_TRUE(pg.parse("1+2;"));
+}
+
+TEST(PackratTest, Packrat_after_another_start_rule_gave_two_rules_one_id) {
+  parser pg(R"(
+    Top  <- W 'x' / W 'y' / Expr ';'
+    W    <- [0-9a-z]+ '!'
+    Expr <- Num '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- Expr
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+
+  // Sub numbers Expr with the id Top gave W. If Top reused that id, Expr
+  // would read W's cached failure at position 0 and the parse would fail.
+  const auto &g = pg.get_grammar();
+  EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
+  EXPECT_EQ(g.at("W").id, g.at("Expr").id);
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+}
+
+TEST(PackratTest, Packrat_parse_nested_in_an_action_keeps_the_outer_ids) {
+  parser pg(R"(
+    Top  <- A (W 'x' / W 'y' / Expr ';')
+    A    <- 'a'
+    W    <- [0-9a-z]+ '!'
+    Expr <- Num '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- P Expr / Expr
+    P    <- 'p'
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  const auto &g = pg.get_grammar();
+  auto nested_ok = false;
+  pg["A"] = [&](const SemanticValues &) {
+    nested_ok = g.at("Sub").parse("1+2").ret;
+  };
+
+  // While the nested parse runs, Sub's numbering gives Expr the id Top gave
+  // W. Unless Top gets its ids back, the rest of Top's parse finds W's
+  // cached failure where it looks for Expr.
+  EXPECT_TRUE(pg.parse("a1+2;"));
+  EXPECT_TRUE(nested_ok);
+  EXPECT_NE(g.at("Expr").id, g.at("W").id);
+
+  // Parsed on its own, Sub does give Expr W's id: the collision above is real.
+  EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
+  EXPECT_EQ(g.at("Expr").id, g.at("W").id);
 }
 
 // =============================================================================
