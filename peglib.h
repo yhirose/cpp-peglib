@@ -1049,8 +1049,11 @@ public:
   // read once cache_success marks it, which happens after it is written.
   std::unique_ptr<uint32_t[]> cache_len;
   // Innermost active start position per rule; re-entry guard for rules that
-  // are not memoized (replaces the per-position bitvector for them).
+  // are not memoized, with or without packrat (see guard_reentry).
   std::vector<const char *> active_pos;
+  // The start rule's numbering, (rule, id) at index id; null when def_count
+  // is 0.
+  const std::pair<Definition *, size_t> *numbering = nullptr;
 
   PackratCache cache_values;
 
@@ -1179,7 +1182,7 @@ public:
         cache_len(enablePackratParsing && this->packrat_cached_count
                       ? new uint32_t[this->packrat_cached_count * (l + 1)]
                       : nullptr),
-        active_pos(enablePackratParsing ? def_count : 0, nullptr),
+        active_pos(def_count, nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
                                           : 0),
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
@@ -1272,6 +1275,38 @@ public:
       if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
       return;
     }
+  }
+
+  // Without packrat, a rule entered again at the position it is already
+  // being parsed at fails instead of recursing forever. The innermost active
+  // start per rule is enough, since a nested call never starts before its
+  // caller; packrat uses the same guard for the rules it does not memoize.
+  // That needs the rule's id in this parse's numbering. A rule outside it has
+  // no reliable id: parse_literal's throwaway %word contexts number no rules
+  // at all, and a rule attached after the first parse was never numbered.
+  // Those are guarded through lr_memo, keyed by the rule itself.
+  template <typename T>
+  void guard_reentry(const char *a_s, const Definition *def, size_t def_id,
+                     size_t &len, T fn) {
+    if (def_id < def_count && numbering[def_id].first == def) {
+      auto save = active_pos[def_id];
+      if (save == a_s) {
+        len = static_cast<size_t>(-1);
+        return;
+      }
+      active_pos[def_id] = a_s;
+      fn();
+      active_pos[def_id] = save;
+      return;
+    }
+    auto key = LRKey({def, top_macro_inst()}, a_s);
+    if (lr_memo.count(key)) {
+      len = static_cast<size_t>(-1);
+      return;
+    }
+    lr_memo[key] = {static_cast<size_t>(-1), {}};
+    fn();
+    lr_memo.erase(key);
   }
 
   // Semantic values
@@ -3340,9 +3375,9 @@ private:
       holder_->accept(vis);
       if (whitespaceOpe) { whitespaceOpe->accept(vis); }
       if (wordOpe) { wordOpe->accept(vis); }
-      definition_ids_.reserve(vis.ids.size());
+      definition_ids_.resize(vis.ids.size());
       for (const auto &[ptr, id] : vis.ids) {
-        definition_ids_.emplace_back(static_cast<Definition *>(ptr), id);
+        definition_ids_[id] = {static_cast<Definition *>(ptr), id};
       }
       has_cut_ = vis.has_cut;
       has_opaque_ope_ = vis.has_opaque_ope;
@@ -3413,6 +3448,8 @@ private:
               verbose_trace, log, error_reporter, packrat_index,
               packrat_cached_count, has_cut_);
 
+    c.numbering = definition_ids_.data();
+
     if (collect_packrat_stats) {
       packrat_stats_.resize(definition_ids_.size());
       c.packrat_stats = &packrat_stats_;
@@ -3468,7 +3505,8 @@ private:
   mutable bool is_token_ = false;
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
-  // This start rule's numbering of the rules it reaches: (rule, id).
+  // This start rule's numbering of the rules it reaches: (rule, id), stored
+  // at index id (ids are dense).
   mutable std::vector<std::pair<Definition *, size_t>> definition_ids_;
   mutable bool has_cut_ = false;
   mutable bool has_opaque_ope_ = false;
@@ -3890,15 +3928,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     if (c.enablePackratParsing) {
       c.packrat(s, outer_->id, len, val, do_recognize);
     } else {
-      // Same re-entry guard as the general no-packrat path below.
-      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
-      if (c.lr_memo.count(guard_key)) {
-        len = static_cast<size_t>(-1);
-      } else {
-        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
-        do_recognize(val);
-        c.lr_memo.erase(guard_key);
-      }
+      c.guard_reentry(s, outer_, outer_->id, len, [&]() { do_recognize(val); });
     }
     return len;
   }
@@ -4060,16 +4090,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       c.packrat(s, outer_->id, len, val,
                 [&](std::any &a_val) { do_parse(len, a_val); });
     } else {
-      // Without packrat, use lr_memo as re-entry guard to prevent
-      // stack overflow from undetected left recursion.
-      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
-      if (c.lr_memo.count(guard_key)) {
-        len = static_cast<size_t>(-1);
-      } else {
-        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
-        do_parse(len, val);
-        c.lr_memo.erase(guard_key);
-      }
+      c.guard_reentry(s, outer_, outer_->id, len,
+                      [&]() { do_parse(len, val); });
     }
   }
 
@@ -4162,9 +4184,9 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       // Definition. The empty argument scope only exists to shadow the
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
-      // top_macro_inst reads in the left-recursion machinery and the
-      // no-packrat re-entry guard. A callee with no such reader parses
-      // directly on the caller's frame.
+      // top_macro_inst reads in the left-recursion machinery and in the
+      // lr_memo fallback of the no-packrat re-entry guard. A callee with no
+      // such reader parses directly on the caller's frame.
       if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
           c.enablePackratParsing) {
         return rule_->holder_->parse(s, n, vs, c, dt);

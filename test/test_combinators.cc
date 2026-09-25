@@ -274,3 +274,21 @@ TEST(CombinatorTest, Packrat_on_recursive_combinator_grammar) {
   EXPECT_TRUE(def_parse(EXPR, "x"));
   EXPECT_FALSE(def_parse(EXPR, "x+"));
 }
+
+// --- a rule attached after the first parse ---
+
+// The first parse numbers the rules the start rule reaches. D only becomes
+// reachable afterwards, so it keeps its default id, which is the start
+// rule's. The re-entry guard must not mistake D for S coming back to the
+// same position.
+TEST(CombinatorTest, Rule_attached_after_the_first_parse) {
+  Definition S, A, D;
+  S <= A;
+  A <= chr('a');
+  D <= chr('a');
+  EXPECT_TRUE(def_parse(S, "a"));
+
+  A <= D;
+  EXPECT_EQ(S.id, D.id);
+  EXPECT_TRUE(def_parse(S, "a"));
+}
