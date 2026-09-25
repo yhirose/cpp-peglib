@@ -4752,28 +4752,23 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
 
 // Compute which rules benefit from packrat memoization.
 // A rule benefits if it's reachable from 2+ alternatives of the same
-// PrioritizedChoice (backtracking will re-visit it at the same position).
+// PrioritizedChoice (backtracking will re-visit it at the same position),
+// unless all of them only reach it through one shared rule that is cached.
 inline void Definition::initialize_packrat_filter() const {
   std::call_once(packrat_filter_init_, [&]() {
     auto def_count = definition_ids_.size();
     if (def_count == 0) { return; }
 
-    // Collect rule IDs that can be invoked at the *same start position* as
-    // the given Ope subtree (leftmost reachability). A packrat cache hit
-    // requires the same rule to be queried twice at the same position, and
-    // in a PEG that only happens when alternatives of a choice share a
-    // leftmost prefix — rules reachable only past a consuming element can
-    // never be re-queried by a sibling alternative.
-    struct CollectLeftmostRules : public TraversalVisitor {
+    // Walks what can be invoked at the *same start position* as the given Ope
+    // subtree (leftmost reachability). A packrat cache hit requires the same
+    // rule to be queried twice at the same position, and in a PEG that only
+    // happens when alternatives of a choice share a leftmost prefix — rules
+    // reachable only past a consuming element can never be re-queried by a
+    // sibling alternative.
+    struct LeftmostWalker : public TraversalVisitor {
       using TraversalVisitor::visit;
-      std::vector<bool> reachable; // indexed by def_id
-      std::vector<bool>
-          visited_rules; // indexed by def_id; guards Holder cycles
 
-      CollectLeftmostRules(size_t n)
-          : reachable(n, false), visited_rules(n, false) {}
-
-      // Collect from the position element `from` starts at: element `from`
+      // Walk from the position element `from` starts at: element `from`
       // itself, plus what follows for as long as elements can match empty —
       // only up to (and including) the first one that must consume input.
       void collect(const std::vector<std::shared_ptr<Ope>> &opes, size_t from) {
@@ -4786,6 +4781,18 @@ inline void Definition::initialize_packrat_filter() const {
       }
 
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
+    };
+
+    // The rule IDs leftmost-reachable from the given subtree.
+    struct CollectLeftmostRules : public LeftmostWalker {
+      using LeftmostWalker::visit;
+      std::vector<bool> reachable; // indexed by def_id
+      std::vector<bool>
+          visited_rules; // indexed by def_id; guards Holder cycles
+
+      CollectLeftmostRules(size_t n)
+          : reachable(n, false), visited_rules(n, false) {}
+
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < reachable.size()) {
@@ -4805,6 +4812,57 @@ inline void Definition::initialize_packrat_filter() const {
         if (ope.rule_ && ope.rule_->id < reachable.size() &&
             !reachable[ope.rule_->id]) {
           reachable[ope.rule_->id] = true;
+          ope.rule_->accept(*this);
+        }
+      }
+    };
+
+    // For each leftmost-reachable rule, its gateways: the first *shared* rule
+    // (one reachable from 2+ alternatives of the group) on each path to it,
+    // or the rule itself when a path reaches it before any shared rule.
+    static constexpr size_t kNoGateway = static_cast<size_t>(-1);
+    struct CollectGateways : public LeftmostWalker {
+      using LeftmostWalker::visit;
+      const std::vector<size_t> &share_count;    // indexed by def_id
+      std::vector<std::vector<size_t>> gateways; // indexed by def_id
+      size_t gateway = kNoGateway; // gateway of the path being walked
+
+      CollectGateways(const std::vector<size_t> &share_count)
+          : share_count(share_count), gateways(share_count.size()) {}
+
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id >= gateways.size()) {
+          ope.ope_->accept(*this);
+          return;
+        }
+
+        // Only a memoized rule can answer for what lies below it, and macros
+        // never reach the packrat cache, so they are never a gateway.
+        auto g = gateway;
+        if (g == kNoGateway && share_count[id] >= 2 && !ope.outer_->is_macro) {
+          g = id;
+        }
+
+        // (rule, gateway) is the walk state, and share_count[id] and is_macro
+        // make it recoverable from the recorded gateway, so the list doubles
+        // as the visited set that stops recursion.
+        auto &list = gateways[id];
+        auto recorded = g == kNoGateway ? id : g;
+        if (std::find(list.begin(), list.end(), recorded) != list.end()) {
+          return;
+        }
+        list.push_back(recorded);
+
+        auto saved = gateway;
+        gateway = g;
+        ope.ope_->accept(*this);
+        gateway = saved;
+      }
+      void visit(Reference &ope) override {
+        // Same bound as CollectLeftmostRules: a rule outside this start
+        // rule's ID space has no visited state, so it must not be entered.
+        if (ope.rule_ && ope.rule_->id < gateways.size()) {
           ope.rule_->accept(*this);
         }
       }
@@ -4834,6 +4892,36 @@ inline void Definition::initialize_packrat_filter() const {
         return {alt};
       }
 
+      // Mark the rules shared by 2+ alternatives of `group`, except that a
+      // rule every alternative reaches only through one and the same other
+      // shared rule is never re-queried here: by the time a later alternative
+      // gets to it, that gateway answers from its own cache entry. Caching
+      // such rules costs memory and never hits.
+      void mark_shared(const std::vector<Elements> &group, size_t k,
+                       const std::vector<size_t> &share_count) {
+        std::vector<std::vector<std::vector<size_t>>> gateways;
+        gateways.reserve(group.size());
+        for (const auto &seq : group) {
+          CollectGateways cg(share_count);
+          cg.collect(seq, k);
+          gateways.push_back(std::move(cg.gateways));
+        }
+        for (size_t id = 0; id < def_count; id++) {
+          if (share_count[id] < 2) { continue; }
+          auto only_via = kNoGateway;
+          for (const auto &alt : gateways) {
+            const auto &list = alt[id];
+            if (list.empty()) { continue; }
+            if (list.size() != 1 || list[0] == id ||
+                (only_via != kNoGateway && list[0] != only_via)) {
+              benefits[id] = true;
+              break;
+            }
+            only_via = list[0];
+          }
+        }
+      }
+
       // `group` holds alternatives that agree on their first `k` elements, so
       // every one of them reaches element k at the same input position — that
       // is exactly when a packrat cache entry can hit. k == 0 is the plain
@@ -4849,13 +4937,15 @@ inline void Definition::initialize_packrat_filter() const {
           clr.collect(seq, k);
           reachable.push_back(std::move(clr.reachable));
         }
-        for (size_t id = 0; id < def_count; id++) {
-          size_t count = 0;
-          for (const auto &alt : reachable) {
-            if (alt[id]) { count++; }
+        std::vector<size_t> share_count(def_count, 0);
+        auto any_shared = false;
+        for (const auto &alt : reachable) {
+          for (size_t id = 0; id < def_count; id++) {
+            if (alt[id] && ++share_count[id] >= 2) { any_shared = true; }
           }
-          if (count >= 2) { benefits[id] = true; }
         }
+
+        if (any_shared) { mark_shared(group, k, share_count); }
 
         // Only alternatives that also agree on element k stay aligned past it.
         std::map<std::string, std::vector<Elements>> aligned;

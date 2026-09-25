@@ -171,5 +171,71 @@ TEST(PackratTest, Packrat_shared_consuming_prefix_is_not_exponential) {
   EXPECT_TRUE(pg.parse(input));
 }
 
+TEST(PackratTest, Packrat_rule_below_a_shared_rule_runs_once) {
+  parser pg(R"(
+    S <- G 'x' / G 'y'
+    G <- H
+    H <- [0-9]+
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  size_t h_count = 0;
+  pg["H"] = [&](const SemanticValues &) {
+    h_count++;
+    return std::string("h");
+  };
+
+  // Both alternatives reach H only through G, so only G needs a cache entry:
+  // the second alternative gets G from it and never re-enters H.
+  EXPECT_TRUE(pg.parse("123y"));
+  EXPECT_EQ(1, h_count);
+}
+
+TEST(PackratTest, Packrat_rule_below_a_shared_macro_runs_once) {
+  parser pg(R"(
+    S    <- M('a') 'x' / M('a') 'y'
+    M(p) <- X p
+    X    <- [0-9]+
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  size_t x_count = 0;
+  pg["X"] = [&](const SemanticValues &) {
+    x_count++;
+    return std::string("x");
+  };
+
+  // Macros are not memoized, so M cannot stand in for X: X itself must stay
+  // cached for the second alternative to reuse it.
+  EXPECT_TRUE(pg.parse("123ay"));
+  EXPECT_EQ(1, x_count);
+}
+
+TEST(PackratTest, Packrat_after_another_start_rule_reassigned_ids) {
+  parser pg(R"(
+    Top  <- (W / Expr) ';' / W '!'
+    W    <- 'w'
+    Expr <- Expr '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- A B C D E Expr
+    A <- 'a'
+    B <- 'b'
+    C <- 'c'
+    D <- 'd'
+    E <- 'e'
+  )");
+  EXPECT_TRUE(pg);
+
+  // Parsing from Sub numbers the shared rules (Expr, Num) past Top's ID
+  // space. Top's packrat filter is only set up afterwards, and must not
+  // recurse forever through the left-recursive Expr it can no longer track.
+  EXPECT_TRUE(pg.parse("1+2;"));
+  EXPECT_TRUE(pg.get_grammar().at("Sub").parse("abcde1+2").ret);
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg.parse("1+2;"));
+}
+
 // =============================================================================
 // Lookahead Predicate Tests
