@@ -1380,12 +1380,11 @@ fn parse_left_recursive<'a>(id: usize, inst: usize, pos: usize, body: &dyn Ope, 
             // A macro is never written to the packrat cache (keyed by rule id
             // alone, which cannot tell two instantiations apart).
             if !info.is_macro { ctx.clear_packrat_cache(pos, id); }
-            let stale: Vec<_> = ctx.lr_memo.keys()
-                .filter(|(rid, ri, p)| *p == pos && (*rid, *ri) != lr_rule
-                        && cycle_rules.contains(&(*rid, *ri))
-                        && !ctx.lr_active_seeds.contains(&(*rid, *ri, *p)))
-                .copied().collect();
-            for k in stale { ctx.lr_memo.remove(&k); }
+            for r in &cycle_rules {
+                if *r == lr_rule { continue; }
+                let k = (r.0, r.1, pos);
+                if !ctx.lr_active_seeds.contains(&k) { ctx.lr_memo.remove(&k); }
+            }
 
             fire_enter(ctx, info.rule_name, pos);
             let (new_len, new_ast) = do_parse(id, pos, body, info, vs, ctx);

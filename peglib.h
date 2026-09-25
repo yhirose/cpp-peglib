@@ -3989,14 +3989,13 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           // but NOT for rules currently in their own seeding phase
           // (lr_active_seeds) — those are outer growers we must not
           // interfere with.
-          for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
-            if (memo_it->first.second == s && memo_it->first.first != lr_rule &&
-                cycle_rules.count(memo_it->first.first) &&
-                !c.lr_active_seeds.count(memo_it->first)) {
-              memo_it = c.lr_memo.erase(memo_it);
-            } else {
-              ++memo_it;
-            }
+          // Look the entries up by key: lr_memo keeps every LR result of the
+          // parse so far, so scanning it on each growth step would make
+          // left-recursive parsing quadratic in the input length.
+          for (const auto &rule : cycle_rules) {
+            if (rule == lr_rule) { continue; }
+            auto key = Context::LRKey(rule, s);
+            if (!c.lr_active_seeds.count(key)) { c.lr_memo.erase(key); }
           }
 
           size_t new_len;
