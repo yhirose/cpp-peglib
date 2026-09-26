@@ -811,6 +811,7 @@ using ErrorReporter = std::function<void(const ErrorReport &report)>;
  * ErrorInfo
  */
 class Definition;
+class PrioritizedChoice;
 
 struct ErrorInfo {
   const char *error_pos = nullptr;
@@ -823,17 +824,37 @@ struct ErrorInfo {
 
   void clear() {
     error_pos = nullptr;
-    expected_tokens.clear();
+    clear_expected_tokens();
     message_pos = nullptr;
     message.clear();
   }
 
+  // Expected tokens are recorded as events and turned into expected_tokens
+  // only when a parse returns or a message is built: nearly all of them are
+  // recorded at a position the parse then moves past, and are never read.
   void add(const char *error_literal, const Definition *error_rule) {
-    for (const auto &[t, r] : expected_tokens) {
-      if (t == error_literal && r == error_rule) { return; }
-    }
-    expected_tokens.emplace_back(error_literal, error_rule);
+    events_.push_back({error_literal, error_rule, nullptr, 0, 0});
   }
+
+  // Alternative `id` of `choice` was skipped by its first set. A run of
+  // skipped alternatives shares one event.
+  void add_skipped(const PrioritizedChoice *choice, size_t id) {
+    if (!events_.empty()) {
+      auto &e = events_.back();
+      if (e.choice == choice && e.end == id) {
+        e.end++;
+        return;
+      }
+    }
+    events_.push_back({nullptr, nullptr, choice, id, id + 1});
+  }
+
+  void clear_expected_tokens() {
+    events_.clear();
+    expected_tokens.clear();
+  }
+
+  void resolve_expected_tokens();
 
   void output_log(const Log &log, const char *s, size_t n) {
     output_log(log, nullptr, s, n);
@@ -842,6 +863,23 @@ struct ErrorInfo {
                   size_t n);
 
 private:
+  struct ExpectedEvent {
+    const char *literal;
+    const Definition *rule;
+    const PrioritizedChoice *choice; // non-null: skipped alternatives
+    size_t begin;
+    size_t end;
+  };
+  std::vector<ExpectedEvent> events_;
+
+  void insert_expected(const char *error_literal,
+                       const Definition *error_rule) {
+    for (const auto &[t, r] : expected_tokens) {
+      if (t == error_literal && r == error_rule) { return; }
+    }
+    expected_tokens.emplace_back(error_literal, error_rule);
+  }
+
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
 
   std::string heuristic_error_token(const char *s, size_t n,
@@ -1012,6 +1050,18 @@ public:
   size_t value_stack_size = 0;
 
   std::vector<Definition *> rule_stack;
+  // Index of the outermost token rule in rule_stack, or npos: error
+  // reporting names that rule, and set_error_pos asks for it constantly.
+  size_t outer_token_rule = static_cast<size_t>(-1);
+
+  void push_rule(Definition *rule);
+
+  void pop_rule() {
+    rule_stack.pop_back();
+    if (outer_token_rule == rule_stack.size()) {
+      outer_token_rule = static_cast<size_t>(-1);
+    }
+  }
 
   // One frame per rule reference: the macro arguments in scope, and the
   // instantiation they identify (0 for anything but a left-recursive macro).
@@ -1648,13 +1698,9 @@ public:
             if (c.error_info.error_pos <= s) {
               if (c.error_info.error_pos < s || !(id > 0)) {
                 c.error_info.error_pos = s;
-                c.error_info.expected_tokens.clear();
+                c.error_info.clear_expected_tokens();
               }
-              if (fs.first_literal) {
-                c.error_info.add(fs.first_literal, nullptr);
-              } else {
-                c.error_info.add(nullptr, fs.first_rule);
-              }
+              c.error_info.add_skipped(this, id);
             }
           }
           id++;
@@ -3482,7 +3528,10 @@ private:
           scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
       auto len = whitespaceOpe->parse(s, n, vs, c, dt);
-      if (fail(len)) { return Result{false, c.recovered, i, c.error_info}; }
+      if (fail(len)) {
+        c.error_info.resolve_expected_tokens();
+        return Result{false, c.recovered, i, c.error_info};
+      }
 
       i = len;
     }
@@ -3501,6 +3550,7 @@ private:
         }
       }
     }
+    c.error_info.resolve_expected_tokens();
     return Result{ret, c.recovered, i, c.error_info};
   }
 
@@ -3587,8 +3637,27 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
   return c_->line_info(sv_.data());
 }
 
+inline void ErrorInfo::resolve_expected_tokens() {
+  for (const auto &e : events_) {
+    if (!e.choice) {
+      insert_expected(e.literal, e.rule);
+      continue;
+    }
+    for (auto id = e.begin; id < e.end; id++) {
+      const auto &fs = e.choice->first_sets_[id];
+      if (fs.first_literal) {
+        insert_expected(fs.first_literal, nullptr);
+      } else {
+        insert_expected(nullptr, fs.first_rule);
+      }
+    }
+  }
+  events_.clear();
+}
+
 inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
                                   const char *s, size_t n) {
+  resolve_expected_tokens();
   if (message_pos) {
     if (message_pos > last_output_pos) {
       last_output_pos = message_pos;
@@ -3686,12 +3755,19 @@ inline size_t Context::skip_whitespace(const char *a_s, size_t n,
   return whitespaceOpe->parse(a_s, n, vs, *this, dt);
 }
 
+inline void Context::push_rule(Definition *rule) {
+  if (outer_token_rule == static_cast<size_t>(-1) && rule->is_token()) {
+    outer_token_rule = rule_stack.size();
+  }
+  rule_stack.push_back(rule);
+}
+
 inline void Context::set_error_pos(const char *a_s, const char *literal) {
   if (log || error_reporter) {
     if (error_info.error_pos <= a_s) {
       if (error_info.error_pos < a_s || !error_info.keep_previous_token) {
         error_info.error_pos = a_s;
-        error_info.expected_tokens.clear();
+        error_info.clear_expected_tokens();
       }
 
       const char *error_literal = nullptr;
@@ -3708,9 +3784,10 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
         }
       }
 
-      for (auto r : rule_stack) {
-        error_rule = r;
-        if (r->is_token()) { break; }
+      if (outer_token_rule < rule_stack.size()) {
+        error_rule = rule_stack[outer_token_rule];
+      } else if (!rule_stack.empty()) {
+        error_rule = rule_stack.back();
       }
 
       if (error_literal || error_rule) {
@@ -3877,7 +3954,7 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
                                      SemanticValues &vs, Context &c,
                                      std::any &dt) const {
   const auto push_rule = c.needs_rule_stack || outer_->has_macro_ref;
-  if (push_rule) { c.rule_stack.push_back(outer_); }
+  if (push_rule) { c.push_rule(outer_); }
 
   size_t len;
   if (outer_->no_whitespace) {
@@ -3898,7 +3975,7 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
     len = ope_->parse(s, n, vs, c, dt);
   }
 
-  if (push_rule) { c.rule_stack.pop_back(); }
+  if (push_rule) { c.pop_rule(); }
   return len;
 }
 
@@ -3912,9 +3989,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // the seed-growing below, which in turn needs its own semantic value scope
   // to memoise. Such a macro forms a scope like a plain rule does.
   if (outer_->is_macro && !outer_->is_left_recursive) {
-    c.rule_stack.push_back(outer_);
+    c.push_rule(outer_);
     auto len = ope_->parse(s, n, vs, c, dt);
-    c.rule_stack.pop_back();
+    c.pop_rule();
     return len;
   }
 
