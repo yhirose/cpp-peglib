@@ -2164,11 +2164,14 @@ public:
 
   const std::string &name() const;
   const std::string &trace_name() const;
+  unsigned int tag() const;
 
   std::shared_ptr<Ope> ope_;
   Definition *outer_;
   mutable std::once_flag trace_name_init_;
   mutable std::string trace_name_;
+  mutable std::once_flag tag_init_;
+  mutable unsigned int tag_ = 0;
 
   friend class Definition;
 
@@ -4179,7 +4182,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   if (success(len)) {
     if (!outer_->ignoreSemanticValue && !c.recognize_only) {
       vs.emplace_back(std::move(val));
-      vs.tags.emplace_back(str2tag(outer_->name));
+      vs.tags.emplace_back(tag());
     }
   }
 
@@ -4203,6 +4206,11 @@ inline const std::string &Holder::trace_name() const {
   std::call_once(trace_name_init_,
                  [this]() { trace_name_ = "[" + outer_->name + "]"; });
   return trace_name_;
+}
+
+inline unsigned int Holder::tag() const {
+  std::call_once(tag_init_, [this]() { tag_ = str2tag(outer_->name); });
+  return tag_;
 }
 
 // Key a macro instantiation by what each argument denotes rather than by the
