@@ -6781,11 +6781,11 @@ template <typename Annotation> struct AstBase : public Annotation {
   size_t length;
   const size_t choice_count;
   const size_t choice;
-  const std::string original_name;
-  const size_t original_choice_count;
-  const size_t original_choice;
+  std::string original_name;
+  size_t original_choice_count;
+  size_t original_choice;
   const unsigned int tag;
-  const unsigned int original_tag;
+  unsigned int original_tag;
 
   const bool is_token;
   const bool preserve_position;
@@ -6906,10 +6906,26 @@ void add_ast_action(Definition &rule, bool collapse = false) {
     }
 
     if (collapse && vs.size() == 1) {
-      return collapse_ast_node(
-          *std::any_cast<const std::shared_ptr<T> &>(vs[0]), node_name,
-          static_cast<size_t>(std::distance(vs.ss, vs.sv().data())),
-          vs.sv().length(), vs.choice_count(), vs.choice());
+      const auto &child = std::any_cast<const std::shared_ptr<T> &>(vs[0]);
+      auto position = static_cast<size_t>(std::distance(vs.ss, vs.sv().data()));
+
+      // Unless something else holds the child (the packrat cache, a user
+      // action), it can stand in for this node itself instead of being
+      // copied. It then keeps its Annotation, which a copy would reset.
+      if (child.use_count() == 1) {
+        if (!child->preserve_position) {
+          child->position = position;
+          child->length = vs.sv().length();
+        }
+        child->original_name = node_name;
+        child->original_tag = str2tag(node_name);
+        child->original_choice_count = vs.choice_count();
+        child->original_choice = vs.choice();
+        return child;
+      }
+
+      return collapse_ast_node(*child, node_name, position, vs.sv().length(),
+                               vs.choice_count(), vs.choice());
     }
 
     // Construct with no children, then move the collected ones in: passing

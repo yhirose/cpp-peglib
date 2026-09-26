@@ -1399,7 +1399,9 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
       return "@" + std::to_string(node.position) + "+" +
              std::to_string(node.length) + " " + std::to_string(node.line) +
              ":" + std::to_string(node.column) + " " +
-             std::to_string(node.preserve_position) + "\n";
+             std::to_string(node.preserve_position) + " " +
+             std::to_string(node.tag) + "/" +
+             std::to_string(node.original_tag) + "\n";
     });
   };
 
