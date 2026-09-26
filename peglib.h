@@ -1341,10 +1341,14 @@ public:
   // no reliable id: parse_literal's throwaway %word contexts number no rules
   // at all, and a rule attached after the first parse was never numbered.
   // Those are guarded through lr_memo, keyed by the rule itself.
+  bool is_numbered(const Definition *def, size_t def_id) const {
+    return def_id < def_count && numbering[def_id].first == def;
+  }
+
   template <typename T>
   void guard_reentry(const char *a_s, const Definition *def, size_t def_id,
                      size_t &len, T fn) {
-    if (def_id < def_count && numbering[def_id].first == def) {
+    if (is_numbered(def, def_id)) {
       auto save = active_pos[def_id];
       if (save == a_s) {
         len = static_cast<size_t>(-1);
@@ -4293,10 +4297,11 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
       // top_macro_inst reads in the left-recursion machinery and in the
-      // lr_memo fallback of the no-packrat re-entry guard. A callee with no
-      // such reader parses directly on the caller's frame.
+      // lr_memo fallback of the no-packrat re-entry guard, which only a rule
+      // outside this parse's numbering takes. A callee with no such reader
+      // parses directly on the caller's frame.
       if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
-          c.enablePackratParsing) {
+          (c.enablePackratParsing || c.is_numbered(rule_, rule_->id))) {
         return rule_->holder_->parse(s, n, vs, c, dt);
       }
       c.push_empty_args();
