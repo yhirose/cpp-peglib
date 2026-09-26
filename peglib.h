@@ -4215,7 +4215,13 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
                                const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
-    return outer_->action(vs, dt, predicate_data);
+    auto val = outer_->action(vs, dt, predicate_data);
+    // Release the values now instead of when this scope is next reused: the
+    // AST node an action just returned is then referenced only by the caller,
+    // which lets a collapsing parent take it over in place.
+    vs.clear();
+    vs.tags.clear();
+    return val;
   } else if (vs.empty()) {
     return std::any();
   } else {
