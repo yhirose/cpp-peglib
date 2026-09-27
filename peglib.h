@@ -838,6 +838,13 @@ using ErrorReporter = std::function<void(const ErrorReport &report)>;
 class Definition;
 class PrioritizedChoice;
 
+// Thrown when a parse nests more rule matches than its start rule's
+// max_depth allows; that parse catches it (see Holder::parse_core).
+struct NestingTooDeep {
+  const char *pos;
+  const Definition *rule;
+};
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
@@ -1285,6 +1292,13 @@ public:
   // Set by PrecedenceClimbing: the operator rule it parses next stores its
   // token here.
   std::string_view *operator_token = nullptr;
+
+  // Rule matches in progress, counted only when the start rule sets a
+  // max_depth. Going past it abandons the parse (see Holder::parse_core).
+  size_t depth = 0;
+  size_t max_depth = std::numeric_limits<size_t>::max();
+  bool limits_depth = false;
+  bool abandoned = false;
 
   // True when error reporting or tracing is active, i.e. when rule_stack
   // must reflect the full chain of rules being parsed. Without them only
@@ -2327,6 +2341,10 @@ public:
   friend class Definition;
 
 private:
+  size_t parse_rule(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const;
+  size_t parse_rule_counted(const char *s, size_t n, SemanticValues &vs,
+                            Context &c, std::any &dt) const;
   size_t parse_ope_body(const char *s, size_t n, SemanticValues &vs, Context &c,
                         std::any &dt) const;
 };
@@ -3597,6 +3615,12 @@ public:
 
   bool eoi_check = true;
 
+  // For a parse started from this rule: the most rule matches it may have in
+  // progress at once, each one nested in the one before. Past that the parse
+  // fails with an error instead of going deeper, which could overflow the
+  // stack.
+  size_t max_depth = std::numeric_limits<size_t>::max();
+
   // Per-rule packrat stats (optional, for profiling)
   mutable bool collect_packrat_stats = false;
   mutable std::vector<Context::PackratStats> packrat_stats_;
@@ -3715,40 +3739,55 @@ private:
       c.defer_ast = has_ast_action && !has_left_recursion;
     }
 
-    size_t i = 0;
+    c.max_depth = max_depth;
+    c.limits_depth = max_depth != std::numeric_limits<size_t>::max();
 
-    if (whitespaceOpe) {
-      auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.verbose_trace;
-      auto se =
-          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    try {
+      size_t i = 0;
 
-      auto len = whitespaceOpe->parse(s, n, vs, c, dt);
-      if (fail(len)) {
-        c.error_info.resolve_expected_tokens();
-        return Result{false, c.recovered, i, c.error_info};
+      if (whitespaceOpe) {
+        auto save_ignore_trace_state = c.ignore_trace_state;
+        c.ignore_trace_state = !c.verbose_trace;
+        auto se = scope_exit(
+            [&]() { c.ignore_trace_state = save_ignore_trace_state; });
+
+        auto len = whitespaceOpe->parse(s, n, vs, c, dt);
+        if (fail(len)) {
+          c.error_info.resolve_expected_tokens();
+          return Result{false, c.recovered, i, c.error_info};
+        }
+
+        i = len;
       }
 
-      i = len;
-    }
-
-    auto len = ope->parse(s + i, n - i, vs, c, dt);
-    auto ret = success(len);
-    if (ret) {
-      i += len;
-      if (eoi_check) {
-        if (i < n) {
-          if (c.error_info.error_pos - c.s < s + i - c.s) {
-            c.error_info.message_pos = s + i;
-            c.error_info.message = "expected end of input";
+      auto len = ope->parse(s + i, n - i, vs, c, dt);
+      auto ret = success(len);
+      if (ret) {
+        i += len;
+        if (eoi_check) {
+          if (i < n) {
+            if (c.error_info.error_pos - c.s < s + i - c.s) {
+              c.error_info.message_pos = s + i;
+              c.error_info.message = "expected end of input";
+            }
+            ret = false;
           }
-          ret = false;
         }
       }
+      c.force_ast(vs);
+      c.error_info.resolve_expected_tokens();
+      return Result{ret, c.recovered, i, c.error_info};
+    } catch (const NestingTooDeep &e) {
+      c.error_info.message_pos = e.pos;
+      c.error_info.message =
+          "exceeded the maximum nesting depth of " + std::to_string(max_depth);
+      c.error_info.label = e.rule->name;
+      c.error_info.resolve_expected_tokens();
+      // Report it even at or before a position a recovered error was
+      // already reported at.
+      c.error_info.last_output_pos = nullptr;
+      return Result{false, c.recovered, 0, c.error_info};
     }
-    c.force_ast(vs);
-    c.error_info.resolve_expected_tokens();
-    return Result{ret, c.recovered, i, c.error_info};
   }
 
   std::shared_ptr<Holder> holder_;
@@ -4361,6 +4400,31 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
 
 inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
                                  Context &c, std::any &dt) const {
+  if (c.limits_depth) { return parse_rule_counted(s, n, vs, c, dt); }
+  return parse_rule(s, n, vs, c, dt);
+}
+
+// Kept out of line so that a parse without a depth limit pays only for the
+// branch above.
+CPPPEGLIB_NOINLINE inline size_t
+Holder::parse_rule_counted(const char *s, size_t n, SemanticValues &vs,
+                           Context &c, std::any &dt) const {
+  // Too deep a nesting abandons the whole parse: failing this match instead
+  // would let the parse go on by backtracking, possibly to a different
+  // result. Definition::parse_core catches the throw and reports it. Any
+  // exception ends the parse and its Context, so the count needs no
+  // restoring on the way out.
+  if (++c.depth > c.max_depth) {
+    c.abandoned = true;
+    throw NestingTooDeep{s, outer_};
+  }
+  auto len = parse_rule(s, n, vs, c, dt);
+  c.depth--;
+  return len;
+}
+
+inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
+                                 Context &c, std::any &dt) const {
   if (!ope_) {
     throw std::logic_error("Uninitialized definition ope was used...");
   }
@@ -4429,7 +4493,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
-      if (outer_->leave) {
+      // An abandoned parse runs no more user code.
+      if (outer_->leave && !c.abandoned) {
         c.force_ast(parse_val);
         outer_->leave(c, s, n, parse_len, parse_val, dt);
       }
@@ -4774,10 +4839,15 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     auto save_tokens = vs.tokens;
 
     auto chvs = c.push_semantic_values_scope();
-    c.operator_token = &tok;
-    auto chlen = binop_->parse(s + i, n - i, chvs, c, dt);
-    c.operator_token = nullptr;
-    c.pop_semantic_values_scope();
+    size_t chlen;
+    {
+      auto se = scope_exit([&]() {
+        c.operator_token = nullptr;
+        c.pop_semantic_values_scope();
+      });
+      c.operator_token = &tok;
+      chlen = binop_->parse(s + i, n - i, chvs, c, dt);
+    }
 
     if (fail(chlen)) { break; }
 
@@ -4796,8 +4866,10 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (assoc == 'L') { next_min_prec = level + 1; }
 
     chvs = c.push_semantic_values_scope();
-    chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
-    c.pop_semantic_values_scope();
+    {
+      auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+      chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
+    }
 
     if (fail(chlen)) {
       vs.assign(save_values.begin(), save_values.end());
@@ -7793,6 +7865,16 @@ public:
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.verbose_trace = verbose_trace;
+    }
+  }
+
+  // Fails a parse that nests more than max_depth rule matches, with an
+  // error, before deep input can overflow the stack (see
+  // Definition::max_depth).
+  void set_max_depth(size_t max_depth) {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.max_depth = max_depth;
     }
   }
 
