@@ -1441,6 +1441,160 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
   }
 }
 
+TEST(GeneralTest, DeferredAstIsUnobservable) {
+  // enable_ast(true) builds a node only once its rule match is kept (see
+  // AstLogEntry). Predicates, leave handlers and user actions must see what
+  // they see when every node is built right away (a tracer forces that), and
+  // the tree must match optimize_ast's. The grammar backtracks over rules that
+  // collapse in chains, token rules with inner rules, ignored rules, a
+  // precedence rule and a macro, and has no left recursion (which would turn
+  // deferring off).
+  const char *grammar = R"(
+    PROGRAM     <-  STATEMENT (';' STATEMENT)*
+    STATEMENT   <-  YIELD / CALL / ASSIGN / VALUE
+    YIELD       <-  'yield' VALUE              { no_ast_opt }
+    CALL        <-  NAME '(' LIST(VALUE, ',') ')'
+    ASSIGN      <-  NAME '=' VALUE ~BANG?
+    VALUE       <-  WRAP / EXPR
+    WRAP        <-  INNER '!'
+    INNER       <-  EXPR
+    EXPR        <-  TERM (OP TERM)* {
+                      precedence
+                        L + -
+                        L * /
+                    }
+    TERM        <-  NUMBER / NAME / '(' VALUE ')' / '[' LIST(VALUE, ',') ']'
+    LIST(I, D)  <-  (I (D I)*)?
+    OP          <-  < [-+*/] >
+    NUMBER      <-  < DIGIT+ >                 { ast_name: NUM }
+    DIGIT       <-  [0-9]
+    NAME        <-  < [a-z]+ >
+    BANG        <-  '??'
+    %whitespace <-  [ \t\r\n]*
+  )";
+  const char *src =
+      "yield 1 + 2 * (x); f(1, [2, a + b!], (3)); a = [1, (2), b] ??; 42!";
+
+  // Nodes get ids in the order they are first seen, so the same node seen
+  // twice (or seen in a callback and then found in the tree) shows up as the
+  // same id. The weak_ptrs keep addresses from being reused.
+  struct Ids {
+    std::map<const Ast *, size_t> ids;
+    std::vector<std::weak_ptr<Ast>> keep;
+    size_t id(const std::shared_ptr<Ast> &node) {
+      auto it = ids.find(node.get());
+      if (it != ids.end()) { return it->second; }
+      keep.push_back(node);
+      auto id = ids.size() + 1;
+      ids[node.get()] = id;
+      return id;
+    }
+  };
+  std::function<void(const std::shared_ptr<Ast> &, Ids &, std::string &)> dump =
+      [&](const std::shared_ptr<Ast> &node, Ids &ids, std::string &out) {
+        out += "#" + std::to_string(ids.id(node)) + " " + node->name + "|" +
+               node->original_name + "|" + std::to_string(node->position) +
+               "+" + std::to_string(node->length) + "|" +
+               std::to_string(node->line) + ":" + std::to_string(node->column) +
+               "|" + std::to_string(node->choice_count) + "/" +
+               std::to_string(node->choice) + "|" +
+               std::to_string(node->original_choice_count) + "/" +
+               std::to_string(node->original_choice) + "|" +
+               std::to_string(node->original_tag) + "|" +
+               std::string(node->is_token ? node->token : "-") + "\n";
+        for (const auto &child : node->nodes) {
+          if (child->parent.lock() != node) { out += "WRONG PARENT\n"; }
+          dump(child, ids, out);
+        }
+      };
+
+  // What the callbacks saw, then the retained nodes and the tree as they are
+  // after the parse.
+  auto run = [&](bool eager, bool opt_mode, int observe) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg);
+    pg.enable_ast(true, opt_mode);
+    if (eager) {
+      pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+    }
+
+    Ids ids;
+    std::string out;
+    std::vector<std::shared_ptr<Ast>> retained;
+    auto see = [&](const std::shared_ptr<Ast> &node) {
+      dump(node, ids, out);
+      retained.push_back(node);
+    };
+
+    if (observe & 1) {
+      for (auto name : {"STATEMENT", "INNER", "TERM", "OP", "NAME"}) {
+        pg[name].predicate = [&, name](const SemanticValues &vs,
+                                       const std::any &, std::string &) {
+          out += std::string("P ") + name + "\n";
+          for (const auto &v : vs) {
+            see(std::any_cast<std::shared_ptr<Ast>>(v));
+          }
+          return true;
+        };
+      }
+    }
+    if (observe & 2) {
+      for (auto name : {"VALUE", "WRAP", "EXPR", "NUMBER", "BANG"}) {
+        pg[name].leave = [&, name](const Context &, const char *, size_t,
+                                   size_t len, std::any &value, std::any &) {
+          if (!success(len)) { return; }
+          out += std::string("L ") + name + "\n";
+          if (value.has_value()) {
+            see(std::any_cast<std::shared_ptr<Ast>>(value));
+          }
+        };
+      }
+    }
+    if (observe & 4) {
+      pg["CALL"] = [&](const SemanticValues &vs) {
+        out += "A CALL\n";
+        auto node = std::make_shared<Ast>("", 1, 1, "CALL!",
+                                          vs.transform<std::shared_ptr<Ast>>(),
+                                          0, vs.sv().size());
+        for (const auto &child : node->nodes) {
+          see(child);
+          child->parent = node;
+        }
+        return node;
+      };
+    }
+
+    std::shared_ptr<Ast> ast;
+    EXPECT_TRUE(pg.parse(src, ast));
+    out += "AFTER\n";
+    for (const auto &node : retained) {
+      dump(node, ids, out);
+    }
+    out += "TREE\n";
+    dump(ast, ids, out);
+    return out;
+  };
+
+  for (auto opt_mode : {true, false}) {
+    // The tree alone, against optimize_ast's.
+    parser full(grammar);
+    full.enable_ast();
+    std::shared_ptr<Ast> expected;
+    ASSERT_TRUE(full.parse(src, expected));
+    expected = full.optimize_ast(expected, opt_mode);
+    Ids ids;
+    std::string expected_tree = "AFTER\nTREE\n";
+    dump(expected, ids, expected_tree);
+    EXPECT_EQ(expected_tree, run(false, opt_mode, 0))
+        << "opt_mode=" << opt_mode;
+
+    for (auto observe = 1; observe < 8; observe++) {
+      EXPECT_EQ(run(true, opt_mode, observe), run(false, opt_mode, observe))
+          << "opt_mode=" << opt_mode << " observe=" << observe;
+    }
+  }
+}
+
 TEST(GeneralTest, CollapsedAstParentLinks) {
   std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
       [&](const std::shared_ptr<Ast> &ast) {

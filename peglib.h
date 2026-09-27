@@ -665,6 +665,7 @@ private:
   friend class Repetition;
   friend class Holder;
   friend class PrecedenceClimbing;
+  friend class Ignore;
 
   static const std::string &empty_name() {
     static const std::string name;
@@ -672,6 +673,7 @@ private:
   }
 
   Context *c_ = nullptr;
+  size_t ast_log_start_ = 0;
   std::string_view sv_;
   size_t choice_count_ = 0;
   size_t choice_ = 0;
@@ -714,7 +716,10 @@ public:
   Action() = default;
   Action(Action &&rhs) = default;
   template <typename F> Action(F fn) : fn_(make_adaptor(fn)) {}
-  template <typename F> void operator=(F fn) { fn_ = make_adaptor(fn); }
+  template <typename F> void operator=(F fn) {
+    fn_ = make_adaptor(fn);
+    ast_node_type_ = nullptr;
+  }
   Action &operator=(const Action &rhs) = default;
 
   operator bool() const { return bool(fn_); }
@@ -723,6 +728,18 @@ public:
                       const std::any &predicate_data) const {
     return fn_(vs, dt, predicate_data);
   }
+
+  // Declares this action to be an AST action: it builds a node, held as
+  // `Node`, from the values alone (a token rule's node from its token, not
+  // reading the values), so a parse may run it later (see AstLogEntry).
+  // `collapse` tells that a single child node stands in for the new one.
+  // Assigning another function clears the declaration.
+  template <typename Node> void declare_ast_action(bool collapse) {
+    ast_node_type_ = &typeid(Node);
+    ast_collapse_ = collapse;
+  }
+  const std::type_info *ast_node_type() const { return ast_node_type_; }
+  bool ast_collapse() const { return ast_collapse_; }
 
 private:
   using Fty = std::function<std::any(SemanticValues &vs, std::any &dt,
@@ -745,6 +762,8 @@ private:
   }
 
   Fty fn_;
+  const std::type_info *ast_node_type_ = nullptr;
+  bool ast_collapse_ = false;
 };
 
 class Predicate {
@@ -1041,6 +1060,61 @@ private:
   std::vector<size_t> keys_;
   std::vector<std::any> vals_;
   size_t used_ = 0; // occupied + tombstone slots
+};
+
+/*
+ * AST log
+ */
+// Building an AST node for every rule that matches wastes most of the work:
+// the nodes of alternatives that fail later are thrown away. An AST action
+// (see Action::declare_ast_action) depends on its values alone, so a parse
+// that can defer it records the call here instead, and the rule's value
+// becomes an AstLogRef to the record. The action runs later, on the values it
+// would have been given, when user code is about to see the value: a
+// predicate, a leave handler, a user action, a User operator, or the parse
+// result (see Context::run_action and Context::force_ast).
+//
+// A record points at its children, which are recorded before it within the
+// same rule match. What a rule match recorded is dropped where its values
+// are thrown away: when the rule fails, when its value is ignored (`~`), and
+// when it is a token rule, whose node reads no values. Records left behind
+// by backtracking inside a rule that succeeds are simply never run.
+struct AstLogEntry {
+  static constexpr uint32_t none = std::numeric_limits<uint32_t>::max();
+  static constexpr uint32_t unlinked = none - 1;
+
+  // An action call: the rule, and what its action reads from its
+  // SemanticValues besides the values and the token.
+  struct Call {
+    const Definition *rule = nullptr;
+    uint32_t position = 0; // the match (sv)
+    uint32_t length = 0;
+    uint32_t choice_count = 0;
+    uint32_t choice = 0;
+  };
+
+  // The recorded call, or none (a null rule) for a value that exists already
+  // (a node user code has seen, or another action's result), kept in
+  // Context::ast_values[value] to become a child.
+  Call call;
+  uint32_t value = 0;
+
+  // The token of a token rule.
+  uint32_t token_position = 0;
+  uint32_t token_length = 0;
+
+  // The values, as a list of entries.
+  uint32_t first_child = none;
+  uint32_t next_sibling = unlinked;
+
+  // A collapsing action given only this record is not recorded on its own:
+  // it is kept here and runs right after this one. Collapsing rewrites the
+  // same fields of the node every time, so only the outermost one counts.
+  Call outer;
+};
+
+struct AstLogRef {
+  uint32_t index;
 };
 
 class Context {
@@ -1379,10 +1453,12 @@ public:
       auto &vs = *value_stack[value_stack_size++];
       vs.path = path;
       vs.ss = s;
+      vs.ast_log_start_ = ast_log.size();
       return vs;
     }
 
     auto &vs = *value_stack[value_stack_size++];
+    vs.ast_log_start_ = ast_log.size();
     if (!vs.empty()) {
       vs.clear();
       if (!vs.tags.empty()) { vs.tags.clear(); }
@@ -1452,6 +1528,25 @@ public:
     return it->second;
   }
 
+  // AST log (see AstLogEntry). defer_ast is decided at parse start; the log
+  // stays empty when it is false.
+  bool defer_ast = false;
+  std::vector<AstLogEntry> ast_log;
+  // Values of the entries without a rule: nodes user code has seen (a
+  // predicate sees its rule's values) and results of other actions. They
+  // are not truncated with the log, so they are released, those of abandoned
+  // alternatives included, only when the parse ends.
+  std::vector<std::any> ast_values;
+
+  // Runs `rule`'s action on `vs`, or records it (see AstLogEntry).
+  std::any run_action(const Definition &rule, SemanticValues &vs, std::any &dt,
+                      const std::any &predicate_data);
+
+  // Runs the recorded actions a value stands for, making it what the parse
+  // would have produced without deferring.
+  void force_ast(std::any &value);
+  void force_ast(SemanticValues &vs);
+
   // Snapshot/Rollback
   struct Snapshot {
     size_t sv_size;
@@ -1476,6 +1571,10 @@ public:
     vs.choice_count_ = snap.choice_count;
     vs.choice_ = snap.choice;
     capture_entries.resize(snap.capture_size);
+  }
+
+  void truncate_ast_log(size_t size) {
+    if (ast_log.size() > size) { ast_log.resize(size); }
   }
 
   // Skip trailing whitespace with trace suppression.
@@ -1532,6 +1631,16 @@ public:
   mutable bool source_line_index_ready_ = false;
   mutable std::vector<size_t> source_line_index;
   mutable size_t line_info_hint_ = 0;
+
+private:
+  std::any run_or_record_action(const Definition &rule, SemanticValues &vs,
+                                std::any &dt, const std::any &predicate_data);
+  bool can_record_ast(const Definition &rule, const SemanticValues &vs) const;
+  std::any record_ast(const Definition &rule, SemanticValues &vs);
+  AstLogEntry::Call ast_call(const Definition &rule,
+                             const SemanticValues &vs) const;
+  std::any build_ast(uint32_t index);
+  std::any run_ast_call(const AstLogEntry::Call &call, SemanticValues &vs);
 };
 
 /*
@@ -2126,7 +2235,9 @@ public:
                     Context &c, std::any &dt) const override {
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
-    return ope_->parse(s, n, chvs, c, dt);
+    auto len = ope_->parse(s, n, chvs, c, dt);
+    c.truncate_ast_log(chvs.ast_log_start_);
+    return len;
   }
 
   void accept(Visitor &v) override;
@@ -2140,11 +2251,8 @@ using Parser = std::function<size_t(const char *s, size_t n, SemanticValues &vs,
 class User : public Ope {
 public:
   User(Parser fn) : fn_(fn) {}
-  size_t parse_core(const char *s, size_t n, SemanticValues &vs,
-                    Context & /*c*/, std::any &dt) const override {
-    assert(fn_);
-    return fn_(s, n, vs, dt);
-  }
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override;
   void accept(Visitor &v) override;
   std::function<size_t(const char *s, size_t n, SemanticValues &vs,
                        std::any &dt)>
@@ -2176,7 +2284,7 @@ public:
 
   void accept(Visitor &v) override;
 
-  std::any reduce(SemanticValues &vs, std::any &dt,
+  std::any reduce(SemanticValues &vs, Context &c, std::any &dt,
                   const std::any &predicate_data) const;
 
   const std::string &name() const;
@@ -3539,6 +3647,20 @@ private:
       c.recognize_only = recognize_only;
     }
 
+    // Defer AST actions (see AstLogEntry) unless a value can outlive the rule
+    // match that made it (the packrat cache, left-recursive seeds) or user
+    // code sees values at every step (a tracer).
+    if (!enablePackratParsing && !c.has_tracer &&
+        n <= std::numeric_limits<uint32_t>::max()) {
+      auto has_ast_action = false;
+      auto has_left_recursion = false;
+      for (const auto &[def, id] : definition_ids_) {
+        has_ast_action |= def->action.ast_node_type() != nullptr;
+        has_left_recursion |= def->is_left_recursive;
+      }
+      c.defer_ast = has_ast_action && !has_left_recursion;
+    }
+
     size_t i = 0;
 
     if (whitespaceOpe) {
@@ -3570,6 +3692,7 @@ private:
         }
       }
     }
+    c.force_ast(vs);
     c.error_info.resolve_expected_tokens();
     return Result{ret, c.recovered, i, c.error_info};
   }
@@ -3773,6 +3896,155 @@ inline size_t Context::skip_whitespace(const char *a_s, size_t n,
   ignore_trace_state = !verbose_trace;
   auto se = scope_exit([&]() { ignore_trace_state = save; });
   return whitespaceOpe->parse(a_s, n, vs, *this, dt);
+}
+
+inline std::any Context::run_action(const Definition &rule, SemanticValues &vs,
+                                    std::any &dt,
+                                    const std::any &predicate_data) {
+  if (defer_ast) { return run_or_record_action(rule, vs, dt, predicate_data); }
+  return rule.action(vs, dt, predicate_data);
+}
+
+// Out of line so that run_action stays small enough to be inlined into
+// every parse that runs actions, deferring or not.
+CPPPEGLIB_NOINLINE inline std::any
+Context::run_or_record_action(const Definition &rule, SemanticValues &vs,
+                              std::any &dt, const std::any &predicate_data) {
+  if (can_record_ast(rule, vs)) { return record_ast(rule, vs); }
+  force_ast(vs);
+  return rule.action(vs, dt, predicate_data);
+}
+
+// An AST action can be recorded when running it later gives the same result:
+// it accepts every value as it is (a recorded one or a node; a token rule's
+// node reads none). It runs now when there is nothing to put off: its rule
+// has a leave handler, which gets the value as soon as the rule matches, or
+// none of its values is recorded. Those are then nodes user code may have
+// seen, and collapsing into one changes it, which must happen now.
+inline bool Context::can_record_ast(const Definition &rule,
+                                    const SemanticValues &vs) const {
+  auto node_type = rule.action.ast_node_type();
+  if (!node_type || rule.leave) { return false; }
+  if (rule.is_token()) { return true; }
+
+  auto recorded = [](const std::any &v) {
+    return std::any_cast<AstLogRef>(&v) != nullptr;
+  };
+  if (!vs.empty() && std::none_of(vs.begin(), vs.end(), recorded)) {
+    return false;
+  }
+  return std::all_of(vs.begin(), vs.end(), [&](const std::any &v) {
+    return recorded(v) || v.type() == *node_type;
+  });
+}
+
+inline std::any Context::record_ast(const Definition &rule,
+                                    SemanticValues &vs) {
+  if (rule.action.ast_collapse() && !rule.is_token() && vs.size() == 1) {
+    auto ref = *std::any_cast<AstLogRef>(&vs[0]);
+    ast_log[ref.index].outer = ast_call(rule, vs);
+    return ref;
+  }
+
+  AstLogEntry e;
+  e.call = ast_call(rule, vs);
+  if (rule.is_token()) {
+    e.token_position = static_cast<uint32_t>(vs.token().data() - s);
+    e.token_length = static_cast<uint32_t>(vs.token().size());
+    // A token rule's node reads no values, so what they recorded goes.
+    truncate_ast_log(vs.ast_log_start_);
+  } else {
+    auto prev = AstLogEntry::none;
+    for (auto &v : vs) {
+      uint32_t child;
+      if (auto ref = std::any_cast<AstLogRef>(&v)) {
+        child = ref->index;
+      } else {
+        child = static_cast<uint32_t>(ast_log.size());
+        ast_log.emplace_back().value = static_cast<uint32_t>(ast_values.size());
+        ast_values.push_back(std::move(v));
+      }
+      // A value moves into one rule's values only, so no entry becomes a
+      // child twice.
+      assert(ast_log[child].next_sibling == AstLogEntry::unlinked);
+      if (prev == AstLogEntry::none) {
+        e.first_child = child;
+      } else {
+        ast_log[prev].next_sibling = child;
+      }
+      prev = child;
+    }
+    if (prev != AstLogEntry::none) {
+      ast_log[prev].next_sibling = AstLogEntry::none;
+    }
+  }
+
+  auto index = static_cast<uint32_t>(ast_log.size());
+  ast_log.push_back(std::move(e));
+  return AstLogRef{index};
+}
+
+inline AstLogEntry::Call Context::ast_call(const Definition &rule,
+                                           const SemanticValues &vs) const {
+  return {&rule, static_cast<uint32_t>(vs.sv().data() - s),
+          static_cast<uint32_t>(vs.sv().size()),
+          static_cast<uint32_t>(vs.choice_count()),
+          static_cast<uint32_t>(vs.choice())};
+}
+
+// Runs the recorded actions of an entry on values set up as they were when
+// they were recorded.
+inline std::any Context::build_ast(uint32_t index) {
+  auto &e = ast_log[index];
+  if (!e.call.rule) { return std::move(ast_values[e.value]); }
+
+  auto &vs = push_semantic_values_scope();
+  auto se = scope_exit([&]() { pop_semantic_values_scope(); });
+
+  for (auto i = e.first_child; i != AstLogEntry::none;
+       i = ast_log[i].next_sibling) {
+    vs.emplace_back(build_ast(i));
+  }
+  if (e.call.rule->is_token()) {
+    vs.tokens.emplace_back(s + e.token_position, e.token_length);
+  }
+  auto val = run_ast_call(e.call, vs);
+
+  if (e.outer.rule) {
+    vs.tokens.clear();
+    vs.emplace_back(std::move(val));
+    val = run_ast_call(e.outer, vs);
+  }
+  return val;
+}
+
+inline std::any Context::run_ast_call(const AstLogEntry::Call &call,
+                                      SemanticValues &vs) {
+  vs.sv_ = std::string_view(s + call.position, call.length);
+  vs.name_ = &call.rule->name;
+  vs.choice_count_ = call.choice_count;
+  vs.choice_ = call.choice;
+
+  std::any dt;
+  static const std::any predicate_data;
+  auto val = call.rule->action(vs, dt, predicate_data);
+  // As Holder::reduce does, so a collapsing parent can take the node over.
+  vs.clear();
+  return val;
+}
+
+inline void Context::force_ast(std::any &value) {
+  if (!defer_ast) { return; }
+  if (auto ref = std::any_cast<AstLogRef>(&value)) {
+    value = build_ast(ref->index);
+  }
+}
+
+inline void Context::force_ast(SemanticValues &vs) {
+  if (!defer_ast) { return; }
+  for (auto &v : vs) {
+    force_ast(v);
+  }
 }
 
 inline void Context::push_rule(Definition *rule) {
@@ -4046,9 +4318,19 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   auto do_parse = [&](size_t &parse_len, std::any &parse_val) {
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
+    // Kept aside: building the value for leave reuses the popped frame.
+    auto ast_log_start = chvs.ast_log_start_;
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
-      if (outer_->leave) { outer_->leave(c, s, n, parse_len, parse_val, dt); }
+      if (outer_->leave) {
+        c.force_ast(parse_val);
+        outer_->leave(c, s, n, parse_len, parse_val, dt);
+      }
+      // Nothing refers to what the rule recorded when it failed or its
+      // value is thrown away.
+      if (fail(parse_len) || outer_->ignoreSemanticValue) {
+        c.truncate_ast_log(ast_log_start);
+      }
     });
 
     parse_len = parse_ope_body(s, n, chvs, c, dt);
@@ -4067,6 +4349,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       if (outer_->predicate) {
+        c.force_ast(chvs);
         std::string msg;
         std::any predicate_data;
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
@@ -4078,11 +4361,11 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           }
           parse_len = static_cast<size_t>(-1);
         } else if (!c.recovered) {
-          parse_val = reduce(chvs, dt, predicate_data);
+          parse_val = reduce(chvs, c, dt, predicate_data);
         }
       } else if (!c.recovered) {
         std::any predicate_data;
-        parse_val = reduce(chvs, dt, predicate_data);
+        parse_val = reduce(chvs, c, dt, predicate_data);
       }
     } else {
       if ((c.log || c.error_reporter) && !outer_->error_message.empty() &&
@@ -4212,10 +4495,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   return len;
 }
 
-inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
+inline std::any Holder::reduce(SemanticValues &vs, Context &c, std::any &dt,
                                const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
-    auto val = outer_->action(vs, dt, predicate_data);
+    auto val = c.run_action(*outer_, vs, dt, predicate_data);
     // Release the values now instead of when this scope is next reused: the
     // AST node an action just returned is then referenced only by the caller,
     // which lets a collapsing parent take it over in place.
@@ -4325,6 +4608,13 @@ inline std::shared_ptr<Ope> Reference::get_core_operator() const {
   return rule_->holder_;
 }
 
+inline size_t User::parse_core(const char *s, size_t n, SemanticValues &vs,
+                               Context &c, std::any &dt) const {
+  assert(fn_);
+  c.force_ast(vs);
+  return fn_(s, n, vs, dt);
+}
+
 inline size_t BackReference::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
@@ -4424,7 +4714,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
       static const std::any empty_predicate_data;
-      val = rule_.action(vs, dt, empty_predicate_data);
+      val = c.run_action(rule_, vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
       val = vs[0];
     }
@@ -6911,6 +7201,9 @@ void add_ast_action(Definition &rule, bool collapse = false) {
           vs.choice_count(), vs.choice(), rule.no_ast_opt);
     }
 
+    // Collapsing sets the same fields whatever the child went through, so a
+    // chain of collapses ends up as the outermost one alone. The AST log
+    // relies on that (see AstLogEntry::outer).
     if (collapse && vs.size() == 1) {
       const auto &child = std::any_cast<const std::shared_ptr<T> &>(vs[0]);
       auto position = static_cast<size_t>(std::distance(vs.ss, vs.sv().data()));
@@ -7307,13 +7600,19 @@ public:
   // With collapse_mode, nodes are collapsed as they are built, giving the
   // tree optimize_ast(ast, opt_mode) would return without copying it again.
   // Rules with a user action are not collapsed; the choice is fixed here.
+  // The nodes are also built only once their rule's match is kept, as far
+  // as the parse allows (see AstLogEntry).
   template <typename T = Ast>
   parser &enable_ast(bool collapse_mode = false, bool opt_mode = true) {
     const AstOptimizer optimizer(opt_mode, get_no_ast_opt_rules());
     for (auto &[_, rule] : *grammar_) {
       if (!rule.action) {
-        add_ast_action<T>(rule, collapse_mode &&
-                                    optimizer.is_optimized(rule.node_name()));
+        auto collapse =
+            collapse_mode && optimizer.is_optimized(rule.node_name());
+        add_ast_action<T>(rule, collapse);
+        if (collapse_mode) {
+          rule.action.declare_ast_action<std::shared_ptr<T>>(collapse);
+        }
       }
     }
     // A later call keeps the collapsing actions set here.
