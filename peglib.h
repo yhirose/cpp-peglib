@@ -3648,8 +3648,9 @@ private:
     }
 
     // Defer AST actions (see AstLogEntry) unless a value can outlive the rule
-    // match that made it (the packrat cache, left-recursive seeds) or user
-    // code sees values at every step (a tracer).
+    // match that made it (the packrat cache, left-recursive seeds), user code
+    // sees values at every step (a tracer), or the input is too long for the
+    // log's 32-bit positions.
     if (!enablePackratParsing && !c.has_tracer &&
         n <= std::numeric_limits<uint32_t>::max()) {
       auto has_ast_action = false;
@@ -4312,24 +4313,20 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     return len;
   }
 
+  // Where this rule's records start in the AST log, for dropping them.
+  auto ast_log_start = c.ast_log.size();
+
   // Shared parse body: invokes enter/leave callbacks, parses the rule's
   // operator, handles actions/predicates/errors, and calls reduce.
   // Writes into parse_len / parse_val (parse_val only on success).
   auto do_parse = [&](size_t &parse_len, std::any &parse_val) {
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
-    // Kept aside: building the value for leave reuses the popped frame.
-    auto ast_log_start = chvs.ast_log_start_;
     auto se = scope_exit([&]() {
       c.pop_semantic_values_scope();
       if (outer_->leave) {
         c.force_ast(parse_val);
         outer_->leave(c, s, n, parse_len, parse_val, dt);
-      }
-      // Nothing refers to what the rule recorded when it failed or its
-      // value is thrown away.
-      if (fail(parse_len) || outer_->ignoreSemanticValue) {
-        c.truncate_ast_log(ast_log_start);
       }
     });
 
@@ -4485,11 +4482,15 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     }
   }
 
-  if (success(len)) {
-    if (!outer_->ignoreSemanticValue && !c.recognize_only) {
+  if (success(len) && !outer_->ignoreSemanticValue) {
+    if (!c.recognize_only) {
       vs.emplace_back(std::move(val));
       vs.tags.emplace_back(tag());
     }
+  } else {
+    // Nothing refers to what the rule recorded when it failed or its value
+    // is thrown away.
+    c.truncate_ast_log(ast_log_start);
   }
 
   return len;

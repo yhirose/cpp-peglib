@@ -1456,7 +1456,7 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
     CALL        <-  NAME '(' LIST(VALUE, ',') ')'
     ASSIGN      <-  NAME '=' VALUE ~BANG?
     VALUE       <-  WRAP / EXPR
-    WRAP        <-  INNER '!'
+    WRAP        <-  INNER EXCL
     INNER       <-  EXPR
     EXPR        <-  TERM (OP TERM)* {
                       precedence
@@ -1470,6 +1470,7 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
     DIGIT       <-  [0-9]
     NAME        <-  < [a-z]+ >
     BANG        <-  '??'
+    ~EXCL       <-  '!'
     %whitespace <-  [ \t\r\n]*
   )";
   const char *src =
