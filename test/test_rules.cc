@@ -1063,4 +1063,93 @@ TEST(UserRuleTest, User_rule_combined_with_peg_rules) {
 }
 
 // =============================================================================
-// Semantic Predicate Tests
+// Dictionary Precedence Tests
+// =============================================================================
+
+TEST(DictionaryPrecedenceTest, Pipe_binds_tighter_than_slash) {
+  // `|` binds tighter than `/`: 'a' | 'b' / 'a' 'c' means
+  // ('a' | 'b') / ('a' 'c'), so "ac" fails once 'a' wins the first alternative.
+  parser pg(R"(S <- 'a' | 'b' / 'a' 'c')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("b"));
+  EXPECT_FALSE(pg.parse("ac"));
+  EXPECT_FALSE(pg.parse("c"));
+}
+
+TEST(DictionaryPrecedenceTest, Pipe_binds_tighter_than_sequence) {
+  // `|` binds tighter than sequence: 'a' 'b' | 'c' means 'a' ('b' | 'c').
+  parser pg(R"(S <- 'a' 'b' | 'c')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("ab"));
+  EXPECT_TRUE(pg.parse("ac"));
+  EXPECT_FALSE(pg.parse("c"));
+  EXPECT_FALSE(pg.parse("a"));
+}
+
+TEST(DictionaryPrecedenceTest, Pure_dictionary) {
+  // A run of `|` literals is a dictionary.
+  parser pg(R"(S <- 'a' | 'bb' | 'ccc')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("bb"));
+  EXPECT_TRUE(pg.parse("ccc"));
+  EXPECT_FALSE(pg.parse("b"));
+}
+
+TEST(DictionaryPrecedenceTest, Dictionary_case_insensitive) {
+  // Case-insensitive dictionary members.
+  parser pg(R"(S <- 'cat'i | 'dog'i)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("cat"));
+  EXPECT_TRUE(pg.parse("CAT"));
+  EXPECT_TRUE(pg.parse("Dog"));
+  EXPECT_FALSE(pg.parse("fish"));
+}
+
+TEST(DictionaryPrecedenceTest, Mixed_pipe_slash_chain) {
+  // Mixing `|` and `/` across a choice chain.
+  parser pg(R"(S <- 'a' | 'b' / 'c' | 'd')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("b"));
+  EXPECT_TRUE(pg.parse("c"));
+  EXPECT_TRUE(pg.parse("d"));
+  EXPECT_FALSE(pg.parse("e"));
+}
+
+TEST(DictionaryPrecedenceTest, Dictionary_ast) {
+  // A parenthesized dictionary is one alternative of the outer choice: both
+  // 'a' and 'b' give S/0.
+  parser pg(R"(
+    S <- ('a' | 'b') C / D
+    C <- < 'c' >
+    D <- < 'd' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ac", ast));
+  EXPECT_EQ(R"(+ S/0
+  - C (c)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("bc", ast));
+  EXPECT_EQ(R"(+ S/0
+  - C (c)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("d", ast));
+  EXPECT_EQ(R"(+ S/1
+  - D (d)
+)",
+            ast_to_s(ast));
+}

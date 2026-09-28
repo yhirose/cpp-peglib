@@ -122,7 +122,11 @@ TEST(PEGTest, PEG_Literal) {
   EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'a\\277\tc' "));
   EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'a\\77\tc' "));
   EXPECT_FALSE(ParserGenerator::parse_test("Literal", "'a\\80\tc' "));
+  EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'a\\277\\tc' "));
+  EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'a\\77\\tc' "));
+  EXPECT_FALSE(ParserGenerator::parse_test("Literal", "'a\\80\\tc' "));
   EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'\n' "));
+  EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'\\n' "));
   EXPECT_TRUE(ParserGenerator::parse_test("Literal", "'a\\'b' "));
   EXPECT_FALSE(ParserGenerator::parse_test("Literal", "'a'b' "));
   EXPECT_FALSE(ParserGenerator::parse_test("Literal", "'a\"'b' "));
@@ -412,4 +416,150 @@ TEST(PEGTest, MetaGrammarFirstSetCoverage) {
     EXPECT_TRUE(pg.parse("ab_Z"));
     EXPECT_FALSE(pg.parse("a1_Z")); // [^0-9] fails on a digit
   }
+}
+
+// =============================================================================
+// Escape Tests
+// =============================================================================
+
+TEST(EscapeTest, Class_escaped_dash_is_literal) {
+  // \- inside a character class is a literal dash, not a range operator.
+  parser pg(R"(S <- [\-]+)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("-"));
+  EXPECT_TRUE(pg.parse("--"));
+  EXPECT_FALSE(pg.parse("a"));
+}
+
+TEST(EscapeTest, Class_escaped_caret_is_literal) {
+  // \^ inside a character class is a literal caret.
+  parser pg(R"(S <- [\^]+)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("^"));
+  EXPECT_TRUE(pg.parse("^^"));
+  EXPECT_FALSE(pg.parse("a"));
+}
+
+TEST(EscapeTest, Class_escaped_dash_in_set) {
+  // [a\-z] is the set {a, -, z}, not the range a-z (dash is escaped/literal).
+  parser pg(R"(S <- [a\-z]+)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("z"));
+  EXPECT_TRUE(pg.parse("-"));
+  EXPECT_TRUE(pg.parse("a-z"));
+  EXPECT_FALSE(pg.parse("b"));
+}
+
+TEST(EscapeTest, Literal_escaped_dash_and_caret) {
+  // \- and \^ are literal - and ^ in string literals.
+  parser pg(R"(S <- '\-' '\^')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("-^"));
+  EXPECT_FALSE(pg.parse("-"));
+  EXPECT_FALSE(pg.parse("^"));
+}
+
+TEST(EscapeTest, Class_form_feed_and_vtab) {
+  // \f (form feed) and \v (vertical tab) escapes match the control characters.
+  parser pg(R"(S <- [\f\v]+)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("\f"));
+  EXPECT_TRUE(pg.parse("\v"));
+  EXPECT_TRUE(pg.parse("\f\v"));
+  EXPECT_FALSE(pg.parse("f"));
+  EXPECT_FALSE(pg.parse("v"));
+}
+
+TEST(EscapeTest, Literal_form_feed) {
+  // \f in a string literal matches U+000C.
+  parser pg(R"(S <- 'a\fb')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a\fb"));
+  EXPECT_FALSE(pg.parse("afb"));
+}
+
+// =============================================================================
+// Grammar Rejection Tests
+// =============================================================================
+
+TEST(GrammarRejectionTest, Reject_unknown_escape_literal) {
+  // An undefined escape sequence in a literal is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(S <- '\z')"));
+}
+
+TEST(GrammarRejectionTest, Reject_unknown_escape_class) {
+  // An undefined escape sequence in a character class is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(S <- [\q])"));
+}
+
+TEST(GrammarRejectionTest, Reject_unknown_instruction) {
+  // An unrecognized instruction in { } is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(S <- 'a' { bogus_instr })"));
+}
+
+TEST(GrammarRejectionTest, Reject_double_ignore) {
+  // More than one leading ~ ignore operator is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(
+    S <- ~~A
+    A <- 'a'
+  )"));
+}
+
+TEST(GrammarRejectionTest, Reject_duplicate_whitespace) {
+  // Defining %whitespace twice is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(
+    %whitespace <- [ ]*
+    %whitespace <- [.]*
+    S <- 'a'
+  )"));
+}
+
+TEST(GrammarRejectionTest, Reject_duplicate_word) {
+  // Defining %word twice is rejected.
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar(R"(
+    %word <- [a-z]+
+    %word <- [0-9]+
+    S <- 'a'
+  )"));
+}
+
+TEST(GrammarRejectionTest, Accept_all_defined_escapes) {
+  // All defined escapes remain valid.
+  parser pg(R"(S <- '\n\t\f\v\-\^\[\]\\')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("\n\t\f\v-^[]\\"));
+}
+
+TEST(GrammarRejectionTest, Accept_single_ignore) {
+  // A single ~ ignore operator is valid.
+  parser pg(R"(
+    S <- ~A B
+    A <- 'a'
+    B <- < 'b' >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("ab"));
+}
+
+TEST(GrammarRejectionTest, Accept_known_instruction) {
+  // A recognized instruction is accepted.
+  parser pg(R"(S <- < [a-z]+ > { no_ast_opt })");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("abc"));
 }

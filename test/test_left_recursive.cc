@@ -1030,3 +1030,17 @@ TEST(MacroArgumentScopeTest, Parameter_forwarded_through_two_macros) {
   EXPECT_TRUE(p.parse("xr"));
   EXPECT_FALSE(p.parse("yr"));
 }
+
+TEST(LeftRecursionMacroTest, Nested_macro_with_left_recursion) {
+  // A two-level nested macro invoked from a left-recursive rule
+  parser pg(R"(
+    EXPR <- EXPR '+' NUM / NUM
+    NUM <- WRAP([0-9]+)
+    WRAP(X) <- TOK(X)
+    TOK(Y) <- < Y > _
+    ~_ <- [ \t]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("1+2+3+4"));
+}
