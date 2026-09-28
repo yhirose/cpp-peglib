@@ -20,11 +20,11 @@ static std::string find_grammar() {
   }
 #endif
   for (auto prefix : {"", "../", "../../"}) {
-    auto path = std::string(prefix) + "spec/mini-js/grammar.peg";
+    auto path = std::string(prefix) + "grammar/mini_js.peg";
     std::ifstream ifs(path);
     if (ifs.good()) return path;
   }
-  return "spec/mini-js/grammar.peg";
+  return "grammar/mini_js.peg";
 }
 
 class MiniJsTest : public ::testing::Test {

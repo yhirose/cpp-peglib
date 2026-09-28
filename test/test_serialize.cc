@@ -281,7 +281,7 @@ TEST(GrammarBlobTest, CaseInsensitiveLiteralAndDictionary) {
 
 // A Dictionary reports vs.choice() as the matched word's index in declaration
 // order. The Trie stores words sorted, so serialization must re-emit them by id
-// or the choice index gets renumbered (found via the spec round-trip oracle).
+// or the choice index gets renumbered.
 TEST(GrammarBlobTest, DictionaryChoiceIndexRoundTrip) {
   const char *g = "S <- 'Jan' | 'January' | 'Feb' | 'February'";
   peg::parser p1;

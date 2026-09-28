@@ -43,7 +43,7 @@ foreach(target peglib-test-main peglib-test-blob-roundtrip)
   # it regardless of the working directory it is run from (e.g. nested build
   # trees or package builds).
   target_compile_definitions(${target} PRIVATE
-    MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../spec/mini-js/grammar.peg")
+    MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../grammar/mini_js.peg")
   target_link_libraries(${target} PRIVATE gtest_main)
 endforeach()
 
