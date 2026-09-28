@@ -199,10 +199,9 @@ TEST(GrammarBlobTest, ParserLoadBlobWithAst) {
   }
 }
 
-// Regression: load_blob() must restore the parser-level packrat flag from the
-// blob so a subsequent enable_packrat_parsing() re-applies packrat instead of
-// clearing the flag baked into the blob. Previously load_blob left the parser
-// member at its false default, so enable_packrat_parsing() silently disabled
+// Regression: enable_packrat_parsing() after load_blob() must keep packrat on
+// when the blob has it baked in. Previously load_blob left the parser-level
+// flag at its false default, so enable_packrat_parsing() silently disabled
 // packrat on the start rule after a blob round-trip.
 TEST(GrammarBlobTest, LoadBlobPreservesPackrat) {
   const char *g = R"(
@@ -229,6 +228,27 @@ TEST(GrammarBlobTest, LoadBlobPreservesPackrat) {
   std::string start2;
   auto g2 = GrammarBlob::deserialize(blob2, start2);
   EXPECT_TRUE((*g2)[start2].enablePackratParsing);
+}
+
+// A blob made without packrat must still let the loaded parser turn it on.
+TEST(GrammarBlobTest, LoadBlobAllowsEnablingPackrat) {
+  peg::parser p1(R"(
+    START <- PAT1 / PAT2
+    PAT1  <- HELLO ' One'
+    PAT2  <- HELLO ' Two'
+    HELLO <- 'Hello'
+  )");
+  ASSERT_TRUE(!!p1);
+  auto blob = p1.serialize_grammar();
+
+  peg::parser p2;
+  ASSERT_TRUE(p2.load_blob(blob));
+  size_t count = 0;
+  p2["HELLO"] = [&](const peg::SemanticValues &) { count++; };
+  p2.enable_packrat_parsing();
+
+  EXPECT_TRUE(p2.parse("Hello Two"));
+  EXPECT_EQ(1, count); // PAT2 reads HELLO from the cache
 }
 
 TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
@@ -331,8 +351,7 @@ TEST(GrammarBlobTest, DefinitionsAreSerializedInNameOrder) {
 
   std::string smallest;
   for (auto &kv : *g)
-    if (smallest.empty() || kv.first < smallest)
-      smallest = kv.first;
+    if (smallest.empty() || kv.first < smallest) smallest = kv.first;
 
   // Header: magic (u32), start rule (u32 length + bytes), definition count
   // (u32); then each definition, name first.
