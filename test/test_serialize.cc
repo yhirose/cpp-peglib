@@ -257,6 +257,12 @@ TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
   EXPECT_FALSE(p.load_blob(junk));
 }
 
+TEST(GrammarBlobTest, SerializeWithoutAGrammarIsEmpty) {
+  peg::parser p("S <- A"); // A is undefined
+  ASSERT_FALSE(p);
+  EXPECT_TRUE(p.serialize_grammar().empty());
+}
+
 TEST(GrammarBlobTest, CharacterClasses) {
   // ranges, negated, and case-insensitive classes
   check_rt("S <- ([a-z] / [^0-9 ] / [A-C]i)+",

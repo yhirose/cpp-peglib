@@ -7736,7 +7736,9 @@ public:
   // Serialize the loaded grammar to a portable byte blob (see GrammarBlob).
   // Semantic callbacks are not included; throws if the grammar is not
   // serializable (uses the `User` operator or a Capture with a match action).
+  // Without a loaded grammar the blob is empty, which load_blob() rejects.
   std::vector<uint8_t> serialize_grammar() const {
+    if (grammar_ == nullptr) { return {}; }
     return GrammarBlob::serialize(*grammar_, start_);
   }
 
@@ -7917,6 +7919,7 @@ public:
   // as the parse allows (see AstLogEntry).
   template <typename T = Ast>
   parser &enable_ast(bool collapse_mode = false, bool opt_mode = true) {
+    if (grammar_ == nullptr) { return *this; }
     const AstOptimizer optimizer(opt_mode, get_no_ast_opt_rules());
     for (auto &[_, rule] : *grammar_) {
       if (!rule.action) {
@@ -7990,6 +7993,7 @@ private:
 
   std::vector<std::string> get_no_ast_opt_rules() const {
     std::vector<std::string> rules;
+    if (grammar_ == nullptr) { return rules; }
     for (auto &[_, rule] : *grammar_) {
       // The optimizer keeps nodes by their emitted name, so honor the
       // `ast_name` override when present (else the rule's own name).
