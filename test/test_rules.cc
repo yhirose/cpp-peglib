@@ -553,6 +553,34 @@ TEST(PrecedenceTest, Precedence_climbing_does_not_refer_to_grammar_text) {
   EXPECT_TRUE(parser.parse("1+2*3-4"));
 }
 
+// An operator tried but not used leaves no capture behind, as in the
+// repetition that the rule is without its precedence instruction: BINOP
+// captures an empty `o` before failing at ';', and the BINOP after it can
+// match "x" only with an `o` that a used operator left. Without a logger,
+// BINOP would not even be entered at ';'.
+TEST(PrecedenceTest,
+     Precedence_climbing_drops_the_captures_of_unused_operators) {
+  for (std::string precedence : {"", "{ precedence L + }"}) {
+    for (auto with_logger : {false, true}) {
+      auto grammar = R"(
+        S     <- EXPR ';' BINOP
+        EXPR  <- ATOM (BINOP ATOM)* )" +
+                     precedence + R"(
+        ATOM  <- [0-9]
+        BINOP <- $o<!'x'>? ('+' / 'x' $o)
+      )";
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg) << precedence;
+      if (with_logger) {
+        pg.set_logger([](size_t, size_t, const std::string &) {});
+      }
+
+      EXPECT_FALSE(pg.parse("1;x")) << precedence << with_logger;
+      EXPECT_TRUE(pg.parse("1+2;x")) << precedence << with_logger;
+    }
+  }
+}
+
 // =============================================================================
 // Precedence Edge Case Tests
 // =============================================================================
