@@ -1320,6 +1320,12 @@ public:
   bool limits_depth = false;
   bool abandoned = false;
 
+  // Whether a rule that cannot start with the next byte may be skipped
+  // instead of entered, where that goes unnoticed (see
+  // Definition::skippable): no error reporting, tracing or nesting limit
+  // needs it entered, and the whitespace and word skipping run no callback.
+  bool skips_rules = false;
+
   // True when error reporting or tracing is active, i.e. when rule_stack
   // must reflect the full chain of rules being parsed. Without them only
   // rules whose body invokes a macro need to appear on the stack (their
@@ -2742,7 +2748,10 @@ struct CollectRuleRefs : public TraversalVisitor {
       arg->accept(*this);
     }
   }
-  void visit(User &) override { reads_scope = true; }
+  void visit(User &) override {
+    reads_scope = true;
+    has_user = true;
+  }
   void visit(PrecedenceClimbing &ope) override {
     reads_scope = true;
     ope.atom_->accept(*this);
@@ -2751,6 +2760,7 @@ struct CollectRuleRefs : public TraversalVisitor {
 
   std::vector<Definition *> rules;
   bool reads_scope = false;
+  bool has_user = false;
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -2930,6 +2940,59 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result = false; }
   void visit(Cut &) override { result = false; }
+};
+
+// What a rule's body may try when the rule is entered on a byte its first set
+// excludes, so that nothing consumes it: the rules it enters there, and the
+// rules that may match anything there, below a lookahead, a recovery or
+// through a macro.
+struct CollectStartRegion : public TraversalVisitor {
+  using TraversalVisitor::visit;
+
+  std::vector<Definition *> entered;
+  std::vector<Definition *> reached; // with all the rules below them
+  bool unknown = false; // a User ope, a combinator rule or a macro parameter
+
+  void visit(Sequence &ope) override {
+    for (const auto &op : ope.opes_) {
+      op->accept(*this);
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      if (!vis.result) { break; }
+    }
+  }
+  // An alternative that cannot start with the byte is skipped by its first
+  // set.
+  void visit(PrioritizedChoice &ope) override {
+    for (size_t i = 0; i < ope.opes_.size(); i++) {
+      if (i < ope.first_sets_.size()) {
+        const auto &fs = ope.first_sets_[i];
+        if (!fs.any_char && !fs.can_be_empty) { continue; }
+      }
+      ope.opes_[i]->accept(*this);
+    }
+  }
+  // An operator follows an atom that matches empty at the same position.
+  void visit(PrecedenceClimbing &ope) override {
+    ope.atom_->accept(*this);
+    ComputeCanBeEmpty vis;
+    ope.atom_->accept(vis);
+    if (vis.result) { ope.binop_->accept(*this); }
+  }
+  void visit(AndPredicate &ope) override { reach(*ope.ope_); }
+  void visit(NotPredicate &ope) override { reach(*ope.ope_); }
+  void visit(Recovery &ope) override { reach(*ope.ope_); }
+  void visit(User &) override { unknown = true; }
+  void visit(Holder &) override { unknown = true; }
+  void visit(Reference &ope) override;
+
+private:
+  void reach(Ope &ope) {
+    CollectRuleRefs vis;
+    ope.accept(vis);
+    reached.insert(reached.end(), vis.rules.begin(), vis.rules.end());
+    if (vis.has_user) { unknown = true; }
+  }
 };
 
 // Structural signature of an Ope. Two alternatives whose first k elements
@@ -3624,11 +3687,16 @@ public:
   bool is_left_recursive = false;
   bool can_be_empty = false;
   // The bytes a match of this rule can start with, when it cannot match empty
-  // and they are known (set up with the first sets). Like a choice alternative
-  // that cannot start with the next byte, the rule is then not entered on
-  // another byte (see Reference::parse_dispatch).
+  // and they are known (set up with the first sets).
   bool has_start_bytes = false;
   std::bitset<256> start_bytes;
+  // Set at the start of a parse: has_start_bytes, and entering the rule on
+  // another byte would run no callback. Like a choice alternative that cannot
+  // start with the next byte, the rule is then not entered on another byte
+  // (see Definition::analyze_skippable and Reference::parse_dispatch). It does
+  // not depend on the start rule, since a nested parse from another start
+  // rule sets it again.
+  bool skippable = false;
   // Body contains a macro invocation, whose arguments resolve against the
   // innermost rule on rule_stack; computed by AssignIDToDefinition. The
   // conservative default keeps the stack maintained until then.
@@ -3702,6 +3770,7 @@ private:
 
   void collect_rule_refs(const std::unordered_map<void *, size_t> &ids) const;
   void analyze_value_use() const;
+  void analyze_skippable() const;
 
   void initialize_packrat_filter() const;
 
@@ -3794,6 +3863,8 @@ private:
 
     c.max_depth = max_depth;
     c.limits_depth = max_depth != std::numeric_limits<size_t>::max();
+    c.skips_rules =
+        !c.needs_rule_stack && !c.limits_depth && !skipping_runs_callbacks_;
 
     try {
       size_t i = 0;
@@ -3858,7 +3929,15 @@ private:
   struct RuleRefs {
     std::vector<size_t> rules;
     bool reads_scope = false;
+    // The rule's start region (see CollectStartRegion), by id.
+    std::vector<size_t> entered;
+    std::vector<size_t> reached;
+    bool unknown = false;
   };
+  // The rules the whitespace and word skipping may match, by id, and whether
+  // any callback may run below them (see Context::skips_rules).
+  mutable std::vector<size_t> skipping_rules_;
+  mutable bool skipping_runs_callbacks_ = false;
   mutable std::vector<RuleRefs> rule_refs_;
   // The callbacks analyze_value_use last saw on each rule, by id.
   mutable std::vector<uint8_t> analyzed_callbacks_;
@@ -4825,13 +4904,11 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
-      // A rule that cannot start here is not entered, as a choice skips an
-      // alternative that cannot (see PrioritizedChoice::parse_core). A parse
-      // that reports errors or traces still enters it, to report what it
-      // expected or to trace it, and so does one with a nesting limit, which
-      // the rules inside may reach.
-      if (!c.needs_rule_stack && !c.limits_depth && rule_->has_start_bytes &&
-          n > 0 && !rule_->start_bytes.test(static_cast<unsigned char>(*s))) {
+      // A rule that cannot start here is not entered where that goes unnoticed
+      // (see Context::skips_rules and Definition::skippable), as a choice
+      // skips an alternative that cannot (see PrioritizedChoice::parse_core).
+      if (c.skips_rules && rule_->skippable && n > 0 &&
+          !rule_->start_bytes.test(static_cast<unsigned char>(*s))) {
         return static_cast<size_t>(-1);
       }
       // Definition. The empty argument scope only exists to shadow the
@@ -5085,6 +5162,16 @@ inline void FindLiteralToken::visit(Reference &ope) {
     for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
+  }
+}
+
+inline void CollectStartRegion::visit(Reference &ope) {
+  if (!ope.rule_) {
+    unknown = true; // a macro parameter
+  } else if (ope.rule_->is_macro) {
+    reach(ope);
+  } else {
+    entered.push_back(ope.rule_);
   }
 }
 
@@ -5477,6 +5564,25 @@ inline void Definition::collect_rule_refs(
       rule_refs_[id].rules.push_back(ids.at(rule));
     }
     rule_refs_[id].reads_scope = vis.reads_scope;
+
+    CollectStartRegion region;
+    ope->accept(region);
+    for (auto rule : region.entered) {
+      rule_refs_[id].entered.push_back(ids.at(rule));
+    }
+    for (auto rule : region.reached) {
+      rule_refs_[id].reached.push_back(ids.at(rule));
+    }
+    rule_refs_[id].unknown = region.unknown;
+  }
+
+  for (const auto &ope : {whitespaceOpe, wordOpe}) {
+    if (!ope) { continue; }
+    CollectRuleRefs vis;
+    ope->accept(vis);
+    for (auto rule : vis.rules) {
+      skipping_rules_.push_back(ids.at(rule));
+    }
   }
 
   // A macro's body parses into its caller's scope.
@@ -5550,6 +5656,8 @@ inline void Definition::analyze_value_use() const {
     def->value_always_empty = !def->action && !refs.reads_scope;
   }
 
+  analyze_skippable();
+
   // A rule that may take a value from below may have one.
   for (auto again = true; again;) {
     again = false;
@@ -5563,6 +5671,58 @@ inline void Definition::analyze_value_use() const {
         }
       }
     }
+  }
+}
+
+// A rule that cannot start with the next byte is skipped instead of entered
+// (see Reference::parse_dispatch) only where entering it would run no
+// callback, so that skipping it goes unnoticed. Entered there, the rule fails
+// without consuming anything: its enter and leave run, and so do those of
+// the rules it enters at its start, whose actions and predicates run too if
+// they can match empty; a lookahead, a recovery and a macro there may match
+// anything below them, and so may the whitespace and word skipping (checked
+// per start rule, see Context::skips_rules). An AST action depends on its
+// values alone and does not count.
+inline void Definition::analyze_skippable() const {
+  auto n = definition_ids_.size();
+  std::vector<bool> on_enter(n), on_match(n), below(n), start(n);
+  for (const auto &[def, id] : definition_ids_) {
+    on_enter[id] = def->enter || def->leave;
+    on_match[id] = def->predicate || (def->action && !def->disable_action &&
+                                      !def->action.ast_node_type());
+    below[id] = on_enter[id] || on_match[id];
+  }
+  auto any_flagged = [](const std::vector<bool> &flag,
+                        const std::vector<size_t> &ids) {
+    return std::any_of(ids.begin(), ids.end(),
+                       [&](size_t r) { return flag[r]; });
+  };
+  // Raises the flag of each rule that lists a flagged rule in `to`.
+  auto spread = [&](std::vector<bool> &flag,
+                    std::vector<size_t> RuleRefs::*to) {
+    for (auto again = true; again;) {
+      again = false;
+      for (size_t id = 0; id < n; id++) {
+        if (!flag[id] && any_flagged(flag, rule_refs_[id].*to)) {
+          flag[id] = again = true;
+        }
+      }
+    }
+  };
+  // Anything below a rule may run.
+  spread(below, &RuleRefs::rules);
+  skipping_runs_callbacks_ = any_flagged(below, skipping_rules_);
+  for (size_t id = 0; id < n; id++) {
+    const auto &refs = rule_refs_[id];
+    start[id] =
+        on_enter[id] || refs.unknown || any_flagged(below, refs.reached) ||
+        std::any_of(refs.entered.begin(), refs.entered.end(), [&](size_t r) {
+          return on_match[r] && definition_ids_[r].first->can_be_empty;
+        });
+  }
+  spread(start, &RuleRefs::entered);
+  for (const auto &[def, id] : definition_ids_) {
+    def->skippable = def->has_start_bytes && !start[id];
   }
 }
 
