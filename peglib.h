@@ -1188,10 +1188,10 @@ public:
 
   std::shared_ptr<Ope> wordOpe;
 
-  // Captures by name. The names are copies: the capture that recorded one
-  // may be gone by the time a back reference reads it (a capture in a macro
-  // argument is rebuilt for each call).
-  std::vector<std::pair<std::string, std::string>> capture_entries;
+  // Captures by name. A name views the string that every copy of its
+  // capture's action shares, which the grammar's own capture keeps alive (a
+  // capture in a macro argument is rebuilt for each call).
+  std::vector<std::pair<std::string_view, std::string>> capture_entries;
 
   // False when the grammar contains no Cut or Recovery ope (determined once
   // at id-assignment time); lets PrioritizedChoice skip all cut_stack work.
@@ -6975,10 +6975,10 @@ private:
         data.captures_in_current_definition.insert(name);
 
         // The name is kept here, since the grammar text may be gone when
-        // the grammar is used.
-        return cap(ope, [name = std::string(name)](const char *a_s, size_t a_n,
-                                                   Context &c) {
-          c.capture_entries.emplace_back(name, std::string(a_s, a_n));
+        // the grammar is used, and shared by the copies of this action.
+        return cap(ope, [name = std::make_shared<const std::string>(name)](
+                            const char *a_s, size_t a_n, Context &c) {
+          c.capture_entries.emplace_back(*name, std::string(a_s, a_n));
         });
       }
       default: {
