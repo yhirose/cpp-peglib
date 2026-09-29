@@ -3291,6 +3291,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) {
       result_.can_be_empty = true;
+      add_whitespace();
     } else {
       auto ch = static_cast<unsigned char>(ope.lit_[0]);
       result_.chars.set(ch);
@@ -3332,6 +3333,10 @@ struct ComputeFirstSet : public TraversalVisitor {
     }
   }
   void visit(AnyCharacter &) override { result_.any_char = true; }
+  void visit(TokenBoundary &ope) override {
+    ope.ope_->accept(*this);
+    if (result_.can_be_empty) { add_whitespace(); }
+  }
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result_.any_char = true; }
@@ -3347,18 +3352,39 @@ struct ComputeFirstSet : public TraversalVisitor {
   // a different call context.
   using FirstSetCache = std::unordered_map<const Definition *, FirstSet>;
 
-  explicit ComputeFirstSet(FirstSetCache &cache) : cache_(cache) {}
+  // `whitespace` is the first set of %whitespace, empty without one.
+  ComputeFirstSet(FirstSetCache &cache, const FirstSet &whitespace)
+      : cache_(cache), whitespace_(whitespace) {}
 
   FirstSet result_;
 
 private:
+  // A literal, a token boundary and a no_whitespace rule skip whitespace
+  // after their match. When the match is empty, the whitespace comes first.
+  // (The match can be empty wherever this is called, so merging can_be_empty
+  // changes nothing.)
+  void add_whitespace() { result_.merge(whitespace_); }
+
   FirstSetCache &cache_;
+  const FirstSet &whitespace_;
   std::unordered_set<const Definition *> refs_;
   size_t cycle_count_ = 0;
 };
 
 struct SetupFirstSets : public TraversalVisitor {
   using TraversalVisitor::visit;
+
+  // `whitespace` is the grammar's %whitespace operator, if any.
+  explicit SetupFirstSets(const std::shared_ptr<Ope> &whitespace = nullptr) {
+    if (whitespace) {
+      // Whitespace skips no whitespace inside itself.
+      ComputeFirstSet::FirstSetCache cache;
+      FirstSet none;
+      ComputeFirstSet cfs(cache, none);
+      whitespace->accept(cfs);
+      whitespace_ = cfs.result_;
+    }
+  }
 
   void visit(Sequence &ope) override;
   void setup_keyword_guarded_identifier(Sequence &ope);
@@ -3367,7 +3393,7 @@ struct SetupFirstSets : public TraversalVisitor {
     ope.first_sets_.clear();
     ope.first_sets_.reserve(ope.opes_.size());
     for (const auto &op : ope.opes_) {
-      ComputeFirstSet cfs(first_set_cache_);
+      ComputeFirstSet cfs(first_set_cache_, whitespace_);
       op->accept(cfs);
       ope.first_sets_.push_back(cfs.result_);
     }
@@ -3385,6 +3411,7 @@ struct SetupFirstSets : public TraversalVisitor {
   void visit(Holder &ope) override;
 
 private:
+  FirstSet whitespace_; // empty without %whitespace, so it adds nothing
   ComputeFirstSet::FirstSetCache first_set_cache_;
   std::unordered_set<const Definition *> visited_rules_;
 };
@@ -5272,7 +5299,10 @@ inline void ComputeFirstSet::visit(Reference &ope) {
       cycle_count_++; // cycle / left recursion
       // The rule adds its bytes where it is being computed, further up. When
       // it can match empty, what follows it here can start a match as well.
-      if (ope.rule_->can_be_empty) { result_.can_be_empty = true; }
+      if (ope.rule_->can_be_empty) {
+        result_.can_be_empty = true;
+        if (ope.rule_->no_whitespace) { add_whitespace(); }
+      }
       return;
     }
     auto save = std::exchange(result_, FirstSet{});
@@ -5294,6 +5324,7 @@ inline void ComputeFirstSet::visit(Reference &ope) {
   }
 
   result_.merge(*rule_fs);
+  if (ope.rule_->no_whitespace && rule_fs->can_be_empty) { add_whitespace(); }
   if (!result_.first_literal) {
     result_.first_literal = rule_fs->first_literal;
   }
@@ -5317,7 +5348,7 @@ inline void SetupFirstSets::visit(Holder &ope) {
   if (!visited_rules_.insert(ope.outer_).second) { return; }
 
   auto &def = *ope.outer_;
-  ComputeFirstSet cfs(first_set_cache_);
+  ComputeFirstSet cfs(first_set_cache_, whitespace_);
   ope.ope_->accept(cfs);
   const auto &fs = cfs.result_;
   def.has_start_bytes = !fs.any_char && !fs.can_be_empty && !def.is_macro &&
@@ -6215,21 +6246,23 @@ struct GrammarBlob {
         pc->binop_->accept(vis);
       }
     }
-    {
-      SetupFirstSets vis; // shared across rules -> O(N)
-      for (auto &x : *g)
-        x.second.accept(vis);
-    }
     // Re-derive automatic whitespace/word skipping on the start rule from the
     // %whitespace / %word definitions, exactly as ParserGenerator does. Sharing
-    // the (already linked and first-set) definition operators avoids leaving
-    // references inside the skipping ope unlinked, and keeps the blob smaller.
+    // the (already linked) definition operators avoids leaving references
+    // inside the skipping ope unlinked, and keeps the blob smaller.
     if (g->count(WHITESPACE_DEFINITION_NAME)) {
       (*g)[start_out].whitespaceOpe =
           wsp((*g)[WHITESPACE_DEFINITION_NAME].get_core_operator());
     }
     if (g->count(WORD_DEFINITION_NAME)) {
       (*g)[start_out].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
+    }
+    // After %whitespace: first sets count the whitespace skipped after an
+    // empty match.
+    {
+      SetupFirstSets vis((*g)[start_out].whitespaceOpe); // shared -> O(N)
+      for (auto &x : *g)
+        x.second.accept(vis);
     }
     return g;
   }
@@ -7316,7 +7349,7 @@ private:
     // each rule's first-sets are computed once (O(N)) instead of re-walking
     // every reachable rule once per referencing rule (O(N^2)).
     {
-      SetupFirstSets vis;
+      SetupFirstSets vis(start_rule.whitespaceOpe);
       for (auto &x : grammar) {
         x.second.accept(vis);
       }
