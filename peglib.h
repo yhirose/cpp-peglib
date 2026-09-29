@@ -3335,7 +3335,9 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result_.any_char = true; }
-  void visit(Cut &) override { result_.can_be_empty = true; }
+  // A cut before the first byte stops the enclosing choice even when the
+  // expression then fails, so the next byte cannot tell to skip it.
+  void visit(Cut &) override { result_.any_char = true; }
 
   // Per-rule cache shared across a SetupFirstSets traversal. Without it,
   // every alternative of every PrioritizedChoice re-walks referenced
@@ -5253,6 +5255,9 @@ inline void ComputeFirstSet::visit(Reference &ope) {
   } else {
     if (!refs_.insert(ope.rule_).second) {
       cycle_count_++; // cycle / left recursion
+      // The rule adds its bytes where it is being computed, further up. When
+      // it can match empty, what follows it here can start a match as well.
+      if (ope.rule_->can_be_empty) { result_.can_be_empty = true; }
       return;
     }
     auto save = std::exchange(result_, FirstSet{});

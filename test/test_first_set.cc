@@ -299,3 +299,31 @@ TEST(FirstSetTest, Left_recursive_rule_referenced_from_multiple_rules) {
   EXPECT_TRUE(pg.parse("q9"));
   EXPECT_FALSE(pg.parse("p+1")); // Expr cannot start with '+'
 }
+
+// A left-recursive rule that can match empty lets what follows its recursive
+// reference start a match: A can start with 'x'.
+TEST(FirstSetTest, Left_recursive_rule_that_can_be_empty) {
+  parser pg(R"(
+    S <- C / 'q'
+    C <- A 'z'
+    A <- A 'x' / ''
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("z"));
+  EXPECT_TRUE(pg.parse("xxz"));
+  EXPECT_TRUE(pg.parse("q"));
+}
+
+// A cut before the first byte stops the enclosing choice even when A then
+// fails, so A must be tried although it cannot start with 'b'.
+TEST(FirstSetTest, Leading_cut_is_not_skipped) {
+  parser pg(R"(
+    S <- A / 'b'
+    A <- ↑ 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_FALSE(pg.parse("b"));
+}
