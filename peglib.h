@@ -1615,19 +1615,22 @@ public:
             vs.choice_count_, vs.choice_,     capture_entries.size()};
   }
 
+  // Mostly there is nothing to drop, and resize is an out-of-line call.
+  template <typename T> static void truncate(T &v, size_t size) {
+    if (v.size() > size) { v.resize(size); }
+  }
+
   void rollback(SemanticValues &vs, const Snapshot &snap) {
-    vs.resize(snap.sv_size);
-    vs.tags.resize(snap.sv_tags_size);
-    vs.tokens.resize(snap.sv_tokens_size);
+    truncate(vs, snap.sv_size);
+    truncate(vs.tags, snap.sv_tags_size);
+    truncate(vs.tokens, snap.sv_tokens_size);
     vs.sv_ = snap.sv_sv;
     vs.choice_count_ = snap.choice_count;
     vs.choice_ = snap.choice;
-    capture_entries.resize(snap.capture_size);
+    truncate(capture_entries, snap.capture_size);
   }
 
-  void truncate_ast_log(size_t size) {
-    if (ast_log.size() > size) { ast_log.resize(size); }
-  }
+  void truncate_ast_log(size_t size) { truncate(ast_log, size); }
 
   // Skip trailing whitespace with trace suppression.
   // Returns whitespace length, or -1 on failure.
