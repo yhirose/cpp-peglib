@@ -3403,6 +3403,11 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result_.any_char = true; }
+  // An operator follows an atom that matches empty at the same position.
+  void visit(PrecedenceClimbing &ope) override {
+    ope.atom_->accept(*this);
+    if (result_.can_be_empty) { ope.binop_->accept(*this); }
+  }
   // A cut before the first byte stops the enclosing choice even when the
   // expression then fails, so the next byte cannot tell to skip it.
   void visit(Cut &) override { result_.any_char = true; }
