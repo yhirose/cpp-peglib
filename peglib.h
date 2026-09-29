@@ -2738,8 +2738,8 @@ struct AssignIDToDefinition : public TraversalVisitor {
 };
 
 // Collects the rules one rule's body takes values from, without walking into
-// them, and whether the body reads its scope itself (see
-// Definition::collect_rule_refs).
+// them, whether the body reads its scope itself, and whether it records or
+// reads captures (see Definition::collect_rule_refs).
 struct CollectRuleRefs : public TraversalVisitor {
   using TraversalVisitor::visit;
 
@@ -3938,8 +3938,9 @@ private:
   mutable std::vector<std::pair<Definition *, size_t>> definition_ids_;
   mutable bool has_cut_ = false;
   // For each rule reached from here (by id): the ids of the rules its body
-  // takes values from, and whether the body reads its scope itself (a User
-  // or PrecedenceClimbing ope, also through a macro).
+  // takes values from, whether the body reads its scope itself (a User or
+  // PrecedenceClimbing ope, also through a macro), and whether it records or
+  // reads captures.
   struct RuleRefs {
     std::vector<size_t> rules;
     bool reads_scope = false;
@@ -3954,6 +3955,8 @@ private:
   mutable std::vector<size_t> skipping_rules_;
   mutable bool skipping_runs_callbacks_ = false;
   mutable std::vector<RuleRefs> rule_refs_;
+  // Raises the flag of each rule that lists a flagged rule in `to`.
+  void spread(std::vector<bool> &flag, std::vector<size_t> RuleRefs::*to) const;
   // The callbacks analyze_value_use last saw on each rule, by id.
   mutable std::vector<uint8_t> analyzed_callbacks_;
   mutable std::once_flag packrat_filter_init_;
@@ -5694,6 +5697,20 @@ inline void Definition::analyze_value_use() const {
   }
 }
 
+inline void Definition::spread(std::vector<bool> &flag,
+                               std::vector<size_t> RuleRefs::*to) const {
+  for (auto again = true; again;) {
+    again = false;
+    for (size_t id = 0; id < flag.size(); id++) {
+      const auto &ids = rule_refs_[id].*to;
+      if (!flag[id] && std::any_of(ids.begin(), ids.end(),
+                                   [&](size_t r) { return flag[r]; })) {
+        flag[id] = again = true;
+      }
+    }
+  }
+}
+
 // A rule that cannot start with the next byte is skipped instead of entered
 // (see Reference::parse_dispatch) only where entering it would run no
 // callback, so that skipping it goes unnoticed. Entered there, the rule fails
@@ -5716,18 +5733,6 @@ inline void Definition::analyze_skippable() const {
                         const std::vector<size_t> &ids) {
     return std::any_of(ids.begin(), ids.end(),
                        [&](size_t r) { return flag[r]; });
-  };
-  // Raises the flag of each rule that lists a flagged rule in `to`.
-  auto spread = [&](std::vector<bool> &flag,
-                    std::vector<size_t> RuleRefs::*to) {
-    for (auto again = true; again;) {
-      again = false;
-      for (size_t id = 0; id < n; id++) {
-        if (!flag[id] && any_flagged(flag, rule_refs_[id].*to)) {
-          flag[id] = again = true;
-        }
-      }
-    }
   };
   // Anything below a rule may run.
   spread(below, &RuleRefs::rules);
@@ -5988,25 +5993,28 @@ inline void Definition::initialize_packrat_filter() const {
     // The cache keeps a match's length and value, not the captures it
     // recorded, and a back reference's match depends on the captures made
     // before it. A rule whose match may record or read captures, itself or
-    // through the rules below it, is therefore not memoized.
+    // through the rules below it, is therefore not memoized. Nor is any rule
+    // when the whitespace skipping does, since a literal skips whitespace
+    // after it in whatever rule it is in.
     std::vector<bool> uses_captures(def_count);
     for (size_t id = 0; id < def_count; id++) {
       uses_captures[id] = rule_refs_[id].uses_captures;
     }
-    for (auto again = true; again;) {
-      again = false;
-      for (size_t id = 0; id < def_count; id++) {
-        if (uses_captures[id]) { continue; }
-        for (auto r : rule_refs_[id].rules) {
-          if (uses_captures[r]) {
-            uses_captures[id] = again = true;
-            break;
-          }
-        }
-      }
+    spread(uses_captures, &RuleRefs::rules);
+    auto whitespace_uses_captures = false;
+    if (whitespaceOpe) {
+      CollectRuleRefs vis;
+      whitespaceOpe->accept(vis);
+      whitespace_uses_captures =
+          vis.uses_captures ||
+          std::any_of(vis.rules.begin(), vis.rules.end(), [&](auto rule) {
+            return rule->id < def_count && uses_captures[rule->id];
+          });
     }
     for (size_t id = 0; id < def_count; id++) {
-      if (uses_captures[id]) { benefits[id] = false; }
+      if (whitespace_uses_captures || uses_captures[id]) {
+        benefits[id] = false;
+      }
     }
 
     // Left-recursive rules read and write the packrat cache directly during

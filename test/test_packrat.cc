@@ -290,9 +290,6 @@ TEST(PackratTest, Packrat_parse_nested_in_an_action_keeps_the_outer_ids) {
   EXPECT_EQ(g.at("Expr").id, g.at("W").id);
 }
 
-// =============================================================================
-// Lookahead Predicate Tests
-
 // B is tried twice at the start, where it captures 'a'. Memoized, the second
 // try would not capture it again after the first try's capture was rolled
 // back, and the $o at the end would have nothing to match.
@@ -331,3 +328,24 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_a_reparsed_operator) {
     EXPECT_FALSE(pg.parse("1*2+3;=*")) << packrat;
   }
 }
+
+// The whitespace after 'a' captures w, so every rule that skips whitespace
+// captures, B included, although its body does not. Memoized, B's second try
+// would not capture w again after the first try's capture was rolled back.
+TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- B 'x' / B 'y'
+      B <- 'a'
+      %whitespace <- $w<[ ]+> / [|] $w / ''
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("a  y|  ")) << packrat;
+    EXPECT_FALSE(pg.parse("a  y| ")) << packrat;
+  }
+}
+
+// =============================================================================
+// Lookahead Predicate Tests
