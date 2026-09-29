@@ -2452,11 +2452,7 @@ public:
       : atom_(atom), binop_(binop), info_(info), rule_(rule) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
-                    std::any &dt) const override {
-    // It reads the values of its operands.
-    auto se = c.set_value_use(c.recognize_only, false);
-    return parse_expression(s, n, vs, c, dt, 0);
-  }
+                    std::any &dt) const override;
 
   void accept(Visitor &v) override;
 
@@ -4981,6 +4977,32 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
   c.error_info.message_pos = s;
   c.error_info.message = "undefined back reference '$" + name_ + "'...";
   return static_cast<size_t>(-1);
+}
+
+inline size_t PrecedenceClimbing::parse_core(const char *s, size_t n,
+                                             SemanticValues &vs, Context &c,
+                                             std::any &dt) const {
+  // It reads the values of its operands.
+  auto se = c.set_value_use(c.recognize_only, false);
+  if (!rule_.is_macro || rule_.is_left_recursive) {
+    return parse_expression(s, n, vs, c, dt, 0);
+  }
+
+  // A macro's body parses on its caller's values, unless it is left-recursive
+  // (see Holder::parse_rule). Fold the operands in a scope of their own, so
+  // that the caller's values stay out of the actions and the fold, and then
+  // hand the result over.
+  auto &chvs = c.push_semantic_values_scope();
+  auto pop = scope_exit([&]() { c.pop_semantic_values_scope(); });
+  auto len = parse_expression(s, n, chvs, c, dt, 0);
+  if (success(len)) {
+    for (auto &v : chvs) {
+      vs.emplace_back(std::move(v));
+    }
+    vs.tags.insert(vs.tags.end(), chvs.tags.begin(), chvs.tags.end());
+    vs.tokens.insert(vs.tokens.end(), chvs.tokens.begin(), chvs.tokens.end());
+  }
+  return len;
 }
 
 inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,

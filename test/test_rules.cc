@@ -581,6 +581,47 @@ TEST(PrecedenceTest,
   }
 }
 
+// A macro's body parses on its caller's values; its precedence fold must
+// leave the values before it alone, also when the alternative it is in fails
+// after the fold.
+TEST(PrecedenceTest, Precedence_climbing_in_a_macro_keeps_the_callers_values) {
+  parser pg(R"(
+    S          <- A (EXPR(NUM, OP) '!' / REST) C
+    EXPR(X, O) <- X (O X)* {
+                    precedence
+                      L +
+                  }
+    A          <- 'a'
+    REST       <- < [0-9+ ]+ >
+    C          <- 'c'
+    NUM        <- < [0-9]+ >
+    OP         <- < '+' >
+    %whitespace <- [ \t]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  pg["A"] = [](const SemanticValues &) { return std::string("A"); };
+  pg["REST"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+  pg["C"] = [](const SemanticValues &) { return std::string("C"); };
+  pg["EXPR"] = [](const SemanticValues &vs) {
+    EXPECT_EQ(3u, vs.size());
+    return std::string("E");
+  };
+  pg["S"] = [](const SemanticValues &vs) {
+    std::string r;
+    for (size_t i = 0; i < vs.size(); i++) {
+      r += std::any_cast<std::string>(vs[i]) + ";";
+    }
+    return r;
+  };
+
+  std::string val;
+  EXPECT_TRUE(pg.parse("a 1 + 2 ! c", val));
+  EXPECT_EQ("A;E;C;", val);
+  EXPECT_TRUE(pg.parse("a 1 + 2 c", val));
+  EXPECT_EQ("A;1 + 2 ;C;", val);
+}
+
 // =============================================================================
 // Precedence Edge Case Tests
 // =============================================================================
