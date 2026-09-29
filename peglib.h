@@ -2467,6 +2467,7 @@ public:
 private:
   size_t parse_expression(const char *s, size_t n, SemanticValues &vs,
                           Context &c, std::any &dt, size_t min_prec) const;
+  static void hand_over(SemanticValues &from, SemanticValues &to);
 };
 
 class Recovery : public Ope {
@@ -4998,14 +4999,19 @@ inline size_t PrecedenceClimbing::parse_core(const char *s, size_t n,
   auto &chvs = c.push_semantic_values_scope();
   auto pop = scope_exit([&]() { c.pop_semantic_values_scope(); });
   auto len = parse_expression(s, n, chvs, c, dt, 0);
-  if (success(len)) {
-    for (auto &v : chvs) {
-      vs.emplace_back(std::move(v));
-    }
-    vs.tags.insert(vs.tags.end(), chvs.tags.begin(), chvs.tags.end());
-    vs.tokens.insert(vs.tokens.end(), chvs.tokens.begin(), chvs.tokens.end());
-  }
+  if (success(len)) { hand_over(chvs, vs); }
   return len;
+}
+
+// Appends what a scope holds to another: all its values, whether none or
+// several, with their tags and tokens.
+inline void PrecedenceClimbing::hand_over(SemanticValues &from,
+                                          SemanticValues &to) {
+  for (auto &v : from) {
+    to.emplace_back(std::move(v));
+  }
+  to.tags.insert(to.tags.end(), from.tags.begin(), from.tags.end());
+  to.tokens.insert(to.tokens.end(), from.tokens.begin(), from.tokens.end());
 }
 
 inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
@@ -5049,7 +5055,9 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     if (level < min_prec) { break; }
 
-    vs.emplace_back(std::move(chvs[0]));
+    // The operator, and the right operand below, hand over what they
+    // produced, as they would in the repetition this parses.
+    hand_over(chvs, vs);
     i += chlen;
 
     auto next_min_prec = level;
@@ -5066,19 +5074,26 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
       break;
     }
 
-    vs.emplace_back(std::move(chvs[0]));
+    hand_over(chvs, vs);
     i += chlen;
 
+    // The result stands for the operands folded into it. What an action
+    // returns is this rule's value and carries its tag, as Holder::parse_rule
+    // tags a rule's value.
     std::any val;
+    auto tag =
+        rule_.action || vs.tags.empty() ? str2tag(rule_.name) : vs.tags[0];
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
       static const std::any empty_predicate_data;
       val = c.run_action(rule_, vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
-      val = vs[0];
+      val = std::move(vs[0]);
     }
     vs.clear();
+    vs.tags.clear();
     vs.emplace_back(std::move(val));
+    vs.tags.emplace_back(tag);
     used = true;
   }
 
