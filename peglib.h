@@ -4992,15 +4992,12 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
   auto i = len;
   while (i < n) {
-    std::vector<std::any> save_values(vs.begin(), vs.end());
-    auto save_tokens = vs.tokens;
-
-    // An operator that goes unused leaves no captures behind, as in the
-    // repetition `atom (binop atom)*` this parses.
-    auto save_captures = c.capture_entries.size();
+    // An operator that goes unused leaves nothing behind, captures
+    // included, as in the repetition `atom (binop atom)*` this parses.
+    auto snap = c.snapshot(vs);
     auto used = false;
-    auto se_captures = scope_exit([&]() {
-      if (!used) { c.capture_entries.resize(save_captures); }
+    auto se_rollback = scope_exit([&]() {
+      if (!used) { c.rollback(vs, snap); }
     });
 
     auto chvs = c.push_semantic_values_scope();
@@ -5037,8 +5034,6 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     }
 
     if (fail(chlen)) {
-      vs.assign(save_values.begin(), save_values.end());
-      vs.tokens = save_tokens;
       i = chlen;
       break;
     }
