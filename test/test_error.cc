@@ -1116,6 +1116,42 @@ TEST(MaxDepthTest, Limit_is_hit_inside_a_precedence) {
   EXPECT_FALSE(pg.parse("1+(2+(3+(4+(5))))"));
 }
 
+// The right operand of a right-associative operator is parsed by a nested
+// call, not a rule match, so a long chain of them nests as deep as a long run
+// of brackets and must hit the limit instead of overflowing the stack. A
+// left-associative chain is parsed in a loop and nests no deeper as it grows.
+TEST(MaxDepthTest, Right_operands_of_precedence_count) {
+  auto chain = [](size_t n) {
+    std::string s = "1";
+    for (size_t i = 0; i < n; i++) {
+      s += "+1";
+    }
+    return s;
+  };
+  for (std::string assoc : {"L", "R"}) {
+    for (auto packrat : {false, true}) {
+      for (auto ast : {false, true}) {
+        parser pg("E <- A (OP A)* { precedence " + assoc +
+                  " + }\n A <- [0-9]\n OP <- '+'");
+        ASSERT_TRUE(!!pg) << assoc;
+        if (packrat) { pg.enable_packrat_parsing(); }
+        if (ast) { pg.enable_ast(true); }
+        pg.set_max_depth(20);
+        std::string msg;
+        pg.set_logger([&](size_t, size_t, const std::string &m) { msg = m; });
+
+        EXPECT_TRUE(pg.parse(chain(10))) << assoc;
+        if (assoc == "L") {
+          EXPECT_TRUE(pg.parse(chain(100))) << assoc;
+        } else {
+          EXPECT_FALSE(pg.parse(chain(100000))) << assoc;
+          EXPECT_EQ("exceeded the maximum nesting depth of 20", msg) << assoc;
+        }
+      }
+    }
+  }
+}
+
 // =============================================================================
 // Error Position Tests
 // =============================================================================

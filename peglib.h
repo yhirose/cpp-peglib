@@ -1316,12 +1316,22 @@ public:
   // token here.
   std::string_view *operator_token = nullptr;
 
-  // Rule matches in progress, counted only when the start rule sets a
-  // max_depth. Going past it abandons the parse (see Holder::parse_core).
+  // Nesting in progress: rule matches, counted only when the start rule sets
+  // a max_depth, and the right operands a precedence rule is parsing. Going
+  // past max_depth abandons the parse (see Holder::parse_core).
   size_t depth = 0;
   size_t max_depth = std::numeric_limits<size_t>::max();
   bool limits_depth = false;
   bool abandoned = false;
+
+  // One more level of nesting in progress. Any exception ends the parse and
+  // its Context, so a caller takes the level back only on a normal exit.
+  void nest(const char *pos, const Definition *rule) {
+    if (++depth > max_depth) {
+      abandoned = true;
+      throw NestingTooDeep{pos, rule};
+    }
+  }
 
   // Whether a rule that cannot start with the next byte may be skipped
   // instead of entered, where that goes unnoticed (see
@@ -4564,13 +4574,8 @@ Holder::parse_rule_counted(const char *s, size_t n, SemanticValues &vs,
                            Context &c, std::any &dt) const {
   // Too deep a nesting abandons the whole parse: failing this match instead
   // would let the parse go on by backtracking, possibly to a different
-  // result. Definition::parse_core catches the throw and reports it. Any
-  // exception ends the parse and its Context, so the count needs no
-  // restoring on the way out.
-  if (++c.depth > c.max_depth) {
-    c.abandoned = true;
-    throw NestingTooDeep{s, outer_};
-  }
+  // result. Definition::parse_core catches the throw and reports it.
+  c.nest(s, outer_);
   auto len = parse_rule(s, n, vs, c, dt);
   c.depth--;
   return len;
@@ -5053,11 +5058,15 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     i += op_len;
 
     // The right operand folds its own operators, so it parses in a scope of
-    // its own and hands over the result.
+    // its own and hands over the result. It nests the way a rule match does,
+    // so it counts as one, or a right-associative chain could overflow the
+    // stack under any max_depth.
     auto next_min_prec = assoc == 'L' ? level + 1 : level;
+    c.nest(s + i, &rule_);
     auto rhs_len = parse_in_scope(vs, c, [&](SemanticValues &chvs) {
       return parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
     });
+    c.depth--;
     if (fail(rhs_len)) {
       i = rhs_len;
       break;
