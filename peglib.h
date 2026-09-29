@@ -2760,10 +2760,16 @@ struct CollectRuleRefs : public TraversalVisitor {
     ope.atom_->accept(*this);
     ope.binop_->accept(*this);
   }
+  void visit(Capture &ope) override {
+    uses_captures = true;
+    ope.ope_->accept(*this);
+  }
+  void visit(BackReference &) override { uses_captures = true; }
 
   std::vector<Definition *> rules;
   bool reads_scope = false;
   bool has_user = false;
+  bool uses_captures = false; // records captures or reads them
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3937,6 +3943,7 @@ private:
   struct RuleRefs {
     std::vector<size_t> rules;
     bool reads_scope = false;
+    bool uses_captures = false;
     // The rule's start region (see CollectStartRegion), by id.
     std::vector<size_t> entered;
     std::vector<size_t> reached;
@@ -5581,6 +5588,7 @@ inline void Definition::collect_rule_refs(
       rule_refs_[id].rules.push_back(ids.at(rule));
     }
     rule_refs_[id].reads_scope = vis.reads_scope;
+    rule_refs_[id].uses_captures = vis.uses_captures;
 
     CollectStartRegion region;
     ope->accept(region);
@@ -5982,9 +5990,34 @@ inline void Definition::initialize_packrat_filter() const {
     if (whitespaceOpe) { whitespaceOpe->accept(finder); }
     if (wordOpe) { wordOpe->accept(finder); }
 
+    // The cache keeps a match's length and value, not the captures it
+    // recorded, and a back reference's match depends on the captures made
+    // before it. A rule whose match may record or read captures, itself or
+    // through the rules below it, is therefore not memoized.
+    std::vector<bool> uses_captures(def_count);
+    for (size_t id = 0; id < def_count; id++) {
+      uses_captures[id] = rule_refs_[id].uses_captures;
+    }
+    for (auto again = true; again;) {
+      again = false;
+      for (size_t id = 0; id < def_count; id++) {
+        if (uses_captures[id]) { continue; }
+        for (auto r : rule_refs_[id].rules) {
+          if (uses_captures[r]) {
+            uses_captures[id] = again = true;
+            break;
+          }
+        }
+      }
+    }
+    for (size_t id = 0; id < def_count; id++) {
+      if (uses_captures[id]) { benefits[id] = false; }
+    }
+
     // Left-recursive rules read and write the packrat cache directly during
-    // seed-growing, so they must stay in the cached set. Macros are the
-    // exception: they use lr_memo only, keyed by instantiation.
+    // seed-growing, so they must stay in the cached set, captures or not.
+    // Macros are the exception: they use lr_memo only, keyed by
+    // instantiation.
     for (const auto &[def, id] : definition_ids_) {
       if (def->is_left_recursive && !def->is_macro && id < def_count) {
         benefits[id] = true;

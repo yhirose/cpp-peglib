@@ -292,3 +292,42 @@ TEST(PackratTest, Packrat_parse_nested_in_an_action_keeps_the_outer_ids) {
 
 // =============================================================================
 // Lookahead Predicate Tests
+
+// B is tried twice at the start, where it captures 'a'. Memoized, the second
+// try would not capture it again after the first try's capture was rolled
+// back, and the $o at the end would have nothing to match.
+TEST(PackratTest, Packrat_keeps_the_captures_of_a_retried_rule) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- B 'x' / B 'y' B
+      B <- $o<[a-z]> / '=' $o
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("ay=a")) << packrat;
+    EXPECT_FALSE(pg.parse("ay=b")) << packrat;
+  }
+}
+
+// The '+' after "1*2" ends the inner level and is parsed again at the outer
+// one, which has to capture it again.
+TEST(PackratTest, Packrat_keeps_the_captures_of_a_reparsed_operator) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S     <- BINOP 'z' / BINOP 'y' / EXPR ';' BINOP
+      EXPR  <- ATOM (BINOP ATOM)* {
+        precedence
+          L +
+          L *
+      }
+      ATOM  <- [0-9]
+      BINOP <- $o<[-+*]> / '=' $o
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("1*2+3;=+")) << packrat;
+    EXPECT_FALSE(pg.parse("1*2+3;=*")) << packrat;
+  }
+}
