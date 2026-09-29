@@ -292,6 +292,8 @@ parser["RULE"].leave = [](const Context &c, const char* s, size_t n, size_t matc
 };
 ```
 
+Where the next byte cannot start a match of a rule, the parser may skip the rule instead of entering it, so neither its *enter* nor its *leave* action runs there, and nothing inside it does. An alternative of a choice is skipped this way in any parse. Elsewhere the rule is still entered when a logger, an error reporter or a tracer is set, to report what it expected or to trace it, and when a nesting limit is set with `set_max_depth`, since the rules inside may reach it.
+
 You can receive error information via a logger:
 
 ```cpp

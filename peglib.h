@@ -3596,6 +3596,12 @@ public:
   bool disable_action = false;
   bool is_left_recursive = false;
   bool can_be_empty = false;
+  // The bytes a match of this rule can start with, when it cannot match empty
+  // and they are known (set up with the first sets). Like a choice alternative
+  // that cannot start with the next byte, the rule is then not entered on
+  // another byte (see Reference::parse_dispatch).
+  bool has_start_bytes = false;
+  std::bitset<256> start_bytes;
   // Body contains a macro invocation, whose arguments resolve against the
   // innermost rule on rule_stack; computed by AssignIDToDefinition. The
   // conservative default keeps the stack maintained until then.
@@ -4792,6 +4798,15 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
+      // A rule that cannot start here is not entered, as a choice skips an
+      // alternative that cannot (see PrioritizedChoice::parse_core). A parse
+      // that reports errors or traces still enters it, to report what it
+      // expected or to trace it, and so does one with a nesting limit, which
+      // the rules inside may reach.
+      if (!c.needs_rule_stack && !c.limits_depth && rule_->has_start_bytes &&
+          n > 0 && !rule_->start_bytes.test(static_cast<unsigned char>(*s))) {
+        return static_cast<size_t>(-1);
+      }
       // Definition. The empty argument scope only exists to shadow the
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
@@ -5300,6 +5315,15 @@ inline void SetupFirstSets::visit(Reference &ope) {
 // is O(N^2) for grammars with dense cross-references.
 inline void SetupFirstSets::visit(Holder &ope) {
   if (!visited_rules_.insert(ope.outer_).second) { return; }
+
+  auto &def = *ope.outer_;
+  ComputeFirstSet cfs(first_set_cache_);
+  ope.ope_->accept(cfs);
+  const auto &fs = cfs.result_;
+  def.has_start_bytes = !fs.any_char && !fs.can_be_empty && !def.is_macro &&
+                        !def.is_left_recursive;
+  def.start_bytes = fs.chars;
+
   ope.ope_->accept(*this);
 }
 

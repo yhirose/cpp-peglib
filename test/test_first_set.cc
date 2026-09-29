@@ -327,3 +327,61 @@ TEST(FirstSetTest, Leading_cut_is_not_skipped) {
   EXPECT_TRUE(pg.parse("a"));
   EXPECT_FALSE(pg.parse("b"));
 }
+
+// =============================================================================
+// Unstartable Rule Tests
+// =============================================================================
+
+// A rule that cannot start with the next byte is not entered, wherever it is
+// used, just as a choice skips an alternative that cannot. A parse that
+// reports errors still enters it, to tell what it expected.
+
+TEST(UnstartableRuleTest, Is_not_entered) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto enters = 0;
+  pg["A"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    enters++;
+  };
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(0, enters);
+  EXPECT_TRUE(pg.parse("yx"));
+  EXPECT_EQ(1, enters);
+}
+
+TEST(UnstartableRuleTest, Is_entered_when_errors_are_reported) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto enters = 0;
+  pg["A"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    enters++;
+  };
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+
+  EXPECT_FALSE(pg.parse("z"));
+  EXPECT_EQ(1, enters);
+  EXPECT_EQ("syntax error, unexpected 'z', expecting 'x'.", message);
+}
+
+TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
+  parser pg(R"(
+    S <- B
+    B <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  // Trying A goes one level past the limit, with or without a logger.
+  pg.set_max_depth(2);
+  EXPECT_FALSE(pg.parse("x"));
+}
