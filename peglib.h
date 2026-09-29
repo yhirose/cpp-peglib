@@ -3238,7 +3238,7 @@ struct FindReference : public Ope::Visitor {
       o->accept(*this);
       opes.emplace_back(std::move(found_ope));
     }
-    found_ope = std::make_shared<Sequence>(opes);
+    found_ope = std::make_shared<Sequence>(std::move(opes));
   }
   void visit(PrioritizedChoice &ope) override {
     std::vector<std::shared_ptr<Ope>> opes;
@@ -3246,7 +3246,7 @@ struct FindReference : public Ope::Visitor {
       o->accept(*this);
       opes.emplace_back(std::move(found_ope));
     }
-    found_ope = std::make_shared<PrioritizedChoice>(opes);
+    found_ope = std::make_shared<PrioritizedChoice>(std::move(opes));
   }
   void visit(Repetition &ope) override {
     ope.ope_->accept(*this);
