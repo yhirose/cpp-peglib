@@ -108,3 +108,30 @@ TEST(SnapshotTest, Capture_rollback_on_choice_failure) {
   EXPECT_TRUE(pg.parse("yyyy"));
   EXPECT_FALSE(pg.parse("yyxx")); // Would wrongly succeed if ref='xx' leaked
 }
+
+TEST(SnapshotTest, Capture_does_not_refer_to_grammar_text) {
+  std::string grammar = R"(
+    S <- $q<[a-z]+> ':' $q
+  )";
+  parser pg(grammar);
+  ASSERT_TRUE(pg);
+
+  // The grammar text may be gone once the grammar is loaded.
+  std::fill(grammar.begin(), grammar.end(), ' ');
+
+  EXPECT_TRUE(pg.parse("ab:ab"));
+  EXPECT_FALSE(pg.parse("ab:ac"));
+}
+
+// A capture in a macro argument is rebuilt for each call, and the one that
+// captured q is gone when $q reads it.
+TEST(SnapshotTest, Capture_in_a_macro_argument_outlives_the_call) {
+  parser pg(R"(
+    S    <- M($q<[a-z]+>) M(':') $q
+    M(x) <- x
+  )");
+  ASSERT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("ab:ab"));
+  EXPECT_FALSE(pg.parse("ab:ac"));
+}
