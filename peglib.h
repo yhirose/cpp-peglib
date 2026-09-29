@@ -5079,16 +5079,17 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     // The result stands for the operands folded into it. What an action
     // returns is this rule's value and carries its tag, as Holder::parse_rule
-    // tags a rule's value.
+    // tags a rule's value; without an action the first value stands for the
+    // fold with its own tag, as Holder::reduce hands it over.
     std::any val;
-    auto tag =
-        rule_.action || vs.tags.empty() ? str2tag(rule_.name) : vs.tags[0];
+    auto tag = str2tag(rule_.name);
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
       static const std::any empty_predicate_data;
       val = c.run_action(rule_, vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
       val = std::move(vs[0]);
+      tag = vs.tags[0];
     }
     vs.clear();
     vs.tags.clear();
