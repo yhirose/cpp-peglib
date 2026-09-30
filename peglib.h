@@ -5366,6 +5366,7 @@ inline void HasEmptyElement::visit(Sequence &ope) {
           is_empty = true;
           error_s = vis.error_s;
           error_name = vis.error_name;
+          return;
         }
         ++it;
       }
@@ -5391,7 +5392,13 @@ inline void HasEmptyElement::visit(Reference &ope) {
                          [&](const std::pair<const char *, std::string> &ref) {
                            return ope.name_ == ref.second;
                          });
-  if (it != refs_.end()) { return; }
+  if (it != refs_.end()) {
+    // A rule already being looked into, such as the one whose repetition
+    // this is (`R <- R*`): whether it can match empty was worked out for
+    // every rule beforehand.
+    if (ope.rule_ && ope.rule_->can_be_empty) { set_error(); }
+    return;
+  }
 
   if (ope.rule_) {
     refs_.emplace_back(ope.s_, ope.name_);
@@ -5411,6 +5418,10 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
     auto it = has_error_cache_.find(ope.name_);
     if (it != has_error_cache_.end()) {
       has_error = it->second;
+      if (has_error) {
+        error_s = ope.s_;
+        error_name = ope.name_;
+      }
     } else {
       refs_.emplace_back(ope.s_, ope.name_);
       ope.rule_->accept(*this);
