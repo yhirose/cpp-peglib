@@ -19,7 +19,7 @@ jobs:
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 4
 
     - name: Test
       working-directory: ${{github.workspace}}/build
@@ -29,7 +29,7 @@ jobs:
       run: cmake -B ${{github.workspace}}/build_20 -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_CXX_STANDARD=20
 
     - name: Build with C++20
-      run: cmake --build ${{github.workspace}}/build_20 --config ${{env.BUILD_TYPE}}
+      run: cmake --build ${{github.workspace}}/build_20 --config ${{env.BUILD_TYPE}} --parallel 4
 
     - name: Test with C++20
       working-directory: ${{github.workspace}}/build_20
