@@ -1637,17 +1637,34 @@ TEST(GeneralTest, DeferredAstBuildsLongPrecedenceChain) {
     folds++;
   }
   EXPECT_EQ(n, folds);
+}
 
-  // Taken apart from the top, as releasing a tree this deep recursively
-  // could overflow the stack.
-  std::vector<std::shared_ptr<Ast>> nodes{std::move(ast)};
-  while (!nodes.empty()) {
-    auto node = std::move(nodes.back());
-    nodes.pop_back();
-    for (auto &child : node->nodes) {
-      nodes.push_back(std::move(child));
-    }
+static std::shared_ptr<Ast> ast_leaf() {
+  return std::make_shared<Ast>("", 1, 1, "A", std::string_view("1"));
+}
+
+static std::shared_ptr<Ast> ast_node(std::vector<std::shared_ptr<Ast>> nodes) {
+  return std::make_shared<Ast>("", 1, 1, "E", nodes);
+}
+
+TEST(GeneralTest, DeepAstIsReleased) {
+  // Releasing a node must not recurse as deep as the tree below it.
+  auto ast = ast_leaf();
+  for (size_t i = 0; i < 1000000; i++) {
+    ast = ast_node({ast});
   }
+  ast.reset();
+}
+
+TEST(GeneralTest, ReleasedAstKeepsNodesHeldElsewhere) {
+  // Only the nodes that die with a tree give up their children.
+  auto kept = ast_node({ast_leaf(), ast_leaf()});
+  auto shared = ast_node({kept, ast_leaf()});
+  auto ast = ast_node({ast_node({shared}), ast_node({shared})});
+  shared.reset();
+  ast.reset();
+  ASSERT_EQ(2u, kept->nodes.size());
+  EXPECT_TRUE(kept->nodes[0] && kept->nodes[1]);
 }
 
 TEST(GeneralTest, RecognizerPathIsUnobservable) {

@@ -7678,6 +7678,33 @@ template <typename Annotation> struct AstBase : public Annotation {
         preserve_position(ast.preserve_position), token(ast.token),
         nodes(ast.nodes), parent(ast.parent) {}
 
+  AstBase(const AstBase &) = default;
+  AstBase(AstBase &&) = default;
+
+  // A tree can be deeper than the call stack allows (a long chain of
+  // left-associative operators), so the nodes that die with this one are
+  // released in a loop here instead of each from its parent's destructor.
+  ~AstBase() {
+    // Set while a destructor on this thread runs that loop: a node that dies
+    // meanwhile hands its children over to it.
+    static thread_local std::vector<std::shared_ptr<AstBase>> *doomed_nodes =
+        nullptr;
+    if (doomed_nodes) {
+      for (auto &node : nodes) {
+        doomed_nodes->push_back(std::move(node));
+      }
+      return;
+    }
+    auto doomed = std::move(nodes);
+    doomed_nodes = &doomed;
+    while (!doomed.empty()) {
+      // Moved out first, as its release may add to `doomed`.
+      auto node = std::move(doomed.back());
+      doomed.pop_back();
+    }
+    doomed_nodes = nullptr;
+  }
+
   const std::string path;
   const size_t line = 1;
   const size_t column = 1;
