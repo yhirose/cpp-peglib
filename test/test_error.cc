@@ -168,6 +168,31 @@ TEST(InfiniteLoopTest, in_prioritized_choice) {
   EXPECT_FALSE(pg);
 }
 
+TEST(InfiniteLoopTest, Empty_match_ends_a_repetition) {
+  // A grammar built with combinators is never checked for a repetition of
+  // something that can match empty. Such a repetition stops at the first
+  // match that consumes nothing, instead of repeating it forever.
+  Definition ROOT;
+  ROOT <= seq(zom(opt(chr('a'))), chr('b'));
+  EXPECT_TRUE(ROOT.parse("aaab").ret);
+  EXPECT_FALSE(ROOT.parse("aaac").ret);
+
+  Definition EMPTY;
+  EMPTY <= oom(lit(""));
+  EXPECT_TRUE(EMPTY.parse("").ret);
+
+  // So does a precedence rule's loop over operators and right operands.
+  Definition ATOM, OP, EXPR;
+  ATOM <= opt(chr('a'));
+  OP <= lit("");
+  PrecedenceClimbing::BinOpeInfo info;
+  info[""] = {1, 'L'};
+  EXPR <= pre(ATOM, OP, info, EXPR);
+  Definition THEN_B;
+  THEN_B <= seq(EXPR, chr('b'));
+  EXPECT_TRUE(THEN_B.parse("ab").ret);
+}
+
 // =============================================================================
 // Error Handling Tests
 // =============================================================================
