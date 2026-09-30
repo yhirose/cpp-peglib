@@ -294,6 +294,8 @@ parser["RULE"].leave = [](const Context &c, const char* s, size_t n, size_t matc
 
 Where the next byte cannot start a match of an alternative of a choice, the parser skips the alternative instead of trying it, so the *enter* and *leave* actions of the rules it would try there do not run, and nothing inside it does.
 
+More generally, whether and how many times callbacks run in an attempt that is later abandoned is not fixed. This skipping leaves them out; packrat parsing can reuse a rule's earlier result at the same position, a match or a failure, instead of trying the rule again, so none of its callbacks run; and a left-recursive rule reuses its results even without packrat parsing, and tries its body once more after its match stops growing. So do not rely on what callbacks do in attempts that may be abandoned: undo in *leave* what *enter* did (such as opening a scope), or build the state from the value or the AST that the parse returns.
+
 You can receive error information via a logger:
 
 ```cpp
