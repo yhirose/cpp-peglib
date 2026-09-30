@@ -1099,7 +1099,9 @@ private:
 // becomes an AstLogRef to the record. The action runs later, on the values it
 // would have been given, when user code is about to see the value: a
 // predicate, a leave handler, a user action, a User operator, or the parse
-// result (see Context::run_action and Context::force_ast).
+// result (see Context::run_action and Context::force_ast). A precedence
+// rule's fold builds its values right away (see
+// PrecedenceClimbing::parse_expression).
 //
 // A record points at its children, which are recorded before it within the
 // same rule match. What a rule match recorded is dropped where its values
@@ -5077,12 +5079,18 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     // returns is this rule's value and carries its tag, as Holder::parse_rule
     // tags a rule's value; without an action the first value stands for the
     // fold with its own tag, as Holder::reduce hands it over.
+    //
+    // The action runs right away, never recorded (see AstLogEntry): each
+    // fold takes the previous one as its left operand, so records would
+    // nest as deep as the chain is long, and building them later would
+    // recurse that deep.
     std::any val;
     auto tag = str2tag(rule_.name);
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
       static const std::any empty_predicate_data;
-      val = c.run_action(rule_, vs, dt, empty_predicate_data);
+      c.force_ast(vs);
+      val = rule_.action(vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
       val = std::move(vs[0]);
       tag = vs.tags[0];

@@ -1617,6 +1617,39 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
   }
 }
 
+TEST(GeneralTest, DeferredAstBuildsLongPrecedenceChain) {
+  // A left-associative chain is parsed in a loop, but its tree is as deep as
+  // the chain is long. Building it must not recurse that deep.
+  parser pg("E <- A (OP A)* { precedence L + }\n A <- < [0-9] >\n OP <- '+'");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast(true);
+
+  const size_t n = 100000;
+  std::string s = "1";
+  for (size_t i = 0; i < n; i++) {
+    s += "+1";
+  }
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(pg.parse(s, ast));
+
+  size_t folds = 0;
+  for (auto node = ast; node->nodes.size() == 3; node = node->nodes[0]) {
+    folds++;
+  }
+  EXPECT_EQ(n, folds);
+
+  // Taken apart from the top, as releasing a tree this deep recursively
+  // could overflow the stack.
+  std::vector<std::shared_ptr<Ast>> nodes{std::move(ast)};
+  while (!nodes.empty()) {
+    auto node = std::move(nodes.back());
+    nodes.pop_back();
+    for (auto &child : node->nodes) {
+      nodes.push_back(std::move(child));
+    }
+  }
+}
+
 TEST(GeneralTest, RecognizerPathIsUnobservable) {
   // A rule match whose value nobody reads, or is always empty, builds no
   // value (see Holder::parse_core). Callbacks must see what they see when
