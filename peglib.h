@@ -8292,8 +8292,16 @@ public:
   // as the parse allows (see AstLogEntry).
   template <typename T = Ast>
   parser &enable_ast(bool collapse_mode = false, bool opt_mode = true) {
+    return enable_ast<T>(collapse_mode, opt_mode, get_no_ast_opt_rules());
+  }
+
+  // As above, but with `rules` in place of the rules marked no_ast_opt, as
+  // in AstOptimizer(opt_mode, rules).
+  template <typename T = Ast>
+  parser &enable_ast(bool collapse_mode, bool opt_mode,
+                     const std::vector<std::string> &rules) {
     if (grammar_ == nullptr) { return *this; }
-    const AstOptimizer optimizer(opt_mode, get_no_ast_opt_rules());
+    const AstOptimizer optimizer(opt_mode, rules);
     for (auto &[_, rule] : *grammar_) {
       if (!rule.action) {
         auto collapse =

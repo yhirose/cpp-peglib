@@ -1392,7 +1392,9 @@ TEST(GeneralTest, NoAstOptPreservesPosition) {
 TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
   // enable_ast(true, opt_mode) must build exactly the tree that
   // optimize_ast(ast, opt_mode) makes out of the full one, source ranges and
-  // parent links included.
+  // parent links included, and enable_ast(true, opt_mode, rules) the one
+  // AstOptimizer(opt_mode, rules) makes. With TERM in `rules` in place of
+  // YIELD, TERM's nodes are kept and YIELD's are not.
   const char *grammar = R"(
     PROGRAM     <-  STATEMENT (';' STATEMENT)*
     STATEMENT   <-  YIELD / ASSIGN / SUM
@@ -1435,28 +1437,37 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
         return n;
       };
 
+  const std::vector<std::string> rules{"TERM"};
   for (auto packrat : {false, true}) {
     for (auto opt_mode : {true, false}) {
-      parser full(grammar);
-      parser collapsed(grammar);
-      ASSERT_TRUE(full);
-      if (packrat) {
-        full.enable_packrat_parsing();
-        collapsed.enable_packrat_parsing();
+      for (auto own_rules : {false, true}) {
+        parser full(grammar);
+        parser collapsed(grammar);
+        ASSERT_TRUE(full);
+        if (packrat) {
+          full.enable_packrat_parsing();
+          collapsed.enable_packrat_parsing();
+        }
+        full.enable_ast();
+        if (own_rules) {
+          collapsed.enable_ast(true, opt_mode, rules);
+        } else {
+          collapsed.enable_ast(true, opt_mode);
+        }
+
+        std::shared_ptr<Ast> expected;
+        std::shared_ptr<Ast> actual;
+        ASSERT_TRUE(full.parse(src, expected));
+        ASSERT_TRUE(collapsed.parse(src, actual));
+        expected = own_rules ? AstOptimizer(opt_mode, rules).optimize(expected)
+                             : full.optimize_ast(expected, opt_mode);
+
+        EXPECT_EQ(dump(expected), dump(actual))
+            << "packrat=" << packrat << " opt_mode=" << opt_mode
+            << " own_rules=" << own_rules;
+        EXPECT_EQ(0u, wrong_parents(actual));
+        EXPECT_TRUE(actual->parent.expired());
       }
-      full.enable_ast();
-      collapsed.enable_ast(true, opt_mode);
-
-      std::shared_ptr<Ast> expected;
-      std::shared_ptr<Ast> actual;
-      ASSERT_TRUE(full.parse(src, expected));
-      ASSERT_TRUE(collapsed.parse(src, actual));
-      expected = full.optimize_ast(expected, opt_mode);
-
-      EXPECT_EQ(dump(expected), dump(actual))
-          << "packrat=" << packrat << " opt_mode=" << opt_mode;
-      EXPECT_EQ(0u, wrong_parents(actual));
-      EXPECT_TRUE(actual->parent.expired());
     }
   }
 }
