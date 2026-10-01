@@ -162,7 +162,7 @@ struct SemanticValues : protected std::vector<any>
   // Matched string
   std::string_view sv() const { return sv_; }
 
-  // Line number and column at which the matched string is
+  // Line number and column (in bytes) at which the matched string is
   std::pair<size_t, size_t> line_info() const;
 
   // Tokens
@@ -673,7 +673,7 @@ const unsigned int     tag;      // str2tag(name) — for fast switch dispatch
 std::string_view       token;    // matched text (valid when is_token is true)
 bool                   is_token;
 size_t                 choice;   // which alternative of a prioritized choice matched
-size_t                 line, column, position, length;
+size_t                 line, column, position, length; // column and position in bytes
 std::vector<std::shared_ptr<Ast>> nodes;  // child nodes
 std::weak_ptr<Ast>     parent;
 ```
@@ -771,6 +771,8 @@ Unicode support
 ---------------
 
 cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`.
+
+Columns are counted in two ways. Errors, the ones passed to the logger and to the error reporter, count `col` in Unicode codepoints from the start of the line, as a text editor does. Matches count it in bytes: the column of `SemanticValues::line_info()` and the `column` of an AST node. The `position` of an `ErrorReport` and of an AST node is a byte offset in the input in both cases.
 
 Error report and recovery
 -------------------------

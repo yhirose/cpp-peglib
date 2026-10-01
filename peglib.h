@@ -531,7 +531,8 @@ private:
  *---------------------------------------------------------------------------*/
 
 /*
- * Line information utility function
+ * Line information utility function. The column counts codepoints, as
+ * error messages do; Context::line_info, used for matches, counts bytes.
  */
 inline std::pair<size_t, size_t> line_info(const char *start, const char *cur) {
   auto p = start;
@@ -594,7 +595,7 @@ struct SemanticValues : protected std::vector<std::any> {
 
   std::vector<unsigned int> tags;
 
-  // Line number and column at which the matched string is
+  // Line number and column (in bytes) at which the matched string is
   std::pair<size_t, size_t> line_info() const;
 
   // Choice count
@@ -821,7 +822,7 @@ using Log = std::function<void(size_t line, size_t col, const std::string &msg,
  */
 struct ErrorReport {
   size_t line = 0;              // 1-based
-  size_t col = 1;               // 1-based
+  size_t col = 1;               // 1-based, in codepoints
   size_t position = 0;          // byte offset in the input
   std::string unexpected_token; // heuristic token at the error position
   std::vector<std::string> expected_literals;
