@@ -171,5 +171,71 @@ TEST(PackratTest, Packrat_shared_consuming_prefix_is_not_exponential) {
   EXPECT_TRUE(pg.parse(input));
 }
 
+TEST(PackratTest, Packrat_after_another_start_rule_reassigned_ids) {
+  parser pg(R"(
+    Top  <- (W / Expr) ';' / W '!'
+    W    <- 'w'
+    Expr <- Expr '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- A B C D E Expr
+    A <- 'a'
+    B <- 'b'
+    C <- 'c'
+    D <- 'd'
+    E <- 'e'
+  )");
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+  EXPECT_TRUE(pg.get_grammar().at("Sub").parse("abcde1+2").ret);
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg.parse("1+2;"));
+}
+
+TEST(PackratTest, Packrat_after_another_start_rule_gave_two_rules_one_id) {
+  parser pg(R"(
+    Top  <- W 'x' / W 'y' / Expr ';'
+    W    <- [0-9a-z]+ '!'
+    Expr <- Num '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- Expr
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+
+  const auto &g = pg.get_grammar();
+  EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+}
+
+TEST(PackratTest, Packrat_parse_nested_in_an_action_keeps_the_outer_ids) {
+  parser pg(R"(
+    Top  <- A (W 'x' / W 'y' / Expr ';')
+    A    <- 'a'
+    W    <- [0-9a-z]+ '!'
+    Expr <- Num '+' Num / Num
+    Num  <- [0-9]+
+    Sub  <- P Expr / Expr
+    P    <- 'p'
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  const auto &g = pg.get_grammar();
+  auto nested_ok = false;
+  pg["A"] = [&](const SemanticValues &) {
+    nested_ok = g.at("Sub").parse("1+2").ret;
+  };
+
+  EXPECT_TRUE(pg.parse("a1+2;"));
+  EXPECT_TRUE(nested_ok);
+  EXPECT_NE(g.at("Expr").id, g.at("W").id);
+
+  EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
+}
+
 // =============================================================================
 // Lookahead Predicate Tests

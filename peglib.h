@@ -1039,6 +1039,7 @@ public:
   std::vector<bool> cut_stack;
 
   const size_t def_count;
+  const std::vector<Definition *> *rules_by_id = nullptr;
   const bool enablePackratParsing;
   const std::vector<int32_t> *packrat_index; // def_id -> cache slot or -1
   size_t packrat_cached_count;               // number of memoized rules
@@ -1079,6 +1080,8 @@ public:
   // Interned macro instantiations: (definition, resolved arguments) -> id.
   std::map<std::vector<const void *>, size_t> macro_inst_ids;
   size_t next_macro_inst_ = 1;
+
+  bool memoizes(const Definition &rule) const;
 
   // Map a def_id to its slot in the cache tables, or -1 for guard-only
   // rules (not memoized).
@@ -3340,9 +3343,11 @@ private:
       definition_ids_.swap(vis.ids);
       has_cut_ = vis.has_cut;
       has_opaque_ope_ = vis.has_opaque_ope;
+      number_new_rules();
     });
   }
 
+  void number_new_rules() const;
   void initialize_packrat_filter() const;
 
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
@@ -3366,17 +3371,18 @@ private:
         packrat_index = &packrat_index_;
         packrat_cached_count = packrat_cached_count_;
       } else {
-        packrat_cached_count = definition_ids_.size();
+        packrat_cached_count = rules_by_id_.size();
       }
     }
 
-    Context c(path, s, n, definition_ids_.size(), whitespaceOpe, wordOpe,
+    Context c(path, s, n, rules_by_id_.size(), whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
               verbose_trace, log, error_reporter, packrat_index,
               packrat_cached_count, has_cut_);
+    c.rules_by_id = &rules_by_id_;
 
     if (collect_packrat_stats) {
-      packrat_stats_.resize(definition_ids_.size());
+      packrat_stats_.resize(rules_by_id_.size());
       c.packrat_stats = &packrat_stats_;
     }
 
@@ -3432,6 +3438,8 @@ private:
   mutable std::once_flag assign_id_to_definition_init_;
   mutable std::once_flag definition_ids_init_;
   mutable std::unordered_map<void *, size_t> definition_ids_;
+  mutable std::vector<Definition *> rules_by_id_;
+  mutable bool has_id_ = false;
   mutable bool has_cut_ = false;
   mutable bool has_opaque_ope_ = false;
   mutable std::once_flag packrat_filter_init_;
@@ -3849,7 +3857,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       len = parse_ope_body(s, n, vs, c, dt);
     };
 
-    if (c.enablePackratParsing) {
+    if (c.memoizes(*outer_)) {
       c.packrat(s, outer_->id, len, val, do_recognize);
     } else {
       // Same re-entry guard as the general no-packrat path below.
@@ -3980,7 +3988,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           // Clear this rule's packrat cache. A macro is never written there
           // (that cache is keyed by rule id alone, which cannot tell two
           // instantiations apart), so there is nothing to clear for one.
-          if (!outer_->is_macro) { c.clear_packrat_cache(s, outer_->id); }
+          if (c.memoizes(*outer_)) { c.clear_packrat_cache(s, outer_->id); }
 
           // Clear lr_memo for cycle-dependent rules at this position,
           // but NOT for rules currently in their own seeding phase
@@ -4012,12 +4020,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
       // Write final result to packrat cache (lr_memo entry is kept as
       // the primary lookup for LR rules at this position)
-      if (success(len) && !outer_->is_macro) {
+      if (success(len) && c.memoizes(*outer_)) {
         c.write_packrat_cache(s, outer_->id, len, val);
       }
     }
   } else {
-    if (c.enablePackratParsing) {
+    if (c.memoizes(*outer_)) {
       // Packrat cache acts as re-entry guard (pre-registered as
       // failure before fn is called).
       c.packrat(s, outer_->id, len, val,
@@ -4129,7 +4137,7 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       // no-packrat re-entry guard. A callee with no such reader parses
       // directly on the caller's frame.
       if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
-          c.enablePackratParsing) {
+          c.memoizes(*rule_)) {
         return rule_->holder_->parse(s, n, vs, c, dt);
       }
       c.push_empty_args();
@@ -4339,9 +4347,8 @@ inline void Cut::accept(Visitor &v) { v.visit(*this); }
 inline void AssignIDToDefinition::visit(Holder &ope) {
   auto p = static_cast<void *>(ope.outer_);
   if (ids.count(p)) { return; }
-  auto id = ids.size();
-  ids[p] = id;
-  ope.outer_->id = id;
+  auto order = ids.size();
+  ids[p] = order;
   ope.outer_->has_macro_ref = false; // set below when the body walk finds one
   auto save = current_def;
   current_def = ope.outer_;
@@ -4747,12 +4754,41 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
   seq.kw_guard_ = std::move(kw);
 }
 
+// Ids are never renumbered: other parses' packrat tables are indexed by them.
+inline void Definition::number_new_rules() const {
+  std::vector<Definition *> rules(definition_ids_.size());
+  for (const auto &[ptr, order] : definition_ids_) {
+    rules[order] = static_cast<Definition *>(ptr);
+  }
+
+  size_t next_id = 0;
+  for (const auto *rule : rules) {
+    if (rule->has_id_) { next_id = std::max(next_id, rule->id + 1); }
+  }
+  for (auto *rule : rules) {
+    if (!rule->has_id_) {
+      rule->id = next_id++;
+      rule->has_id_ = true;
+    }
+  }
+
+  rules_by_id_.assign(next_id, nullptr);
+  for (auto *rule : rules) {
+    if (!rules_by_id_[rule->id]) { rules_by_id_[rule->id] = rule; }
+  }
+}
+
+inline bool Context::memoizes(const Definition &rule) const {
+  return enablePackratParsing && !rule.is_macro && rule.id < def_count &&
+         (*rules_by_id)[rule.id] == &rule;
+}
+
 // Compute which rules benefit from packrat memoization.
 // A rule benefits if it's reachable from 2+ alternatives of the same
 // PrioritizedChoice (backtracking will re-visit it at the same position).
 inline void Definition::initialize_packrat_filter() const {
   std::call_once(packrat_filter_init_, [&]() {
-    auto def_count = definition_ids_.size();
+    auto def_count = rules_by_id_.size();
     if (def_count == 0) { return; }
 
     // Collect rule IDs that can be invoked at the *same start position* as
@@ -4899,10 +4935,9 @@ inline void Definition::initialize_packrat_filter() const {
     // Left-recursive rules read and write the packrat cache directly during
     // seed-growing, so they must stay in the cached set. Macros are the
     // exception: they use lr_memo only, keyed by instantiation.
-    for (const auto &[ptr, id] : definition_ids_) {
-      auto *def = static_cast<Definition *>(ptr);
-      if (def->is_left_recursive && !def->is_macro && id < def_count) {
-        benefits[id] = true;
+    for (auto *def : rules_by_id_) {
+      if (def && def->is_left_recursive && !def->is_macro) {
+        benefits[def->id] = true;
       }
     }
 
