@@ -999,6 +999,22 @@ private:
   size_t used_ = 0; // occupied + tombstone slots
 };
 
+/*
+ * StartRuleAnalysis
+ */
+
+// Whatever depends on the start rule lives here, never on the shared rules.
+struct StartRuleAnalysis {
+  std::vector<Definition *> rules;
+  std::vector<Definition *> rules_by_id;
+  bool has_cut = false;
+  bool has_opaque_ope = false;
+  std::vector<int32_t> packrat_index; // def_id -> cache slot or -1
+  size_t packrat_cached_count = 0;
+
+  bool indexes(const Definition &rule) const;
+};
+
 class Context {
 public:
   const char *path;
@@ -1039,7 +1055,7 @@ public:
   std::vector<bool> cut_stack;
 
   const size_t def_count;
-  const std::vector<Definition *> *rules_by_id = nullptr;
+  const StartRuleAnalysis *const analysis;
   const bool enablePackratParsing;
   const std::vector<int32_t> *packrat_index; // def_id -> cache slot or -1
   size_t packrat_cached_count;               // number of memoized rules
@@ -1158,18 +1174,21 @@ public:
   Log log;
   ErrorReporter error_reporter;
 
-  Context(const char *path, const char *s, size_t l, size_t def_count,
-          std::shared_ptr<Ope> whitespaceOpe, std::shared_ptr<Ope> wordOpe,
-          bool enablePackratParsing, TracerEnter tracer_enter,
-          TracerLeave tracer_leave, std::any trace_data, bool verbose_trace,
-          Log log, ErrorReporter error_reporter = nullptr,
-          const std::vector<int32_t> *packrat_index = nullptr,
-          size_t packrat_cached_count = 0, bool has_cut = true)
+  Context(const char *path, const char *s, size_t l,
+          const StartRuleAnalysis *analysis, std::shared_ptr<Ope> whitespaceOpe,
+          std::shared_ptr<Ope> wordOpe, bool enablePackratParsing,
+          TracerEnter tracer_enter, TracerLeave tracer_leave,
+          std::any trace_data, bool verbose_trace, Log log,
+          ErrorReporter error_reporter = nullptr)
       : path(path), s(s), l(l), whitespaceOpe(whitespaceOpe), wordOpe(wordOpe),
-        has_cut(has_cut), def_count(def_count),
-        enablePackratParsing(enablePackratParsing),
-        packrat_index(packrat_index),
-        packrat_cached_count(packrat_index ? packrat_cached_count : def_count),
+        has_cut(analysis ? analysis->has_cut : true),
+        def_count(analysis ? analysis->rules_by_id.size() : 0),
+        analysis(analysis), enablePackratParsing(enablePackratParsing),
+        packrat_index(analysis && enablePackratParsing
+                          ? &analysis->packrat_index
+                          : nullptr),
+        packrat_cached_count(packrat_index ? analysis->packrat_cached_count
+                                           : def_count),
         cache_registered(
             enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
         cache_success(
@@ -3334,26 +3353,19 @@ private:
   Definition &operator=(const Definition &rhs);
   Definition &operator=(Definition &&rhs);
 
-  void initialize_definition_ids() const {
-    std::call_once(definition_ids_init_, [&]() {
-      AssignIDToDefinition vis;
-      holder_->accept(vis);
-      if (whitespaceOpe) { whitespaceOpe->accept(vis); }
-      if (wordOpe) { wordOpe->accept(vis); }
-      definition_ids_.swap(vis.ids);
-      has_cut_ = vis.has_cut;
-      has_opaque_ope_ = vis.has_opaque_ope;
-      number_new_rules();
-    });
+  const StartRuleAnalysis &analysis() const {
+    std::call_once(analysis_init_, [&]() { analyze(); });
+    return analysis_;
   }
 
+  void analyze() const;
   void number_new_rules() const;
-  void initialize_packrat_filter() const;
+  void select_packrat_rules() const;
 
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log,
                     ErrorReporter error_reporter = nullptr) const {
-    initialize_definition_ids();
+    const auto &analysis = this->analysis();
 
     std::shared_ptr<Ope> ope = holder_;
 
@@ -3363,36 +3375,23 @@ private:
       if (tracer_end) { tracer_end(trace_data); }
     });
 
-    const std::vector<int32_t> *packrat_index = nullptr;
-    size_t packrat_cached_count = 0;
-    if (enablePackratParsing) {
-      initialize_packrat_filter();
-      if (!packrat_index_.empty()) {
-        packrat_index = &packrat_index_;
-        packrat_cached_count = packrat_cached_count_;
-      } else {
-        packrat_cached_count = rules_by_id_.size();
-      }
-    }
+    if (enablePackratParsing) { select_packrat_rules(); }
 
-    Context c(path, s, n, rules_by_id_.size(), whitespaceOpe, wordOpe,
+    Context c(path, s, n, &analysis, whitespaceOpe, wordOpe,
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
-              verbose_trace, log, error_reporter, packrat_index,
-              packrat_cached_count, has_cut_);
-    c.rules_by_id = &rules_by_id_;
+              verbose_trace, log, error_reporter);
 
     if (collect_packrat_stats) {
-      packrat_stats_.resize(rules_by_id_.size());
+      packrat_stats_.resize(analysis.rules_by_id.size());
       c.packrat_stats = &packrat_stats_;
     }
 
     // Recognizer mode: nothing in this parse observes semantic values, so
     // rule invocations skip the semantic-value machinery entirely. The
     // callback scan runs per parse; actions can be attached between parses.
-    if (!has_opaque_ope_ && !c.has_tracer && !c.needs_rule_stack) {
+    if (!analysis.has_opaque_ope && !c.has_tracer && !c.needs_rule_stack) {
       auto recognize_only = true;
-      for (const auto &entry : definition_ids_) {
-        auto def = static_cast<Definition *>(entry.first);
+      for (const auto *def : analysis.rules) {
         if (def->action || def->enter || def->leave || def->predicate) {
           recognize_only = false;
           break;
@@ -3435,17 +3434,15 @@ private:
   std::shared_ptr<Holder> holder_;
   mutable std::once_flag is_token_init_;
   mutable bool is_token_ = false;
-  mutable std::once_flag assign_id_to_definition_init_;
-  mutable std::once_flag definition_ids_init_;
-  mutable std::unordered_map<void *, size_t> definition_ids_;
-  mutable std::vector<Definition *> rules_by_id_;
   mutable bool has_id_ = false;
-  mutable bool has_cut_ = false;
-  mutable bool has_opaque_ope_ = false;
-  mutable std::once_flag packrat_filter_init_;
-  mutable std::vector<int32_t> packrat_index_; // def_id -> cache slot or -1
-  mutable size_t packrat_cached_count_ = 0;
+  mutable std::once_flag analysis_init_;
+  mutable std::once_flag packrat_rules_init_;
+  mutable StartRuleAnalysis analysis_;
 };
+
+inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
+  return rule.id < rules_by_id.size() && rules_by_id[rule.id] == &rule;
+}
 
 /*
  * Implementations
@@ -3477,8 +3474,8 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
     std::call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, nullptr, false, nullptr);
+      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
+                      nullptr, nullptr, nullptr, false, nullptr);
       std::any dummy_dt;
 
       auto len =
@@ -3488,8 +3485,8 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
     if (is_word) {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, nullptr, false, nullptr);
+      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
+                      nullptr, nullptr, nullptr, false, nullptr);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -3703,8 +3700,8 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
 
     {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, 0, nullptr, nullptr, false, nullptr,
-                      nullptr, nullptr, false, nullptr);
+      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
+                      nullptr, nullptr, nullptr, false, nullptr);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -4754,12 +4751,23 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
   seq.kw_guard_ = std::move(kw);
 }
 
+inline void Definition::analyze() const {
+  AssignIDToDefinition vis;
+  holder_->accept(vis);
+  if (whitespaceOpe) { whitespaceOpe->accept(vis); }
+  if (wordOpe) { wordOpe->accept(vis); }
+  analysis_.has_cut = vis.has_cut;
+  analysis_.has_opaque_ope = vis.has_opaque_ope;
+  analysis_.rules.resize(vis.ids.size());
+  for (const auto &[ptr, order] : vis.ids) {
+    analysis_.rules[order] = static_cast<Definition *>(ptr);
+  }
+  number_new_rules();
+}
+
 // Ids are never renumbered: other parses' packrat tables are indexed by them.
 inline void Definition::number_new_rules() const {
-  std::vector<Definition *> rules(definition_ids_.size());
-  for (const auto &[ptr, order] : definition_ids_) {
-    rules[order] = static_cast<Definition *>(ptr);
-  }
+  const auto &rules = analysis_.rules;
 
   size_t next_id = 0;
   for (const auto *rule : rules) {
@@ -4772,23 +4780,23 @@ inline void Definition::number_new_rules() const {
     }
   }
 
-  rules_by_id_.assign(next_id, nullptr);
+  auto &rules_by_id = analysis_.rules_by_id;
+  rules_by_id.assign(next_id, nullptr);
   for (auto *rule : rules) {
-    if (!rules_by_id_[rule->id]) { rules_by_id_[rule->id] = rule; }
+    if (!rules_by_id[rule->id]) { rules_by_id[rule->id] = rule; }
   }
 }
 
 inline bool Context::memoizes(const Definition &rule) const {
-  return enablePackratParsing && !rule.is_macro && rule.id < def_count &&
-         (*rules_by_id)[rule.id] == &rule;
+  return enablePackratParsing && !rule.is_macro && analysis->indexes(rule);
 }
 
 // Compute which rules benefit from packrat memoization.
 // A rule benefits if it's reachable from 2+ alternatives of the same
 // PrioritizedChoice (backtracking will re-visit it at the same position).
-inline void Definition::initialize_packrat_filter() const {
-  std::call_once(packrat_filter_init_, [&]() {
-    auto def_count = rules_by_id_.size();
+inline void Definition::select_packrat_rules() const {
+  std::call_once(packrat_rules_init_, [&]() {
+    auto def_count = analysis_.rules_by_id.size();
     if (def_count == 0) { return; }
 
     // Collect rule IDs that can be invoked at the *same start position* as
@@ -4935,19 +4943,19 @@ inline void Definition::initialize_packrat_filter() const {
     // Left-recursive rules read and write the packrat cache directly during
     // seed-growing, so they must stay in the cached set. Macros are the
     // exception: they use lr_memo only, keyed by instantiation.
-    for (auto *def : rules_by_id_) {
+    for (auto *def : analysis_.rules_by_id) {
       if (def && def->is_left_recursive && !def->is_macro) {
         benefits[def->id] = true;
       }
     }
 
     // Compact index: def_id -> slot in the cache tables (-1 = guard only)
-    packrat_index_.assign(def_count, -1);
+    analysis_.packrat_index.assign(def_count, -1);
     int32_t k = 0;
     for (size_t id = 0; id < def_count; id++) {
-      if (benefits[id]) { packrat_index_[id] = k++; }
+      if (benefits[id]) { analysis_.packrat_index[id] = k++; }
     }
-    packrat_cached_count_ = static_cast<size_t>(k);
+    analysis_.packrat_cached_count = static_cast<size_t>(k);
   });
 }
 
