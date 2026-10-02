@@ -1234,8 +1234,9 @@ public:
 
   // Left recursion support
   struct LRMemo {
-    size_t len = static_cast<size_t>(-1);
+    size_t len = static_cast<size_t>(-1); // a failure by default
     std::any val;
+    std::string_view token; // for an operator rule (see PrecedenceClimbing)
   };
 
   // A left-recursive rule instance: the definition plus, for a macro, the
@@ -1546,7 +1547,7 @@ public:
       len = static_cast<size_t>(-1);
       return;
     }
-    lr_memo[key] = {static_cast<size_t>(-1), {}};
+    lr_memo[key] = {};
     fn();
     lr_memo.erase(key);
   }
@@ -4731,10 +4732,17 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
   // Where this rule's records start in the AST log, for dropping them.
   auto ast_log_start = c.ast_log.size();
 
+  // An operator rule of a precedence hands over the token of the match it
+  // ends up with (see PrecedenceClimbing).
+  auto operator_token = std::exchange(c.operator_token, nullptr);
+  std::string_view token;
+
   // Shared parse body: invokes enter/leave callbacks, parses the rule's
   // operator, handles actions/predicates/errors, and calls reduce.
-  // Writes into parse_len / parse_val (parse_val only on success).
-  auto do_parse = [&](size_t &parse_len, std::any &parse_val) {
+  // Writes into parse_len / parse_val / parse_token (the last two only on
+  // success).
+  auto do_parse = [&](size_t &parse_len, std::any &parse_val,
+                      std::string_view &parse_token) {
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() {
@@ -4746,7 +4754,6 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       }
     });
 
-    auto operator_token = std::exchange(c.operator_token, nullptr);
     {
       // The body parses into this rule's own scope, and its values are read
       // unless this rule's value does not depend on them.
@@ -4769,7 +4776,7 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
     if (success(parse_len)) {
       chvs.sv_ = std::string_view(s, parse_len);
       chvs.name_ = &outer_->name;
-      if (operator_token && !c.recovered) { *operator_token = chvs.token(); }
+      if (!c.recovered) { parse_token = chvs.token(); }
 
       auto ope_ptr = ope_.get();
       if (ope_ptr->is_token_boundary) {
@@ -4831,6 +4838,7 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       if (success(it->second.len)) {
         len = it->second.len;
         val = it->second.val;
+        token = it->second.token;
       } else {
         len = static_cast<size_t>(-1);
       }
@@ -4839,7 +4847,7 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       c.lr_refs_hit.insert(it->first.first);
     } else {
       // Seed with FAIL
-      c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
+      c.lr_memo[lr_key] = {};
 
       // Mark as active seed (protects our lr_memo from inner growers)
       c.lr_active_seeds.insert(lr_key);
@@ -4853,7 +4861,8 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       // Initial parse (self-references will hit the FAIL seed)
       size_t initial_len;
       std::any initial_val;
-      do_parse(initial_len, initial_val);
+      std::string_view initial_token;
+      do_parse(initial_len, initial_val, initial_token);
 
       // Rules whose lr_memo was hit during our parse are in our cycle.
       // If we detected cycle members, we ourselves are also part of
@@ -4873,7 +4882,8 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
         // Got initial seed, now grow
         len = initial_len;
         val = std::move(initial_val);
-        c.lr_memo[lr_key] = {len, val};
+        token = initial_token;
+        c.lr_memo[lr_key] = {len, val, token};
 
         while (true) {
           // Clear this rule's packrat cache. A macro is never written there
@@ -4896,7 +4906,8 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
 
           size_t new_len;
           std::any new_val;
-          do_parse(new_len, new_val);
+          std::string_view new_token;
+          do_parse(new_len, new_val, new_token);
 
           if (!success(new_len) || new_len <= len) {
             break; // No improvement, done growing
@@ -4904,7 +4915,8 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
 
           len = new_len;
           val = std::move(new_val);
-          c.lr_memo[lr_key] = {len, val};
+          token = new_token;
+          c.lr_memo[lr_key] = {len, val, token};
         }
       }
 
@@ -4916,15 +4928,17 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
     }
   } else {
     // A cached match of an operator rule would not hand over its token.
-    if (c.enablePackratParsing && !c.operator_token) {
+    if (c.enablePackratParsing && !operator_token) {
       // Memoized, and guarded from re-entry (see Context::packrat).
       c.packrat(s, outer_->id, len, val,
-                [&](std::any &a_val) { do_parse(len, a_val); });
+                [&](std::any &a_val) { do_parse(len, a_val, token); });
     } else {
       c.guard_reentry(s, outer_, outer_->id, len,
-                      [&]() { do_parse(len, val); });
+                      [&]() { do_parse(len, val, token); });
     }
   }
+
+  if (operator_token && success(len)) { *operator_token = token; }
 
   if (success(len) && !outer_->ignoreSemanticValue && !c.recognize_only) {
     vs.emplace_back(std::move(val));

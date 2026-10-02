@@ -742,6 +742,58 @@ TEST(PrecedenceTest, Precedence_climbing_with_a_cached_operator_rule) {
   }
 }
 
+// A left-recursive operator rule hands over the token of the match it grows
+// to, also when its memo already holds that match from a lookahead.
+TEST(PrecedenceTest, Precedence_climbing_with_a_left_recursive_operator_rule) {
+  struct {
+    const char *grammar;
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {R"(
+        E <- A (O A)* { precedence L + - L * }
+        O <- O '!' / < [-+*] >
+        A <- N F
+        F <- &(O 'x') / ''
+        N <- < [0-9] >
+      )",
+       "1+2*3", "(1+(2*3))"},
+      {R"(
+        E <- A (O A)* { precedence L + - L * }
+        O <- O '!' / < [-+*] >
+        A <- F N
+        F <- &('2' O) / ''
+        N <- < [0-9] >
+      )",
+       "1+2*3", "(1+(2*3))"},
+      {R"(
+        E <- A (O A)* { precedence L * L + L ** }
+        O <- O '*' / [-+*]
+        A <- < [0-9] >
+      )",
+       "1**2+3", "((1**2)+3)"},
+  };
+  for (const auto &[grammar, input, expected] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      pg["A"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+      pg["O"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+      pg["E"] = [](const SemanticValues &vs) {
+        if (vs.size() == 1) { return std::any_cast<std::string>(vs[0]); }
+        return "(" + std::any_cast<std::string>(vs[0]) +
+               std::any_cast<std::string>(vs[1]) +
+               std::any_cast<std::string>(vs[2]) + ")";
+      };
+
+      std::string val;
+      ASSERT_TRUE(pg.parse(input, val)) << input << " " << packrat;
+      EXPECT_EQ(expected, val) << input << " " << packrat;
+    }
+  }
+}
+
 // A macro's body parses on its caller's values; its precedence fold must
 // leave the values before it alone, also when the alternative it is in fails
 // after the fold.
