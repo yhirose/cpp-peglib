@@ -1046,3 +1046,44 @@ TEST(LeftRecursionMacroTest, Nested_macro_with_left_recursion) {
 
   EXPECT_TRUE(pg.parse("1+2+3+4"));
 }
+
+// L is grown inside TYPE's token, where no whitespace is skipped, and then at
+// the same position in EXPR, where it is. Its match from inside the token
+// must not stand in for the one outside.
+TEST(LeftRecursionTest, Seed_grown_in_a_token_is_not_reused_outside) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S    <- DECL / EXPR
+      DECL <- TYPE NAME
+      TYPE <- < L >
+      EXPR <- L '/' L
+      L    <- L '.' NAME / NAME
+      NAME <- < [a-z]+ >
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("x / y")) << packrat;
+    EXPECT_TRUE(pg.parse("x.a / y.b")) << packrat;
+    EXPECT_TRUE(pg.parse("x.a z")) << packrat;
+  }
+}
+
+// Q recurses into itself inside its own token, and grows the seed of the
+// match outside it.
+TEST(LeftRecursionTest, Recursion_into_a_token_grows_the_outer_seed) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- Q ';'
+      Q <- < Q '.' I / I >
+      I <- [a-z]+
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("a.b.c;")) << packrat;
+    EXPECT_TRUE(pg.parse("a.b.c ;")) << packrat;
+  }
+}

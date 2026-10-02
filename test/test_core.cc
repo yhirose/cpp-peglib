@@ -1682,9 +1682,9 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
   // A rule match whose value nobody reads, or is always empty, builds no
   // value (see Holder::parse_core). Callbacks must see what they see when
   // every match builds its value (a tracer forces that), with and without
-  // AST. The grammar has matches under `~`, `&` and `!`, inside token rules
-  // and in whitespace, a predicate on a token rule, and precedence rules, one
-  // of them in a macro used under `&`.
+  // AST and packrat. The grammar has matches under `~`, `&` and `!`, inside
+  // token rules and in whitespace, a predicate on a token rule, and precedence
+  // rules, one of them in a macro used under `&`.
   const char *grammar = R"(
     PROGRAM     <-  &TERM STATEMENT (';' STATEMENT)* END?
     STATEMENT   <-  DECL / CALL / &CHECK &INFIX(TERM, OP) EXPR
@@ -1721,10 +1721,11 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
   const char *src =
       "int a = 1 + # c\n2 * (b - 3.5); f(1, [2, -4], iff); elsex / 6 .end";
 
-  auto run = [&](bool eager, bool ast, int observe) {
+  auto run = [&](bool eager, bool ast, int observe, bool packrat) {
     parser pg(grammar);
     EXPECT_TRUE(pg);
     if (ast) { pg.enable_ast(true); }
+    if (packrat) { pg.enable_packrat_parsing(); }
     if (eager) {
       pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
     }
@@ -1793,10 +1794,14 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
     return out;
   };
 
-  for (auto ast : {true, false}) {
-    for (auto observe = 0; observe < 8; observe++) {
-      EXPECT_EQ(run(true, ast, observe), run(false, ast, observe))
-          << "ast=" << ast << " observe=" << observe;
+  for (auto packrat : {false, true}) {
+    for (auto ast : {true, false}) {
+      for (auto observe = 0; observe < 8; observe++) {
+        EXPECT_EQ(run(true, ast, observe, packrat),
+                  run(false, ast, observe, packrat))
+            << "packrat=" << packrat << " ast=" << ast
+            << " observe=" << observe;
+      }
     }
   }
 

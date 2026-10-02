@@ -292,3 +292,23 @@ TEST(CombinatorTest, Rule_attached_after_the_first_parse) {
   EXPECT_EQ(S.id, D.id);
   EXPECT_TRUE(def_parse(S, "a"));
 }
+
+// R enters itself at the same position through the whitespace its empty
+// literal skips. That fails as it does for a rule numbered in the first parse
+// (see Context::guard_reentry), so R matches 'a' itself.
+TEST(CombinatorTest, Rule_attached_after_the_first_parse_reentering) {
+  for (auto attach_late : {false, true}) {
+    Definition S, A, X, R;
+    S <= seq(chr('c'), A);
+    S.whitespaceOpe = wsp(opt(X));
+    R <= cho(seq(lit(""), chr('a')), chr('b'));
+    if (attach_late) {
+      A <= chr('a');
+      X <= chr('x');
+      EXPECT_TRUE(def_parse(S, "ca"));
+    }
+    A <= R;
+    X <= R;
+    EXPECT_TRUE(def_parse(S, "ca")) << attach_late;
+  }
+}

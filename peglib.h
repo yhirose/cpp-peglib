@@ -1223,8 +1223,8 @@ public:
   // above (see cache_index). Left uninitialized on purpose: a slot is only
   // read once cache_success marks it, which happens after it is written.
   std::unique_ptr<uint32_t[]> cache_len;
-  // Innermost active start position per rule; re-entry guard for rules that
-  // are not memoized, with or without packrat (see guard_reentry).
+  // Innermost active start position per rule; re-entry guard, with or
+  // without packrat (see guard_reentry and packrat).
   std::vector<const char *> active_pos;
   // The start rule's numbering, (rule, id) at index id; null when def_count
   // is 0.
@@ -1239,9 +1239,10 @@ public:
   };
 
   // A left-recursive rule instance: the definition plus, for a macro, the
-  // instantiation it was invoked with (0 for a plain rule). Two
+  // instantiation it was invoked with (0 for a plain rule), and whether it
+  // matches where no whitespace is skipped (see skips_no_whitespace). Two
   // instantiations of the same macro grow independent seeds.
-  using LRRule = std::pair<const Definition *, size_t>;
+  using LRRule = std::tuple<const Definition *, size_t, bool>;
   using LRKey = std::pair<LRRule, const char *>;
 
   std::map<LRKey, LRMemo> lr_memo;
@@ -1258,6 +1259,12 @@ public:
   std::map<std::vector<const void *>, size_t> macro_inst_ids;
   size_t next_macro_inst_ = 1;
 
+  // Entries in the cache tables: a run per memoized rule, two with
+  // whitespace (see cache_index).
+  size_t cache_size() const {
+    return packrat_cached_count * (whitespaceOpe ? 2 : 1) * (l + 1);
+  }
+
   // Map a def_id to its slot in the cache tables, or -1 for guard-only
   // rules (not memoized).
   int32_t cache_slot(size_t def_id) const {
@@ -1265,12 +1272,22 @@ public:
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
   }
 
-  // Rule-major: each memoized rule owns a contiguous run of l + 1 entries.
+  // No whitespace is skipped after a match in a token or in the whitespace,
+  // so a rule may match differently there than at the same position
+  // elsewhere. The memos keep matches from the two places apart.
+  bool skips_no_whitespace() const {
+    return whitespaceOpe && (in_token_boundary_count || in_whitespace);
+  }
+
+  // Rule-major: each memoized rule owns a contiguous run of l + 1 entries,
+  // and a second one for its matches where no whitespace is skipped.
   // cache_len is left uninitialized, so pages of a rule that rarely succeeds
   // are never touched and never become resident; a position-major layout
   // interleaves all rules and ends up touching every page.
   size_t cache_index(int32_t slot, size_t col) const {
-    return static_cast<size_t>(slot) * (l + 1) + col;
+    auto run = static_cast<size_t>(slot) +
+               (skips_no_whitespace() ? packrat_cached_count : 0);
+    return run * (l + 1) + col;
   }
 
   void clear_packrat_cache(const char *pos, size_t def_id) {
@@ -1382,12 +1399,10 @@ public:
         enablePackratParsing(enablePackratParsing),
         packrat_index(packrat_index),
         packrat_cached_count(packrat_index ? packrat_cached_count : def_count),
-        cache_registered(
-            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
-        cache_success(
-            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
+        cache_registered(enablePackratParsing ? cache_size() : 0),
+        cache_success(enablePackratParsing ? cache_size() : 0),
         cache_len(enablePackratParsing && this->packrat_cached_count
-                      ? new uint32_t[this->packrat_cached_count * (l + 1)]
+                      ? new uint32_t[cache_size()]
                       : nullptr),
         active_pos(def_count, nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
@@ -1457,6 +1472,14 @@ public:
       return;
     }
 
+    // The failure pre-registered below fails a recursion at the same
+    // position only where whitespace is skipped alike (see cache_index); the
+    // active-position guard fails it anywhere.
+    if (active_pos[def_id] == a_s) {
+      len = static_cast<size_t>(-1);
+      return;
+    }
+
     auto idx = cache_index(slot, static_cast<size_t>(a_s - s));
 
     if (cache_registered[idx]) {
@@ -1472,7 +1495,7 @@ public:
         return;
       }
     } else {
-      // Pre-register as failure (re-entry guard + failure memoization)
+      // Pre-register as failure (failure memoization)
       cache_registered[idx] = true;
       cache_success[idx] = false;
 
@@ -1480,7 +1503,10 @@ public:
         (*packrat_stats)[def_id].misses++;
       }
 
+      auto save = active_pos[def_id];
+      active_pos[def_id] = a_s;
       fn(val);
+      active_pos[def_id] = save;
 
       if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
       return;
@@ -1490,7 +1516,7 @@ public:
   // Without packrat, a rule entered again at the position it is already
   // being parsed at fails instead of recursing forever. The innermost active
   // start per rule is enough, since a nested call never starts before its
-  // caller; packrat uses the same guard for the rules it does not memoize.
+  // caller; packrat uses the same guard.
   // That needs the rule's id in this parse's numbering. A rule outside it has
   // no reliable id: parse_literal's throwaway %word contexts number no rules
   // at all, and a rule attached after the first parse was never numbered.
@@ -1513,7 +1539,9 @@ public:
       active_pos[def_id] = save;
       return;
     }
-    auto key = LRKey({def, top_macro_inst()}, a_s);
+    // A re-entry guard, which unlike a memo holds wherever whitespace is
+    // skipped or not.
+    auto key = LRKey({def, top_macro_inst(), false}, a_s);
     if (lr_memo.count(key)) {
       len = static_cast<size_t>(-1);
       return;
@@ -4785,11 +4813,20 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
   if (outer_->is_left_recursive) {
     // A macro grows one seed per instantiation: Sum(D) and Sum(L) are
     // different rules as far as the memo is concerned.
-    auto lr_rule = Context::LRRule(outer_, c.top_macro_inst());
+    auto lr_rule =
+        Context::LRRule(outer_, c.top_macro_inst(), c.skips_no_whitespace());
     auto lr_key = Context::LRKey(lr_rule, s);
 
-    // Check LR memo first
+    // Check LR memo first. A rule that recurses into itself across a token
+    // boundary grows the seed of the outer match.
     auto it = c.lr_memo.find(lr_key);
+    if (it == c.lr_memo.end()) {
+      auto outer_key = lr_key;
+      std::get<2>(outer_key.first) = !std::get<2>(lr_key.first);
+      if (c.lr_active_seeds.count(outer_key)) {
+        it = c.lr_memo.find(outer_key);
+      }
+    }
     if (it != c.lr_memo.end()) {
       if (success(it->second.len)) {
         len = it->second.len;
@@ -4799,7 +4836,7 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       }
       // Record that this rule's lr_memo was accessed.
       // Any LR rule currently seeding will know we're in its cycle.
-      c.lr_refs_hit.insert(lr_rule);
+      c.lr_refs_hit.insert(it->first.first);
     } else {
       // Seed with FAIL
       c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
@@ -4880,8 +4917,7 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
   } else {
     // A cached match of an operator rule would not hand over its token.
     if (c.enablePackratParsing && !c.operator_token) {
-      // Packrat cache acts as re-entry guard (pre-registered as
-      // failure before fn is called).
+      // Memoized, and guarded from re-entry (see Context::packrat).
       c.packrat(s, outer_->id, len, val,
                 [&](std::any &a_val) { do_parse(len, a_val); });
     } else {

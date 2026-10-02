@@ -499,5 +499,71 @@ TEST(PackratTest, Packrat_parse_nested_from_another_start_rule_keeps_values) {
   }
 }
 
+// No whitespace is skipped inside a token, a no_whitespace rule or the
+// whitespace, so a rule matched there can match differently than at the same
+// position elsewhere: NAME inside TYPE, and COMMENT in the whitespace after
+// [a]. A memoized match from there must not stand in for one elsewhere.
+TEST(PackratTest, Packrat_keeps_matches_that_skip_no_whitespace_apart) {
+  struct {
+    const char *grammar;
+    std::vector<const char *> inputs;
+  } cases[] = {
+      {R"(
+        S    <- DECL / EXPR
+        DECL <- TYPE NAME
+        TYPE <- < NAME >
+        EXPR <- NAME '/' NAME
+        NAME <- < [a-z]+ >
+        %whitespace <- [ ]*
+      )",
+       {"x / y", "int x"}},
+      {R"(
+        S       <- 'a' 'z' / X
+        X       <- [a] COMMENT 'q' / [a] COMMENT '/' 'y'
+        COMMENT <- '#' 'x'
+        %whitespace <- ([ ] / COMMENT)*
+      )",
+       {"a#x / y", "a z"}},
+      {R"(
+        S    <- DECL / EXPR
+        DECL <- TYPE NAME
+        TYPE <- NAME { no_whitespace }
+        EXPR <- NAME '/' NAME
+        NAME <- [a-z]+ ''
+        %whitespace <- [ ]*
+      )",
+       {"x / y", "int x"}},
+  };
+  for (const auto &[grammar, inputs] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      for (auto input : inputs) {
+        EXPECT_TRUE(pg.parse(input)) << input << " " << packrat;
+      }
+    }
+  }
+}
+
+// R enters itself at the same position through the whitespace its empty
+// literal skips, where no whitespace is skipped. That fails, with packrat as
+// without it, however the memo keeps the two places apart.
+TEST(PackratTest, Packrat_reentry_through_the_whitespace_fails) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- [c] T
+      T <- R 'z' / R
+      R <- '' 'a' / 'b'
+      %whitespace <- R?
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("ca")) << packrat;
+    EXPECT_TRUE(pg.parse("caz")) << packrat;
+  }
+}
+
 // =============================================================================
 // Lookahead Predicate Tests
