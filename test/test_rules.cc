@@ -675,6 +675,44 @@ TEST(PrecedenceTest, Precedence_climbing_with_an_ignored_operator_rule) {
   }
 }
 
+// An operator rule hands its token to the precedence rule also when the
+// packrat cache already holds its match at that position. Both alternatives
+// of F start with O, so the selective packrat memoizes O, and F's lookahead
+// caches O's match before the precedence rule parses it.
+TEST(PrecedenceTest, Precedence_climbing_with_a_cached_operator_rule) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      A    <- N F
+      F    <- &(O 'x') / &(O 'y') / ''
+      N    <- < [0-9]+ >
+      O    <- < [-+*] >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  + A
+    - N (1)
+    - F/2 ()
+  - O (+)
+  + E
+    + A
+      - N (2)
+      - F/2 ()
+    - O (*)
+    + A
+      - N (3)
+      - F/2 ()
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
 // A macro's body parses on its caller's values; its precedence fold must
 // leave the values before it alone, also when the alternative it is in fails
 // after the fold.

@@ -4832,7 +4832,8 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
       }
     }
   } else {
-    if (c.enablePackratParsing) {
+    // A cached match of an operator rule would not hand over its token.
+    if (c.enablePackratParsing && !c.operator_token) {
       // Packrat cache acts as re-entry guard (pre-registered as
       // failure before fn is called).
       c.packrat(s, outer_->id, len, val,
