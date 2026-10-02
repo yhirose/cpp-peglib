@@ -4190,8 +4190,8 @@ inline size_t Context::parse_values_unread(const Ope &ope, const char *a_s,
 // rule at the same position, whose value may be read. A tracer sees every
 // scope, and an operator rule of a precedence hands over its token.
 inline bool Context::can_recognize(const Definition &rule) const {
-  if (!rule.recognizable || has_tracer) { return false; }
-  if (rule.value_always_empty) { return !operator_token; }
+  if (!rule.recognizable || has_tracer || operator_token) { return false; }
+  if (rule.value_always_empty) { return true; }
   return !enablePackratParsing && (values_unread || rule.ignoreSemanticValue);
 }
 

@@ -648,6 +648,33 @@ TEST(PrecedenceTest, Precedence_climbing_hands_over_values_with_their_tags) {
   EXPECT_TRUE(pg.parse("1 + 2 + 3"));
 }
 
+// An operator rule hands its token to the precedence rule also when its own
+// value is thrown away and nothing else would make it build one.
+TEST(PrecedenceTest, Precedence_climbing_with_an_ignored_operator_rule) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      ~O   <- P
+      P    <- < [-+*] >
+      A    <- < [0-9]+ >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  - A (1)
+  + E
+    - A (2)
+    - A (3)
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
 // A macro's body parses on its caller's values; its precedence fold must
 // leave the values before it alone, also when the alternative it is in fails
 // after the fold.
