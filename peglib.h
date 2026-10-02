@@ -1326,6 +1326,9 @@ public:
   // True while the values produced here are never read: inside `~`, `&` and
   // `!`, and in the body of a rule whose own value does not depend on them.
   bool values_unread = false;
+  // Whether this parse may read a value of the rule, by id (see
+  // Definition::analyze_value_use).
+  const std::vector<bool> *value_read = nullptr;
 
   // Set by PrecedenceClimbing: the operator rule it parses next stores its
   // token here.
@@ -2768,20 +2771,24 @@ struct AssignIDToDefinition : public TraversalVisitor {
   bool has_cut = false;              // grammar contains a Cut or Recovery ope
 };
 
-// Collects the rules one rule's body takes values from, without walking into
-// them, whether the body reads its scope itself, and whether it records or
-// reads captures (see Definition::collect_rule_refs).
+// Collects the rules one rule's body refers to, without walking into them,
+// which of them put values in its scope, whether the body reads its scope
+// itself, and whether it records or reads captures (see
+// Definition::collect_rule_refs).
 struct CollectRuleRefs : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  void visit(Holder &ope) override { rules.push_back(ope.outer_); }
+  void visit(Holder &ope) override { add(ope.outer_); }
   void visit(Reference &ope) override {
     // A macro parameter has no rule; the call site collects its argument.
-    if (ope.rule_) { rules.push_back(ope.rule_); }
+    if (ope.rule_) { add(ope.rule_); }
     for (const auto &arg : ope.args_) {
-      arg->accept(*this);
+      read(*arg);
     }
   }
+  void visit(AndPredicate &ope) override { thrown_away(*ope.ope_); }
+  void visit(NotPredicate &ope) override { thrown_away(*ope.ope_); }
+  void visit(Ignore &ope) override { thrown_away(*ope.ope_); }
   void visit(User &) override {
     reads_scope = true;
     has_user = true;
@@ -2789,7 +2796,7 @@ struct CollectRuleRefs : public TraversalVisitor {
   void visit(PrecedenceClimbing &ope) override {
     reads_scope = true;
     ope.atom_->accept(*this);
-    ope.binop_->accept(*this);
+    read(*ope.binop_);
   }
   void visit(Capture &ope) override {
     uses_captures = true;
@@ -2798,9 +2805,38 @@ struct CollectRuleRefs : public TraversalVisitor {
   void visit(BackReference &) override { uses_captures = true; }
 
   std::vector<Definition *> rules;
+  // Of those, the rules whose values land in this rule's scope, and the rules
+  // whose values count as read wherever they are, `~` rules included: those
+  // in a macro argument, which lands in a scope the analysis does not follow,
+  // and a precedence's operator, whose action runs as it hands over its token
+  // (see Definition::analyze_value_use). The rest are thrown away.
+  std::vector<Definition *> value_rules;
+  std::vector<Definition *> read_rules;
   bool reads_scope = false;
   bool has_user = false;
   bool uses_captures = false; // records captures or reads them
+
+private:
+  void add(Definition *rule) {
+    rules.push_back(rule);
+    if (read_) {
+      read_rules.push_back(rule);
+    } else if (!thrown_away_) {
+      value_rules.push_back(rule);
+    }
+  }
+  void read(Ope &ope) {
+    read_++;
+    ope.accept(*this);
+    read_--;
+  }
+  void thrown_away(Ope &ope) {
+    thrown_away_++;
+    ope.accept(*this);
+    thrown_away_--;
+  }
+  size_t read_ = 0;
+  size_t thrown_away_ = 0;
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3882,6 +3918,7 @@ private:
               packrat_cached_count, has_cut_);
 
     c.numbering = definition_ids_.data();
+    c.value_read = &value_read_;
 
     if (collect_packrat_stats) {
       packrat_stats_.resize(definition_ids_.size());
@@ -3963,11 +4000,14 @@ private:
   mutable std::vector<std::pair<Definition *, size_t>> definition_ids_;
   mutable bool has_cut_ = false;
   // For each rule reached from here (by id): the ids of the rules its body
-  // takes values from, whether the body reads its scope itself (a User or
+  // refers to, whether the body reads its scope itself (a User or
   // PrecedenceClimbing ope, also through a macro), and whether it records or
   // reads captures.
   struct RuleRefs {
     std::vector<size_t> rules;
+    // See CollectRuleRefs.
+    std::vector<size_t> value_rules;
+    std::vector<size_t> read_rules;
     bool reads_scope = false;
     bool uses_captures = false;
     // The rule's start region (see CollectStartRegion), by id.
@@ -3984,6 +4024,9 @@ private:
   void spread(std::vector<bool> &flag, std::vector<size_t> RuleRefs::*to) const;
   // The callbacks analyze_value_use last saw on each rule, by id.
   mutable std::vector<uint8_t> analyzed_callbacks_;
+  // Whether a parse from here may read a value of the rule, by id. It
+  // depends on the start rule, so it lives here and not on the rule.
+  mutable std::vector<bool> value_read_;
   mutable std::once_flag packrat_filter_init_;
   mutable std::vector<int32_t> packrat_index_; // def_id -> cache slot or -1
   mutable size_t packrat_cached_count_ = 0;
@@ -4185,14 +4228,15 @@ inline size_t Context::parse_values_unread(const Ope &ope, const char *a_s,
 }
 
 // A rule match can skip building its value when nothing observes the match
-// and the value is either always empty or never read. With packrat only the
-// former: the cache would hand the missing value to a later match of the
-// rule at the same position, whose value may be read. A tracer sees every
-// scope, and an operator rule of a precedence hands over its token.
+// and the value is either always empty or not read. With packrat no match of
+// the rule may be read: the cache hands the value to later matches of the
+// rule at the same position. A tracer sees every scope, and an operator rule
+// of a precedence hands over its token.
 inline bool Context::can_recognize(const Definition &rule) const {
   if (!rule.recognizable || has_tracer || operator_token) { return false; }
   if (rule.value_always_empty) { return true; }
-  return !enablePackratParsing && (values_unread || rule.ignoreSemanticValue);
+  if (enablePackratParsing) { return !(*value_read)[rule.id]; }
+  return values_unread || rule.ignoreSemanticValue;
 }
 
 inline std::any Context::run_action(const Definition &rule, SemanticValues &vs,
@@ -4623,9 +4667,11 @@ inline size_t Holder::parse_rule(const char *s, size_t n, SemanticValues &vs,
   };
 
   // Below a match on the recognizer path the values are unread, and there
-  // is no tracer and no operator token to hand over.
+  // is no tracer and no operator token to hand over, so Context::can_recognize
+  // comes down to this.
   if (c.recognize_only && outer_->recognizable &&
-      (!c.enablePackratParsing || outer_->value_always_empty)) {
+      (!c.enablePackratParsing || outer_->value_always_empty ||
+       !(*c.value_read)[outer_->id])) {
     if (c.enablePackratParsing) {
       c.packrat(s, outer_->id, len, val, do_recognize);
     } else {
@@ -5649,27 +5695,34 @@ inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
 
 inline void Definition::collect_rule_refs(
     const std::unordered_map<void *, size_t> &ids) const {
+  auto to_ids = [&](const std::vector<Definition *> &rules) {
+    std::vector<size_t> r;
+    for (auto rule : rules) {
+      r.push_back(ids.at(rule));
+    }
+    return r;
+  };
+
   rule_refs_.resize(definition_ids_.size());
   for (const auto &[def, id] : definition_ids_) {
     auto ope = def->get_core_operator();
     if (!ope) { continue; }
+    auto &refs = rule_refs_[id];
     CollectRuleRefs vis;
     ope->accept(vis);
-    for (auto rule : vis.rules) {
-      rule_refs_[id].rules.push_back(ids.at(rule));
-    }
-    rule_refs_[id].reads_scope = vis.reads_scope;
-    rule_refs_[id].uses_captures = vis.uses_captures;
+    refs.rules = to_ids(vis.rules);
+    refs.value_rules = to_ids(vis.value_rules);
+    // A macro's body lands in a scope the analysis does not follow, so all its
+    // values count as read.
+    refs.read_rules = to_ids(def->is_macro ? vis.rules : vis.read_rules);
+    refs.reads_scope = vis.reads_scope;
+    refs.uses_captures = vis.uses_captures;
 
     CollectStartRegion region;
     ope->accept(region);
-    for (auto rule : region.entered) {
-      rule_refs_[id].entered.push_back(ids.at(rule));
-    }
-    for (auto rule : region.reached) {
-      rule_refs_[id].reached.push_back(ids.at(rule));
-    }
-    rule_refs_[id].unknown = region.unknown;
+    refs.entered = to_ids(region.entered);
+    refs.reached = to_ids(region.reached);
+    refs.unknown = region.unknown;
   }
 
   for (const auto &ope : {whitespaceOpe, wordOpe}) {
@@ -5750,6 +5803,45 @@ inline void Definition::analyze_value_use() const {
     }
 
     def->value_always_empty = !def->action && !refs.reads_scope;
+  }
+
+  // A value is read where it lands in a scope that is read: that of the parse
+  // result, of whatever the whitespace and word skipping run in, of a macro
+  // or a precedence's operator (see CollectRuleRefs), of a rule whose action,
+  // predicate or `leave` handler, or whose body itself, reads its values, and
+  // of a rule that passes its first value up as its own when that is read.
+  // With packrat, an action runs where the rule's value is read or the rule
+  // cannot take the recognizer path (see Context::can_recognize). A `~` rule's
+  // value is thrown away wherever it lands.
+  auto &read = value_read_;
+  read.assign(definition_ids_.size(), false);
+  for (const auto &[def, id] : definition_ids_) {
+    if (def == this) { read[id] = true; }
+    for (auto r : rule_refs_[id].read_rules) {
+      read[r] = true;
+    }
+  }
+  for (auto r : skipping_rules_) {
+    read[r] = true;
+  }
+  auto passes_read_down = [&](const Definition &def, size_t id) -> bool {
+    switch (def.child_values) {
+    case ChildValues::read: return read[id] || !def.recognizable;
+    case ChildValues::unread: return false;
+    case ChildValues::passed_up: return read[id];
+    }
+    return false;
+  };
+  for (auto again = true; again;) {
+    again = false;
+    for (const auto &[def, id] : definition_ids_) {
+      if (!passes_read_down(*def, id)) { continue; }
+      for (auto r : rule_refs_[id].value_rules) {
+        if (!read[r] && !definition_ids_[r].first->ignoreSemanticValue) {
+          read[r] = again = true;
+        }
+      }
+    }
   }
 
   analyze_skippable();

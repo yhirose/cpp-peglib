@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
+#include <map>
 #include <peglib.h>
+#include <set>
 
 using namespace peg;
 
@@ -344,6 +346,156 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
 
     EXPECT_TRUE(pg.parse("a  y|  ")) << packrat;
     EXPECT_FALSE(pg.parse("a  y| ")) << packrat;
+  }
+}
+
+// Gives the rules AST actions that count their runs in `runs`. Such an action
+// may be skipped where nothing reads its value (see Holder::parse_rule), so
+// the counts show which matches built a value.
+static void count_ast_actions(parser &pg, const std::vector<std::string> &names,
+                              std::map<std::string, size_t> &runs) {
+  for (const auto &name : names) {
+    auto &rule = pg[name.c_str()];
+    rule = [&runs, name](const SemanticValues &vs) {
+      runs[name]++;
+      return std::make_shared<Ast>("", 1, 1, name.c_str(),
+                                   vs.transform<std::shared_ptr<Ast>>());
+    };
+    rule.action.declare_ast_action<std::shared_ptr<Ast>>(false);
+  }
+}
+
+// With packrat, a match builds no value when no match of its rule is ever
+// read: in a lookahead, a token rule or a `~` rule, or below a rule that
+// passes up its first value or runs an action only where its own value is
+// read. Values that land in a macro, the whitespace or a rule whose
+// callbacks see them are read.
+TEST(PackratTest, Packrat_builds_no_value_nothing_reads) {
+  const char *grammar = R"(
+    S       <- &LRM(ARG3) &LOOK &LOOK_PASS TOKEN DROP CHECKED PASS M(ARG)
+               &SHARED SHARED T('t')
+    LOOK    <- 'i'
+    LOOK_PASS <- LOOK_UP
+    LOOK_UP <- 'i'
+    LRM(X)  <- LRM(X) X / X
+    ARG3    <- 'i'
+    TOKEN   <- < INNER >
+    INNER   <- 'i'
+    ~DROP   <- BELOW
+    BELOW   <- 'b'
+    ~CHECKED <- CHECKED_BELOW
+    CHECKED_BELOW <- 'c'
+    PASS    <- UP
+    UP      <- 'u'
+    M(X)    <- X BODY
+    ARG     <- 'a'
+    BODY    <- 'm'
+    SHARED  <- 's'
+    T(X)    <- < X > TBODY
+    TBODY   <- 'n'
+    %whitespace <- SPACE*
+    SPACE   <- ' '
+  )";
+  const std::vector<std::string> names{
+      "S",       "LOOK",          "TOKEN", "INNER", "DROP", "BELOW",
+      "CHECKED", "CHECKED_BELOW", "UP",    "ARG",   "BODY", "SHARED",
+      "SPACE",   "LOOK_UP",       "LRM",   "ARG3",  "T",    "TBODY"};
+
+  parser pg(grammar);
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, names, runs);
+  auto reads_its_value = [](const SemanticValues &vs, const std::any &,
+                            std::string &) {
+    return vs.size() == 1 && vs[0].has_value();
+  };
+  pg["CHECKED"].predicate = reads_its_value;
+
+  ASSERT_TRUE(pg.parse("i b c u a m s t n"));
+  std::set<std::string> ran;
+  for (const auto &[name, n] : runs) {
+    ran.insert(name);
+  }
+  EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "CHECKED", "CHECKED_BELOW",
+                                   "UP", "ARG", "BODY", "SHARED", "SPACE",
+                                   "LRM", "ARG3", "TBODY"}),
+            ran);
+
+  // Callbacks attached since are taken into account: DROP's predicate reads
+  // BELOW's value.
+  runs.clear();
+  pg["DROP"].predicate = reads_its_value;
+  ASSERT_TRUE(pg.parse("i b c u a m s t n"));
+  EXPECT_EQ(1u, runs["DROP"]);
+  EXPECT_EQ(1u, runs["BELOW"]);
+  EXPECT_EQ(0u, runs["LOOK"]);
+}
+
+// A match whose value is thrown away leaves no valueless cache entry for a
+// later match of the rule at the same position whose value is read. Both
+// alternatives start with A, so the selective packrat memoizes it.
+TEST(PackratTest,
+     Packrat_keeps_the_value_of_a_rule_read_after_a_dropped_match) {
+  parser pg(R"(
+    S <- ~A 'z' / A 'y'
+    A <- B
+    B <- 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"B"}, runs);
+  auto has_value = false;
+  pg["S"] = [&](const SemanticValues &vs) {
+    has_value = vs.size() == 1 && vs[0].has_value();
+  };
+  ASSERT_TRUE(pg.parse("ay"));
+  EXPECT_TRUE(has_value);
+}
+
+// Whether a value is read depends on the start rule. A parse from another
+// start rule nested in an action must not change what the enclosing parse
+// builds: S2 reads R only in a lookahead, S1 reads its value.
+TEST(PackratTest, Packrat_parse_nested_from_another_start_rule_keeps_values) {
+  for (auto with_predicate : {false, true}) {
+    parser pg(R"(
+      S1 <- N R
+      S2 <- &R 'r'
+      N  <- 'n'
+      R  <- T
+      T  <- 'r'
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_packrat_parsing();
+
+    const auto &g = pg.get_grammar();
+    auto nested_ok = false;
+    pg["N"] = [&](const SemanticValues &) {
+      nested_ok = g.at("S2").parse("r").ret;
+      return 1;
+    };
+    pg["T"] = [](const SemanticValues &) { return 42; };
+    std::vector<int> seen;
+    auto see = [&](const SemanticValues &vs) {
+      seen.clear();
+      for (const auto &v : vs) {
+        seen.push_back(v.has_value() ? std::any_cast<int>(v) : -1);
+      }
+    };
+    if (with_predicate) {
+      pg["S1"].predicate = [&](const SemanticValues &vs, const std::any &,
+                               std::string &) {
+        see(vs);
+        return true;
+      };
+    } else {
+      pg["S1"] = see;
+    }
+
+    EXPECT_TRUE(pg.parse("nr")) << with_predicate;
+    EXPECT_TRUE(nested_ok) << with_predicate;
+    EXPECT_EQ((std::vector<int>{1, 42}), seen) << with_predicate;
   }
 }
 

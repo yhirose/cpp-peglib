@@ -675,6 +675,35 @@ TEST(PrecedenceTest, Precedence_climbing_with_an_ignored_operator_rule) {
   }
 }
 
+// Such an operator rule still runs its action as it hands over its token, on
+// the values of the rules below it, which must be built.
+TEST(PrecedenceTest,
+     Precedence_climbing_with_an_ignored_operator_rule_above_another) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      ~O   <- X
+      X    <- P
+      P    <- < [-+*] >
+      A    <- < [0-9]+ >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  - A (1)
+  + E
+    - A (2)
+    - A (3)
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
 // An operator rule hands its token to the precedence rule also when the
 // packrat cache already holds its match at that position. Both alternatives
 // of F start with O, so the selective packrat memoizes O, and F's lookahead
