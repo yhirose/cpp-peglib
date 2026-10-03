@@ -3223,6 +3223,10 @@ public:
     return is_token_;
   }
 
+  const std::string &node_name() const {
+    return ast_name.empty() ? name : ast_name;
+  }
+
   std::string name;
   const char *s_ = nullptr;
   std::pair<size_t, size_t> line_ = {1, 1};
@@ -6508,28 +6512,38 @@ ast_to_s(const std::shared_ptr<T> &ptr,
   return s;
 }
 
+// A copy of `child` standing in for its single-child parent. Shared by
+// AstOptimizer and the collapsing AST actions so both build the same tree.
+template <typename T>
+std::shared_ptr<T> collapse_ast_node(const T &child, const char *name,
+                                     size_t position, size_t length,
+                                     size_t choice_count, size_t choice) {
+  auto pos = child.preserve_position ? child.position : position;
+  auto len = child.preserve_position ? child.length : length;
+  auto ast = std::make_shared<T>(child, name, pos, len, choice_count, choice);
+  for (auto &node : ast->nodes) {
+    node->parent = ast;
+  }
+  return ast;
+}
+
 struct AstOptimizer {
   AstOptimizer(bool mode, const std::vector<std::string> &rules = {})
       : mode_(mode), rules_(rules) {}
 
+  bool is_optimized(const std::string &name) const {
+    auto found = std::find(rules_.begin(), rules_.end(), name) != rules_.end();
+    return mode_ ? !found : found;
+  }
+
   template <typename T>
   std::shared_ptr<T> optimize(std::shared_ptr<T> original,
                               std::shared_ptr<T> parent = nullptr) {
-    auto found =
-        std::find(rules_.begin(), rules_.end(), original->name) != rules_.end();
-    auto opt = mode_ ? !found : found;
-
-    if (opt && original->nodes.size() == 1) {
-      auto child = optimize(original->nodes[0], parent);
-      auto pos =
-          child->preserve_position ? child->position : original->position;
-      auto len = child->preserve_position ? child->length : original->length;
-      auto ast = std::make_shared<T>(*child, original->name.data(), pos, len,
-                                     original->choice_count, original->choice);
-      for (auto &node : ast->nodes) {
-        node->parent = ast;
-      }
-      return ast;
+    if (is_optimized(original->name) && original->nodes.size() == 1) {
+      return collapse_ast_node(*optimize(original->nodes[0], parent),
+                               original->name.data(), original->position,
+                               original->length, original->choice_count,
+                               original->choice);
     }
 
     auto ast = std::make_shared<T>(*original);
@@ -6550,29 +6564,37 @@ private:
 struct EmptyType {};
 using Ast = AstBase<EmptyType>;
 
-template <typename T = Ast> void add_ast_action(Definition &rule) {
-  rule.action = [&](const SemanticValues &vs) {
-    auto line = vs.line_info();
-
+template <typename T = Ast>
+void add_ast_action(Definition &rule, bool collapse = false) {
+  rule.action = [&rule, collapse](const SemanticValues &vs) {
     // `{ ast_name: X }` overrides the node's name/tag (falls back to the
     // rule's own name when unset).
-    const char *node_name =
-        rule.ast_name.empty() ? rule.name.data() : rule.ast_name.data();
+    const char *node_name = rule.node_name().data();
+    auto position = static_cast<size_t>(std::distance(vs.ss, vs.sv().data()));
+    auto length = vs.sv().length();
 
     if (rule.is_token()) {
+      auto line = vs.line_info();
       return std::make_shared<T>(
-          vs.path, line.first, line.second, node_name, vs.token(),
-          std::distance(vs.ss, vs.sv().data()), vs.sv().length(),
-          vs.choice_count(), vs.choice(), rule.no_ast_opt);
+          vs.path, line.first, line.second, node_name, vs.token(), position,
+          length, vs.choice_count(), vs.choice(), rule.no_ast_opt);
     }
+
+    if (collapse && vs.size() == 1) {
+      return collapse_ast_node(
+          *std::any_cast<const std::shared_ptr<T> &>(vs[0]), node_name,
+          position, length, vs.choice_count(), vs.choice());
+    }
+
+    auto line = vs.line_info();
 
     // Construct with no children, then move the collected ones in: passing
     // the vector to the constructor would bind to its `const &` parameter
     // and copy the whole thing (plus a reference count bump per child).
-    auto ast = std::make_shared<T>(
-        vs.path, line.first, line.second, node_name,
-        std::vector<std::shared_ptr<T>>(), std::distance(vs.ss, vs.sv().data()),
-        vs.sv().length(), vs.choice_count(), vs.choice(), rule.no_ast_opt);
+    auto ast =
+        std::make_shared<T>(vs.path, line.first, line.second, node_name,
+                            std::vector<std::shared_ptr<T>>(), position, length,
+                            vs.choice_count(), vs.choice(), rule.no_ast_opt);
     ast->nodes = vs.transform<std::shared_ptr<T>>();
 
     for (auto &node : ast->nodes) {
@@ -6818,7 +6840,7 @@ public:
       const auto &rule = (*grammar_)[start_];
       auto result =
           rule.parse_and_get_value(s, n, val, path, log_, error_reporter_);
-      return post_process(s, n, result);
+      return post_process(s, n, val, result);
     }
     return false;
   }
@@ -6830,7 +6852,7 @@ public:
       const auto &rule = (*grammar_)[start_];
       auto result =
           rule.parse_and_get_value(s, n, dt, val, path, log_, error_reporter_);
-      return post_process(s, n, result);
+      return post_process(s, n, val, result);
     }
     return false;
   }
@@ -6931,10 +6953,28 @@ public:
     }
   }
 
-  template <typename T = Ast> parser &enable_ast() {
+  // With collapse_mode, nodes are collapsed as they are built, giving the
+  // tree optimize_ast(ast, opt_mode) would return without copying it again.
+  // Rules with a user action are not collapsed.
+  template <typename T = Ast>
+  parser &enable_ast(bool collapse_mode = false, bool opt_mode = true) {
+    return enable_ast<T>(collapse_mode, opt_mode, get_no_ast_opt_rules());
+  }
+
+  // As above, but with `rules` in place of the rules marked no_ast_opt, as
+  // in AstOptimizer(opt_mode, rules).
+  template <typename T = Ast>
+  parser &enable_ast(bool collapse_mode, bool opt_mode,
+                     const std::vector<std::string> &rules) {
+    const AstOptimizer optimizer(opt_mode, rules);
     for (auto &[_, rule] : *grammar_) {
-      if (!rule.action) { add_ast_action<T>(rule); }
+      if (!rule.action) {
+        add_ast_action<T>(rule, collapse_mode &&
+                                    optimizer.is_optimized(rule.node_name()));
+      }
     }
+    // A later call keeps the collapsing actions set here.
+    collapse_ast_ = collapse_ast_ || collapse_mode;
     return *this;
   }
 
@@ -6967,14 +7007,46 @@ private:
     return r.ret && !r.recovered;
   }
 
+  template <typename T>
+  bool post_process(const char *s, size_t n, T &val,
+                    Definition::Result &r) const {
+    auto ret = post_process(s, n, r);
+    if (ret) { link_collapsed_ast(val); }
+    return ret;
+  }
+
+  // Packrat or left recursion can reuse a node after a collapsed copy of it
+  // was discarded, leaving its children with a stale parent, so relink the
+  // finished tree. A direct Definition::parse_and_get_value call skips this.
+  template <typename V> void link_collapsed_ast(V &) const {}
+  template <typename A>
+  void link_collapsed_ast(std::shared_ptr<AstBase<A>> &ast) const {
+    if (!collapse_ast_ || !ast) { return; }
+    ast->parent.reset();
+    // Only a zero-length node can sit under two parents (packrat reuses it);
+    // each extra occurrence gets its own copy, as optimize_ast would give.
+    std::unordered_set<const AstBase<A> *> zero_length;
+    std::vector<std::shared_ptr<AstBase<A>> *> stack{&ast};
+    while (!stack.empty()) {
+      auto &node = *stack.back();
+      stack.pop_back();
+      for (auto &child : node->nodes) {
+        if (child->length == 0 && !zero_length.insert(child.get()).second) {
+          child = std::make_shared<AstBase<A>>(*child);
+          zero_length.insert(child.get());
+        }
+        child->parent = node;
+        stack.push_back(&child);
+      }
+    }
+  }
+
   std::vector<std::string> get_no_ast_opt_rules() const {
     std::vector<std::string> rules;
-    for (auto &[name, rule] : *grammar_) {
+    for (auto &[_, rule] : *grammar_) {
       // The optimizer keeps nodes by their emitted name, so honor the
       // `ast_name` override when present (else the rule's own name).
-      if (rule.no_ast_opt) {
-        rules.push_back(rule.ast_name.empty() ? name : rule.ast_name);
-      }
+      if (rule.no_ast_opt) { rules.push_back(rule.node_name()); }
     }
     return rules;
   }
@@ -6983,6 +7055,7 @@ private:
   std::string start_;
   bool enableLeftRecursion_ = true;
   bool enablePackratParsing_ = false;
+  bool collapse_ast_ = false;
   Log log_;
   ErrorReporter error_reporter_;
 };

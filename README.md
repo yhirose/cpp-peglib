@@ -637,7 +637,21 @@ if (parser.parse("...", ast)) {
 }
 ```
 
-`optimize_ast` removes redundant nodes to make an AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used.
+`optimize_ast` removes redundant nodes to make an AST simpler. If you want to disable this behavior from particular rules, `no_ast_opt` instruction can be used. Passing `false` as the second argument, `opt_mode`, reverses this: only the nodes of the `no_ast_opt` rules are removed.
+
+If you only need the optimized AST, `enable_ast(true)` removes those nodes while parsing instead. It returns the same tree that `optimize_ast` would, and it is faster and uses much less memory on large inputs because the unoptimized tree is never kept. The second argument has the same meaning as the `opt_mode` argument of `optimize_ast`. Nodes built by your own semantic actions are left as they are.
+
+```cpp
+parser.enable_ast(true);  // same AST as enable_ast() followed by optimize_ast()
+```
+
+A third argument lists the rules to use in place of those marked `no_ast_opt`, for the tree that `AstOptimizer(opt_mode, rules)` would return:
+
+```cpp
+parser.enable_ast(true, true, {"ARGUMENTS", "BLOCK"});
+```
+
+With `enable_ast(true)`, a node's `parent` is guaranteed only once the parse has returned: until then, a node that packrat parsing or left recursion reuses can still point to a parent built for an alternative that was abandoned.
 
 By default an AST node carries the name of the rule that produced it. A rule can override that tag with the `{ ast_name: NodeTag }` instruction, so several rules can emit nodes under a shared tag.
 

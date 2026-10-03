@@ -1369,6 +1369,141 @@ TEST(GeneralTest, NoAstOptPreservesPosition) {
   EXPECT_LT(ast->length, src.length());
 }
 
+TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
+  // enable_ast(true, opt_mode) must build exactly the tree that
+  // optimize_ast(ast, opt_mode) makes out of the full one, source ranges and
+  // parent links included, and enable_ast(true, opt_mode, rules) the one
+  // AstOptimizer(opt_mode, rules) makes. With TERM in `rules` in place of
+  // YIELD, TERM's nodes are kept and YIELD's are not.
+  const char *grammar = R"(
+    PROGRAM     <-  STATEMENT (';' STATEMENT)*
+    STATEMENT   <-  YIELD / ASSIGN / SUM
+    YIELD       <-  'yield' EXPR               { no_ast_opt }
+    ASSIGN      <-  NAME '=' EXPR
+    SUM         <-  SUM '#' NUMBER / NUMBER
+    EXPR        <-  TERM (OP TERM)* {
+                      precedence
+                        L + -
+                        L * /
+                    }
+    TERM        <-  NUMBER / NAME / '(' EXPR ')' / LIST(EXPR, ',')
+    LIST(I, D)  <-  '[' (I (D I)*)? ']'
+    OP          <-  < [-+*/] >
+    NUMBER      <-  < DIGIT+ >                 { ast_name: NUM }
+    DIGIT       <-  [0-9]
+    NAME        <-  < [a-z]+ >
+    %whitespace <-  [ \t\r\n]*
+  )";
+  const char *src = "yield 1 + 2 * (x); a = [1, (2), b]; 7 # 8 # 9; 42";
+
+  auto dump = [](const std::shared_ptr<Ast> &ast) {
+    return ast_to_s<Ast>(ast, [](const Ast &node, int) {
+      return "@" + std::to_string(node.position) + "+" +
+             std::to_string(node.length) + " " + std::to_string(node.line) +
+             ":" + std::to_string(node.column) + " " +
+             std::to_string(node.preserve_position) + " " +
+             std::to_string(node.tag) + "/" +
+             std::to_string(node.original_tag) + "\n";
+    });
+  };
+
+  std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
+      [&](const std::shared_ptr<Ast> &ast) {
+        size_t n = 0;
+        for (const auto &child : ast->nodes) {
+          if (child->parent.lock() != ast) { n++; }
+          n += wrong_parents(child);
+        }
+        return n;
+      };
+
+  const std::vector<std::string> rules{"TERM"};
+  for (auto packrat : {false, true}) {
+    for (auto opt_mode : {true, false}) {
+      for (auto own_rules : {false, true}) {
+        parser full(grammar);
+        parser collapsed(grammar);
+        ASSERT_TRUE(full);
+        if (packrat) {
+          full.enable_packrat_parsing();
+          collapsed.enable_packrat_parsing();
+        }
+        full.enable_ast();
+        if (own_rules) {
+          collapsed.enable_ast(true, opt_mode, rules);
+        } else {
+          collapsed.enable_ast(true, opt_mode);
+        }
+
+        std::shared_ptr<Ast> expected;
+        std::shared_ptr<Ast> actual;
+        ASSERT_TRUE(full.parse(src, expected));
+        ASSERT_TRUE(collapsed.parse(src, actual));
+        expected = own_rules ? AstOptimizer(opt_mode, rules).optimize(expected)
+                             : full.optimize_ast(expected, opt_mode);
+
+        EXPECT_EQ(dump(expected), dump(actual))
+            << "packrat=" << packrat << " opt_mode=" << opt_mode
+            << " own_rules=" << own_rules;
+        EXPECT_EQ(0u, wrong_parents(actual));
+        EXPECT_TRUE(actual->parent.expired());
+      }
+    }
+  }
+}
+
+TEST(GeneralTest, CollapsedAstParentLinks) {
+  std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
+      [&](const std::shared_ptr<Ast> &ast) {
+        size_t n = 0;
+        for (const auto &child : ast->nodes) {
+          if (child->parent.lock() != ast) { n++; }
+          n += wrong_parents(child);
+        }
+        return n;
+      };
+
+  {
+    // A second enable_ast() leaves the collapsing actions in place, so the
+    // parent links must still be fixed up after each parse.
+    parser pg(R"(
+      T <- A '!' / B
+      A <- X
+      B <- X Z
+      X <- K L
+      K <- 'k'
+      L <- 'l'
+      Z <- 'z'
+    )");
+    pg.enable_packrat_parsing();
+    pg.enable_ast(true);
+    pg.enable_ast();
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("klz", ast));
+    EXPECT_EQ(0u, wrong_parents(ast));
+  }
+
+  {
+    // Packrat hands the same zero-length E node to both X and Y.
+    parser pg(R"(
+      S  <- X Y
+      X  <- A0 E
+      Y  <- E B0 / E C0
+      E  <- 'e'?
+      A0 <- 'a'
+      B0 <- 'b'
+      C0 <- 'c'
+    )");
+    pg.enable_packrat_parsing();
+    pg.enable_ast(true);
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("ab", ast));
+    EXPECT_EQ(0u, wrong_parents(ast));
+  }
+}
+
 TEST(GeneralTest, ChoiceWithWhitespace) {
   auto parser = peg::parser(R"(
     type <- 'string' / 'int' / 'double'
