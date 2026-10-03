@@ -581,6 +581,129 @@ TEST(PrecedenceTest,
   }
 }
 
+// A precedence action sees what the repetition `atom (binop atom)*` would
+// produce: each value with its tag, and no value for an operand without one.
+// Its result carries the rule's tag.
+TEST(PrecedenceTest, Precedence_climbing_hands_over_values_with_their_tags) {
+  struct {
+    std::string op;
+    std::vector<std::string> folds;
+  } cases[] = {
+      {"OP", {"(2/n */o 3/n )", "(1/n +/o (2/n */o 3/n )/e )"}},
+      {"~OP", {"(2/n 3/n )", "(1/n (2/n 3/n )/e )"}},
+  };
+  for (const auto &[op, expected] : cases) {
+    parser pg((R"(
+      E    <- NUM (OP NUM)* { precedence L + L * }
+      NUM  <- < [0-9]+ >
+      )" + op + R"( <- < [+*] >
+      %whitespace <- [ ]*
+    )")
+                  .c_str());
+    ASSERT_TRUE(!!pg) << op;
+
+    std::vector<std::string> folds;
+    pg["NUM"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+    pg["OP"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+    pg["E"] = [&](const SemanticValues &vs) {
+      EXPECT_EQ(vs.size(), vs.tags.size());
+      std::string r = "(";
+      for (size_t i = 0; i < vs.size(); i++) {
+        auto tag = vs.tags.at(i);
+        r += std::any_cast<std::string>(vs[i]) + "/" +
+             (tag == str2tag("NUM")  ? "n"
+              : tag == str2tag("OP") ? "o"
+              : tag == str2tag("E")  ? "e"
+                                     : "?") +
+             " ";
+      }
+      folds.push_back(r + ")");
+      return r + ")";
+    };
+
+    std::string val;
+    EXPECT_TRUE(pg.parse("1 + 2 * 3", val)) << op;
+    EXPECT_EQ(expected, folds) << op;
+    EXPECT_EQ(expected.back(), val) << op;
+  }
+
+  // Without an action the first operand's value, with its tag, stands for
+  // the fold, as a predicate on the rule sees.
+  parser pg(R"(
+    E    <- NUM (OP NUM)* { precedence L + }
+    NUM  <- < [0-9]+ >
+    OP   <- < '+' >
+    %whitespace <- [ ]*
+  )");
+  ASSERT_TRUE(!!pg);
+  pg["NUM"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+  pg["E"].predicate = [](const SemanticValues &vs, const std::any &,
+                         std::string &) {
+    EXPECT_EQ(1u, vs.size());
+    EXPECT_EQ(1u, vs.tags.size());
+    EXPECT_EQ("1", std::any_cast<std::string>(vs[0]));
+    EXPECT_EQ(str2tag("NUM"), vs.tags.at(0));
+    return true;
+  };
+  EXPECT_TRUE(pg.parse("1 + 2 + 3"));
+}
+
+// An operator rule hands its token to the precedence rule also when its own
+// value is thrown away and nothing else would make it build one.
+TEST(PrecedenceTest, Precedence_climbing_with_an_ignored_operator_rule) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      ~O   <- P
+      P    <- < [-+*] >
+      A    <- < [0-9]+ >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  - A (1)
+  + E
+    - A (2)
+    - A (3)
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
+// Such an operator rule still runs its action as it hands over its token, on
+// the values of the rules below it, which must be built.
+TEST(PrecedenceTest,
+     Precedence_climbing_with_an_ignored_operator_rule_above_another) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      ~O   <- X
+      X    <- P
+      P    <- < [-+*] >
+      A    <- < [0-9]+ >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  - A (1)
+  + E
+    - A (2)
+    - A (3)
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
 // =============================================================================
 // Precedence Edge Case Tests
 // =============================================================================

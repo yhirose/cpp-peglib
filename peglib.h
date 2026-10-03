@@ -2198,6 +2198,15 @@ public:
 private:
   size_t parse_expression(const char *s, size_t n, SemanticValues &vs,
                           Context &c, std::any &dt, size_t min_prec) const;
+
+  // Hands the values of `from` over to `vs`, whether none or several, with
+  // their tags.
+  static void append_values(SemanticValues &vs, SemanticValues &from) {
+    for (auto &v : from) {
+      vs.emplace_back(std::move(v));
+    }
+    vs.tags.insert(vs.tags.end(), from.tags.begin(), from.tags.end());
+  }
 };
 
 class Recovery : public Ope {
@@ -4198,7 +4207,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     if (level < min_prec) { break; }
 
-    vs.emplace_back(std::move(chvs[0]));
+    append_values(vs, chvs);
     i += chlen;
     auto op_len = chlen;
 
@@ -4219,19 +4228,28 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
       break;
     }
 
-    vs.emplace_back(std::move(chvs[0]));
+    append_values(vs, chvs);
+    vs.tokens.insert(vs.tokens.end(), chvs.tokens.begin(), chvs.tokens.end());
     i += chlen;
 
+    // The result stands for the operands folded into it. What an action
+    // returns is this rule's value and carries its tag, as Holder::parse_core
+    // tags a rule's value; without an action the first value stands for the
+    // fold with its own tag, as Holder::reduce hands it over.
     std::any val;
+    auto tag = str2tag(rule_.name);
     if (rule_.action) {
       vs.sv_ = std::string_view(s, i);
       static const std::any empty_predicate_data;
       val = rule_.action(vs, dt, empty_predicate_data);
     } else if (!vs.empty()) {
-      val = vs[0];
+      val = std::move(vs[0]);
+      tag = vs.tags[0];
     }
     vs.clear();
+    vs.tags.clear();
     vs.emplace_back(std::move(val));
+    vs.tags.emplace_back(tag);
     used = true;
 
     // Like a repetition (see Repetition::parse_core), a round that consumes
