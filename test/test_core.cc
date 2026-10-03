@@ -1471,6 +1471,56 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
   }
 }
 
+TEST(GeneralTest, DeferredAstBuildsLongPrecedenceChain) {
+  // A left-associative chain is parsed in a loop, but its tree is as deep as
+  // the chain is long. Building it must not recurse that deep.
+  parser pg("E <- A (OP A)* { precedence L + }\n A <- < [0-9] >\n OP <- '+'");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast(true);
+
+  const size_t n = 100000;
+  std::string s = "1";
+  for (size_t i = 0; i < n; i++) {
+    s += "+1";
+  }
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(pg.parse(s, ast));
+
+  size_t folds = 0;
+  for (auto node = ast; node->nodes.size() == 3; node = node->nodes[0]) {
+    folds++;
+  }
+  EXPECT_EQ(n, folds);
+}
+
+static std::shared_ptr<Ast> ast_leaf() {
+  return std::make_shared<Ast>("", 1, 1, "A", std::string_view("1"));
+}
+
+static std::shared_ptr<Ast> ast_node(std::vector<std::shared_ptr<Ast>> nodes) {
+  return std::make_shared<Ast>("", 1, 1, "E", nodes);
+}
+
+TEST(GeneralTest, DeepAstIsReleased) {
+  // Releasing a node must not recurse as deep as the tree below it.
+  auto ast = ast_leaf();
+  for (size_t i = 0; i < 1000000; i++) {
+    ast = ast_node({ast});
+  }
+  ast.reset();
+}
+
+TEST(GeneralTest, ReleasedAstKeepsNodesHeldElsewhere) {
+  // Only the nodes that die with a tree give up their children.
+  auto kept = ast_node({ast_leaf(), ast_leaf()});
+  auto shared = ast_node({kept, ast_leaf()});
+  auto ast = ast_node({ast_node({shared}), ast_node({shared})});
+  shared.reset();
+  ast.reset();
+  ASSERT_EQ(2u, kept->nodes.size());
+  EXPECT_TRUE(kept->nodes[0] && kept->nodes[1]);
+}
+
 TEST(GeneralTest, CollapsedAstParentLinks) {
   std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
       [&](const std::shared_ptr<Ast> &ast) {
