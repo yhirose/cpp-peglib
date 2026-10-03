@@ -6451,11 +6451,11 @@ template <typename Annotation> struct AstBase : public Annotation {
   size_t length;
   const size_t choice_count;
   const size_t choice;
-  const std::string original_name;
-  const size_t original_choice_count;
-  const size_t original_choice;
+  std::string original_name;
+  size_t original_choice_count;
+  size_t original_choice;
   const unsigned int tag;
-  const unsigned int original_tag;
+  unsigned int original_tag;
 
   const bool is_token;
   const bool preserve_position;
