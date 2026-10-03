@@ -900,8 +900,8 @@ using TracerLeave = std::function<void(
 using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 
 // Semantic values of memoized parse results: open-addressing hash map keyed
-// by the fused (position * rule count + rule id) index. Match lengths live in
-// a dense per-index array in Context (validity is tracked by its
+// by the index of the cache tables (Context::cache_index). Match lengths live
+// in a dense per-index array in Context (validity is tracked by its
 // registered/success bitvectors), so this map only holds the entries whose
 // result carries a std::any value — a grammar without semantic actions never
 // allocates it. Keys are probed linearly in a flat array.
@@ -1037,9 +1037,9 @@ public:
   size_t packrat_cached_count;               // number of memoized rules
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
-  // Match length per (position, memoized rule), indexed like the bitvectors
-  // above. Left uninitialized on purpose: a slot is only read once
-  // cache_success marks it, which happens after it is written.
+  // Match length per cache_index(), like the bitvectors above. Left
+  // uninitialized on purpose: a slot is only read once cache_success marks
+  // it, which happens after it is written.
   std::unique_ptr<uint32_t[]> cache_len;
 
   PackratCache cache_values;
@@ -1065,17 +1065,23 @@ public:
   std::vector<const char *> active_pos;
   std::map<LRKey, RuleMatch> in_progress;
 
-  // Confirmed matches of left-recursive rules.
-  std::map<LRKey, RuleMatch> lr_memo;
+  // No whitespace is skipped after a match in a token or in the whitespace,
+  // so a rule may match differently there than at the same position
+  // elsewhere. The memos keep matches from the two places apart.
+  bool skips_no_whitespace() const {
+    return whitespaceOpe && (in_token_boundary_count || in_whitespace);
+  }
+
+  // Confirmed matches of left-recursive rules, by skips_no_whitespace().
+  std::map<LRKey, RuleMatch> lr_memo[2];
 
   // The seed being grown, or else the confirmed match.
   const RuleMatch *find_lr_match(const LRKey &key) const {
     if (auto it = in_progress.find(key); it != in_progress.end()) {
       return &it->second;
     }
-    if (auto it = lr_memo.find(key); it != lr_memo.end()) {
-      return &it->second;
-    }
+    auto &memo = lr_memo[skips_no_whitespace()];
+    if (auto it = memo.find(key); it != memo.end()) { return &it->second; }
     return nullptr;
   }
 
@@ -1096,6 +1102,18 @@ public:
   int32_t cache_slot(size_t def_id) const {
     if (!packrat_index) { return -1; }
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
+  }
+
+  // The cache tables have an entry per memoized rule and position, and with
+  // whitespace a second half for the matches where none is skipped.
+  size_t cache_size() const {
+    return packrat_cached_count * (l + 1) * (whitespaceOpe ? 2 : 1);
+  }
+
+  size_t cache_index(int32_t slot, const char *pos) const {
+    auto idx = packrat_cached_count * static_cast<size_t>(pos - s) +
+               static_cast<size_t>(slot);
+    return skips_no_whitespace() ? idx + packrat_cached_count * (l + 1) : idx;
   }
 
   void write_packrat_cache(size_t idx, size_t len, const std::any &val) {
@@ -1153,12 +1171,10 @@ public:
                           : nullptr),
         packrat_cached_count(packrat_index ? analysis->packrat_cached_count
                                            : def_count),
-        cache_registered(
-            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
-        cache_success(
-            enablePackratParsing ? this->packrat_cached_count * (l + 1) : 0),
+        cache_registered(enablePackratParsing ? cache_size() : 0),
+        cache_success(enablePackratParsing ? cache_size() : 0),
         cache_len(enablePackratParsing && this->packrat_cached_count
-                      ? new uint32_t[this->packrat_cached_count * (l + 1)]
+                      ? new uint32_t[cache_size()]
                       : nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
                                           : 0),
@@ -3861,12 +3877,14 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         while (true) {
           // Clear lr_memo for cycle-dependent rules at this position. Outer
           // growers are not there: their seeds are in progress.
-          for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
-            if (memo_it->first.second == s &&
-                cycle_rules.count(memo_it->first.first)) {
-              memo_it = c.lr_memo.erase(memo_it);
-            } else {
-              ++memo_it;
+          for (auto &memo : c.lr_memo) {
+            for (auto memo_it = memo.begin(); memo_it != memo.end();) {
+              if (memo_it->first.second == s &&
+                  cycle_rules.count(memo_it->first.first)) {
+                memo_it = memo.erase(memo_it);
+              } else {
+                ++memo_it;
+              }
             }
           }
 
@@ -3883,7 +3901,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       }
 
       // Confirmed, a failure too, so the rule is not seeded here again
-      c.lr_memo[lr_key] = std::move(seed);
+      c.lr_memo[c.skips_no_whitespace()][lr_key] = std::move(seed);
     }
   } else {
     c.reuse_or_parse(s, *outer_, vs.holds_rule_tokens_, match,
@@ -4634,8 +4652,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
   auto slot = needs_token ? -1 : cache_slot(def_id);
   size_t idx = 0;
   if (slot >= 0) {
-    idx = packrat_cached_count * static_cast<size_t>(a_s - s) +
-          static_cast<size_t>(slot);
+    idx = cache_index(slot, a_s);
     if (cache_registered[idx]) {
       if (packrat_stats && def_id < packrat_stats->size()) {
         (*packrat_stats)[def_id].hits++;
