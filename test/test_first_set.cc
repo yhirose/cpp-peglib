@@ -327,3 +327,27 @@ TEST(FirstSetTest, Leading_cut_is_not_skipped) {
   EXPECT_TRUE(pg.parse("a"));
   EXPECT_FALSE(pg.parse("b"));
 }
+
+// A literal, a token boundary and a no_whitespace rule skip whitespace after
+// their match, even an empty one, so the whitespace can start what follows
+// them. [a] skips no whitespace, so T starts at the space.
+TEST(FirstSetTest, Whitespace_after_an_empty_match) {
+  for (auto grammar : {
+           R"(S <- [a] T
+              T <- 'y' / '' 'x')",
+           R"(S <- [a] T
+              T <- 'y' / < 'z'? > 'x')",
+           R"(S <- [a] T
+              T <- 'y' / E 'x'
+              E <- '')",
+           R"(S <- [a] T
+              T <- 'y' / N 'x'
+              N <- 'z'? { no_whitespace })",
+       }) {
+    parser pg(std::string(grammar) + "\n%whitespace <- [ ]*\n");
+    ASSERT_TRUE(!!pg) << grammar;
+
+    EXPECT_TRUE(pg.parse("ax")) << grammar;
+    EXPECT_TRUE(pg.parse("a x")) << grammar;
+  }
+}
