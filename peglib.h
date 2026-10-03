@@ -2656,6 +2656,7 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   void visit(Character &) override { result = false; }
   void visit(AnyCharacter &) override { result = false; }
   void visit(User &) override { result = false; }
+  void visit(Holder &ope) override;
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result = false; }
   void visit(Cut &) override { result = false; }
@@ -4413,6 +4414,12 @@ inline void FindLiteralToken::visit(Reference &ope) {
       arg->accept(*this);
     }
   }
+}
+
+// A rule that a combinator embeds, without a Reference. Going into it would
+// never end for a rule that reaches itself at its own start.
+inline void ComputeCanBeEmpty::visit(Holder &ope) {
+  result = ope.outer_->can_be_empty;
 }
 
 inline void ComputeCanBeEmpty::visit(Reference &ope) {
@@ -6543,7 +6550,7 @@ private:
         changed = false;
         for (auto &[name, rule] : grammar) {
           ComputeCanBeEmpty vis;
-          rule.accept(vis);
+          rule.get_core_operator()->accept(vis);
           if (vis.result != rule.can_be_empty) {
             rule.can_be_empty = vis.result;
             changed = true;

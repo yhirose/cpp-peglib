@@ -296,3 +296,17 @@ TEST(CombinatorTest, Packrat_on_rules_numbered_apart) {
   EXPECT_TRUE(def_parse(S1, "az"));
   EXPECT_TRUE(def_parse(S2, "bw"));
 }
+
+// A rule that a combinator refers to is embedded without a Reference, so a
+// rule that reaches itself at its own start forms a cycle that choosing the
+// rules to memoize must not follow forever.
+TEST(CombinatorTest, Packrat_on_a_rule_that_starts_with_itself) {
+  for (auto packrat : {false, true}) {
+    Definition A;
+    A <= cho(seq(A, chr('b')), chr('a'));
+    A.enablePackratParsing = packrat;
+
+    EXPECT_TRUE(A.parse("a").ret) << packrat;
+    EXPECT_FALSE(A.parse("b").ret) << packrat;
+  }
+}
