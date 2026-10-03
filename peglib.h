@@ -5034,6 +5034,61 @@ inline void Definition::select_packrat_rules() const {
     if (whitespaceOpe) { whitespaceOpe->accept(finder); }
     if (wordOpe) { wordOpe->accept(finder); }
 
+    // The cache keeps a match's length and value, not the captures it
+    // recorded, and a back reference's match depends on the captures made
+    // before it. A rule whose match may record or read captures, itself or
+    // through the rules below it, is therefore not memoized. Nor is any rule
+    // when the whitespace skipping does, since a literal skips whitespace
+    // after it in whatever rule it is in.
+    struct UsesCaptures : public TraversalVisitor {
+      using TraversalVisitor::visit;
+      const StartRuleAnalysis &analysis;
+      const std::vector<bool> &rules; // by id: known to use captures
+      bool result = false;
+
+      UsesCaptures(const StartRuleAnalysis &analysis,
+                   const std::vector<bool> &rules)
+          : analysis(analysis), rules(rules) {}
+
+      void visit(Capture &) override { result = true; }
+      void visit(BackReference &) override { result = true; }
+      void visit(PrecedenceClimbing &ope) override {
+        ope.atom_->accept(*this);
+        ope.binop_->accept(*this);
+      }
+      void visit(Holder &ope) override { add(*ope.outer_); }
+      void visit(Reference &ope) override {
+        if (ope.rule_) { add(*ope.rule_); }
+        for (const auto &arg : ope.args_) {
+          arg->accept(*this);
+        }
+      }
+
+      // A rule this analysis does not index is taken to use captures.
+      void add(const Definition &rule) {
+        if (!analysis.indexes(rule) || rules[rule.id]) { result = true; }
+      }
+    };
+
+    std::vector<bool> uses_captures(def_count, false);
+    for (auto changed = true; changed;) {
+      changed = false;
+      for (const auto *rule : analysis_.rules) {
+        if (!analysis_.indexes(*rule) || uses_captures[rule->id]) { continue; }
+        UsesCaptures vis(analysis_, uses_captures);
+        rule->get_core_operator()->accept(vis);
+        if (vis.result) {
+          uses_captures[rule->id] = true;
+          changed = true;
+        }
+      }
+    }
+    UsesCaptures whitespace(analysis_, uses_captures);
+    if (whitespaceOpe) { whitespaceOpe->accept(whitespace); }
+    for (size_t id = 0; id < def_count; id++) {
+      if (whitespace.result || uses_captures[id]) { benefits[id] = false; }
+    }
+
     // Compact index: def_id -> slot in the cache tables (-1 = not memoized)
     analysis_.packrat_index.assign(def_count, -1);
     int32_t k = 0;
