@@ -1573,6 +1573,64 @@ TEST(GeneralTest, CollapsedAstParentLinks) {
   }
 }
 
+// The same holds for the tree of enable_ast(): a node reused from a
+// left-recursive rule's memo or the packrat cache may have been taken in by
+// a parent that was then discarded.
+TEST(GeneralTest, AstParentLinks) {
+  std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
+      [&](const std::shared_ptr<Ast> &ast) {
+        size_t n = 0;
+        for (const auto &child : ast->nodes) {
+          if (child->parent.lock() != ast) { n++; }
+          n += wrong_parents(child);
+        }
+        return n;
+      };
+
+  struct {
+    const char *grammar;
+    const char *input;
+  } cases[] = {
+      {R"(
+         S <- E ';'
+         E <- T '+' N / N
+         T <- E
+         N <- < [0-9]+ >
+       )",
+       "1+2+3;"},
+      {R"(
+         E <- E '+' T / T
+         T <- T '*' N / N
+         N <- < [0-9]+ >
+       )",
+       "1*2+3*4"},
+      // Packrat hands the same zero-length E node to both X and Y.
+      {R"(
+         S  <- X Y
+         X  <- A0 E
+         Y  <- E B0 / E C0
+         E  <- 'e'?
+         A0 <- 'a'
+         B0 <- 'b'
+         C0 <- 'c'
+       )",
+       "ab"},
+  };
+  for (const auto &[grammar, input] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg) << grammar;
+      pg.enable_ast();
+      if (packrat) { pg.enable_packrat_parsing(); }
+
+      std::shared_ptr<Ast> ast;
+      ASSERT_TRUE(pg.parse(input, ast)) << grammar << packrat;
+      EXPECT_EQ(0u, wrong_parents(ast)) << grammar << packrat;
+      EXPECT_TRUE(ast->parent.expired()) << grammar << packrat;
+    }
+  }
+}
+
 TEST(GeneralTest, ChoiceWithWhitespace) {
   auto parser = peg::parser(R"(
     type <- 'string' / 'int' / 'double'

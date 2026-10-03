@@ -7269,8 +7269,7 @@ public:
                                     optimizer.is_optimized(rule.node_name()));
       }
     }
-    // A later call keeps the collapsing actions set here.
-    collapse_ast_ = collapse_ast_ || collapse_mode;
+    builds_ast_ = true;
     return *this;
   }
 
@@ -7308,7 +7307,7 @@ private:
                     Definition::Result &r) const {
     check_ast_depth(rule, s, n, val, r);
     auto ret = post_process(s, n, r);
-    if (ret) { link_collapsed_ast(val); }
+    if (ret) { link_ast(val); }
     return ret;
   }
 
@@ -7348,16 +7347,15 @@ private:
     }
   }
 
-  // Packrat or left recursion can reuse a node after a collapsed copy of it
-  // was discarded, leaving its children with a stale parent, so relink the
-  // finished tree. A direct Definition::parse_and_get_value call skips this.
-  template <typename V> void link_collapsed_ast(V &) const {}
-  template <typename A>
-  void link_collapsed_ast(std::shared_ptr<AstBase<A>> &ast) const {
-    if (!collapse_ast_ || !ast) { return; }
+  // Packrat or left recursion can reuse a node after a parent that took it in
+  // was discarded, leaving it with a stale parent, so link the finished tree
+  // again. A direct Definition::parse_and_get_value call skips this.
+  template <typename V> void link_ast(V &) const {}
+  template <typename A> void link_ast(std::shared_ptr<AstBase<A>> &ast) const {
+    if (!builds_ast_ || !ast) { return; }
     ast->parent.reset();
     // Only a zero-length node can sit under two parents (packrat reuses it);
-    // each extra occurrence gets its own copy, as optimize_ast would give.
+    // each extra occurrence gets its own copy.
     std::unordered_set<const AstBase<A> *> zero_length;
     std::vector<std::shared_ptr<AstBase<A>> *> stack{&ast};
     while (!stack.empty()) {
@@ -7389,7 +7387,7 @@ private:
   std::string start_;
   bool enableLeftRecursion_ = true;
   bool enablePackratParsing_ = false;
-  bool collapse_ast_ = false;
+  bool builds_ast_ = false; // enable_ast() was called
   Log log_;
   ErrorReporter error_reporter_;
 };

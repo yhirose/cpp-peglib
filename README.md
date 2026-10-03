@@ -653,7 +653,7 @@ A third argument lists the rules to use in place of those marked `no_ast_opt`, f
 parser.enable_ast(true, true, {"ARGUMENTS", "BLOCK"});
 ```
 
-With `enable_ast(true)`, a node's `parent` is guaranteed only once the parse has returned: until then, a node that packrat parsing or left recursion reuses can still point to a parent built for an alternative that was abandoned.
+A node's `parent` is guaranteed only once `parser::parse` has returned: until then, a node that packrat parsing or left recursion reuses can still point to a parent built for an alternative that was abandoned. Where packrat parsing reuses a node of an empty match under two parents, each gets a copy of its own, so such a node in the returned tree can be another object than the one an action or a `leave` handler saw.
 
 A left-associative `precedence` operator or left recursion turns a long chain such as `1+2+3+...` into a tree as deep as the chain is long. Parsing it and building and releasing its tree take no recursion that deep, but `optimize_ast` and `ast_to_s` walk the tree recursively, as your own code may, and can overflow the stack on a tree a few tens of thousands of levels deep with an 8MB stack, and on a much shallower one in a thread with a smaller stack. For such input, use `enable_ast(true)` rather than `optimize_ast`, and `set_max_depth` to make a parse fail on a tree deeper than the code that walks it can take (see [Limit nesting depth](#limit-nesting-depth)). `ast_to_s` indents each node by its depth, so on such a chain its output grows with the square of the chain's length: around a gigabyte for 20,000 operators.
 
