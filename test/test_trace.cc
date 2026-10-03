@@ -228,6 +228,48 @@ TEST(TraceTest, Enable_profiling_shows_success_fail_counts) {
   EXPECT_NE(output.find("fail"), std::string::npos);
 }
 
+// The report comes when the parse ends, however it ends: once for a start
+// rule that matches inside itself, and also for a parse that the nesting
+// limit or an exception cuts short.
+TEST(TraceTest, Enable_profiling_reports_once_when_the_parse_ends) {
+  auto reports = [](const std::string &output) {
+    size_t count = 0;
+    for (size_t pos = 0;
+         (pos = output.find("duration:", pos)) != std::string::npos; pos++) {
+      count++;
+    }
+    return count;
+  };
+
+  parser parser(R"(
+    E <- '(' E ')' / N
+    N <- 'x'
+  )");
+  ASSERT_TRUE(parser);
+
+  {
+    std::ostringstream os;
+    enable_profiling(parser, os);
+    EXPECT_TRUE(parser.parse("((x))"));
+    EXPECT_EQ(1u, reports(os.str()));
+  }
+  {
+    std::ostringstream os;
+    enable_profiling(parser, os);
+    parser.set_max_depth(2);
+    EXPECT_FALSE(parser.parse("((x))"));
+    EXPECT_EQ(1u, reports(os.str()));
+    parser.set_max_depth(std::numeric_limits<size_t>::max());
+  }
+  {
+    std::ostringstream os;
+    enable_profiling(parser, os);
+    parser["N"] = [](const SemanticValues &) { throw std::runtime_error(""); };
+    EXPECT_THROW(parser.parse("((x))"), std::runtime_error);
+    EXPECT_EQ(1u, reports(os.str()));
+  }
+}
+
 TEST(TraceTest, Trace_with_packrat) {
   parser parser(R"(
     ROOT <- A / B

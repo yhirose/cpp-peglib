@@ -7505,50 +7505,6 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
           } else {
             stat.fail++;
           }
-
-          if (index == 0) {
-            auto end = std::chrono::steady_clock::now();
-            auto nano = std::chrono::duration_cast<std::chrono::microseconds>(
-                            end - stats.start)
-                            .count();
-            auto sec = nano / 1000000.0;
-            os << "duration: " << sec << "s (" << nano << "µs)" << std::endl
-               << std::endl;
-
-            char buff[BUFSIZ];
-            size_t total_success = 0;
-            size_t total_fail = 0;
-            for (auto &[name, success, fail] : stats.items) {
-              total_success += success;
-              total_fail += fail;
-            }
-
-            os << "  id       total      %     success        fail  "
-                  "definition"
-               << std::endl;
-
-            auto grand_total = total_success + total_fail;
-            snprintf(buff, BUFSIZ, "%4s  %10zu  %5s  %10zu  %10zu  %s", "",
-                     grand_total, "", total_success, total_fail,
-                     "Total counters");
-            os << buff << std::endl;
-
-            snprintf(buff, BUFSIZ, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "",
-                     "", total_success * 100.0 / grand_total,
-                     total_fail * 100.0 / grand_total, "% success/fail");
-            os << buff << std::endl << std::endl;
-            ;
-
-            size_t id = 0;
-            for (auto &[name, success, fail] : stats.items) {
-              auto total = success + fail;
-              auto ratio = total * 100.0 / stats.total;
-              snprintf(buff, BUFSIZ, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s", id,
-                       total, ratio, success, fail, name.c_str());
-              os << buff << std::endl;
-              id++;
-            }
-          }
         }
       },
       [&](auto &trace_data) {
@@ -7556,9 +7512,57 @@ inline void enable_profiling(parser &parser, std::ostream &os) {
         stats->start = std::chrono::steady_clock::now();
         trace_data = stats;
       },
+      // Reports here, where every parse ends, rather than where the start
+      // rule is left: a parse that an exception cuts short never gets there,
+      // and a start rule that matches inside itself gets there many times.
       [&](auto &trace_data) {
-        auto stats = std::any_cast<Stats *>(trace_data);
-        delete stats;
+        auto stats_ptr = std::any_cast<Stats *>(trace_data);
+        auto &stats = *stats_ptr;
+
+        auto end = std::chrono::steady_clock::now();
+        auto nano = std::chrono::duration_cast<std::chrono::microseconds>(
+                        end - stats.start)
+                        .count();
+        auto sec = nano / 1000000.0;
+        os << "duration: " << sec << "s (" << nano << "µs)" << std::endl
+           << std::endl;
+
+        char buff[BUFSIZ];
+        size_t total_success = 0;
+        size_t total_fail = 0;
+        for (auto &[name, success, fail] : stats.items) {
+          total_success += success;
+          total_fail += fail;
+        }
+
+        os << "  id       total      %     success        fail  "
+              "definition"
+           << std::endl;
+
+        auto grand_total = total_success + total_fail;
+        snprintf(buff, BUFSIZ, "%4s  %10zu  %5s  %10zu  %10zu  %s", "",
+                 grand_total, "", total_success, total_fail, "Total counters");
+        os << buff << std::endl;
+
+        // A parse cut short may have left no rule at all.
+        auto percent = [&](size_t count) {
+          return grand_total ? count * 100.0 / grand_total : 0.0;
+        };
+        snprintf(buff, BUFSIZ, "%4s  %10s  %5s  %10.2f  %10.2f  %s", "", "", "",
+                 percent(total_success), percent(total_fail), "% success/fail");
+        os << buff << std::endl << std::endl;
+
+        size_t id = 0;
+        for (auto &[name, success, fail] : stats.items) {
+          auto total = success + fail;
+          auto ratio = total * 100.0 / stats.total;
+          snprintf(buff, BUFSIZ, "%4zu  %10zu  %5.2f  %10zu  %10zu  %s", id,
+                   total, ratio, success, fail, name.c_str());
+          os << buff << std::endl;
+          id++;
+        }
+
+        delete stats_ptr;
       });
 }
 } // namespace peg
