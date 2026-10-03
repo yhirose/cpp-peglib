@@ -162,7 +162,7 @@ struct SemanticValues : protected std::vector<any>
   // Matched string
   std::string_view sv() const { return sv_; }
 
-  // Line number and column at which the matched string is
+  // Line number and column (in bytes) at which the matched string is
   std::pair<size_t, size_t> line_info() const;
 
   // Tokens
@@ -291,6 +291,10 @@ parser["RULE"].leave = [](const Context &c, const char* s, size_t n, size_t matc
   std::cout << "leave" << std::endl;
 };
 ```
+
+Where the next byte cannot start a match of an alternative of a choice, the parser skips the alternative instead of trying it, so the *enter* and *leave* actions of the rules it would try there do not run, and nothing inside it does.
+
+More generally, whether and how many times callbacks run in an attempt that is later abandoned is not fixed. This skipping leaves them out; packrat parsing can reuse a rule's earlier result at the same position, a match or a failure, instead of trying the rule again, so none of its callbacks run; and a left-recursive rule reuses its results even without packrat parsing, and tries its body once more after its match stops growing. So do not rely on what callbacks do in attempts that may be abandoned: undo in *leave* what *enter* did (such as opening a scope), or build the state from the value or the AST that the parse returns.
 
 When an exception thrown by one of your callbacks leaves the parser, the *leave* actions of the rules it passes through do not run.
 
@@ -671,7 +675,7 @@ const unsigned int     tag;      // str2tag(name) — for fast switch dispatch
 std::string_view       token;    // matched text (valid when is_token is true)
 bool                   is_token;
 size_t                 choice;   // which alternative of a prioritized choice matched
-size_t                 line, column, position, length;
+size_t                 line, column, position, length; // column and position in bytes
 std::vector<std::shared_ptr<Ast>> nodes;  // child nodes
 std::weak_ptr<Ast>     parent;
 ```
@@ -769,6 +773,8 @@ Unicode support
 ---------------
 
 cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`.
+
+Columns are counted in two ways. Errors, the ones passed to the logger and to the error reporter, count `col` in Unicode codepoints from the start of the line, as a text editor does. Matches count it in bytes: the column of `SemanticValues::line_info()` and the `column` of an AST node. The `position` of an `ErrorReport` and of an AST node is a byte offset in the input in both cases.
 
 Error report and recovery
 -------------------------
@@ -1025,8 +1031,8 @@ Notes:
   and other callbacks are **not** included and must be re-applied after
   `load_blob`.
 - First-sets are recomputed on load, and references are resolved by name.
-- Grammars that use the `precedence` instruction, a capture / back-reference, or
-  a User operator are not serializable (`serialize_grammar()` throws;
+- Grammars that use a capture / back-reference or a User operator are not
+  serializable (`serialize_grammar()` throws;
   `load_blob()` returns `false` on a bad or incompatible blob).
 
 `peglint` can emit a blob with the `--blob` option:
