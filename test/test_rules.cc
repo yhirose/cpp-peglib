@@ -534,6 +534,25 @@ TEST(PrecedenceTest, Precedence_climbing_error3) {
   EXPECT_FALSE(ret);
 }
 
+TEST(PrecedenceTest, Precedence_climbing_does_not_refer_to_grammar_text) {
+  std::string grammar = R"(
+        EXPRESSION  <-  ATOM (OPERATOR ATOM)* {
+                          precedence
+                            L + -
+                            L * /
+                        }
+        ATOM        <-  < [0-9]+ >
+        OPERATOR    <-  < [-+*/] >
+	)";
+  parser parser(grammar);
+  ASSERT_TRUE(!!parser);
+
+  // The grammar text may be gone once the grammar is loaded.
+  std::fill(grammar.begin(), grammar.end(), ' ');
+
+  EXPECT_TRUE(parser.parse("1+2*3-4"));
+}
+
 // =============================================================================
 // Precedence Edge Case Tests
 // =============================================================================

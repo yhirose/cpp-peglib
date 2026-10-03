@@ -2144,7 +2144,10 @@ public:
 
 class PrecedenceClimbing : public Ope {
 public:
-  using BinOpeInfo = std::map<std::string_view, std::pair<size_t, char>>;
+  // Keyed by the operator's text. The keys own it: the grammar text they
+  // were read from may be gone by the time of a parse.
+  using BinOpeInfo =
+      std::map<std::string, std::pair<size_t, char>, std::less<>>;
 
   PrecedenceClimbing(const std::shared_ptr<Ope> &atom,
                      const std::shared_ptr<Ope> &binop, const BinOpeInfo &info,
@@ -2161,10 +2164,6 @@ public:
   std::shared_ptr<Ope> atom_;
   std::shared_ptr<Ope> binop_;
   BinOpeInfo info_;
-  // Owned backing storage for info_ keys when this node is built by
-  // GrammarBlob::deserialize. Grammars parsed from source leave this empty and
-  // point info_ keys into the retained grammar text instead.
-  std::vector<std::string> info_keys_;
   const Definition &rule_;
 
 private:
@@ -5101,7 +5100,7 @@ struct GrammarBlob {
       write_ope(w, x->binop_);
       w.u32((uint32_t)x->info_.size());
       for (auto &[key, pri] : x->info_) {
-        w.str(std::string(key));
+        w.str(key);
         w.u64((uint64_t)pri.first);
         w.u8((uint8_t)pri.second);
       }
@@ -5225,16 +5224,11 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       auto pc = std::make_shared<PrecedenceClimbing>(
           atom, binop, PrecedenceClimbing::BinOpeInfo{}, *owner);
-      // info_ keys are string_views; back them with owned strings whose
-      // addresses stay stable (reserve avoids reallocation, and the node is
-      // never moved once held by shared_ptr).
-      pc->info_keys_.reserve(n);
       for (uint32_t i = 0; i < n; i++) {
         std::string key = r.str();
         auto level = (size_t)r.u64();
         auto assoc = (char)r.u8();
-        pc->info_keys_.push_back(std::move(key));
-        pc->info_[pc->info_keys_.back()] = std::pair(level, assoc);
+        pc->info_[std::move(key)] = std::pair(level, assoc);
       }
       return pc;
     }
@@ -6076,7 +6070,7 @@ private:
         auto tokens = std::any_cast<std::vector<std::string_view>>(v);
         auto assoc = tokens[0][0];
         for (size_t i = 1; i < tokens.size(); i++) {
-          binOpeInfo[tokens[i]] = std::pair(level, assoc);
+          binOpeInfo[std::string(tokens[i])] = std::pair(level, assoc);
         }
         level++;
       }

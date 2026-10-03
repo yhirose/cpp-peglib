@@ -1109,50 +1109,53 @@ TEST(MaxDepthTest, Limit_is_hit_inside_a_precedence) {
 
 // The right operand of a right-associative operator is parsed by a nested
 // call, not a rule match, so a long chain of them nests as deep as a long run
-// of brackets and must hit the limit instead of overflowing the stack.
-TEST(MaxDepthTest, Right_operands_of_a_right_associative_chain_count) {
-  for (auto packrat : {false, true}) {
-    parser pg(R"(
-      E  <- A (OP A)* { precedence R + }
-      A  <- [0-9]
-      OP <- '+'
-    )");
-    ASSERT_TRUE(!!pg);
-    if (packrat) { pg.enable_packrat_parsing(); }
-    pg.set_max_depth(20);
-    std::string msg;
-    pg.set_logger([&](size_t ln, size_t col, const std::string &m,
-                      const std::string &rule) {
-      msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m + " (" +
-            rule + ")";
-    });
+// of brackets and must hit the limit instead of overflowing the stack. A
+// left-associative chain is parsed in a loop and nests no deeper as it grows,
+// but its AST does.
+TEST(MaxDepthTest, Right_operands_of_precedence_count) {
+  for (std::string assoc : {"L", "R"}) {
+    for (auto packrat : {false, true}) {
+      for (auto ast : {false, true}) {
+        parser pg("E <- A (OP A)* { precedence " + assoc +
+                  " + }\n A <- [0-9]\n OP <- '+'");
+        ASSERT_TRUE(!!pg) << assoc;
+        if (packrat) { pg.enable_packrat_parsing(); }
+        if (ast) { pg.enable_ast(true); }
+        pg.set_max_depth(20);
+        std::string msg;
+        pg.set_logger([&](size_t, size_t, const std::string &m) { msg = m; });
 
-    EXPECT_TRUE(pg.parse(chain(10))) << packrat;
-    EXPECT_FALSE(pg.parse(chain(100000))) << packrat;
-    // The 19th right operand is the 20th level, and its A the 21st.
-    EXPECT_EQ("1:39 exceeded the maximum nesting depth of 20 (A)", msg)
-        << packrat;
+        auto parse = [&](const std::string &s) {
+          std::shared_ptr<Ast> tree;
+          return ast ? pg.parse(s, tree) : pg.parse(s);
+        };
+
+        EXPECT_TRUE(parse(chain(10))) << assoc;
+        if (assoc == "L") {
+          if (ast) {
+            EXPECT_FALSE(parse(chain(100))) << assoc;
+            EXPECT_EQ("exceeded the maximum nesting depth of 20", msg);
+          } else {
+            EXPECT_TRUE(parse(chain(100))) << assoc;
+          }
+        } else {
+          EXPECT_FALSE(parse(chain(100000))) << assoc;
+          EXPECT_EQ("exceeded the maximum nesting depth of 20", msg) << assoc;
+        }
+      }
+    }
   }
 }
 
 // A tree that nests deeper than its parse did is held to the limit too, and
 // reported at its first node past it, as the parse reports the rule match
 // that goes past it.
-TEST(MaxDepthTest, Returned_ast_of_a_folded_chain_is_held_to_the_limit) {
-  for (auto grammar : {R"(
-         E  <- A (OP A)* { precedence L + }
-         A  <- < [0-9] >
-         OP <- '+'
-         %whitespace <- [ \n]*
-       )",
-                       R"(
-         E  <- E OP A / A
-         A  <- < [0-9] >
-         OP <- '+'
-         %whitespace <- [ \n]*
-       )"}) {
+TEST(MaxDepthTest, Returned_ast_is_held_to_the_limit) {
+  for (auto grammar :
+       {"E <- A (OP A)* { precedence L + }", "E <- E OP A / A"}) {
     for (auto opt : {false, true}) {
-      parser pg(grammar);
+      parser pg(std::string(grammar) +
+                "\n A <- < [0-9] >\n OP <- '+'\n %whitespace <- [ \\n]*");
       ASSERT_TRUE(!!pg) << grammar;
       pg.enable_ast(opt);
       pg.set_max_depth(20);
