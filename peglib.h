@@ -1717,6 +1717,11 @@ public:
       }
       i += len;
       count++;
+      // A match that consumes nothing would usually match the same way again
+      // forever, so it ends the repetition. Loading a grammar checks for such
+      // a repetition, but the check is not exhaustive, and a grammar built
+      // with combinators is never checked.
+      if (len == 0 && max_ == std::numeric_limits<size_t>::max()) { break; }
     }
     return i;
   }
@@ -4156,6 +4161,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     vs.emplace_back(std::move(chvs[0]));
     i += chlen;
+    auto op_len = chlen;
 
     auto next_min_prec = level;
     if (assoc == 'L') { next_min_prec = level + 1; }
@@ -4189,6 +4195,10 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     }
     vs.clear();
     vs.emplace_back(std::move(val));
+
+    // Like a repetition (see Repetition::parse_core), a round that consumes
+    // nothing ends the loop.
+    if (op_len == 0 && chlen == 0) { break; }
   }
 
   return i;
