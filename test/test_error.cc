@@ -167,6 +167,24 @@ TEST(InfiniteLoopTest, in_prioritized_choice) {
   EXPECT_FALSE(pg);
 }
 
+TEST(InfiniteLoopTest, Left_recursion_in_repetition) {
+  // The repetition reaches back to the rule it is in, and that rule can match
+  // empty (by repeating nothing), so the repeated element can too.
+  for (auto grammar :
+       {"R <- R* 'a'?", "A <- ('x' / A)*", "A <- B* 'a'?\n B <- A"}) {
+    parser pg(grammar);
+    EXPECT_FALSE(pg) << grammar;
+  }
+
+  // A rule reached again is fine when the repetition consumes around it, or
+  // when the rule cannot match empty.
+  for (auto grammar :
+       {"A <- (A 'b')* 'a'?", "S <- E*\n E <- E '+' T / T\n T <- [0-9]"}) {
+    parser pg(grammar);
+    EXPECT_TRUE(!!pg) << grammar;
+  }
+}
+
 TEST(InfiniteLoopTest, Back_reference_in_repetition) {
   // A back reference counts as consuming, so a run of one captured character
   // loads.

@@ -26,11 +26,13 @@ TEST(LeftRecursionTest, Left_recursive_with_option_test) {
 }
 
 TEST(LeftRecursionTest, Left_recursive_with_zom_test) {
+  // A can match empty, so A* repeats something that can match empty, which
+  // is rejected for any rule.
   parser parser(R"(
         A <- 'a'* A*
     )");
 
-  EXPECT_TRUE(parser);
+  EXPECT_FALSE(parser);
 }
 
 TEST(LeftRecursionTest, Left_recursive_with_a_ZOM_content_rule) {
