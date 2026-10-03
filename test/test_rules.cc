@@ -745,6 +745,34 @@ TEST(PrecedenceTest, Precedence_climbing_in_a_macro_keeps_the_callers_values) {
   EXPECT_EQ("A;1 + 2 ;C;", val);
 }
 
+// A recovered error does not end the parse, and the expressions after it
+// still need their operators: the third statement has no error. Like a rule's
+// action, the fold's does not run after the error.
+TEST(PrecedenceTest, Precedence_climbing_after_a_recovered_error) {
+  parser pg(R"(
+    PROGRAM <- STMT*
+    STMT    <- EXPR ';' / %recover((!';' .)* ';')
+    EXPR    <- NUM (OP NUM)* { precedence L + }
+    NUM     <- < [0-9]+ >
+    OP      <- < '+' >
+    %whitespace <- [ \t\n]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto folds = 0;
+  pg["EXPR"] = [&](const SemanticValues &) { folds++; };
+  std::vector<std::string> errors;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    errors.push_back(std::to_string(ln) + ":" + std::to_string(col) + " " +
+                     msg);
+  });
+
+  EXPECT_FALSE(pg.parse("1 + 2;\n3 + ;\n4 + 5;"));
+  ASSERT_EQ(1u, errors.size());
+  EXPECT_EQ("2:5 syntax error, unexpected ';', expecting <NUM>.", errors[0]);
+  EXPECT_EQ(1, folds); // the first statement's
+}
+
 // =============================================================================
 // Precedence Edge Case Tests
 // =============================================================================

@@ -4043,9 +4043,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       vs.emplace_back(std::move(match.val));
       vs.tags.emplace_back(str2tag(outer_->name));
     }
-    if (vs.holds_rule_tokens_ && !c.recovered) {
-      vs.tokens.push_back(match.token);
-    }
+    if (vs.holds_rule_tokens_) { vs.tokens.push_back(match.token); }
   }
 
   return match.len;
@@ -4261,16 +4259,19 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     // The result stands for the operands folded into it. What an action
     // returns is this rule's value and carries its tag, as Holder::parse_core
     // tags a rule's value; without an action the first value stands for the
-    // fold with its own tag, as Holder::reduce hands it over.
+    // fold with its own tag, as Holder::reduce hands it over. After a
+    // recovered error no value is built, as for a rule.
     std::any val;
     auto tag = str2tag(rule_.name);
-    if (rule_.action) {
-      vs.sv_ = std::string_view(s, i);
-      static const std::any empty_predicate_data;
-      val = rule_.action(vs, dt, empty_predicate_data);
-    } else if (!vs.empty()) {
-      val = std::move(vs[0]);
-      tag = vs.tags[0];
+    if (!c.recovered) {
+      if (rule_.action) {
+        vs.sv_ = std::string_view(s, i);
+        static const std::any empty_predicate_data;
+        val = rule_.action(vs, dt, empty_predicate_data);
+      } else if (!vs.empty()) {
+        val = std::move(vs[0]);
+        tag = vs.tags[0];
+      }
     }
     vs.clear();
     vs.tags.clear();
