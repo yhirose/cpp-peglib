@@ -328,6 +328,25 @@ TEST(FirstSetTest, Leading_cut_is_not_skipped) {
   EXPECT_FALSE(pg.parse("b"));
 }
 
+// A precedence rule whose atom matches empty can start with an operator.
+TEST(FirstSetTest, Operator_after_an_empty_atom) {
+  for (auto start : {"S <- X / 'q'", "S <- X?"}) {
+    parser pg(std::string(start) + R"(
+      X <- E 'x'
+      E <- T (O T)* {
+        precedence
+          L +
+      }
+      T <- 't'?
+      O <- '+'
+    )");
+    ASSERT_TRUE(!!pg) << start;
+
+    EXPECT_TRUE(pg.parse("+x")) << start;
+    EXPECT_TRUE(pg.parse("t+tx")) << start;
+  }
+}
+
 // A literal, a token boundary and a no_whitespace rule skip whitespace after
 // their match, even an empty one, so the whitespace can start what follows
 // them. [a] skips no whitespace, so T starts at the space.
