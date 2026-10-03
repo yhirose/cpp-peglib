@@ -38,8 +38,13 @@ target_include_directories(peglib-test-main PRIVATE ..)
 # regardless of the working directory it is run from (e.g. nested build trees or
 # package builds).
 target_compile_definitions(peglib-test-main PRIVATE
-  MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../spec/mini-js/grammar.peg")
+  MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../spec/mini-js/grammar.peg"
+  CPPPEGLIB_TEST_BLOB_ROUNDTRIP)
 
 include(GoogleTest)
 gtest_discover_tests(peglib-test-main)
+# The same tests again with every grammar reloaded from its serialized blob
+# (CPPPEGLIB_TEST_BLOB_ROUNDTRIP in peglib.h).
+gtest_discover_tests(peglib-test-main TEST_PREFIX "BlobRoundTrip."
+  PROPERTIES ENVIRONMENT "CPPPEGLIB_TEST_BLOB_ROUNDTRIP=1")
 target_link_libraries(peglib-test-main PRIVATE gtest_main)
