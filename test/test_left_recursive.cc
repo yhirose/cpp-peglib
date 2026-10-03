@@ -1032,3 +1032,26 @@ TEST(MacroArgumentScopeTest, Parameter_forwarded_through_two_macros) {
   EXPECT_TRUE(p.parse("xr"));
   EXPECT_FALSE(p.parse("yr"));
 }
+
+// While A grows outside a token, T and B match inside one from A's seed.
+// Those matches belong to no parse inside a token, where A skips no
+// whitespace, so they must be gone when U parses A there: whether A was
+// parsed outside first does not change U's token.
+TEST(LeftRecursionTest, Match_from_a_seed_grown_outside_a_token_is_not_kept) {
+  for (std::string first : {"", "A 'q' / "}) {
+    parser pg("S <- (" + first + R"(U) .*
+      U <- < A >
+      A <- T 'x' [ ] 'y' / 'x'
+      T <- < B >
+      B <- A
+      %whitespace <- ' '*
+    )");
+    ASSERT_TRUE(!!pg) << first;
+
+    std::string token;
+    pg["U"] = [&](const SemanticValues &vs) { token = vs.token_to_string(); };
+
+    EXPECT_TRUE(pg.parse("x x y")) << first;
+    EXPECT_EQ("x", token) << first;
+  }
+}

@@ -4001,22 +4001,21 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       c.lr_refs_hit = std::move(saved_refs);
       c.lr_refs_hit.insert(cycle_rules.begin(), cycle_rules.end());
 
+      // Forgets what the rules of the cycle matched at this position. Outer
+      // growers are not there: their seeds are in progress.
+      auto forget_cycle = [&](auto &memo) {
+        for (const auto &rule : cycle_rules) {
+          memo.erase(Context::LRKey(rule, s));
+        }
+      };
+
       if (success(match.len)) {
         // Got initial seed, now grow
         seed = std::move(match);
 
         while (true) {
-          // Clear lr_memo for cycle-dependent rules at this position. Outer
-          // growers are not there: their seeds are in progress.
           for (auto &memo : c.lr_memo) {
-            for (auto memo_it = memo.begin(); memo_it != memo.end();) {
-              if (memo_it->first.second == s &&
-                  cycle_rules.count(memo_it->first.first)) {
-                memo_it = memo.erase(memo_it);
-              } else {
-                ++memo_it;
-              }
-            }
+            forget_cycle(memo);
           }
 
           Context::RuleMatch grown;
@@ -4030,6 +4029,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         }
         match = seed;
       }
+
+      // What the cycle matched in the other whitespace context was built from
+      // this seed too, which a parse in that context would not have grown.
+      forget_cycle(c.lr_memo[!c.skips_no_whitespace()]);
 
       // Confirmed, a failure too, so the rule is not seeded here again
       c.lr_memo[c.skips_no_whitespace()][lr_key] = std::move(seed);
