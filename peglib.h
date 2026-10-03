@@ -5852,8 +5852,11 @@ private:
         data.captures_stack.back().insert(name);
         data.captures_in_current_definition.insert(name);
 
-        return cap(ope, [name](const char *a_s, size_t a_n, Context &c) {
-          c.capture_entries.emplace_back(name, std::string(a_s, a_n));
+        // The name is kept here, since the grammar text may be gone when
+        // the grammar is used, and shared by the copies of this action.
+        return cap(ope, [name = std::make_shared<const std::string>(name)](
+                            const char *a_s, size_t a_n, Context &c) {
+          c.capture_entries.emplace_back(*name, std::string(a_s, a_n));
         });
       }
       default: {
