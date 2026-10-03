@@ -237,6 +237,12 @@ TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
   EXPECT_FALSE(p.load_blob(junk));
 }
 
+TEST(GrammarBlobTest, SerializeWithoutAGrammarIsEmpty) {
+  peg::parser p("S <- A"); // A is undefined
+  ASSERT_FALSE(p);
+  EXPECT_TRUE(p.serialize_grammar().empty());
+}
+
 TEST(GrammarBlobTest, CharacterClasses) {
   // ranges, negated, and case-insensitive classes
   check_rt("S <- ([a-z] / [^0-9 ] / [A-C]i)+",
@@ -331,8 +337,7 @@ TEST(GrammarBlobTest, DefinitionsAreSerializedInNameOrder) {
 
   std::string smallest;
   for (auto &kv : *g)
-    if (smallest.empty() || kv.first < smallest)
-      smallest = kv.first;
+    if (smallest.empty() || kv.first < smallest) smallest = kv.first;
 
   // Header: magic (u32), start rule (u32 length + bytes), definition count
   // (u32); then each definition, name first.

@@ -23,6 +23,25 @@ TEST(GeneralTest, Simple_syntax_test) {
   EXPECT_TRUE(ret);
 }
 
+TEST(GeneralTest, Enable_ast_without_a_grammar) {
+  parser parser("S <- A"); // A is undefined
+  ASSERT_FALSE(parser);
+
+  parser.enable_ast(); // does nothing
+}
+
+TEST(GeneralTest, Optimize_ast_without_a_grammar) {
+  parser with("S <- A  A <- 'x'");
+  with.enable_ast();
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(with.parse("x", ast));
+
+  parser without("S <- A"); // A is undefined
+  ASSERT_FALSE(without);
+  EXPECT_EQ(ast_to_s(with.optimize_ast(ast)),
+            ast_to_s(without.optimize_ast(ast)));
+}
+
 TEST(GeneralTest, Empty_syntax_test) {
   parser parser("");
   bool ret = parser;
