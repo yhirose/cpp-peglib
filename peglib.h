@@ -900,8 +900,7 @@ using TracerStartOrEnd = std::function<void(std::any &trace_data)>;
 // a dense per-index array in Context (validity is tracked by its
 // registered/success bitvectors), so this map only holds the entries whose
 // result carries a std::any value — a grammar without semantic actions never
-// allocates it. Keys are probed linearly in a flat array; erased slots become
-// tombstones (erase only happens during left-recursion cache invalidation).
+// allocates it. Keys are probed linearly in a flat array.
 class PackratCache {
 public:
   explicit PackratCache(size_t expected_entries) {
@@ -928,43 +927,16 @@ public:
     if (keys_.empty() || (used_ + 1) * 4 > keys_.size() * 3) { grow(); }
     auto mask = keys_.size() - 1;
     auto i = mix(key) & mask;
-    auto insert_pos = kEmpty;
-    while (true) {
-      if (keys_[i] == key) {
-        insert_pos = i;
-        break;
-      }
-      if (keys_[i] == kTombstone) {
-        if (insert_pos == kEmpty) { insert_pos = i; }
-      } else if (keys_[i] == kEmpty) {
-        if (insert_pos == kEmpty) { insert_pos = i; }
-        if (keys_[insert_pos] == kEmpty) { used_++; }
-        break;
-      }
+    while (keys_[i] != key && keys_[i] != kEmpty) {
       i = (i + 1) & mask;
     }
-    keys_[insert_pos] = key;
-    vals_[insert_pos] = val;
-  }
-
-  void erase(size_t key) {
-    if (keys_.empty()) { return; }
-    auto mask = keys_.size() - 1;
-    auto i = mix(key) & mask;
-    while (true) {
-      if (keys_[i] == key) {
-        keys_[i] = kTombstone;
-        vals_[i].reset();
-        return;
-      }
-      if (keys_[i] == kEmpty) { return; }
-      i = (i + 1) & mask;
-    }
+    if (keys_[i] == kEmpty) { used_++; }
+    keys_[i] = key;
+    vals_[i] = val;
   }
 
 private:
   static constexpr size_t kEmpty = static_cast<size_t>(-1);
-  static constexpr size_t kTombstone = static_cast<size_t>(-2);
 
   static size_t mix(size_t key) {
     // Mix in 64 bits so `h >> 32` stays well-defined where size_t is 32-bit
@@ -982,7 +954,7 @@ private:
     used_ = 0;
     auto mask = new_cap - 1;
     for (size_t j = 0; j < old_keys.size(); j++) {
-      if (old_keys[j] == kEmpty || old_keys[j] == kTombstone) { continue; }
+      if (old_keys[j] == kEmpty) { continue; }
       auto i = mix(old_keys[j]) & mask;
       while (keys_[i] != kEmpty) {
         i = (i + 1) & mask;
@@ -996,7 +968,7 @@ private:
   size_t initial_capacity_ = 1024;
   std::vector<size_t> keys_;
   std::vector<std::any> vals_;
-  size_t used_ = 0; // occupied + tombstone slots
+  size_t used_ = 0; // occupied slots
 };
 
 /*
@@ -1065,9 +1037,6 @@ public:
   // above. Left uninitialized on purpose: a slot is only read once
   // cache_success marks it, which happens after it is written.
   std::unique_ptr<uint32_t[]> cache_len;
-  // Innermost active start position per rule; re-entry guard for rules that
-  // are not memoized (replaces the per-position bitvector for them).
-  std::vector<const char *> active_pos;
 
   PackratCache cache_values;
 
@@ -1083,68 +1052,56 @@ public:
   using LRRule = std::pair<const Definition *, size_t>;
   using LRKey = std::pair<LRRule, const char *>;
 
+  // Rules being parsed. A rule with an id only needs its innermost start,
+  // since a nested call never starts before its caller. The map holds the
+  // seeds of left-recursive rules, and a failure for rules without an id.
+  std::vector<const char *> active_pos;
+  std::map<LRKey, LRMemo> in_progress;
+
+  // Confirmed matches of left-recursive rules.
   std::map<LRKey, LRMemo> lr_memo;
 
-  // Rules whose lr_memo was hit during the current parse scope.
+  // The seed being grown, or else the confirmed match.
+  const LRMemo *find_lr_match(const LRKey &key) const {
+    if (auto it = in_progress.find(key); it != in_progress.end()) {
+      return &it->second;
+    }
+    if (auto it = lr_memo.find(key); it != lr_memo.end()) {
+      return &it->second;
+    }
+    return nullptr;
+  }
+
+  // Rules whose seed or lr_memo was hit during the current parse scope.
   // Used to track LR cycle membership.
   std::set<LRRule> lr_refs_hit;
-
-  // Rules currently in their seeding/growing phase at a given position.
-  // Protected from having their lr_memo erased by inner growers.
-  std::set<LRKey> lr_active_seeds;
 
   // Interned macro instantiations: (definition, resolved arguments) -> id.
   std::map<std::vector<const void *>, size_t> macro_inst_ids;
   size_t next_macro_inst_ = 1;
 
-  bool memoizes(const Definition &rule) const;
+  bool has_id(const Definition &rule) const {
+    return analysis && analysis->indexes(rule);
+  }
 
-  // Map a def_id to its slot in the cache tables, or -1 for guard-only
-  // rules (not memoized).
+  // Map a def_id to its slot in the cache tables, or -1 for rules that are
+  // not memoized.
   int32_t cache_slot(size_t def_id) const {
-    if (!packrat_index) { return static_cast<int32_t>(def_id); }
+    if (!packrat_index) { return -1; }
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
   }
 
-  void clear_packrat_cache(const char *pos, size_t def_id) {
-    if (!enablePackratParsing) { return; }
-    auto slot = cache_slot(def_id);
-    if (slot < 0) { return; }
-    auto col = static_cast<size_t>(pos - s);
-    auto idx = packrat_cached_count * col + static_cast<size_t>(slot);
-    if (idx < cache_registered.size()) {
-      cache_registered[idx] = false;
-      cache_success[idx] = false;
-    }
-    cache_values.erase(idx);
-  }
-
-  void write_packrat_cache(const char *pos, size_t def_id, size_t len,
-                           const std::any &val) {
-    if (!enablePackratParsing) { return; }
-    auto slot = cache_slot(def_id);
-    if (slot < 0) { return; }
-    auto col = pos - s;
-    auto idx = packrat_cached_count * static_cast<size_t>(col) +
-               static_cast<size_t>(slot);
-    if (idx >= cache_registered.size()) { return; }
+  void write_packrat_cache(size_t idx, size_t len, const std::any &val) {
     if (sizeof(size_t) > sizeof(uint32_t) &&
         len > static_cast<size_t>(UINT32_MAX)) {
-      // A match too long for the 32-bit memo: forget the pre-registered
-      // failure so the rule simply re-parses at this position.
-      cache_registered[idx] = false;
+      // A match too long for the 32-bit memo is not memoized, so the rule
+      // simply re-parses at this position.
       return;
     }
     cache_registered[idx] = true;
     cache_success[idx] = true;
     cache_len[idx] = static_cast<uint32_t>(len);
-    if (val.has_value()) {
-      cache_values.insert_or_assign(idx, val);
-    } else {
-      // A regrow of a left-recursive seed may replace a value-carrying
-      // result with an empty one; drop the stale value if any was stored.
-      cache_values.erase(idx);
-    }
+    if (val.has_value()) { cache_values.insert_or_assign(idx, val); }
   }
 
   TracerEnter tracer_enter;
@@ -1196,12 +1153,11 @@ public:
         cache_len(enablePackratParsing && this->packrat_cached_count
                       ? new uint32_t[this->packrat_cached_count * (l + 1)]
                       : nullptr),
-        active_pos(enablePackratParsing ? def_count : 0, nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
                                           : 0),
-        tracer_enter(tracer_enter), tracer_leave(tracer_leave),
-        has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
-        verbose_trace(verbose_trace),
+        active_pos(def_count, nullptr), tracer_enter(tracer_enter),
+        tracer_leave(tracer_leave), has_tracer(tracer_enter && tracer_leave),
+        trace_data(trace_data), verbose_trace(verbose_trace),
         needs_rule_stack(static_cast<bool>(tracer_enter) ||
                          static_cast<bool>(tracer_leave) ||
                          static_cast<bool>(log) ||
@@ -1232,66 +1188,11 @@ public:
   };
   std::vector<PackratStats> *packrat_stats = nullptr;
 
+  // A rule entered again where it is being parsed fails instead of recursing
+  // forever, a memoized match is reused, and otherwise fn parses the rule.
   template <typename T>
-  void packrat(const char *a_s, size_t def_id, size_t &len, std::any &val,
-               T fn) {
-    if (!enablePackratParsing) {
-      fn(val);
-      return;
-    }
-
-    auto slot = cache_slot(def_id);
-    if (slot < 0) {
-      // Guard-only rule: no memoization. Recursion at the same position is
-      // caught by the per-rule active-position guard.
-      if (active_pos[def_id] == a_s) {
-        if (packrat_stats && def_id < packrat_stats->size()) {
-          (*packrat_stats)[def_id].hits++;
-        }
-        len = static_cast<size_t>(-1);
-        return;
-      }
-      if (packrat_stats && def_id < packrat_stats->size()) {
-        (*packrat_stats)[def_id].misses++;
-      }
-      auto save = active_pos[def_id];
-      active_pos[def_id] = a_s;
-      fn(val);
-      active_pos[def_id] = save;
-      return;
-    }
-
-    auto col = a_s - s;
-    auto idx = packrat_cached_count * static_cast<size_t>(col) +
-               static_cast<size_t>(slot);
-
-    if (cache_registered[idx]) {
-      if (packrat_stats && def_id < packrat_stats->size()) {
-        (*packrat_stats)[def_id].hits++;
-      }
-      if (cache_success[idx]) {
-        len = cache_len[idx];
-        if (!cache_values.find(idx, val)) { val.reset(); }
-        return;
-      } else {
-        len = static_cast<size_t>(-1);
-        return;
-      }
-    } else {
-      // Pre-register as failure (re-entry guard + failure memoization)
-      cache_registered[idx] = true;
-      cache_success[idx] = false;
-
-      if (packrat_stats && def_id < packrat_stats->size()) {
-        (*packrat_stats)[def_id].misses++;
-      }
-
-      fn(val);
-
-      if (success(len)) { write_packrat_cache(a_s, def_id, len, val); }
-      return;
-    }
-  }
+  void reuse_or_parse(const char *a_s, const Definition &rule, size_t &len,
+                      std::any &val, T fn);
 
   // Semantic values
   SemanticValues &push_semantic_values_scope() {
@@ -3854,19 +3755,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       len = parse_ope_body(s, n, vs, c, dt);
     };
 
-    if (c.memoizes(*outer_)) {
-      c.packrat(s, outer_->id, len, val, do_recognize);
-    } else {
-      // Same re-entry guard as the general no-packrat path below.
-      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
-      if (c.lr_memo.count(guard_key)) {
-        len = static_cast<size_t>(-1);
-      } else {
-        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
-        do_recognize(val);
-        c.lr_memo.erase(guard_key);
-      }
-    }
+    c.reuse_or_parse(s, *outer_, len, val, do_recognize);
     return len;
   }
 
@@ -3931,25 +3820,20 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     auto lr_rule = Context::LRRule(outer_, c.top_macro_inst());
     auto lr_key = Context::LRKey(lr_rule, s);
 
-    // Check LR memo first
-    auto it = c.lr_memo.find(lr_key);
-    if (it != c.lr_memo.end()) {
-      if (success(it->second.len)) {
-        len = it->second.len;
-        val = it->second.val;
+    if (auto match = c.find_lr_match(lr_key)) {
+      if (success(match->len)) {
+        len = match->len;
+        val = match->val;
       } else {
         len = static_cast<size_t>(-1);
       }
-      // Record that this rule's lr_memo was accessed.
+      // Record that this rule's seed or lr_memo was hit.
       // Any LR rule currently seeding will know we're in its cycle.
       c.lr_refs_hit.insert(lr_rule);
     } else {
       // Seed with FAIL
-      c.lr_memo[lr_key] = {static_cast<size_t>(-1), {}};
-
-      // Mark as active seed (protects our lr_memo from inner growers)
-      c.lr_active_seeds.insert(lr_key);
-      auto seed_guard = scope_exit([&]() { c.lr_active_seeds.erase(lr_key); });
+      auto &seed = c.in_progress[lr_key];
+      auto seed_guard = scope_exit([&]() { c.in_progress.erase(lr_key); });
 
       // Track which LR rules are referenced during our parse
       // to identify cycle members
@@ -3961,7 +3845,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       std::any initial_val;
       do_parse(initial_len, initial_val);
 
-      // Rules whose lr_memo was hit during our parse are in our cycle.
+      // Rules whose seed or lr_memo was hit during our parse are in our cycle.
       // If we detected cycle members, we ourselves are also part of
       // the cycle, so add self — this lets parent seeders see us as
       // a transitive cycle member.
@@ -3973,28 +3857,19 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       c.lr_refs_hit.insert(cycle_rules.begin(), cycle_rules.end());
 
       if (!success(initial_len)) {
-        // Keep FAIL in lr_memo so we don't re-seed
         len = static_cast<size_t>(-1);
       } else {
         // Got initial seed, now grow
         len = initial_len;
         val = std::move(initial_val);
-        c.lr_memo[lr_key] = {len, val};
+        seed = {len, val};
 
         while (true) {
-          // Clear this rule's packrat cache. A macro is never written there
-          // (that cache is keyed by rule id alone, which cannot tell two
-          // instantiations apart), so there is nothing to clear for one.
-          if (c.memoizes(*outer_)) { c.clear_packrat_cache(s, outer_->id); }
-
-          // Clear lr_memo for cycle-dependent rules at this position,
-          // but NOT for rules currently in their own seeding phase
-          // (lr_active_seeds) — those are outer growers we must not
-          // interfere with.
+          // Clear lr_memo for cycle-dependent rules at this position. Outer
+          // growers are not there: their seeds are in progress.
           for (auto memo_it = c.lr_memo.begin(); memo_it != c.lr_memo.end();) {
-            if (memo_it->first.second == s && memo_it->first.first != lr_rule &&
-                cycle_rules.count(memo_it->first.first) &&
-                !c.lr_active_seeds.count(memo_it->first)) {
+            if (memo_it->first.second == s &&
+                cycle_rules.count(memo_it->first.first)) {
               memo_it = c.lr_memo.erase(memo_it);
             } else {
               ++memo_it;
@@ -4011,34 +3886,16 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 
           len = new_len;
           val = std::move(new_val);
-          c.lr_memo[lr_key] = {len, val};
+          seed = {len, val};
         }
       }
 
-      // Write final result to packrat cache (lr_memo entry is kept as
-      // the primary lookup for LR rules at this position)
-      if (success(len) && c.memoizes(*outer_)) {
-        c.write_packrat_cache(s, outer_->id, len, val);
-      }
+      // Confirmed, a failure too, so the rule is not seeded here again
+      c.lr_memo[lr_key] = std::move(seed);
     }
   } else {
-    if (c.memoizes(*outer_)) {
-      // Packrat cache acts as re-entry guard (pre-registered as
-      // failure before fn is called).
-      c.packrat(s, outer_->id, len, val,
-                [&](std::any &a_val) { do_parse(len, a_val); });
-    } else {
-      // Without packrat, use lr_memo as re-entry guard to prevent
-      // stack overflow from undetected left recursion.
-      auto guard_key = Context::LRKey({outer_, c.top_macro_inst()}, s);
-      if (c.lr_memo.count(guard_key)) {
-        len = static_cast<size_t>(-1);
-      } else {
-        c.lr_memo[guard_key] = {static_cast<size_t>(-1), {}};
-        do_parse(len, val);
-        c.lr_memo.erase(guard_key);
-      }
-    }
+    c.reuse_or_parse(s, *outer_, len, val,
+                     [&](std::any &a_val) { do_parse(len, a_val); });
   }
 
   if (success(len)) {
@@ -4130,11 +3987,11 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       // Definition. The empty argument scope only exists to shadow the
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
-      // top_macro_inst reads in the left-recursion machinery and the
-      // no-packrat re-entry guard. A callee with no such reader parses
+      // top_macro_inst reads in the left-recursion machinery and the re-entry
+      // guard of a rule without an id. A callee with no such reader parses
       // directly on the caller's frame.
       if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
-          c.memoizes(*rule_)) {
+          c.has_id(*rule_)) {
         return rule_->holder_->parse(s, n, vs, c, dt);
       }
       c.push_empty_args();
@@ -4787,8 +4644,60 @@ inline void Definition::number_new_rules() const {
   }
 }
 
-inline bool Context::memoizes(const Definition &rule) const {
-  return enablePackratParsing && !rule.is_macro && analysis->indexes(rule);
+template <typename T>
+inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
+                                    size_t &len, std::any &val, T fn) {
+  if (!has_id(rule)) {
+    auto key = LRKey({&rule, top_macro_inst()}, a_s);
+    if (!in_progress.emplace(key, LRMemo()).second) {
+      len = static_cast<size_t>(-1);
+      return;
+    }
+    fn(val);
+    in_progress.erase(key);
+    return;
+  }
+
+  auto def_id = rule.id;
+  if (active_pos[def_id] == a_s) {
+    len = static_cast<size_t>(-1);
+    return;
+  }
+
+  auto slot = cache_slot(def_id);
+  size_t idx = 0;
+  if (slot >= 0) {
+    idx = packrat_cached_count * static_cast<size_t>(a_s - s) +
+          static_cast<size_t>(slot);
+    if (cache_registered[idx]) {
+      if (packrat_stats && def_id < packrat_stats->size()) {
+        (*packrat_stats)[def_id].hits++;
+      }
+      if (cache_success[idx]) {
+        len = cache_len[idx];
+        if (!cache_values.find(idx, val)) { val.reset(); }
+      } else {
+        len = static_cast<size_t>(-1);
+      }
+      return;
+    }
+  }
+  if (enablePackratParsing && packrat_stats && def_id < packrat_stats->size()) {
+    (*packrat_stats)[def_id].misses++;
+  }
+
+  auto save = active_pos[def_id];
+  active_pos[def_id] = a_s;
+  fn(val);
+  active_pos[def_id] = save;
+
+  if (slot < 0) { return; }
+  if (success(len)) {
+    write_packrat_cache(idx, len, val);
+  } else {
+    cache_registered[idx] = true;
+    cache_success[idx] = false;
+  }
 }
 
 // Compute which rules benefit from packrat memoization.
@@ -4940,20 +4849,14 @@ inline void Definition::select_packrat_rules() const {
     if (whitespaceOpe) { whitespaceOpe->accept(finder); }
     if (wordOpe) { wordOpe->accept(finder); }
 
-    // Left-recursive rules read and write the packrat cache directly during
-    // seed-growing, so they must stay in the cached set. Macros are the
-    // exception: they use lr_memo only, keyed by instantiation.
-    for (auto *def : analysis_.rules_by_id) {
-      if (def && def->is_left_recursive && !def->is_macro) {
-        benefits[def->id] = true;
-      }
-    }
-
-    // Compact index: def_id -> slot in the cache tables (-1 = guard only)
+    // Compact index: def_id -> slot in the cache tables (-1 = not memoized)
     analysis_.packrat_index.assign(def_count, -1);
     int32_t k = 0;
     for (size_t id = 0; id < def_count; id++) {
-      if (benefits[id]) { analysis_.packrat_index[id] = k++; }
+      // A left-recursive rule keeps its matches in lr_memo.
+      if (benefits[id] && !analysis_.rules_by_id[id]->is_left_recursive) {
+        analysis_.packrat_index[id] = k++;
+      }
     }
     analysis_.packrat_cached_count = static_cast<size_t>(k);
   });
