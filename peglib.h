@@ -33,6 +33,9 @@
 #include <charconv>
 #endif
 #include <cstdint>
+#ifdef CPPPEGLIB_TEST_BLOB_ROUNDTRIP
+#include <cstdlib>
+#endif
 #include <cstring>
 #include <functional>
 #include <initializer_list>
@@ -8226,8 +8229,9 @@ public:
 #ifdef CPPPEGLIB_TEST_BLOB_ROUNDTRIP
     // For the test suite: replace the grammar with the one its blob loads, so
     // every test also checks GrammarBlob. A grammar that a blob cannot hold
-    // stays as parsed.
-    if (grammar_ != nullptr) {
+    // stays as parsed. The environment variable lets one test binary run both
+    // ways.
+    if (grammar_ != nullptr && std::getenv("CPPPEGLIB_TEST_BLOB_ROUNDTRIP")) {
       std::vector<uint8_t> blob;
       try {
         blob = serialize_grammar();

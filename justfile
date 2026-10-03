@@ -7,9 +7,9 @@ release *args:
     @./scripts/release.sh {{args}}
 
 test:
-    cmake --build build -j {{num_cpus()}} --target peglib-test-main peglib-test-blob-roundtrip
+    cmake --build build -j {{num_cpus()}} --target peglib-test-main
     build/test/peglib-test-main
-    build/test/peglib-test-blob-roundtrip
+    CPPPEGLIB_TEST_BLOB_ROUNDTRIP=1 build/test/peglib-test-main
 
 bench:
     #!/usr/bin/env bash
