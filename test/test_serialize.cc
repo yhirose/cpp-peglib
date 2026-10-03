@@ -231,6 +231,27 @@ TEST(GrammarBlobTest, LoadBlobPreservesPackrat) {
   EXPECT_TRUE((*g2)[start2].enablePackratParsing);
 }
 
+// A blob made without packrat must still let the loaded parser turn it on.
+TEST(GrammarBlobTest, LoadBlobAllowsEnablingPackrat) {
+  peg::parser p1(R"(
+    START <- PAT1 / PAT2
+    PAT1  <- HELLO ' One'
+    PAT2  <- HELLO ' Two'
+    HELLO <- 'Hello'
+  )");
+  ASSERT_TRUE(!!p1);
+  auto blob = p1.serialize_grammar();
+
+  peg::parser p2;
+  ASSERT_TRUE(p2.load_blob(blob));
+  size_t count = 0;
+  p2["HELLO"] = [&](const peg::SemanticValues &) { count++; };
+  p2.enable_packrat_parsing();
+
+  EXPECT_TRUE(p2.parse("Hello Two"));
+  EXPECT_EQ(1, count); // PAT2 reads HELLO from the cache
+}
+
 TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
   peg::parser p;
   std::vector<uint8_t> junk = {9, 9, 9, 9};

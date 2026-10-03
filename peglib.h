@@ -6921,10 +6921,12 @@ public:
       grammar_ = GrammarBlob::deserialize(blob, start_);
     } catch (const std::exception &) { return false; }
     if (grammar_ != nullptr) {
-      // Symmetry with load_grammar(): restore the parser-level packrat flag
-      // from the blob so a later enable_packrat_parsing() re-applies it
-      // instead of resetting the start rule to the false member default.
-      enablePackratParsing_ = (*grammar_)[start_].enablePackratParsing;
+      // enablePackratParsing_ says whether the grammar allows packrat, which
+      // only a back reference to a capture in another rule forbids. Such a
+      // grammar holds a capture, which a blob cannot, so a blob always allows
+      // packrat. Whether packrat is on is the start rule's own flag, which the
+      // blob restores.
+      enablePackratParsing_ = true;
     }
     return grammar_ != nullptr;
   }
