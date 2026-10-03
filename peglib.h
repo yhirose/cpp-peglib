@@ -816,6 +816,13 @@ using ErrorReporter = std::function<void(const ErrorReport &report)>;
  */
 class Definition;
 
+// Thrown when a parse nests more rule matches than its start rule's
+// max_depth allows; that parse catches it (see Definition::parse_core).
+struct NestingTooDeep {
+  const char *pos;
+  const Definition *rule;
+};
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
@@ -837,6 +844,18 @@ struct ErrorInfo {
       if (t == error_literal && r == error_rule) { return; }
     }
     expected_tokens.emplace_back(error_literal, error_rule);
+  }
+
+  // A parse went past its max_depth at `pos`, where the rule match that
+  // `label` names starts. It is reported even at or before a position a
+  // recovered error already was.
+  void set_nesting_too_deep(const char *pos, const std::string &label,
+                            size_t max_depth) {
+    message_pos = pos;
+    message =
+        "exceeded the maximum nesting depth of " + std::to_string(max_depth);
+    this->label = label;
+    last_output_pos = nullptr;
   }
 
   void output_log(const Log &log, const char *s, size_t n) {
@@ -1142,6 +1161,27 @@ public:
   // straight into the caller's scope. Decided at parse start (callbacks
   // can be attached between parses).
   bool recognize_only = false;
+
+  // The rule matches in progress, and the right operands a precedence rule
+  // is parsing. Counted only under a limit.
+  size_t depth = 0;
+  size_t max_depth = std::numeric_limits<size_t>::max();
+
+  bool limits_depth() const {
+    return max_depth != std::numeric_limits<size_t>::max();
+  }
+
+  // One level deeper until the result goes out of scope. Too deep a nesting
+  // abandons the whole parse: failing this match instead would let the parse
+  // go on by backtracking, possibly to a different result.
+  auto nest(const char *pos, const Definition &rule) {
+    if (limits_depth() && ++depth > max_depth) {
+      throw NestingTooDeep{pos, &rule};
+    }
+    return scope_exit([this]() {
+      if (limits_depth()) { depth--; }
+    });
+  }
 
   // True when error reporting or tracing is active, i.e. when rule_stack
   // must reflect the full chain of rules being parsed. Without them only
@@ -3269,6 +3309,9 @@ public:
 
   bool eoi_check = true;
 
+  // The deepest that rule matches may nest in a parse from this rule.
+  size_t max_depth = std::numeric_limits<size_t>::max();
+
   // Per-rule packrat stats (optional, for profiling)
   mutable bool collect_packrat_stats = false;
   mutable std::vector<Context::PackratStats> packrat_stats_;
@@ -3327,35 +3370,42 @@ private:
       c.recognize_only = recognize_only;
     }
 
-    size_t i = 0;
+    c.max_depth = max_depth;
 
-    if (whitespaceOpe) {
-      auto save_ignore_trace_state = c.ignore_trace_state;
-      c.ignore_trace_state = !c.verbose_trace;
-      auto se =
-          scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    try {
+      size_t i = 0;
 
-      auto len = whitespaceOpe->parse(s, n, vs, c, dt);
-      if (fail(len)) { return Result{false, c.recovered, i, c.error_info}; }
+      if (whitespaceOpe) {
+        auto save_ignore_trace_state = c.ignore_trace_state;
+        c.ignore_trace_state = !c.verbose_trace;
+        auto se = scope_exit(
+            [&]() { c.ignore_trace_state = save_ignore_trace_state; });
 
-      i = len;
-    }
+        auto len = whitespaceOpe->parse(s, n, vs, c, dt);
+        if (fail(len)) { return Result{false, c.recovered, i, c.error_info}; }
 
-    auto len = ope->parse(s + i, n - i, vs, c, dt);
-    auto ret = success(len);
-    if (ret) {
-      i += len;
-      if (eoi_check) {
-        if (i < n) {
-          if (c.error_info.error_pos - c.s < s + i - c.s) {
-            c.error_info.message_pos = s + i;
-            c.error_info.message = "expected end of input";
+        i = len;
+      }
+
+      auto len = ope->parse(s + i, n - i, vs, c, dt);
+      auto ret = success(len);
+      if (ret) {
+        i += len;
+        if (eoi_check) {
+          if (i < n) {
+            if (c.error_info.error_pos - c.s < s + i - c.s) {
+              c.error_info.message_pos = s + i;
+              c.error_info.message = "expected end of input";
+            }
+            ret = false;
           }
-          ret = false;
         }
       }
+      return Result{ret, c.recovered, i, c.error_info};
+    } catch (const NestingTooDeep &e) {
+      c.error_info.set_nesting_too_deep(e.pos, e.rule->name, max_depth);
+      return Result{false, c.recovered, 0, c.error_info};
     }
-    return Result{ret, c.recovered, i, c.error_info};
   }
 
   std::shared_ptr<Holder> holder_;
@@ -3762,6 +3812,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     throw std::logic_error("Uninitialized definition ope was used...");
   }
 
+  auto nesting = c.nest(s, *outer_);
+
   // Macro reference. A left-recursive macro cannot take this path: it needs
   // the seed-growing below, which in turn needs its own semantic value scope
   // to memoise. Such a macro forms a scope like a plain rule does.
@@ -4085,6 +4137,9 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     chvs = c.push_semantic_values_scope();
     {
       auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+      // The right operand nests the way a rule match does, so it counts as
+      // one: a chain of right-associative operators is as deep as it is long.
+      auto nesting = c.nest(s + i, rule_);
       chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
     }
 
@@ -6955,6 +7010,15 @@ public:
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
       rule.verbose_trace = verbose_trace;
+    }
+  }
+
+  // Fails a parse that nests more than max_depth rule matches, with an
+  // error, before deep input can overflow the stack.
+  void set_max_depth(size_t max_depth) {
+    if (grammar_ != nullptr) {
+      auto &rule = (*grammar_)[start_];
+      rule.max_depth = max_depth;
     }
   }
 

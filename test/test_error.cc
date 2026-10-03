@@ -1009,4 +1009,131 @@ TEST(ErrorReporterTest, Unknown_capture_resolves_to_empty) {
 }
 
 // =============================================================================
+// Nesting Depth Limit Tests
+// =============================================================================
+
+// "1+1+...+1" with n operators.
+static std::string chain(size_t n) {
+  std::string s = "1";
+  for (size_t i = 0; i < n; i++) {
+    s += "+1";
+  }
+  return s;
+}
+
+TEST(MaxDepthTest, Parse_fails_past_the_limit) {
+  for (auto packrat : {false, true}) {
+    for (auto ast : {false, true}) {
+      parser pg(R"(
+        E <- '(' E ')' / 'x'
+      )");
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      if (ast) { pg.enable_ast(true); }
+      pg.set_max_depth(3);
+
+      std::vector<std::string> msgs;
+      pg.set_logger([&](size_t ln, size_t col, const std::string &m,
+                        const std::string &rule) {
+        msgs.push_back(std::to_string(ln) + ":" + std::to_string(col) + " " +
+                       m + " (" + rule + ")");
+      });
+
+      // Three matches of E in progress at once, then four.
+      EXPECT_TRUE(pg.parse("((x))"));
+      EXPECT_FALSE(pg.parse("(((x)))"));
+      ASSERT_EQ(1u, msgs.size());
+      EXPECT_EQ("1:4 exceeded the maximum nesting depth of 3 (E)", msgs[0]);
+    }
+  }
+}
+
+TEST(MaxDepthTest, Parse_is_abandoned_not_backtracked) {
+  // Failing only the match that went too deep would let the second
+  // alternative take the input. The parse stops instead, and no user code
+  // runs once it has.
+  parser pg(R"(
+    S   <- E / ANY
+    E   <- '(' E ')' / 'x'
+    ANY <- .*
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.set_max_depth(3);
+
+  auto actions = 0;
+  auto leaves = 0;
+  pg["ANY"] = [&](const SemanticValues &) { actions++; };
+  pg["E"].leave = [&](auto &&...) { leaves++; };
+
+  EXPECT_FALSE(pg.parse("((((x))))"));
+  EXPECT_EQ(0, actions);
+  EXPECT_EQ(0, leaves);
+}
+
+TEST(MaxDepthTest, Limit_is_reported_after_a_recovered_error) {
+  // The recovered error is reported at 1:6, past where the limit is hit.
+  parser pg(R"(
+    START <- STMT*
+    STMT  <- 'a' ';' '(((' 'q' / 'a' '!'^x / E
+    E     <- '(' E ')' / 'x'
+    x     <- (!';' .)* ';'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.set_max_depth(4);
+
+  std::vector<std::string> msgs;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &m) {
+    msgs.push_back(std::to_string(ln) + ":" + std::to_string(col) + " " + m);
+  });
+
+  EXPECT_FALSE(pg.parse("a;(((x)))"));
+  ASSERT_EQ(2u, msgs.size());
+  EXPECT_EQ("1:5 exceeded the maximum nesting depth of 4", msgs[1]);
+}
+
+TEST(MaxDepthTest, Limit_is_hit_inside_a_precedence) {
+  parser pg(R"(
+    EXPR <- ATOM (OP ATOM)* {
+      precedence
+        L +
+    }
+    ATOM <- '(' EXPR ')' / [0-9]
+    OP   <- '+'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.set_max_depth(8);
+
+  EXPECT_TRUE(pg.parse("1+(2+(3))"));
+  EXPECT_FALSE(pg.parse("1+(2+(3+(4+(5))))"));
+}
+
+// The right operand of a right-associative operator is parsed by a nested
+// call, not a rule match, so a long chain of them nests as deep as a long run
+// of brackets and must hit the limit instead of overflowing the stack.
+TEST(MaxDepthTest, Right_operands_of_a_right_associative_chain_count) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E  <- A (OP A)* { precedence R + }
+      A  <- [0-9]
+      OP <- '+'
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    pg.set_max_depth(20);
+    std::string msg;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &m,
+                      const std::string &rule) {
+      msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m + " (" +
+            rule + ")";
+    });
+
+    EXPECT_TRUE(pg.parse(chain(10))) << packrat;
+    EXPECT_FALSE(pg.parse(chain(100000))) << packrat;
+    // The 19th right operand is the 20th level, and its A the 21st.
+    EXPECT_EQ("1:39 exceeded the maximum nesting depth of 20 (A)", msg)
+        << packrat;
+  }
+}
+
+// =============================================================================
 // Enter/Leave Handler Tests

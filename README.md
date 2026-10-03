@@ -877,6 +877,22 @@ parser.set_error_reporter([](const peg::ErrorReport &r) {
 
 Both callbacks can be set at the same time; each error is delivered to both. With error recovery, the reporter is called once per recovered error, so a single parse can produce multiple reports. Mapping `r.label` to an application-defined error enum is the intended way to get typed errors.
 
+Limit nesting depth
+-------------------
+
+The parser descends one level of C++ recursion for each rule it enters, and for the right operand of each operator a `precedence` rule parses, so deeply nested input, such as a few thousand `(`s, can overflow the stack and crash. `set_max_depth` makes such a parse fail with an error instead:
+
+```cpp
+parser.set_max_depth(1000);
+
+parser.parse(deeply_nested_input); // false
+// exceeded the maximum nesting depth of 1000
+```
+
+The depth counts the rule matches in progress at once, including macros and the rules `%whitespace` refers to, and the right operands a `precedence` rule is parsing: a chain of right-associative operators, such as `1^2^3` with `R ^`, nests one level per operator. One level of nesting in the input usually passes through several rules, so the limit is in rules, not in brackets. How deep is safe depends on the grammar and on the stack size of the thread that parses.
+
+Reaching the limit abandons the whole parse. The parser does not backtrack to try another alternative, no more actions, predicates or `leave` handlers run, and the error is reported at the position where the limit was reached, with the rule entered there (or the `precedence` rule, for a right operand) as its label. There is no limit by default.
+
 Change the Start Definition Rule
 --------------------------------
 
