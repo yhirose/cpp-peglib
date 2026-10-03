@@ -24,6 +24,9 @@ TEST(UnicodeTest, Japanese_character) {
   EXPECT_TRUE(ret);
 
   EXPECT_TRUE(parser.parse(u8R"(サーバーを復旧します。)"));
+  EXPECT_TRUE(parser.parse(u8R"(古いサーバーが落ちた。)"));
+  EXPECT_FALSE(parser.parse(u8R"(サーバーを復旧し。)"));
+  EXPECT_FALSE(parser.parse(u8R"(サーバー。)"));
 }
 
 TEST(UnicodeTest, dot_with_a_code) {

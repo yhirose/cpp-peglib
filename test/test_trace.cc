@@ -307,3 +307,148 @@ TEST(TraceTest, Trace_with_left_recursion) {
   EXPECT_TRUE(parser.parse("1+2"));
   EXPECT_GT(enter_count, 0);
 }
+
+// =============================================================================
+// Trace Order Tests
+// =============================================================================
+
+static void record_enter_leave(parser &pg,
+                               std::initializer_list<const char *> rules,
+                               std::vector<std::string> &trace) {
+  for (auto rule : rules) {
+    pg[rule].enter = [&trace, rule](const Context &, const char *, size_t,
+                                    std::any &) {
+      trace.push_back(std::string("enter_") + rule);
+    };
+    pg[rule].leave = [&trace, rule](const Context &, const char *, size_t,
+                                    size_t, std::any &, std::any &) {
+      trace.push_back(std::string("leave_") + rule);
+    };
+  }
+}
+
+TEST(TraceOrderTest, Trace_macro_is_transparent) {
+  // A macro rule fires no enter/leave; only the expanded body's rules do.
+  parser pg(R"(
+    S <- Rep(A)
+    Rep(X) <- X+
+    A <- < 'a' >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> trace;
+  record_enter_leave(pg, {"S", "Rep", "A"}, trace);
+
+  EXPECT_TRUE(pg.parse("aa"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_S", "enter_A", "leave_A", "enter_A",
+                                "leave_A", "enter_A", "leave_A", "leave_S"}),
+      trace);
+
+  trace.clear();
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_EQ((std::vector<std::string>{"enter_S", "enter_A", "leave_A",
+                                      "enter_A", "leave_A", "leave_S"}),
+            trace);
+}
+
+TEST(TraceOrderTest, Trace_backtracking_alternatives) {
+  // Each backtracked alternative fires enter/leave for the rules it tries.
+  parser pg(R"(
+    S <- A 'x' / A 'y'
+    A <- < 'a' >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> trace;
+  record_enter_leave(pg, {"S", "A"}, trace);
+
+  EXPECT_TRUE(pg.parse("ax"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_S", "enter_A", "leave_A", "leave_S"}),
+      trace);
+
+  trace.clear();
+  EXPECT_TRUE(pg.parse("ay"));
+  EXPECT_EQ((std::vector<std::string>{"enter_S", "enter_A", "leave_A",
+                                      "enter_A", "leave_A", "leave_S"}),
+            trace);
+}
+
+TEST(TraceOrderTest, Trace_repetition_final_attempt) {
+  // A repetition fires enter/leave for every attempt, including the final
+  // failing one.
+  parser pg(R"(
+    S <- A+
+    A <- < 'a' >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> trace;
+  record_enter_leave(pg, {"S", "A"}, trace);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_EQ((std::vector<std::string>{"enter_S", "enter_A", "leave_A",
+                                      "enter_A", "leave_A", "leave_S"}),
+            trace);
+
+  trace.clear();
+  EXPECT_TRUE(pg.parse("aa"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_S", "enter_A", "leave_A", "enter_A",
+                                "leave_A", "enter_A", "leave_A", "leave_S"}),
+      trace);
+}
+
+TEST(TraceOrderTest, Trace_predicate) {
+  // enter/leave fire for rules referenced inside predicates.
+  parser pg(R"(
+    S <- &A A
+    A <- < 'a' >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> trace;
+  record_enter_leave(pg, {"S", "A"}, trace);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_EQ((std::vector<std::string>{"enter_S", "enter_A", "leave_A",
+                                      "enter_A", "leave_A", "leave_S"}),
+            trace);
+}
+
+TEST(TraceOrderTest, Trace_left_recursion) {
+  // A left-recursive rule fires enter/leave per seed/grow iteration; recursive
+  // memo hits fire nothing.
+  parser pg(R"(
+    E <- E '+' T / T
+    T <- < [0-9] >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> trace;
+  record_enter_leave(pg, {"E", "T"}, trace);
+
+  EXPECT_TRUE(pg.parse("1"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E"}),
+      trace);
+
+  trace.clear();
+  EXPECT_TRUE(pg.parse("1+2"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E"}),
+      trace);
+
+  trace.clear();
+  EXPECT_TRUE(pg.parse("1+2+3"));
+  EXPECT_EQ(
+      (std::vector<std::string>{"enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E",
+                                "enter_E", "enter_T", "leave_T", "leave_E"}),
+      trace);
+}

@@ -10,6 +10,7 @@ TEST(GeneralTest, Simple_syntax_test_with_unicode) {
 
   bool ret = parser;
   EXPECT_TRUE(ret);
+  EXPECT_TRUE(parser.parse(" "));
 }
 #endif
 
@@ -1471,6 +1472,162 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
   }
 }
 
+// Nodes get ids in the order they are first seen, so the same node seen twice
+// (or seen in a callback and then found in the tree) shows up as the same id.
+// The weak_ptrs keep addresses from being reused.
+struct AstIds {
+  std::map<const Ast *, size_t> ids;
+  std::vector<std::weak_ptr<Ast>> keep;
+  size_t id(const std::shared_ptr<Ast> &node) {
+    auto it = ids.find(node.get());
+    if (it != ids.end()) { return it->second; }
+    keep.push_back(node);
+    auto id = ids.size() + 1;
+    ids[node.get()] = id;
+    return id;
+  }
+};
+
+static void dump_ast(const std::shared_ptr<Ast> &node, AstIds &ids,
+                     std::string &out) {
+  out += "#" + std::to_string(ids.id(node)) + " " + node->name + "|" +
+         node->original_name + "|" + std::to_string(node->position) + "+" +
+         std::to_string(node->length) + "|" + std::to_string(node->line) + ":" +
+         std::to_string(node->column) + "|" +
+         std::to_string(node->choice_count) + "/" +
+         std::to_string(node->choice) + "|" +
+         std::to_string(node->original_choice_count) + "/" +
+         std::to_string(node->original_choice) + "|" +
+         std::to_string(node->original_tag) + "|" +
+         std::string(node->is_token ? node->token : "-") + "\n";
+  for (const auto &child : node->nodes) {
+    if (child->parent.lock() != node) { out += "WRONG PARENT\n"; }
+    dump_ast(child, ids, out);
+  }
+}
+
+TEST(GeneralTest, DeferredAstIsUnobservable) {
+  // enable_ast(true) builds a node only once its rule match is kept (see
+  // AstLogEntry). Predicates, leave handlers and user actions must see what
+  // they see when every node is built right away (a tracer forces that), and
+  // the tree must match optimize_ast's. The grammar backtracks over rules that
+  // collapse in chains, token rules with inner rules, ignored rules, a
+  // precedence rule and a macro, and has no left recursion (which would turn
+  // deferring off).
+  const char *grammar = R"(
+    PROGRAM     <-  STATEMENT (';' STATEMENT)*
+    STATEMENT   <-  YIELD / CALL / ASSIGN / VALUE
+    YIELD       <-  'yield' VALUE              { no_ast_opt }
+    CALL        <-  NAME '(' LIST(VALUE, ',') ')'
+    ASSIGN      <-  NAME '=' VALUE ~BANG?
+    VALUE       <-  WRAP / EXPR
+    WRAP        <-  INNER EXCL
+    INNER       <-  EXPR
+    EXPR        <-  TERM (OP TERM)* {
+                      precedence
+                        L + -
+                        L * /
+                    }
+    TERM        <-  NUMBER / NAME / '(' VALUE ')' / '[' LIST(VALUE, ',') ']'
+    LIST(I, D)  <-  (I (D I)*)?
+    OP          <-  < [-+*/] >
+    NUMBER      <-  < DIGIT+ >                 { ast_name: NUM }
+    DIGIT       <-  [0-9]
+    NAME        <-  < [a-z]+ >
+    BANG        <-  '??'
+    ~EXCL       <-  '!'
+    %whitespace <-  [ \t\r\n]*
+  )";
+  const char *src =
+      "yield 1 + 2 * (x); f(1, [2, a + b!], (3)); a = [1, (2), b] ??; 42!";
+
+  // What the callbacks saw, then the retained nodes and the tree as they are
+  // after the parse.
+  auto run = [&](bool eager, bool opt_mode, int observe) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg);
+    pg.enable_ast(true, opt_mode);
+    if (eager) {
+      pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+    }
+
+    AstIds ids;
+    std::string out;
+    std::vector<std::shared_ptr<Ast>> retained;
+    auto see = [&](const std::shared_ptr<Ast> &node) {
+      dump_ast(node, ids, out);
+      retained.push_back(node);
+    };
+
+    if (observe & 1) {
+      for (auto name : {"STATEMENT", "INNER", "TERM", "OP", "NAME"}) {
+        pg[name].predicate = [&, name](const SemanticValues &vs,
+                                       const std::any &, std::string &) {
+          out += std::string("P ") + name + "\n";
+          for (const auto &v : vs) {
+            see(std::any_cast<std::shared_ptr<Ast>>(v));
+          }
+          return true;
+        };
+      }
+    }
+    if (observe & 2) {
+      for (auto name : {"VALUE", "WRAP", "EXPR", "NUMBER", "BANG"}) {
+        pg[name].leave = [&, name](const Context &, const char *, size_t,
+                                   size_t len, std::any &value, std::any &) {
+          if (!success(len)) { return; }
+          out += std::string("L ") + name + "\n";
+          if (value.has_value()) {
+            see(std::any_cast<std::shared_ptr<Ast>>(value));
+          }
+        };
+      }
+    }
+    if (observe & 4) {
+      pg["CALL"] = [&](const SemanticValues &vs) {
+        out += "A CALL\n";
+        auto node = std::make_shared<Ast>("", 1, 1, "CALL!",
+                                          vs.transform<std::shared_ptr<Ast>>(),
+                                          0, vs.sv().size());
+        for (const auto &child : node->nodes) {
+          see(child);
+          child->parent = node;
+        }
+        return node;
+      };
+    }
+
+    std::shared_ptr<Ast> ast;
+    EXPECT_TRUE(pg.parse(src, ast));
+    out += "AFTER\n";
+    for (const auto &node : retained) {
+      dump_ast(node, ids, out);
+    }
+    out += "TREE\n";
+    dump_ast(ast, ids, out);
+    return out;
+  };
+
+  for (auto opt_mode : {true, false}) {
+    // The tree alone, against optimize_ast's.
+    parser full(grammar);
+    full.enable_ast();
+    std::shared_ptr<Ast> expected;
+    ASSERT_TRUE(full.parse(src, expected));
+    expected = full.optimize_ast(expected, opt_mode);
+    AstIds ids;
+    std::string expected_tree = "AFTER\nTREE\n";
+    dump_ast(expected, ids, expected_tree);
+    EXPECT_EQ(expected_tree, run(false, opt_mode, 0))
+        << "opt_mode=" << opt_mode;
+
+    for (auto observe = 1; observe < 8; observe++) {
+      EXPECT_EQ(run(true, opt_mode, observe), run(false, opt_mode, observe))
+          << "opt_mode=" << opt_mode << " observe=" << observe;
+    }
+  }
+}
+
 TEST(GeneralTest, DeferredAstBuildsLongPrecedenceChain) {
   // A left-associative chain is parsed in a loop, but its tree is as deep as
   // the chain is long. Building it must not recurse that deep.
@@ -1519,6 +1676,211 @@ TEST(GeneralTest, ReleasedAstKeepsNodesHeldElsewhere) {
   ast.reset();
   ASSERT_EQ(2u, kept->nodes.size());
   EXPECT_TRUE(kept->nodes[0] && kept->nodes[1]);
+}
+
+TEST(GeneralTest, RecognizerPathIsUnobservable) {
+  // A rule match whose value nobody reads, or is always empty, builds no
+  // value (see Holder::parse_core). Callbacks must see what they see when
+  // every match builds its value (a tracer forces that), with and without
+  // AST and packrat. The grammar has matches under `~`, `&` and `!`, inside
+  // token rules and in whitespace, a predicate on a token rule, and precedence
+  // rules, one of them in a macro used under `&`.
+  const char *grammar = R"(
+    PROGRAM     <-  &TERM STATEMENT (';' STATEMENT)* END?
+    STATEMENT   <-  DECL / CALL / &CHECK &INFIX(TERM, OP) EXPR
+    CHECK       <-  INFIX(TERM, OP)
+    INFIX(A, O) <-  A (O A)* {
+                      precedence
+                        L + -
+                        L * /
+                    }
+    DECL        <-  TYPE NAME ('=' EXPR)?
+    TYPE        <-  < NAME >
+    CALL        <-  NAME '(' LIST(EXPR, ',') ')'
+    EXPR        <-  TERM (OP TERM)* {
+                      precedence
+                        L + -
+                        L * /
+                    }
+    TERM        <-  NUMBER / NAME / '(' EXPR ')' / '[' LIST(EXPR, ',') ']'
+                  / &'-' SIGNED
+    SIGNED      <-  '-' NUMBER
+    LIST(I, D)  <-  (I (D I)*)?
+    OP          <-  < '+' / '-' / '*' / '/' >
+    NUMBER      <-  < DIGIT+ FRACTION? >
+    FRACTION    <-  '.' DIGIT+
+    DIGIT       <-  [0-9]
+    NAME        <-  !KEYWORD < ALPHA (ALPHA / DIGIT)* >
+    KEYWORD     <-  ('if' / 'else') !ALPHA
+    ALPHA       <-  [a-z]
+    ~END        <-  '.' ALPHA*
+    COMMENT     <-  '#' (!EOL .)* EOL
+    EOL         <-  '\r\n' / '\n'
+    %whitespace <-  [ \t\r\n]* COMMENT?
+  )";
+  const char *src =
+      "int a = 1 + # c\n2 * (b - 3.5); f(1, [2, -4], iff); elsex / 6 .end";
+
+  auto run = [&](bool eager, bool ast, int observe, bool packrat) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg);
+    if (ast) { pg.enable_ast(true); }
+    if (packrat) { pg.enable_packrat_parsing(); }
+    if (eager) {
+      pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+    }
+
+    AstIds ids;
+    std::string out;
+    auto see = [&](const std::any &value) {
+      if (!value.has_value()) {
+        out += "  (empty)\n";
+      } else {
+        dump_ast(std::any_cast<std::shared_ptr<Ast>>(value), ids, out);
+      }
+    };
+    auto see_scope = [&](const char *name, const SemanticValues &vs) {
+      out += std::string(name) + " " + std::to_string(vs.size()) + " " +
+             std::to_string(vs.tags.size()) + " " +
+             std::to_string(vs.tokens.size()) + " " + vs.token_to_string() +
+             " " + std::to_string(vs.choice_count()) + "/" +
+             std::to_string(vs.choice()) + "\n";
+      for (const auto &v : vs) {
+        see(v);
+      }
+    };
+
+    pg["TYPE"].predicate = [&](const SemanticValues &vs, const std::any &,
+                               std::string &) {
+      see_scope("TYPE", vs);
+      return vs.token() == "int";
+    };
+    if (observe & 1) {
+      for (auto name : {"STATEMENT", "OP", "NUMBER", "CALL"}) {
+        pg[name].predicate = [&, name](const SemanticValues &vs,
+                                       const std::any &, std::string &) {
+          see_scope(name, vs);
+          return true;
+        };
+      }
+    }
+    if (observe & 2) {
+      for (auto name : {"TERM", "FRACTION", "COMMENT", "KEYWORD"}) {
+        pg[name].leave = [&, name](const Context &, const char *, size_t,
+                                   size_t len, std::any &value, std::any &) {
+          if (!success(len)) { return; }
+          out += std::string("L ") + name + "\n";
+          see(value);
+        };
+      }
+    }
+    if (ast && (observe & 4)) {
+      // Without an action, TERM's value is its first value.
+      pg["TERM"].action = Action();
+      pg["SIGNED"] = [&](const SemanticValues &vs) {
+        see_scope("SIGNED", vs);
+        return std::make_shared<Ast>("", 1, 1, "SIGNED!",
+                                     vs.transform<std::shared_ptr<Ast>>(), 0,
+                                     vs.sv().size());
+      };
+    }
+
+    std::shared_ptr<Ast> tree;
+    EXPECT_TRUE(ast ? pg.parse(src, tree) : pg.parse(src));
+    if (tree) {
+      out += "TREE\n";
+      dump_ast(tree, ids, out);
+    }
+    return out;
+  };
+
+  for (auto packrat : {false, true}) {
+    for (auto ast : {true, false}) {
+      for (auto observe = 0; observe < 8; observe++) {
+        EXPECT_EQ(run(true, ast, observe, packrat),
+                  run(false, ast, observe, packrat))
+            << "packrat=" << packrat << " ast=" << ast
+            << " observe=" << observe;
+      }
+    }
+  }
+
+  // An AST action that would throw on a value that is not a node still runs
+  // where its value is not read.
+  for (auto eager : {true, false}) {
+    parser pg(R"(
+      S <- &A 'a'
+      A <- B
+      B <- 'a'
+    )");
+    pg.enable_ast(true);
+    pg["B"] = [](const SemanticValues &) { return 1; };
+    if (eager) {
+      pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+    }
+    std::shared_ptr<Ast> tree;
+    EXPECT_THROW(pg.parse("a", tree), std::bad_any_cast) << "eager=" << eager;
+  }
+
+  // A rule without an action whose value is not read where it first matches
+  // still builds it when the packrat cache or a left-recursive seed keeps it
+  // for a later match that reads it.
+  auto first_value = [](const char *grammar, const char *src, bool packrat,
+                        bool eager) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    if (pg.get_grammar().count("Q")) {
+      pg["Q"].enter = [](auto &&...) {};
+    }
+    pg["D"] = [](const SemanticValues &vs) {
+      return vs.token_to_number<int>();
+    };
+    std::string out;
+    pg["S"] = [&](const SemanticValues &vs) {
+      for (const auto &v : vs) {
+        out += v.has_value() ? std::to_string(std::any_cast<int>(v)) : "-";
+      }
+    };
+    if (eager) {
+      pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+    }
+    EXPECT_TRUE(pg.parse(src));
+    return out;
+  };
+  const char *memoized = R"(
+    S <- ~Q 'x' / Q
+    Q <- C D
+    C <- 'a'
+    D <- [0-9]
+  )";
+  EXPECT_EQ(first_value(memoized, "a1", true, true),
+            first_value(memoized, "a1", true, false));
+  const char *left_recursive = R"(
+    S <- &E E
+    E <- E P D / Z D
+    P <- '+'
+    Z <- 'z'
+    D <- [0-9]
+  )";
+  EXPECT_EQ(first_value(left_recursive, "z1+2", false, true),
+            first_value(left_recursive, "z1+2", false, false));
+
+  // A start rule sees the callbacks as they are even after another start rule
+  // analyzed the rules they share.
+  parser pg(R"(
+    S <- &X 'a'
+    X <- 'a'
+  )");
+  size_t leaves = 0;
+  auto leave = [&](auto &&...) { leaves++; };
+  pg["X"].leave = leave;
+  EXPECT_TRUE(pg.parse("a"));
+  pg["X"].leave = nullptr;
+  EXPECT_TRUE(pg["X"].parse("a").ret);
+  pg["X"].leave = leave;
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_EQ(2u, leaves);
 }
 
 TEST(GeneralTest, CollapsedAstParentLinks) {
@@ -1704,4 +2066,349 @@ TEST(GeneralTest, InvalidRange) {
 
   bool ret = parser;
   EXPECT_FALSE(ret);
+}
+
+// =============================================================================
+// AST Choice Tests
+// =============================================================================
+
+TEST(AstChoiceTest, Choice_suffix_top_level) {
+  // A rule whose body is a choice carries the /N choice suffix.
+  parser pg(R"(
+    S <- A / B
+    A <- < 'a' >
+    B <- < 'b' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("a", ast));
+  EXPECT_EQ(R"(+ S/0
+  - A (a)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("b", ast));
+  EXPECT_EQ(R"(+ S/1
+  - B (b)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstChoiceTest, No_choice_suffix_nested_in_sequence) {
+  // A choice nested inside a sequence does not leak a choice suffix onto the
+  // rule node.
+  parser pg(R"(
+    S <- (A / B) C
+    A <- < 'a' >
+    B <- < 'b' >
+    C <- < 'c' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ac", ast));
+  EXPECT_EQ(R"(+ S
+  - A (a)
+  - C (c)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("bc", ast));
+  EXPECT_EQ(R"(+ S
+  - B (b)
+  - C (c)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstChoiceTest, No_choice_suffix_choice_at_sequence_end) {
+  // A trailing choice inside a sequence still does not add a choice suffix.
+  parser pg(R"(
+    S <- A (B / C)
+    A <- < 'a' >
+    B <- < 'b' >
+    C <- < 'c' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ab", ast));
+  EXPECT_EQ(R"(+ S
+  - A (a)
+  - B (b)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("ac", ast));
+  EXPECT_EQ(R"(+ S
+  - A (a)
+  - C (c)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstChoiceTest, Choice_of_sequences) {
+  // A top-level choice of sequences carries the choice suffix.
+  parser pg(R"(
+    S <- A B / C D
+    A <- < 'a' >
+    B <- < 'b' >
+    C <- < 'c' >
+    D <- < 'd' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ab", ast));
+  EXPECT_EQ(R"(+ S/0
+  - A (a)
+  - B (b)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("cd", ast));
+  EXPECT_EQ(R"(+ S/1
+  - C (c)
+  - D (d)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstChoiceTest, Token_boundary_over_choice) {
+  // A token boundary is unwrapped: an inner choice still carries the suffix.
+  parser pg(R"(
+    S <- < A / B >
+    A <- < 'a' >
+    B <- < 'b' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("a", ast));
+  EXPECT_EQ(R"(- S/0 (a)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("b", ast));
+  EXPECT_EQ(R"(- S/1 (b)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstChoiceTest, Dictionary_choice_suffix) {
+  // A dictionary is choice-like and carries the choice suffix.
+  parser pg(R"(S <- 'a' | 'b' | 'c')");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("a", ast));
+  EXPECT_EQ(R"(- S/0 (a)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("b", ast));
+  EXPECT_EQ(R"(- S/1 (b)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("c", ast));
+  EXPECT_EQ(R"(- S/2 (c)
+)",
+            ast_to_s(ast));
+}
+
+// =============================================================================
+// AST Instruction Tests
+// =============================================================================
+
+TEST(AstInstructionTest, No_ast_opt_instruction) {
+  // A rule marked { no_ast_opt } is not collapsed by optimization.
+  parser pg(R"(
+    S <- Wrapped
+    Wrapped <- Inner { no_ast_opt }
+    Inner <- < [a-z]+ >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("abc", ast));
+  ast = pg.optimize_ast(ast);
+  EXPECT_EQ(R"(+ S[Wrapped]
+  - Inner (abc)
+)",
+            ast_to_s(ast));
+}
+
+TEST(AstInstructionTest, Ast_name_instruction) {
+  // { ast_name: X } overrides the node's emitted name.
+  parser pg(R"(
+    S <- Item
+    Item <- < [a-z]+ > { ast_name: Word }
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("abc", ast));
+  EXPECT_EQ(R"(+ S
+  - Word (abc)
+)",
+            ast_to_s(ast));
+}
+
+// =============================================================================
+// Ignore Tests
+// =============================================================================
+
+TEST(IgnoreTest, Ignore_drops_only_target_in_ast) {
+  // ~ on a reference drops only that node's AST value, keeping siblings
+  parser pg(R"(
+    S <- ~A B
+    A <- 'a'
+    B <- < 'b' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ab", ast));
+  EXPECT_EQ(R"(+ S
+  - B (b)
+)",
+            ast_to_s(ast));
+}
+
+TEST(IgnoreTest, Ignore_middle_reference_in_ast) {
+  // ~ in the middle of a sequence keeps the non-ignored siblings
+  parser pg(R"(
+    S <- A ~B C
+    A <- < 'a' >
+    B <- 'b'
+    C <- < 'c' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("abc", ast));
+  EXPECT_EQ(R"(+ S
+  - A (a)
+  - C (c)
+)",
+            ast_to_s(ast));
+}
+
+TEST(IgnoreTest, Ignore_repeated_reference_in_ast) {
+  // (~A)+ matches but contributes no AST children
+  parser pg(R"(
+    S <- (~A)+
+    A <- 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("aaa", ast));
+  EXPECT_EQ(R"(+ S
+)",
+            ast_to_s(ast));
+}
+
+// =============================================================================
+// Start Rule Tests
+// =============================================================================
+
+TEST(StartRuleTest, Word_directive_not_default_start) {
+  // A reserved %word directive defined first must not become the default start
+  // rule; the first ordinary rule (S) is the start.
+  parser pg(R"(
+    %word <- [a-z]+
+    S <- 'cat'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("cat"));
+  EXPECT_FALSE(pg.parse("dog"));
+}
+
+TEST(StartRuleTest, Whitespace_directive_not_default_start) {
+  // A reserved %whitespace directive defined first must not become the default
+  // start rule.
+  parser pg(R"(
+    %whitespace <- [ ]*
+    S <- 'cat'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("cat"));
+  EXPECT_FALSE(pg.parse("dog"));
+}
+
+// =============================================================================
+// Semantic Value Tests
+// =============================================================================
+
+TEST(SemanticValueTest, Ignore_shifts_sv_index) {
+  // A ~ignored child leaves no semantic value, so later children shift down in
+  // the sv index.
+  parser pg(R"(
+    S <- ~A '+' B
+    A <- < [0-9]+ >
+    B <- < [0-9]+ >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  pg["A"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  pg["B"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  pg["S"] = [](const SemanticValues &vs) { return vs[0]; };
+
+  long val = 0;
+  EXPECT_TRUE(pg.parse("1+2", val));
+  EXPECT_EQ(2, val);
+  EXPECT_TRUE(pg.parse("10+20", val));
+  EXPECT_EQ(20, val);
+}
+
+TEST(SemanticValueTest, Choice_index_value) {
+  // vs.choice() reflects which alternative matched.
+  parser pg(R"(S <- 'a' / 'b' / 'c')");
+  ASSERT_TRUE(!!pg);
+
+  pg["S"] = [](const SemanticValues &vs) {
+    return static_cast<long>(vs.choice());
+  };
+
+  long val = -1;
+  EXPECT_TRUE(pg.parse("a", val));
+  EXPECT_EQ(0, val);
+  EXPECT_TRUE(pg.parse("b", val));
+  EXPECT_EQ(1, val);
+  EXPECT_TRUE(pg.parse("c", val));
+  EXPECT_EQ(2, val);
+}
+
+TEST(SemanticValueTest, Value_by_index) {
+  // vs[i] is the value of the i-th child that has one.
+  parser pg(R"(
+    S <- A B
+    A <- < [0-9] >
+    B <- < [0-9] >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  pg["A"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  pg["B"] = [](const SemanticValues &vs) { return vs.token_to_number<long>(); };
+  pg["S"] = [](const SemanticValues &vs) { return vs[1]; };
+
+  long val = 0;
+  EXPECT_TRUE(pg.parse("12", val));
+  EXPECT_EQ(2, val);
 }

@@ -599,3 +599,128 @@ TEST(LiteralTest, Literal_with_escape_sequences) {
 }
 
 // =============================================================================
+// Token Determination Tests
+// =============================================================================
+
+TEST(TokenDeterminationTest, Macro_reference_rule_is_token) {
+  // A rule whose only reference is a macro call is a token (the macro ref
+  // recurses into its args).
+  parser pg(R"(
+    S <- KW
+    KW <- K('let')
+    K(X) <- < X >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("let", ast));
+  EXPECT_EQ(R"(+ S
+  - KW (let)
+)",
+            ast_to_s(ast));
+}
+
+TEST(TokenDeterminationTest, Predicate_reference_does_not_block_token) {
+  // References that appear only inside a predicate do not make a rule a
+  // non-token.
+  parser pg(R"(
+    S <- WILD
+    WILD <- '_' !Ident
+    Ident <- [a-z]+
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("_", ast));
+  EXPECT_EQ(R"(+ S
+  - WILD (_)
+)",
+            ast_to_s(ast));
+}
+
+TEST(TokenDeterminationTest, Keyword_guard_is_token) {
+  // A keyword literal guarded by a negative lookahead over a rule is still a
+  // token.
+  parser pg(R"(
+    S <- KW
+    KW <- 'let' !IdentChar
+    IdentChar <- [a-zA-Z0-9_]
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("let", ast));
+  EXPECT_EQ(R"(+ S
+  - KW (let)
+)",
+            ast_to_s(ast));
+}
+
+// =============================================================================
+// Word Boundary Tests
+// =============================================================================
+
+TEST(WordBoundaryTest, Word_literal_needs_boundary_dollar) {
+  // With `$` in %word, the word-literal '${' requires a word boundary, so
+  // '${x}' does not interpolate.
+  parser pg(R"(
+    Doc <- Span*
+    Span <- '${' Ident '}'
+          / Ch+
+    Ch <- !('${') .
+    Ident <- [a-z]+
+    %word <- [a-zA-Z0-9_$]
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ab", ast));
+  EXPECT_EQ(R"(+ Doc
+  + Span/1
+    - Ch (a)
+    - Ch (b)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("${x}", ast));
+  EXPECT_EQ(R"(+ Doc
+  + Span/1
+    - Ch ($)
+    - Ch ({)
+    - Ch (x)
+    - Ch (})
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("a${x}b", ast));
+  EXPECT_EQ(R"(+ Doc
+  + Span/1
+    - Ch (a)
+    - Ch ($)
+    - Ch ({)
+    - Ch (x)
+    - Ch (})
+    - Ch (b)
+)",
+            ast_to_s(ast));
+}
+
+TEST(WordBoundaryTest, Keyword_literal_boundary) {
+  // A word-literal keyword only matches at a word boundary.
+  parser pg(R"(
+    S <- KW_IF / IDENT
+    KW_IF <- 'if'
+    IDENT <- < [a-z]+ >
+    %word <- [a-zA-Z0-9_]
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("if"));
+  EXPECT_TRUE(pg.parse("iffy"));
+}
+
+// =============================================================================

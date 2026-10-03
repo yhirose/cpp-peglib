@@ -171,6 +171,48 @@ TEST(PackratTest, Packrat_shared_consuming_prefix_is_not_exponential) {
   EXPECT_TRUE(pg.parse(input));
 }
 
+TEST(PackratTest, Packrat_rule_below_a_shared_rule_runs_once) {
+  parser pg(R"(
+    S <- G 'x' / G 'y'
+    G <- H
+    H <- [0-9]+
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  size_t h_count = 0;
+  pg["H"] = [&](const SemanticValues &) {
+    h_count++;
+    return std::string("h");
+  };
+
+  // Both alternatives reach H only through G, so only G needs a cache entry:
+  // the second alternative gets G from it and never re-enters H.
+  EXPECT_TRUE(pg.parse("123y"));
+  EXPECT_EQ(1, h_count);
+}
+
+TEST(PackratTest, Packrat_rule_below_a_shared_macro_runs_once) {
+  parser pg(R"(
+    S    <- M('a') 'x' / M('a') 'y'
+    M(p) <- X p
+    X    <- [0-9]+
+  )");
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg);
+
+  size_t x_count = 0;
+  pg["X"] = [&](const SemanticValues &) {
+    x_count++;
+    return std::string("x");
+  };
+
+  // Macros are not memoized, so M cannot stand in for X: X itself must stay
+  // cached for the second alternative to reuse it.
+  EXPECT_TRUE(pg.parse("123ay"));
+  EXPECT_EQ(1, x_count);
+}
+
 TEST(PackratTest, Packrat_after_another_start_rule_reassigned_ids) {
   parser pg(R"(
     Top  <- (W / Expr) ';' / W '!'
@@ -291,6 +333,117 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
 
     EXPECT_TRUE(pg.parse("a  y|  ")) << packrat;
     EXPECT_FALSE(pg.parse("a  y| ")) << packrat;
+  }
+}
+
+// Whether a value is read depends on the start rule. A parse from another
+// start rule nested in an action must not change what the enclosing parse
+// builds: S2 reads R only in a lookahead, S1 reads its value.
+TEST(PackratTest, Packrat_parse_nested_from_another_start_rule_keeps_values) {
+  for (auto with_predicate : {false, true}) {
+    parser pg(R"(
+      S1 <- N R
+      S2 <- &R 'r'
+      N  <- 'n'
+      R  <- T
+      T  <- 'r'
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_packrat_parsing();
+
+    const auto &g = pg.get_grammar();
+    auto nested_ok = false;
+    pg["N"] = [&](const SemanticValues &) {
+      nested_ok = g.at("S2").parse("r").ret;
+      return 1;
+    };
+    pg["T"] = [](const SemanticValues &) { return 42; };
+    std::vector<int> seen;
+    auto see = [&](const SemanticValues &vs) {
+      seen.clear();
+      for (const auto &v : vs) {
+        seen.push_back(v.has_value() ? std::any_cast<int>(v) : -1);
+      }
+    };
+    if (with_predicate) {
+      pg["S1"].predicate = [&](const SemanticValues &vs, const std::any &,
+                               std::string &) {
+        see(vs);
+        return true;
+      };
+    } else {
+      pg["S1"] = see;
+    }
+
+    EXPECT_TRUE(pg.parse("nr")) << with_predicate;
+    EXPECT_TRUE(nested_ok) << with_predicate;
+    EXPECT_EQ((std::vector<int>{1, 42}), seen) << with_predicate;
+  }
+}
+
+// No whitespace is skipped inside a token, a no_whitespace rule or the
+// whitespace, so a rule matched there can match differently than at the same
+// position elsewhere: NAME inside TYPE, and COMMENT in the whitespace after
+// [a]. A memoized match from there must not stand in for one elsewhere.
+TEST(PackratTest, Packrat_keeps_matches_that_skip_no_whitespace_apart) {
+  struct {
+    const char *grammar;
+    std::vector<const char *> inputs;
+  } cases[] = {
+      {R"(
+        S    <- DECL / EXPR
+        DECL <- TYPE NAME
+        TYPE <- < NAME >
+        EXPR <- NAME '/' NAME
+        NAME <- < [a-z]+ >
+        %whitespace <- [ ]*
+      )",
+       {"x / y", "int x"}},
+      {R"(
+        S       <- 'a' 'z' / X
+        X       <- [a] COMMENT 'q' / [a] COMMENT '/' 'y'
+        COMMENT <- '#' 'x'
+        %whitespace <- ([ ] / COMMENT)*
+      )",
+       {"a#x / y", "a z"}},
+      {R"(
+        S    <- DECL / EXPR
+        DECL <- TYPE NAME
+        TYPE <- NAME { no_whitespace }
+        EXPR <- NAME '/' NAME
+        NAME <- [a-z]+ ''
+        %whitespace <- [ ]*
+      )",
+       {"x / y", "int x"}},
+  };
+  for (const auto &[grammar, inputs] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      for (auto input : inputs) {
+        EXPECT_TRUE(pg.parse(input)) << input << " " << packrat;
+      }
+    }
+  }
+}
+
+// R enters itself at the same position through the whitespace its empty
+// literal skips, where no whitespace is skipped. That fails, with packrat as
+// without it, however the memo keeps the two places apart.
+TEST(PackratTest, Packrat_reentry_through_the_whitespace_fails) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- [c] T
+      T <- R 'z' / R
+      R <- '' 'a' / 'b'
+      %whitespace <- R?
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("ca")) << packrat;
+    EXPECT_TRUE(pg.parse("caz")) << packrat;
   }
 }
 

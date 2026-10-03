@@ -186,3 +186,22 @@ TEST(Utf8Test, Encode_decode_roundtrip) {
     EXPECT_EQ(decoded, cp);
   }
 }
+
+// =============================================================================
+// Unicode Rule Name Tests
+// =============================================================================
+
+TEST(UnicodeRuleNameTest, Unicode_rule_names_greek) {
+  // Identifiers may use non-ASCII letters (Greek) and character-class ranges.
+  parser pg(R"(
+    Δοκιμή <- λέξη+
+    λέξη <- [α-ωΑ-Ω]+ ' '?
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("λεξη"));
+  EXPECT_TRUE(pg.parse("λεξη λεξη"));
+  EXPECT_TRUE(pg.parse("αβγ"));
+  EXPECT_FALSE(pg.parse("λέξη"));
+  EXPECT_FALSE(pg.parse(""));
+}

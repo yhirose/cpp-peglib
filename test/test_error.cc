@@ -126,6 +126,7 @@ TEST(InfiniteLoopTest, Not_infinite_3) {
     )");
 
   EXPECT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("1 + 2 * 3"));
 }
 
 TEST(InfiniteLoopTest, whitespace) {
@@ -1308,6 +1309,53 @@ TEST(MaxDepthTest, Ast_from_another_parse_is_reported_within_the_input) {
   std::shared_ptr<Ast> ast;
   EXPECT_FALSE(outer.parse("include", ast));
   EXPECT_EQ("1:8 exceeded the maximum nesting depth of 3", msg);
+}
+
+// =============================================================================
+// Error Position Tests
+// =============================================================================
+
+TEST(ErrorPositionTest, Deeper_error_past_match_wins) {
+  // When a nested attempt fails past the accepted match, that deeper error
+  // (with its position) is reported instead of end-of-input.
+  parser pg(R"(
+    S <- Line+
+    Line <- [a-z]+ '\n'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> errors;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    errors.push_back(std::to_string(ln) + ":" + std::to_string(col) + ": " +
+                     msg);
+  });
+
+  EXPECT_TRUE(pg.parse("ab\ncd\n"));
+
+  errors.clear();
+  EXPECT_FALSE(pg.parse("ab\nde"));
+  ASSERT_FALSE(errors.empty());
+  EXPECT_EQ("2:3: syntax error, expecting '\n'.", errors[0]);
+}
+
+TEST(ErrorPositionTest, Not_predicate_failure_names_rule) {
+  // A leading negative lookahead that fails reports the unexpected token and
+  // the expected rule.
+  parser pg(R"(S <- !'x' [a-z] 'y')");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> errors;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    errors.push_back(std::to_string(ln) + ":" + std::to_string(col) + ": " +
+                     msg);
+  });
+
+  EXPECT_TRUE(pg.parse("ay"));
+
+  errors.clear();
+  EXPECT_FALSE(pg.parse("xy"));
+  ASSERT_FALSE(errors.empty());
+  EXPECT_EQ("1:1: syntax error, unexpected 'xy', expecting <S>.", errors[0]);
 }
 
 // =============================================================================

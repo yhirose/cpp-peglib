@@ -704,6 +704,96 @@ TEST(PrecedenceTest,
   }
 }
 
+// An operator rule hands its token to the precedence rule also when the
+// packrat cache already holds its match at that position. Both alternatives
+// of F start with O, so the selective packrat memoizes O, and F's lookahead
+// caches O's match before the precedence rule parses it.
+TEST(PrecedenceTest, Precedence_climbing_with_a_cached_operator_rule) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      E    <- A (O A)* { precedence L + - L * }
+      A    <- N F
+      F    <- &(O 'x') / &(O 'y') / ''
+      N    <- < [0-9]+ >
+      O    <- < [-+*] >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast(true);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
+    EXPECT_EQ(R"(+ E
+  + A
+    - N (1)
+    - F/2 ()
+  - O (+)
+  + E
+    + A
+      - N (2)
+      - F/2 ()
+    - O (*)
+    + A
+      - N (3)
+      - F/2 ()
+)",
+              ast_to_s(ast))
+        << packrat;
+  }
+}
+
+// A left-recursive operator rule hands over the token of the match it grows
+// to, also when its memo already holds that match from a lookahead.
+TEST(PrecedenceTest, Precedence_climbing_with_a_left_recursive_operator_rule) {
+  struct {
+    const char *grammar;
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {R"(
+        E <- A (O A)* { precedence L + - L * }
+        O <- O '!' / < [-+*] >
+        A <- N F
+        F <- &(O 'x') / ''
+        N <- < [0-9] >
+      )",
+       "1+2*3", "(1+(2*3))"},
+      {R"(
+        E <- A (O A)* { precedence L + - L * }
+        O <- O '!' / < [-+*] >
+        A <- F N
+        F <- &('2' O) / ''
+        N <- < [0-9] >
+      )",
+       "1+2*3", "(1+(2*3))"},
+      {R"(
+        E <- A (O A)* { precedence L * L + L ** }
+        O <- O '*' / [-+*]
+        A <- < [0-9] >
+      )",
+       "1**2+3", "((1**2)+3)"},
+  };
+  for (const auto &[grammar, input, expected] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      pg["A"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+      pg["O"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
+      pg["E"] = [](const SemanticValues &vs) {
+        if (vs.size() == 1) { return std::any_cast<std::string>(vs[0]); }
+        return "(" + std::any_cast<std::string>(vs[0]) +
+               std::any_cast<std::string>(vs[1]) +
+               std::any_cast<std::string>(vs[2]) + ")";
+      };
+
+      std::string val;
+      ASSERT_TRUE(pg.parse(input, val)) << input << " " << packrat;
+      EXPECT_EQ(expected, val) << input << " " << packrat;
+    }
+  }
+}
+
 // A macro's body parses on its caller's values; its precedence fold must
 // leave the values before it alone, also when the alternative it is in fails
 // after the fold.
@@ -1280,6 +1370,98 @@ TEST(UserRuleTest, User_rule_combined_with_peg_rules) {
 
   EXPECT_TRUE(g.parse("Hello WORLD!"));
   EXPECT_FALSE(g.parse("Hello world!"));
+}
+
+// =============================================================================
+// Dictionary Precedence Tests
+// =============================================================================
+
+TEST(DictionaryPrecedenceTest, Pipe_binds_tighter_than_slash) {
+  // `|` binds tighter than `/`: 'a' | 'b' / 'a' 'c' means
+  // ('a' | 'b') / ('a' 'c'), so "ac" fails once 'a' wins the first alternative.
+  parser pg(R"(S <- 'a' | 'b' / 'a' 'c')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("b"));
+  EXPECT_FALSE(pg.parse("ac"));
+  EXPECT_FALSE(pg.parse("c"));
+}
+
+TEST(DictionaryPrecedenceTest, Pipe_binds_tighter_than_sequence) {
+  // `|` binds tighter than sequence: 'a' 'b' | 'c' means 'a' ('b' | 'c').
+  parser pg(R"(S <- 'a' 'b' | 'c')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("ab"));
+  EXPECT_TRUE(pg.parse("ac"));
+  EXPECT_FALSE(pg.parse("c"));
+  EXPECT_FALSE(pg.parse("a"));
+}
+
+TEST(DictionaryPrecedenceTest, Pure_dictionary) {
+  // A run of `|` literals is a dictionary.
+  parser pg(R"(S <- 'a' | 'bb' | 'ccc')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("bb"));
+  EXPECT_TRUE(pg.parse("ccc"));
+  EXPECT_FALSE(pg.parse("b"));
+}
+
+TEST(DictionaryPrecedenceTest, Dictionary_case_insensitive) {
+  // Case-insensitive dictionary members.
+  parser pg(R"(S <- 'cat'i | 'dog'i)");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("cat"));
+  EXPECT_TRUE(pg.parse("CAT"));
+  EXPECT_TRUE(pg.parse("Dog"));
+  EXPECT_FALSE(pg.parse("fish"));
+}
+
+TEST(DictionaryPrecedenceTest, Mixed_pipe_slash_chain) {
+  // Mixing `|` and `/` across a choice chain.
+  parser pg(R"(S <- 'a' | 'b' / 'c' | 'd')");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_TRUE(pg.parse("b"));
+  EXPECT_TRUE(pg.parse("c"));
+  EXPECT_TRUE(pg.parse("d"));
+  EXPECT_FALSE(pg.parse("e"));
+}
+
+TEST(DictionaryPrecedenceTest, Dictionary_ast) {
+  // A parenthesized dictionary is one alternative of the outer choice: both
+  // 'a' and 'b' give S/0.
+  parser pg(R"(
+    S <- ('a' | 'b') C / D
+    C <- < 'c' >
+    D <- < 'd' >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::shared_ptr<Ast> ast;
+
+  EXPECT_TRUE(pg.parse("ac", ast));
+  EXPECT_EQ(R"(+ S/0
+  - C (c)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("bc", ast));
+  EXPECT_EQ(R"(+ S/0
+  - C (c)
+)",
+            ast_to_s(ast));
+
+  EXPECT_TRUE(pg.parse("d", ast));
+  EXPECT_EQ(R"(+ S/1
+  - D (d)
+)",
+            ast_to_s(ast));
 }
 
 // =============================================================================

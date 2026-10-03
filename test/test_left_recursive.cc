@@ -1033,6 +1033,61 @@ TEST(MacroArgumentScopeTest, Parameter_forwarded_through_two_macros) {
   EXPECT_FALSE(p.parse("yr"));
 }
 
+TEST(LeftRecursionMacroTest, Nested_macro_with_left_recursion) {
+  // A two-level nested macro invoked from a left-recursive rule
+  parser pg(R"(
+    EXPR <- EXPR '+' NUM / NUM
+    NUM <- WRAP([0-9]+)
+    WRAP(X) <- TOK(X)
+    TOK(Y) <- < Y > _
+    ~_ <- [ \t]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("1+2+3+4"));
+}
+
+// L is grown inside TYPE's token, where no whitespace is skipped, and then at
+// the same position in EXPR, where it is. Its match from inside the token
+// must not stand in for the one outside.
+TEST(LeftRecursionTest, Seed_grown_in_a_token_is_not_reused_outside) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S    <- DECL / EXPR
+      DECL <- TYPE NAME
+      TYPE <- < L >
+      EXPR <- L '/' L
+      L    <- L '.' NAME / NAME
+      NAME <- < [a-z]+ >
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("x / y")) << packrat;
+    EXPECT_TRUE(pg.parse("x.a / y.b")) << packrat;
+    EXPECT_TRUE(pg.parse("x.a z")) << packrat;
+  }
+}
+
+// Q recurses into itself inside its own token, and grows the seed of the
+// match outside it.
+TEST(LeftRecursionTest, Recursion_into_a_token_grows_the_outer_seed) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- Q ';'
+      Q <- < Q '.' I / I >
+      I <- [a-z]+
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("a.b.c;")) << packrat;
+    EXPECT_TRUE(pg.parse("a.b.c ;")) << packrat;
+  }
+}
+
 // While A grows outside a token, T and B match inside one from A's seed.
 // Those matches belong to no parse inside a token, where A skips no
 // whitespace, so they must be gone when U parses A there: whether A was
