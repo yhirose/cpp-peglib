@@ -2184,9 +2184,7 @@ public:
       : atom_(atom), binop_(binop), info_(info), rule_(rule) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
-                    std::any &dt) const override {
-    return parse_expression(s, n, vs, c, dt, 0);
-  }
+                    std::any &dt) const override;
 
   void accept(Visitor &v) override;
 
@@ -2198,6 +2196,9 @@ public:
 private:
   size_t parse_expression(const char *s, size_t n, SemanticValues &vs,
                           Context &c, std::any &dt, size_t min_prec) const;
+
+  template <typename F>
+  static size_t parse_in_scope(SemanticValues &vs, Context &c, F parse);
 
   // Hands the values of `from` over to `vs`, whether none or several, with
   // their tags.
@@ -4172,6 +4173,36 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
   return static_cast<size_t>(-1);
 }
 
+inline size_t PrecedenceClimbing::parse_core(const char *s, size_t n,
+                                             SemanticValues &vs, Context &c,
+                                             std::any &dt) const {
+  if (!rule_.is_macro || rule_.is_left_recursive) {
+    return parse_expression(s, n, vs, c, dt, 0);
+  }
+
+  // A macro's body parses on its caller's values, unless it is left-recursive
+  // (see Holder::parse_core). Fold the operands in a scope of their own, so
+  // that the caller's values stay out of the actions and the fold.
+  return parse_in_scope(vs, c, [&](SemanticValues &chvs) {
+    return parse_expression(s, n, chvs, c, dt, 0);
+  });
+}
+
+// Parses into a scope of its own and, on a match, hands what it produced
+// over to `vs`: all its values with their tags, and its tokens.
+template <typename F>
+inline size_t PrecedenceClimbing::parse_in_scope(SemanticValues &vs, Context &c,
+                                                 F parse) {
+  auto &chvs = c.push_semantic_values_scope();
+  auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+  auto len = parse(chvs);
+  if (success(len)) {
+    append_values(vs, chvs);
+    vs.tokens.insert(vs.tokens.end(), chvs.tokens.begin(), chvs.tokens.end());
+  }
+  return len;
+}
+
 inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
                                                    SemanticValues &vs,
                                                    Context &c, std::any &dt,
@@ -4191,13 +4222,13 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     auto chvs = c.push_semantic_values_scope();
     chvs.holds_rule_tokens_ = true;
-    size_t chlen;
+    size_t op_len;
     {
       auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
-      chlen = binop_->parse(s + i, n - i, chvs, c, dt);
+      op_len = binop_->parse(s + i, n - i, chvs, c, dt);
     }
 
-    if (fail(chlen) || chvs.tokens.empty()) { break; }
+    if (fail(op_len) || chvs.tokens.empty()) { break; }
 
     auto it = info_.find(chvs.tokens.front());
     if (it == info_.end()) { break; }
@@ -4208,29 +4239,24 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (level < min_prec) { break; }
 
     append_values(vs, chvs);
-    i += chlen;
-    auto op_len = chlen;
+    i += op_len;
 
     auto next_min_prec = level;
     if (assoc == 'L') { next_min_prec = level + 1; }
 
-    chvs = c.push_semantic_values_scope();
-    {
-      auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
-      // The right operand nests the way a rule match does, so it counts as
-      // one: a chain of right-associative operators is as deep as it is long.
+    // The right operand folds its own operators, so it parses in a scope of
+    // its own. It nests the way a rule match does, so it counts as one: a
+    // chain of right-associative operators is as deep as it is long.
+    auto rhs_len = parse_in_scope(vs, c, [&](SemanticValues &rhs) {
       auto nesting = c.nest(s + i, rule_);
-      chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
-    }
+      return parse_expression(s + i, n - i, rhs, c, dt, next_min_prec);
+    });
 
-    if (fail(chlen)) {
-      i = chlen;
+    if (fail(rhs_len)) {
+      i = rhs_len;
       break;
     }
-
-    append_values(vs, chvs);
-    vs.tokens.insert(vs.tokens.end(), chvs.tokens.begin(), chvs.tokens.end());
-    i += chlen;
+    i += rhs_len;
 
     // The result stands for the operands folded into it. What an action
     // returns is this rule's value and carries its tag, as Holder::parse_core
@@ -4254,7 +4280,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     // Like a repetition (see Repetition::parse_core), a round that consumes
     // nothing ends the loop.
-    if (op_len == 0 && chlen == 0) { break; }
+    if (op_len == 0 && rhs_len == 0) { break; }
   }
 
   return i;
