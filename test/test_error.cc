@@ -940,6 +940,23 @@ TEST(ErrorReporterTest, Expected_literals_report) {
   EXPECT_EQ("c", report.expected_literals[1]);
 }
 
+TEST(ErrorReporterTest, Expected_back_reference_report) {
+  parser pg(R"(S <- $q<[a-z]+> ':' ($q 'x' / $q 'y'))");
+  ASSERT_TRUE(!!pg);
+
+  // The captured text is freed when the parse ends, before the report. Both
+  // alternatives expect the same text, which is reported once.
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+  ErrorReport report;
+  pg.set_error_reporter([&](const ErrorReport &r) { report = r; });
+  EXPECT_FALSE(pg.parse("ab:ac"));
+
+  EXPECT_EQ("syntax error, unexpected 'ac', expecting 'ab'.", message);
+  ASSERT_EQ(1, report.expected_literals.size());
+  EXPECT_EQ("ab", report.expected_literals[0]);
+}
+
 TEST(ErrorReporterTest, Works_together_with_logger) {
   parser pg("S <- 'a' 'b'");
   ASSERT_TRUE(!!pg);

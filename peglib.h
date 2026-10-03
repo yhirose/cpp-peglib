@@ -834,12 +834,22 @@ struct ErrorInfo {
 
   void clear() {
     error_pos = nullptr;
-    expected_tokens.clear();
+    clear_expected_tokens();
     message_pos = nullptr;
     message.clear();
   }
 
-  void add(const char *error_literal, const Definition *error_rule) {
+  void clear_expected_tokens() {
+    expected_tokens.clear();
+    literal_copies_.clear();
+  }
+
+  // `error_literal` points at text the grammar owns, unless `copy_literal` is
+  // set: a back reference's literal is captured text, which is dropped when
+  // the parse backtracks past its capture, and when the parse ends.
+  void add(const char *error_literal, const Definition *error_rule,
+           bool copy_literal = false) {
+    if (copy_literal) { error_literal = copy_of(error_literal); }
     for (const auto &[t, r] : expected_tokens) {
       if (t == error_literal && r == error_rule) { return; }
     }
@@ -865,6 +875,19 @@ struct ErrorInfo {
                   size_t n);
 
 private:
+  // Copies of the literals that the grammar does not own. Held by pointer so
+  // that their text stays put as this vector grows, and is shared with the
+  // copies of this ErrorInfo (a parse result is one).
+  std::vector<std::shared_ptr<const std::string>> literal_copies_;
+
+  const char *copy_of(const char *literal) {
+    for (const auto &copy : literal_copies_) {
+      if (*copy == literal) { return copy->c_str(); }
+    }
+    literal_copies_.push_back(std::make_shared<const std::string>(literal));
+    return literal_copies_.back()->c_str();
+  }
+
   int cast_char(char c) const { return static_cast<unsigned char>(c); }
 
   std::string heuristic_error_token(const char *s, size_t n,
@@ -1374,7 +1397,8 @@ public:
                          std::any &dt);
 
   // Error
-  void set_error_pos(const char *a_s, const char *literal = nullptr);
+  void set_error_pos(const char *a_s, const char *literal = nullptr,
+                     bool copy_literal = false);
 
   // Trace
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
@@ -1597,7 +1621,7 @@ public:
             if (c.error_info.error_pos <= s) {
               if (c.error_info.error_pos < s || !(id > 0)) {
                 c.error_info.error_pos = s;
-                c.error_info.expected_tokens.clear();
+                c.error_info.clear_expected_tokens();
               }
               if (fs.first_literal) {
                 c.error_info.add(fs.first_literal, nullptr);
@@ -3427,7 +3451,8 @@ inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
                             std::once_flag &init_is_word, bool &is_word,
-                            bool ignore_case, const std::string &lower_lit) {
+                            bool ignore_case, const std::string &lower_lit,
+                            bool copy_lit) {
   size_t i = 0;
   for (; i < lit.size(); i++) {
     if (i >= n ||
@@ -3436,7 +3461,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                     c.tolower_table[static_cast<unsigned char>(s[i])]) !=
                 lower_lit[i])
              : (s[i] != lit[i]))) {
-      c.set_error_pos(s, lit.data());
+      c.set_error_pos(s, lit.data(), copy_lit);
       return static_cast<size_t>(-1);
     }
   }
@@ -3468,7 +3493,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
       NotPredicate ope(c.wordOpe);
       auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
       if (fail(len)) {
-        c.set_error_pos(s, lit.data());
+        c.set_error_pos(s, lit.data(), copy_lit);
         return len;
       }
       i += len;
@@ -3587,12 +3612,13 @@ inline size_t Context::skip_whitespace(const char *a_s, size_t n,
   return whitespaceOpe->parse(a_s, n, vs, *this, dt);
 }
 
-inline void Context::set_error_pos(const char *a_s, const char *literal) {
+inline void Context::set_error_pos(const char *a_s, const char *literal,
+                                   bool copy_literal) {
   if (log || error_reporter) {
     if (error_info.error_pos <= a_s) {
       if (error_info.error_pos < a_s || !error_info.keep_previous_token) {
         error_info.error_pos = a_s;
-        error_info.expected_tokens.clear();
+        error_info.clear_expected_tokens();
       }
 
       const char *error_literal = nullptr;
@@ -3615,7 +3641,7 @@ inline void Context::set_error_pos(const char *a_s, const char *literal) {
       }
 
       if (error_literal || error_rule) {
-        error_info.add(error_literal, error_rule);
+        error_info.add(error_literal, error_rule, literal && copy_literal);
       }
     }
   }
@@ -3702,7 +3728,7 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
   return parse_literal(s, n, vs, c, dt, lit_, init_is_word_, is_word_,
-                       ignore_case_, lower_lit_);
+                       ignore_case_, lower_lit_, false);
 }
 
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
@@ -4087,8 +4113,9 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
       std::once_flag init_is_word;
       auto is_word = false;
       static const std::string empty;
+      // The captured text does not outlive its capture.
       return parse_literal(s, n, vs, c, dt, lit, init_is_word, is_word, false,
-                           empty);
+                           empty, true);
     }
   }
 
