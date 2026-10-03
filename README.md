@@ -384,12 +384,12 @@ The same can be written with nested token boundaries — the outer `<` ... `>` d
 StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
 ```
 
-**Rules whose name starts with `_` are hidden from error messages.** If you define `%whitespace` in terms of sub-rules (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
+**Rules whose name starts with `_` are hidden from error messages.** If you skip whitespace with rules of your own instead of `%whitespace` (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. What `%whitespace` fails to match while it is skipped is not listed among the expected tokens. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
 
 ```
-%whitespace <- (_SPACE / _COMMENT)*
-_SPACE      <- [ \t\r\n]
-_COMMENT    <- '#' (!'\n' .)*
+~_       <- (_SPACE / _COMMENT)*
+_SPACE   <- [ \t\r\n]
+_COMMENT <- '#' (!'\n' .)*
 ```
 
 **Keyword-like operators need `%word`.** In a scannerless parser, `'and'` happily matches the first three letters of `android`. Declare `%word` so literals that look like words are checked against a word boundary. ([#328](https://github.com/yhirose/cpp-peglib/issues/328)) See the next section.
@@ -780,6 +780,8 @@ Error report and recovery
 -------------------------
 
 cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
+
+The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Packrat parsing reuses a rule's earlier failure at the same position instead of trying the rule again, and a reused failure lists nothing more. So when a rule that a token rule uses has already failed there outside that token rule, the name of the token rule is not listed.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 

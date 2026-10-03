@@ -833,7 +833,6 @@ struct ErrorInfo {
   std::string message;
   std::string label;
   const char *last_output_pos = nullptr;
-  bool keep_previous_token = false;
 
   void clear() {
     error_pos = nullptr;
@@ -845,6 +844,17 @@ struct ErrorInfo {
   void clear_expected_tokens() {
     expected_tokens.clear();
     literal_copies_.clear();
+  }
+
+  // False when a failure has gone past `pos`. Otherwise the error is at
+  // `pos` now, and what was expected before it is dropped.
+  bool advance_to(const char *pos) {
+    if (pos < error_pos) { return false; }
+    if (error_pos < pos) {
+      error_pos = pos;
+      clear_expected_tokens();
+    }
+    return true;
   }
 
   // `error_literal` points at text the grammar owns, unless `copy_literal` is
@@ -1400,6 +1410,10 @@ public:
                          std::any &dt);
 
   // Error
+  // What skipping whitespace fails to match is not what the input lacks.
+  bool collects_expected_tokens() const {
+    return (log || error_reporter) && !in_whitespace;
+  }
   void set_error_pos(const char *a_s, const char *literal = nullptr,
                      bool copy_literal = false);
 
@@ -1619,18 +1633,13 @@ public:
         const auto &fs = first_sets_[id];
         if (!fs.any_char && !fs.can_be_empty &&
             !fs.chars.test(static_cast<unsigned char>(*s))) {
-          if ((c.log || c.error_reporter) &&
-              (fs.first_literal || fs.first_rule)) {
-            if (c.error_info.error_pos <= s) {
-              if (c.error_info.error_pos < s || !(id > 0)) {
-                c.error_info.error_pos = s;
-                c.error_info.clear_expected_tokens();
-              }
-              if (fs.first_literal) {
-                c.error_info.add(fs.first_literal, nullptr);
-              } else {
-                c.error_info.add(nullptr, fs.first_rule);
-              }
+          if (c.collects_expected_tokens() &&
+              (fs.first_literal || fs.first_rule) &&
+              c.error_info.advance_to(s)) {
+            if (fs.first_literal) {
+              c.error_info.add(fs.first_literal, nullptr);
+            } else {
+              c.error_info.add(nullptr, fs.first_rule);
             }
           }
           id++;
@@ -1641,8 +1650,6 @@ public:
       if (c.has_cut && !c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
       auto snap = c.snapshot(vs);
-      c.error_info.keep_previous_token = id > 0;
-
       len = ope->parse(s, n, vs, c, dt);
 
       if (success(len)) {
@@ -1658,7 +1665,6 @@ public:
       id++;
     }
 
-    c.error_info.keep_previous_token = false;
     return len;
   }
 
@@ -3627,8 +3633,14 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
         while (i < expected_tokens.size()) {
           auto [error_literal, error_rule] = expected_tokens[i];
 
+          // The same text can come from more than one place in the grammar.
+          const auto &literals = report.expected_literals;
+          auto listed =
+              error_literal && std::find(literals.begin(), literals.end(),
+                                         error_literal) != literals.end();
+
           // Skip rules start with '_'
-          if (!(error_rule && error_rule->name[0] == '_')) {
+          if (!(error_rule && error_rule->name[0] == '_') && !listed) {
             msg += (first_item ? ", expecting " : ", ");
             if (error_literal) {
               msg += "'";
@@ -3667,35 +3679,28 @@ inline size_t Context::skip_whitespace(const char *a_s, size_t n,
 
 inline void Context::set_error_pos(const char *a_s, const char *literal,
                                    bool copy_literal) {
-  if (log || error_reporter) {
-    if (error_info.error_pos <= a_s) {
-      if (error_info.error_pos < a_s || !error_info.keep_previous_token) {
-        error_info.error_pos = a_s;
-        error_info.clear_expected_tokens();
-      }
+  if (collects_expected_tokens() && error_info.advance_to(a_s)) {
+    const char *error_literal = nullptr;
+    const Definition *error_rule = nullptr;
 
-      const char *error_literal = nullptr;
-      const Definition *error_rule = nullptr;
-
-      if (literal) {
-        error_literal = literal;
-      } else if (!rule_stack.empty()) {
-        auto rule = rule_stack.back();
-        auto ope = rule->get_core_operator();
-        if (auto token = FindLiteralToken::token(*ope);
-            token && token[0] != '\0') {
-          error_literal = token;
-        }
+    if (literal) {
+      error_literal = literal;
+    } else if (!rule_stack.empty()) {
+      auto rule = rule_stack.back();
+      auto ope = rule->get_core_operator();
+      if (auto token = FindLiteralToken::token(*ope);
+          token && token[0] != '\0') {
+        error_literal = token;
       }
+    }
 
-      for (auto r : rule_stack) {
-        error_rule = r;
-        if (r->is_token()) { break; }
-      }
+    for (auto r : rule_stack) {
+      error_rule = r;
+      if (r->is_token()) { break; }
+    }
 
-      if (error_literal || error_rule) {
-        error_info.add(error_literal, error_rule, literal && copy_literal);
-      }
+    if (error_literal || error_rule) {
+      error_info.add(error_literal, error_rule, literal && copy_literal);
     }
   }
 }

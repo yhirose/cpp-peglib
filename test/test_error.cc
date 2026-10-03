@@ -282,6 +282,63 @@ TEST(ErrorTest, Default_error_handling_2) {
   EXPECT_EQ(i, errors.size());
 }
 
+static std::string syntax_error(parser &pg, const char *input) {
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+  EXPECT_FALSE(pg.parse(input));
+  return message;
+}
+
+TEST(ErrorTest, Expected_tokens_of_every_failure_at_the_furthest_position) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected 'z', expecting 'y', 'x'.",
+            syntax_error(pg, "z"));
+}
+
+TEST(ErrorTest, Expected_tokens_are_the_same_with_packrat) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- T 'x' / (U / V)? T
+      T <- 'tt'
+      U <- 'tu'
+      V <- 'tv'
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_EQ("syntax error, unexpected 'tz', expecting 'tt', 'tu', 'tv'.",
+              syntax_error(pg, "tz"));
+  }
+}
+
+TEST(ErrorTest, Expected_tokens_leave_out_what_whitespace_fails_to_match) {
+  parser pg(R"(
+    S           <- 'a' 'b'
+    %whitespace <- ([ ] / '//' [a-z]*)*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected 'c', expecting 'b'.",
+            syntax_error(pg, "a c"));
+}
+
+TEST(ErrorTest, Expected_token_is_listed_once) {
+  parser pg(R"(
+    S <- A 'x' / B 'y'
+    A <- 'k' '+'
+    B <- 'k' '+'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected '-', expecting '+'.",
+            syntax_error(pg, "k-"));
+}
+
 TEST(ErrorTest, Default_error_handling_fiblang) {
   parser pg(R"(
     # Syntax
@@ -433,7 +490,7 @@ TEST(ErrorTest, Error_recovery_2) {
       R"(1:38: syntax error, unexpected 'ddd', expecting '"', <NUM>.)",
       R"(1:55: syntax error, unexpected ']', expecting '"'.)",
       R"(1:58: syntax error, unexpected '\n', expecting '"', <NUM>.)",
-      R"(2:3: syntax error, expecting ']'.)",
+      R"(2:3: syntax error, expecting ',', ']'.)",
   };
 
   size_t i = 0;
