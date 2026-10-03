@@ -292,6 +292,8 @@ parser["RULE"].leave = [](const Context &c, const char* s, size_t n, size_t matc
 };
 ```
 
+When an exception thrown by one of your callbacks leaves the parser, the *leave* actions of the rules it passes through do not run.
+
 You can receive error information via a logger:
 
 ```cpp

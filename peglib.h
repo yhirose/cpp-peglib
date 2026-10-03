@@ -3789,10 +3789,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   auto do_parse = [&](Context::RuleMatch &m) {
     if (outer_->enter) { outer_->enter(c, s, n, dt); }
     auto &chvs = c.push_semantic_values_scope();
-    auto se = scope_exit([&]() {
-      c.pop_semantic_values_scope();
-      if (outer_->leave) { outer_->leave(c, s, n, m.len, m.val, dt); }
-    });
+    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
 
     m.len = parse_ope_body(s, n, chvs, c, dt);
 
@@ -3837,6 +3834,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         c.error_info.label = outer_->name;
       }
     }
+
+    // Not from the scope_exit: an exception leaves no result to report.
+    if (outer_->leave) { outer_->leave(c, s, n, m.len, m.val, dt); }
   };
 
   if (outer_->is_left_recursive) {
@@ -4060,8 +4060,11 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     auto chvs = c.push_semantic_values_scope();
     chvs.holds_rule_tokens_ = true;
-    auto chlen = binop_->parse(s + i, n - i, chvs, c, dt);
-    c.pop_semantic_values_scope();
+    size_t chlen;
+    {
+      auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+      chlen = binop_->parse(s + i, n - i, chvs, c, dt);
+    }
 
     if (fail(chlen) || chvs.tokens.empty()) { break; }
 
@@ -4080,8 +4083,10 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     if (assoc == 'L') { next_min_prec = level + 1; }
 
     chvs = c.push_semantic_values_scope();
-    chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
-    c.pop_semantic_values_scope();
+    {
+      auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
+      chlen = parse_expression(s + i, n - i, chvs, c, dt, next_min_prec);
+    }
 
     if (fail(chlen)) {
       vs.assign(save_values.begin(), save_values.end());

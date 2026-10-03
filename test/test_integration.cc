@@ -111,6 +111,61 @@ TEST(HandlerTest, Enter_leave_with_state_management) {
   EXPECT_EQ(1, max_depth);
 }
 
+// An exception leaves the rules it passes through without a result to report,
+// also through a precedence rule's operator and its right operand.
+TEST(HandlerTest, Leave_is_not_called_on_an_exception) {
+  for (std::string thrower : {"A", "NUM", "OP"}) {
+    parser pg(R"(
+      S    <- A EXPR
+      A    <- 'a'
+      EXPR <- NUM (OP NUM)* { precedence L + }
+      NUM  <- < [0-9] >
+      OP   <- < '+' >
+    )");
+    ASSERT_TRUE(!!pg);
+
+    std::vector<std::string> left;
+    for (auto name : {"S", "A", "EXPR", "NUM", "OP"}) {
+      pg[name].leave = [&left, name](const Context &, const char *, size_t,
+                                     size_t, std::any &,
+                                     std::any &) { left.push_back(name); };
+    }
+    auto calls = 0;
+    pg[thrower.c_str()] = [&](const SemanticValues &) {
+      if (++calls == (thrower == "NUM" ? 2 : 1)) {
+        throw std::runtime_error("");
+      }
+    };
+
+    EXPECT_THROW(pg.parse("a1+2"), std::runtime_error) << thrower;
+    if (thrower == "A") {
+      EXPECT_TRUE(left.empty());
+    } else if (thrower == "OP") {
+      EXPECT_EQ(std::vector<std::string>({"A", "NUM"}), left);
+    } else {
+      EXPECT_EQ(std::vector<std::string>({"A", "NUM", "OP"}), left);
+    }
+  }
+}
+
+// A leave handler may throw too, and the rules above it are left the same way.
+TEST(HandlerTest, Exception_from_leave_propagates) {
+  parser pg(R"(
+    S <- A
+    A <- 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto s_left = false;
+  pg["S"].leave = [&](const Context &, const char *, size_t, size_t, std::any &,
+                      std::any &) { s_left = true; };
+  pg["A"].leave = [](const Context &, const char *, size_t, size_t, std::any &,
+                     std::any &) { throw std::runtime_error(""); };
+
+  EXPECT_THROW(pg.parse("a"), std::runtime_error);
+  EXPECT_FALSE(s_left);
+}
+
 // =============================================================================
 // User-Defined Rule Tests
 // =============================================================================
