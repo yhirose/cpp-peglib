@@ -893,6 +893,8 @@ The depth counts the rule matches in progress at once, including macros and the 
 
 Reaching the limit abandons the whole parse. The parser does not backtrack to try another alternative, no more actions, predicates or `leave` handlers run, and the error is reported at the position where the limit was reached, with the rule entered there (or the `precedence` rule, for a right operand) as its label. There is no limit by default.
 
+An AST can be deeper than the parse nested: a left-associative `precedence` operator and left recursion fold a chain such as `1+2+3` in a loop into a tree as deep as the chain is long, and packrat parsing reuses a subtree wherever it matches again. So when `parse` returns an AST, the tree is held to the limit too. A tree that goes past it is not returned: the parse fails with the same error, reported at the first node past the limit, with that node's name as its label. Checking the tree takes one more walk over it after the parse, whose cost grows with the number of nodes: on a C grammar, nothing measurable with `enable_ast(true)`, and about 13% more time with `enable_ast()`, which keeps many more nodes.
+
 Change the Start Definition Rule
 --------------------------------
 

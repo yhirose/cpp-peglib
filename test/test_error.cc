@@ -1135,5 +1135,102 @@ TEST(MaxDepthTest, Right_operands_of_a_right_associative_chain_count) {
   }
 }
 
+// A tree that nests deeper than its parse did is held to the limit too, and
+// reported at its first node past it, as the parse reports the rule match
+// that goes past it.
+TEST(MaxDepthTest, Returned_ast_of_a_folded_chain_is_held_to_the_limit) {
+  for (auto grammar : {R"(
+         E  <- A (OP A)* { precedence L + }
+         A  <- < [0-9] >
+         OP <- '+'
+         %whitespace <- [ \n]*
+       )",
+                       R"(
+         E  <- E OP A / A
+         A  <- < [0-9] >
+         OP <- '+'
+         %whitespace <- [ \n]*
+       )"}) {
+    for (auto opt : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg) << grammar;
+      pg.enable_ast(opt);
+      pg.set_max_depth(20);
+      std::string msg, label;
+      pg.set_logger([&](size_t ln, size_t col, const std::string &m,
+                        const std::string &rule) {
+        msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m;
+        label = rule;
+      });
+
+      std::shared_ptr<Ast> ast;
+      EXPECT_TRUE(pg.parse(chain(18), ast)) << grammar;
+      EXPECT_FALSE(pg.parse("\n  " + chain(30), ast)) << grammar;
+      EXPECT_EQ("2:3 exceeded the maximum nesting depth of 20", msg);
+      EXPECT_EQ("E", label);
+      EXPECT_FALSE(ast);
+    }
+  }
+}
+
+// Packrat parsing reuses a subtree built at a shallower depth, which must not
+// get past the limit a parse without it stops at.
+TEST(MaxDepthTest, Packrat_reuse_is_held_to_the_limit) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S  <- &E W1 / E
+      W1 <- W2 'x'?
+      W2 <- W3 'x'?
+      W3 <- E 'x'?
+      E  <- '(' E ')' / N
+      N  <- < 'n' >
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_ast();
+    if (packrat) { pg.enable_packrat_parsing(); }
+    pg.set_max_depth(13);
+    std::string msg;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &m) {
+      msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m;
+    });
+
+    std::shared_ptr<Ast> ast;
+    EXPECT_FALSE(pg.parse("((((((((n))))))))", ast)) << packrat;
+    EXPECT_EQ("1:9 exceeded the maximum nesting depth of 13", msg) << packrat;
+  }
+}
+
+// A user action can return a tree from another parse, whose positions are not
+// in this input.
+TEST(MaxDepthTest, Ast_from_another_parse_is_reported_within_the_input) {
+  const char *grammar = R"(
+    S    <- INC / E
+    INC  <- 'include'
+    E    <- '(' E ')' / N
+    N    <- < 'n' >
+    %whitespace <- [ ]*
+  )";
+  parser inner(grammar);
+  ASSERT_TRUE(!!inner);
+  inner.enable_ast();
+  parser outer(grammar);
+  ASSERT_TRUE(!!outer);
+  outer["INC"] = [&](const SemanticValues &) {
+    std::shared_ptr<Ast> ast;
+    inner.parse(std::string(100, ' ') + "((((n))))", ast);
+    return ast;
+  };
+  outer.enable_ast();
+  outer.set_max_depth(3);
+  std::string msg;
+  outer.set_logger([&](size_t ln, size_t col, const std::string &m) {
+    msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m;
+  });
+
+  std::shared_ptr<Ast> ast;
+  EXPECT_FALSE(outer.parse("include", ast));
+  EXPECT_EQ("1:8 exceeded the maximum nesting depth of 3", msg);
+}
+
 // =============================================================================
 // Enter/Leave Handler Tests

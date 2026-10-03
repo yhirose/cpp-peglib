@@ -846,9 +846,9 @@ struct ErrorInfo {
     expected_tokens.emplace_back(error_literal, error_rule);
   }
 
-  // A parse went past its max_depth at `pos`, where the rule match that
-  // `label` names starts. It is reported even at or before a position a
-  // recovered error already was.
+  // A parse went past its max_depth at `pos`, where the rule match or the
+  // returned AST node that `label` names starts. It is reported even at or
+  // before a position a recovered error already was.
   void set_nesting_too_deep(const char *pos, const std::string &label,
                             size_t max_depth) {
     message_pos = pos;
@@ -6900,7 +6900,7 @@ public:
       const auto &rule = (*grammar_)[start_];
       auto result =
           rule.parse_and_get_value(s, n, val, path, log_, error_reporter_);
-      return post_process(s, n, val, result);
+      return post_process(rule, s, n, val, result);
     }
     return false;
   }
@@ -6912,7 +6912,7 @@ public:
       const auto &rule = (*grammar_)[start_];
       auto result =
           rule.parse_and_get_value(s, n, dt, val, path, log_, error_reporter_);
-      return post_process(s, n, val, result);
+      return post_process(rule, s, n, val, result);
     }
     return false;
   }
@@ -7014,7 +7014,8 @@ public:
   }
 
   // Fails a parse that nests more than max_depth rule matches, with an
-  // error, before deep input can overflow the stack.
+  // error, before deep input can overflow the stack, and one that returns
+  // an AST deeper than that (see check_ast_depth).
   void set_max_depth(size_t max_depth) {
     if (grammar_ != nullptr) {
       auto &rule = (*grammar_)[start_];
@@ -7077,11 +7078,48 @@ private:
   }
 
   template <typename T>
-  bool post_process(const char *s, size_t n, T &val,
+  bool post_process(const Definition &rule, const char *s, size_t n, T &val,
                     Definition::Result &r) const {
+    check_ast_depth(rule, s, n, val, r);
     auto ret = post_process(s, n, r);
     if (ret) { link_collapsed_ast(val); }
     return ret;
+  }
+
+  // A tree can nest deeper than its parse did: a left-associative precedence
+  // operator or left recursion folds a chain in a loop, and packrat parsing
+  // reuses a subtree wherever it matches again. Under a max_depth, the
+  // returned tree is held to it too, and one that goes past it is reported at
+  // its first node that does, as the parse reports the rule match that does.
+  template <typename V>
+  void check_ast_depth(const Definition &, const char *, size_t, V &,
+                       Definition::Result &) const {}
+  template <typename A>
+  void check_ast_depth(const Definition &rule, const char *s, size_t n,
+                       std::shared_ptr<AstBase<A>> &ast,
+                       Definition::Result &r) const {
+    if (!r.ret || !ast ||
+        rule.max_depth == std::numeric_limits<size_t>::max()) {
+      return;
+    }
+    std::vector<std::pair<const AstBase<A> *, size_t>> stack{{ast.get(), 1}};
+    while (!stack.empty()) {
+      auto [node, depth] = stack.back();
+      stack.pop_back();
+      if (depth > rule.max_depth) {
+        r.ret = false;
+        // A node a user action took from another parse can start past the
+        // end of this input.
+        r.error_info.set_nesting_too_deep(s + std::min(node->position, n),
+                                          node->name, rule.max_depth);
+        ast.reset();
+        return;
+      }
+      // In reverse, so that nodes are visited in the order of the text.
+      for (auto it = node->nodes.rbegin(); it != node->nodes.rend(); ++it) {
+        stack.emplace_back(it->get(), depth + 1);
+      }
+    }
   }
 
   // Packrat or left recursion can reuse a node after a collapsed copy of it
