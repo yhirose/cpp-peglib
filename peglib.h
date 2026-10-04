@@ -18,6 +18,12 @@
 #define CPPPEGLIB_HEURISTIC_ERROR_TOKEN_MAX_CHAR_COUNT 32
 #endif
 
+#if defined(_MSC_VER)
+#define CPPPEGLIB_NOINLINE __declspec(noinline)
+#else
+#define CPPPEGLIB_NOINLINE __attribute__((noinline))
+#endif
+
 #include <algorithm>
 #include <any>
 #include <bitset>
@@ -1480,6 +1486,10 @@ public:
 
   bool is_token_boundary = false;
   bool is_choice_like = false;
+
+private:
+  size_t parse_traced(const char *s, size_t n, SemanticValues &vs, Context &c,
+                      std::any &dt) const;
 };
 
 // Keyword-guarded identifier data, heap-allocated only for matching Sequences.
@@ -3735,13 +3745,21 @@ inline bool Context::is_traceable(const Ope &ope) const {
 
 inline size_t Ope::parse(const char *s, size_t n, SemanticValues &vs,
                          Context &c, std::any &dt) const {
-  if (c.is_traceable(*this)) {
-    c.trace_enter(*this, s, n, vs, dt);
-    auto len = parse_core(s, n, vs, c, dt);
-    c.trace_leave(*this, s, n, vs, dt, len);
-    return len;
-  }
+  if (c.has_tracer) { return parse_traced(s, n, vs, c, dt); }
   return parse_core(s, n, vs, c, dt);
+}
+
+// Out of line, so that Ope::parse is small enough to be inlined into its
+// callers.
+CPPPEGLIB_NOINLINE inline size_t Ope::parse_traced(const char *s, size_t n,
+                                                   SemanticValues &vs,
+                                                   Context &c,
+                                                   std::any &dt) const {
+  if (!c.is_traceable(*this)) { return parse_core(s, n, vs, c, dt); }
+  c.trace_enter(*this, s, n, vs, dt);
+  auto len = parse_core(s, n, vs, c, dt);
+  c.trace_leave(*this, s, n, vs, dt, len);
+  return len;
 }
 
 inline size_t Dictionary::parse_core(const char *s, size_t n,
