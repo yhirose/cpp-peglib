@@ -1264,16 +1264,18 @@ public:
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
   }
 
-  // The cache tables have an entry per memoized rule and position, and with
-  // whitespace a second half for the matches where none is skipped.
+  // The cache tables have a run of entries per memoized rule, one for each
+  // position, and with whitespace a second run for the matches where none is
+  // skipped. A rule that rarely succeeds leaves the pages of its run in
+  // cache_len untouched.
   size_t cache_size() const {
-    return packrat_cached_count * (l + 1) * (whitespaceOpe ? 2 : 1);
+    return packrat_cached_count * (whitespaceOpe ? 2 : 1) * (l + 1);
   }
 
   size_t cache_index(int32_t slot, const char *pos) const {
-    auto idx = packrat_cached_count * static_cast<size_t>(pos - s) +
-               static_cast<size_t>(slot);
-    return skips_no_whitespace() ? idx + packrat_cached_count * (l + 1) : idx;
+    auto run = static_cast<size_t>(slot) +
+               (skips_no_whitespace() ? packrat_cached_count : 0);
+    return run * (l + 1) + static_cast<size_t>(pos - s);
   }
 
   void write_packrat_cache(size_t idx, size_t len, const std::any &val) {
