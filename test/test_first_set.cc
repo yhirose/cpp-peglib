@@ -328,6 +328,194 @@ TEST(FirstSetTest, Leading_cut_is_not_skipped) {
   EXPECT_FALSE(pg.parse("b"));
 }
 
+// =============================================================================
+// Unstartable Rule Tests
+// =============================================================================
+
+// A rule that cannot start with the next byte is not entered, wherever it is
+// used, just as a choice skips an alternative that cannot, where entering it
+// would run no callback, so that skipping it goes unnoticed. A parse that
+// reports errors still enters it, to tell what it expected.
+
+// How many times the parses from S so far tried the rule, as packrat
+// statistics count them.
+static size_t tries(parser &pg, const char *name) {
+  const auto &stats = pg["S"].packrat_stats_;
+  auto id = pg[name].id;
+  return id < stats.size() ? stats[id].hits + stats[id].misses : 0;
+}
+
+TEST(UnstartableRuleTest, Is_not_entered) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(0u, tries(pg, "A"));
+  EXPECT_TRUE(pg.parse("yx"));
+  EXPECT_EQ(1u, tries(pg, "A"));
+}
+
+TEST(UnstartableRuleTest, Is_entered_when_errors_are_reported) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+
+  EXPECT_FALSE(pg.parse("z"));
+  EXPECT_EQ(1u, tries(pg, "A"));
+  EXPECT_EQ("syntax error, unexpected 'z', expecting 'y', 'x'.", message);
+}
+
+TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
+  parser pg(R"(
+    S <- B
+    B <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  // Trying A goes one level past the limit, with or without a logger.
+  pg.set_max_depth(2);
+  EXPECT_FALSE(pg.parse("x"));
+}
+
+TEST(UnstartableRuleTest, Is_entered_to_run_its_enter_and_leave) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- 'y'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto enters = 0;
+  auto leaves = 0;
+  pg["A"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    enters++;
+  };
+  pg["A"].leave = [&](const Context &, const char *, size_t, size_t, std::any &,
+                      std::any &) { leaves++; };
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(1, enters);
+  EXPECT_EQ(1, leaves);
+}
+
+// E matches empty before R fails on 'y', also where R enters it through Q,
+// and G reads what its action did, so skipping R would make the parse fail.
+TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_it) {
+  for (auto grammar : {
+           R"(R <- E 'x')",
+           R"(R <- Q 'x'
+              Q <- E 'z')",
+       }) {
+    for (auto with_logger : {false, true}) {
+      parser pg(R"(
+        S <- R? 'y' G
+        E <- ''
+        G <- 'g'
+      )" + std::string(grammar));
+      ASSERT_TRUE(!!pg);
+
+      auto count = 0;
+      pg["E"] = [&](const SemanticValues &) { count++; };
+      pg["G"].predicate = [&](const SemanticValues &, const std::any &,
+                              std::string &) { return count > 0; };
+      if (with_logger) {
+        pg.set_logger([](size_t, size_t, const std::string &) {});
+      }
+
+      EXPECT_TRUE(pg.parse("yg")) << grammar << with_logger;
+      EXPECT_EQ(1, count) << grammar << with_logger;
+    }
+  }
+}
+
+// A lookahead may match anything: K matches 'x' inside A.
+TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_a_lookahead) {
+  parser pg(R"(
+    S <- A? 'x'
+    A <- !K 'y'
+    K <- 'x'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto count = 0;
+  pg["K"] = [&](const SemanticValues &) { count++; };
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(1, count);
+}
+
+// The whitespace after 'z' is skipped inside A's lookahead, and again after
+// S's 'z'.
+TEST(UnstartableRuleTest, Is_entered_to_run_an_action_of_the_whitespace) {
+  parser pg(R"(
+    S <- A? 'z'
+    A <- &'z' 'y'
+    %whitespace <- W*
+    W <- ' '
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto count = 0;
+  pg["W"] = [&](const SemanticValues &) { count++; };
+
+  EXPECT_TRUE(pg.parse("z  "));
+  EXPECT_EQ(4, count);
+}
+
+// W's enter makes S enter A. X, parsed from an action of B, skips no
+// whitespace and may skip A, but that holds for X's parses alone.
+TEST(UnstartableRuleTest, Is_entered_after_a_nested_parse_that_skips_it) {
+  parser pg(R"(
+    S <- B A? 'x'
+    A <- '' 'y'
+    B <- 'b'
+    X <- A? 'z'
+    %whitespace <- W*
+    W <- ' '
+  )");
+  ASSERT_TRUE(!!pg);
+
+  auto enters = 0;
+  pg["W"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    enters++;
+  };
+  pg["B"] = [&](const SemanticValues &) {
+    EXPECT_TRUE(pg["X"].parse("z").ret);
+  };
+
+  EXPECT_TRUE(pg.parse("bx"));
+  EXPECT_EQ(4, enters);
+}
+
+// An AST action depends on its values alone, so running it or not goes
+// unnoticed.
+TEST(UnstartableRuleTest, Is_not_entered_for_an_ast_action_below_it) {
+  parser pg(R"(
+    S <- R? 'y'
+    R <- E 'x'
+    E <- ''
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast(true);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+
+  std::shared_ptr<Ast> ast;
+  EXPECT_TRUE(pg.parse("y", ast));
+  EXPECT_EQ(0u, tries(pg, "R"));
+}
+
 // A precedence rule whose atom matches empty can start with an operator.
 TEST(FirstSetTest, Operator_after_an_empty_atom) {
   for (auto start : {"S <- X / 'q'", "S <- X?"}) {
@@ -369,4 +557,33 @@ TEST(FirstSetTest, Whitespace_after_an_empty_match) {
     EXPECT_TRUE(pg.parse("ax")) << grammar;
     EXPECT_TRUE(pg.parse("a x")) << grammar;
   }
+}
+
+// A cut in a lookahead reaches the choice around the rule, which then tries
+// no other alternative.
+TEST(UnstartableRuleTest, Is_entered_to_run_a_cut_in_a_lookahead) {
+  parser pg(R"(
+    S <- 'x' R / 'x' 'c'
+    R <- !E 'b'
+    E <- ↑ 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_FALSE(pg.parse("xc"));
+  pg.set_logger([](size_t, size_t, const std::string &) {});
+  EXPECT_FALSE(pg.parse("xc"));
+}
+
+// The same holds where a rule that cannot start with the next byte is not
+// entered.
+TEST(UnstartableRuleTest, Is_entered_at_whitespace_after_an_empty_match) {
+  parser pg(R"(
+    S <- [a] U
+    U <- '' 'x'
+    %whitespace <- [ ]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("ax"));
+  EXPECT_TRUE(pg.parse("a x"));
 }

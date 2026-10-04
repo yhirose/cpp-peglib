@@ -1071,9 +1071,9 @@ struct StartRuleAnalysis {
   bool indexes(const Definition &rule) const;
 };
 
-// How a match of a rule uses values, which Holder::parse_core goes by to
-// build no value that nothing reads (see Definition::value_use).
-struct ValueUse {
+// What Holder::parse_core goes by to leave out what goes unnoticed: building
+// a value that nothing reads, and entering a rule that cannot start.
+struct RuleUse {
   // Whether a match is only recognized: it runs no callback, forms no scope
   // and builds no value.
   enum class Recognized : uint8_t {
@@ -1090,6 +1090,9 @@ struct ValueUse {
   Recognized recognized = Recognized::never;
   ChildValues child_values = ChildValues::read;
   bool value_always_empty = false;
+  // Whether entering the rule on a byte it cannot start with would run no
+  // callback.
+  bool skippable = false;
 };
 
 class Context {
@@ -1270,8 +1273,8 @@ public:
   Log log;
   ErrorReporter error_reporter;
 
-  // By rule id. A rule without an entry is never only recognized.
-  const ValueUse *value_use = nullptr;
+  // By rule id. A rule without an entry is always entered and built.
+  const RuleUse *rule_use = nullptr;
 
   // The body of a match that is only recognized parses into this scope.
   SemanticValues unread_scope;
@@ -1279,6 +1282,11 @@ public:
   // A tracer and a User operator see the scopes as they are, so every match
   // is built and every value delivered.
   bool builds_everything = false;
+
+  // Whether a rule that cannot start with the next byte may fail without
+  // being entered. It is entered all the same for an error to report what
+  // it expected, for a tracer to see it and for a nesting limit to count it.
+  bool skips_rules = false;
 
   // Until the returned guard goes, neither the values nor the tokens of
   // rule matches are delivered to `vs`: what is parsed is thrown away.
@@ -3248,6 +3256,8 @@ static const char *RECOVER_DEFINITION_NAME = "%recover";
 /*
  * Definition
  */
+struct CollectRuleRefs;
+
 class Definition {
 public:
   struct Result {
@@ -3454,6 +3464,10 @@ public:
   bool disable_action = false;
   bool is_left_recursive = false;
   bool can_be_empty = false;
+  // The bytes a match of this rule can start with, when it cannot match empty
+  // and they are known (set up with the first sets).
+  bool has_start_bytes = false;
+  std::bitset<256> start_bytes;
   // Body contains a macro invocation, whose arguments resolve against the
   // innermost rule on rule_stack; computed by AssignIDToDefinition. The
   // conservative default keeps the stack maintained until then.
@@ -3496,10 +3510,15 @@ private:
   void analyze() const;
   void number_new_rules() const;
   void select_packrat_rules() const;
-  std::shared_ptr<const std::vector<ValueUse>>
-  value_uses(bool builds_everything) const;
-  bool update_value_use_inputs(bool builds_everything) const;
-  std::vector<ValueUse> analyze_value_use() const;
+  std::shared_ptr<const std::vector<RuleUse>>
+  rule_uses(bool builds_everything) const;
+  bool update_rule_use_inputs(bool builds_everything) const;
+  std::vector<RuleUse> analyze_rule_uses() const;
+  void decide_value_use(const std::vector<CollectRuleRefs> &refs,
+                        const CollectRuleRefs &whitespace,
+                        std::vector<RuleUse> &uses) const;
+  void decide_skippable(const std::vector<CollectRuleRefs> &refs,
+                        std::vector<RuleUse> &uses) const;
 
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log,
@@ -3526,10 +3545,11 @@ private:
     }
 
     c.builds_everything = c.has_tracer || analysis.has_user;
-    auto uses = value_uses(c.builds_everything);
-    c.value_use = uses->data();
+    auto uses = rule_uses(c.builds_everything);
+    c.rule_use = uses->data();
 
     c.max_depth = max_depth;
+    c.skips_rules = !c.needs_rule_stack && !c.limits_depth();
 
     try {
       size_t i = 0;
@@ -3577,16 +3597,16 @@ private:
   mutable std::once_flag packrat_rules_init_;
   mutable StartRuleAnalysis analysis_;
 
-  // What value_uses_ was made from: what it is made for, and of each rule
+  // What rule_uses_ was made from: what it is made for, and of each rule
   // the type of its AST node and the callbacks it has.
-  struct ValueUseInputs {
+  struct RuleUseInputs {
     bool builds_everything = false;
     bool packrat = false;
     std::vector<std::pair<const std::type_info *, uint8_t>> rules;
   };
-  mutable std::mutex value_uses_mutex_;
-  mutable ValueUseInputs value_use_inputs_;
-  mutable std::shared_ptr<const std::vector<ValueUse>> value_uses_;
+  mutable std::mutex rule_uses_mutex_;
+  mutable RuleUseInputs rule_use_inputs_;
+  mutable std::shared_ptr<const std::vector<RuleUse>> rule_uses_;
 };
 
 inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
@@ -4005,16 +4025,23 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     return len;
   }
 
-  Context::RuleMatch match;
-
   auto has_id = c.has_id(*outer_);
-  const auto use = has_id ? c.value_use[outer_->id] : ValueUse();
+  const auto use = has_id ? c.rule_use[outer_->id] : RuleUse();
+
+  // A rule that cannot start with the next byte fails without being entered
+  // where that goes unnoticed, as a choice skips an alternative that cannot.
+  if (use.skippable && c.skips_rules && n > 0 &&
+      !outer_->start_bytes.test(static_cast<unsigned char>(*s))) {
+    return static_cast<size_t>(-1);
+  }
+
+  Context::RuleMatch match;
 
   // A match that nothing observes, and whose value and token nothing reads,
   // is only recognized. A value that is always empty is delivered as such.
   if (!vs.holds_rule_tokens_ &&
-      (use.recognized == ValueUse::Recognized::always ||
-       (use.recognized == ValueUse::Recognized::where_unread &&
+      (use.recognized == RuleUse::Recognized::always ||
+       (use.recognized == RuleUse::Recognized::where_unread &&
         !vs.holds_rule_values_))) {
     c.reuse_or_parse(s, *outer_, has_id, false, match, [&]() {
       match.len = parse_ope_body(s, n, c.unread_scope, c, dt);
@@ -4037,8 +4064,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
     chvs.holds_rule_values_ =
-        use.child_values == ValueUse::ChildValues::read ||
-        (use.child_values == ValueUse::ChildValues::passed_up &&
+        use.child_values == RuleUse::ChildValues::read ||
+        (use.child_values == RuleUse::ChildValues::passed_up &&
          vs.holds_rule_values_);
 
     m.len = parse_ope_body(s, n, chvs, c, dt);
@@ -4818,6 +4845,15 @@ inline void SetupFirstSets::visit(Reference &ope) {
 // is O(N^2) for grammars with dense cross-references.
 inline void SetupFirstSets::visit(Holder &ope) {
   if (!visited_rules_.insert(ope.outer_).second) { return; }
+
+  auto &rule = *ope.outer_;
+  ComputeFirstSet cfs(first_set_cache_, whitespace_);
+  ope.ope_->accept(cfs);
+  const auto &fs = cfs.result_;
+  rule.has_start_bytes = !fs.any_char && !fs.can_be_empty && !rule.is_macro &&
+                         !rule.is_left_recursive;
+  rule.start_bytes = fs.chars;
+
   ope.ope_->accept(*this);
 }
 
@@ -4944,7 +4980,7 @@ inline void Definition::analyze() const {
 
 // The rules an operator refers to, without walking into them, macros and
 // the rules in their arguments included.
-struct CollectValueRules : public TraversalVisitor {
+struct CollectRuleRefs : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   void visit(AndPredicate &ope) override { thrown_away(*ope.ope_); }
@@ -4963,9 +4999,11 @@ struct CollectValueRules : public TraversalVisitor {
     read(*ope.binop_);
   }
 
-  // The rules whose values land in the scope the operator is parsed into:
-  // not those whose match is thrown away.
+  // Every rule, those in a lookahead or an ignored operator too.
   std::vector<Definition *> rules;
+  // Of those, the rules whose values land in the scope the operator is
+  // parsed into: not those whose match is thrown away.
+  std::vector<Definition *> value_rules;
   // The rules whose values are read whatever that scope is to its reader:
   // those in a macro argument, which land where the macro puts them, and a
   // precedence's operator, whose action runs as it hands over its token.
@@ -4974,7 +5012,8 @@ struct CollectValueRules : public TraversalVisitor {
 
 private:
   void add(Definition *rule) {
-    if (!thrown_away_) { rules.push_back(rule); }
+    rules.push_back(rule);
+    if (!thrown_away_) { value_rules.push_back(rule); }
     if (reading_) { read_rules.push_back(rule); }
   }
   void read(Ope &ope) {
@@ -4991,22 +5030,99 @@ private:
   size_t thrown_away_ = 0;
 };
 
-// How the matches of each rule use values depends on the callbacks of the
+// Whether an operator has a cut, without walking into the rules it refers
+// to. A recovery cuts where it matches.
+struct HasCut : public TraversalVisitor {
+  using TraversalVisitor::visit;
+
+  void visit(Cut &) override { result = true; }
+  void visit(Recovery &) override { result = true; }
+  void visit(Holder &) override {}
+
+  bool result = false;
+};
+
+// What a rule's body may try when the rule is entered on a byte its first set
+// excludes, so that nothing consumes it: the rules it enters there, and the
+// rules that may match anything there, below a lookahead or through a macro.
+// A User operator is not looked for: a parse builds everything with one (see
+// Context::builds_everything).
+struct CollectStartRegion : public TraversalVisitor {
+  using TraversalVisitor::visit;
+
+  std::vector<Definition *> entered;
+  std::vector<Definition *> reached; // with all the rules below them
+  // A combinator rule, a macro parameter, a recovery, or a cut in what may
+  // match anything.
+  bool unknown = false;
+
+  void visit(Sequence &ope) override {
+    for (const auto &op : ope.opes_) {
+      op->accept(*this);
+      ComputeCanBeEmpty vis;
+      op->accept(vis);
+      if (!vis.result) { break; }
+    }
+  }
+  // An alternative that cannot start with the byte is skipped by its first
+  // set.
+  void visit(PrioritizedChoice &ope) override {
+    for (size_t i = 0; i < ope.opes_.size(); i++) {
+      if (i < ope.first_sets_.size()) {
+        const auto &fs = ope.first_sets_[i];
+        if (!fs.any_char && !fs.can_be_empty) { continue; }
+      }
+      ope.opes_[i]->accept(*this);
+    }
+  }
+  // An operator follows an atom that matches empty at the same position.
+  void visit(PrecedenceClimbing &ope) override {
+    ope.atom_->accept(*this);
+    ComputeCanBeEmpty vis;
+    ope.atom_->accept(vis);
+    if (vis.result) { ope.binop_->accept(*this); }
+  }
+  void visit(AndPredicate &ope) override { reach(*ope.ope_); }
+  void visit(NotPredicate &ope) override { reach(*ope.ope_); }
+  void visit(Recovery &) override { unknown = true; }
+  void visit(Holder &) override { unknown = true; }
+  void visit(Reference &ope) override {
+    if (!ope.rule_) {
+      unknown = true;
+    } else if (ope.rule_->is_macro) {
+      reach(ope);
+    } else {
+      entered.push_back(ope.rule_);
+    }
+  }
+
+private:
+  void reach(Ope &ope) {
+    CollectRuleRefs vis;
+    ope.accept(vis);
+    reached.insert(reached.end(), vis.rules.begin(), vis.rules.end());
+    HasCut cut;
+    ope.accept(cut);
+    if (cut.result) { unknown = true; }
+  }
+};
+
+// What goes unnoticed in a match of a rule depends on the callbacks of the
 // rule and of the rules below it, which can be set between parses. So it is
 // decided again when one of them has changed. A parse keeps the outcome it
 // started with.
-inline std::shared_ptr<const std::vector<ValueUse>>
-Definition::value_uses(bool builds_everything) const {
-  std::lock_guard lock(value_uses_mutex_);
-  if (update_value_use_inputs(builds_everything) || !value_uses_) {
-    value_uses_ = std::make_shared<const std::vector<ValueUse>>(
-        builds_everything ? std::vector<ValueUse>(analysis_.rules_by_id.size())
-                          : analyze_value_use());
+inline std::shared_ptr<const std::vector<RuleUse>>
+Definition::rule_uses(bool builds_everything) const {
+  std::lock_guard lock(rule_uses_mutex_);
+  if (update_rule_use_inputs(builds_everything) || !rule_uses_) {
+    rule_uses_ = std::make_shared<const std::vector<RuleUse>>(
+        builds_everything ? std::vector<RuleUse>(analysis_.rules_by_id.size())
+                          : analyze_rule_uses());
   }
-  return value_uses_;
+  return rule_uses_;
 }
 
-inline bool Definition::update_value_use_inputs(bool builds_everything) const {
+inline bool Definition::update_rule_use_inputs(bool builds_everything) const {
   auto changed = false;
   auto update = [&](auto &was, const auto &is) {
     if (!(was == is)) {
@@ -5015,7 +5131,7 @@ inline bool Definition::update_value_use_inputs(bool builds_everything) const {
     }
   };
 
-  auto &inputs = value_use_inputs_;
+  auto &inputs = rule_use_inputs_;
   update(inputs.builds_everything, builds_everything);
   update(inputs.packrat, enablePackratParsing);
   inputs.rules.resize(analysis_.rules.size());
@@ -5032,27 +5148,45 @@ inline bool Definition::update_value_use_inputs(bool builds_everything) const {
 }
 
 // With packrat, the rules to memoize have been selected.
-inline std::vector<ValueUse> Definition::analyze_value_use() const {
+inline std::vector<RuleUse> Definition::analyze_rule_uses() const {
   const auto &a = analysis_;
   auto count = a.rules_by_id.size();
 
-  // A rule that this start rule does not index is never only recognized, and
-  // is taken to have a value.
-  std::vector<ValueUse> uses(count);
-  std::vector<CollectValueRules> refs(count);
-  std::vector<bool> observed(count, true), value_always_empty(count, false);
+  // A rule that this start rule does not index gets no entry.
+  std::vector<RuleUse> uses(count);
+  std::vector<CollectRuleRefs> refs(count);
+  for (auto *rule : a.rules_by_id) {
+    if (rule) { rule->get_core_operator()->accept(refs[rule->id]); }
+  }
 
   // What the whitespace matches lands in the scope of the rule being parsed,
   // unless it is ignored, as wsp() makes it.
-  CollectValueRules whitespace;
+  CollectRuleRefs whitespace;
   if (whitespaceOpe) { whitespaceOpe->accept(whitespace); }
+  for (auto &r : refs) {
+    r.value_rules.insert(r.value_rules.end(), whitespace.value_rules.begin(),
+                         whitespace.value_rules.end());
+  }
+
+  decide_value_use(refs, whitespace, uses);
+  decide_skippable(refs, uses);
+  return uses;
+}
+
+// A rule that this start rule does not index is taken to be observed and to
+// have a value.
+inline void
+Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
+                             const CollectRuleRefs &whitespace,
+                             std::vector<RuleUse> &uses) const {
+  const auto &a = analysis_;
+  auto count = a.rules_by_id.size();
+  std::vector<bool> observed(count, true), value_always_empty(count, false);
 
   for (auto *rule : a.rules_by_id) {
     if (!rule) { continue; }
     auto id = rule->id;
-    auto &rules = refs[id].rules;
-    rule->get_core_operator()->accept(refs[id]);
-    rules.insert(rules.end(), whitespace.rules.begin(), whitespace.rules.end());
+    const auto &rules = refs[id].value_rules;
 
     auto has_action = rule->action && !rule->disable_action;
     auto node_type = rule->action.ast_node_type();
@@ -5076,11 +5210,11 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
 
     if (rule->predicate || refs[id].has_precedence ||
         (has_action && !token_node) || (!has_action && rule->leave)) {
-      uses[id].child_values = ValueUse::ChildValues::read;
+      uses[id].child_values = RuleUse::ChildValues::read;
     } else if (has_action) {
-      uses[id].child_values = ValueUse::ChildValues::unread;
+      uses[id].child_values = RuleUse::ChildValues::unread;
     } else {
-      uses[id].child_values = ValueUse::ChildValues::passed_up;
+      uses[id].child_values = RuleUse::ChildValues::passed_up;
     }
   }
 
@@ -5089,7 +5223,7 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
     again = false;
     for (auto *rule : a.rules_by_id) {
       if (!rule || !value_always_empty[rule->id]) { continue; }
-      const auto &rules = refs[rule->id].rules;
+      const auto &rules = refs[rule->id].value_rules;
       if (!std::all_of(rules.begin(), rules.end(), [&](auto *r) {
             return a.indexes(*r) && value_always_empty[r->id];
           })) {
@@ -5116,18 +5250,18 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
     }
   };
   mark_read(this);
-  mark_all_read(whitespace.rules);
+  mark_all_read(whitespace.value_rules);
   mark_all_read(whitespace.read_rules);
   for (auto *rule : a.rules) {
     if (!a.indexes(*rule)) {
-      CollectValueRules vis;
+      CollectRuleRefs vis;
       rule->get_core_operator()->accept(vis);
-      mark_all_read(vis.rules);
+      mark_all_read(vis.value_rules);
       mark_all_read(vis.read_rules);
       continue;
     }
     mark_all_read(refs[rule->id].read_rules);
-    if (rule->is_macro) { mark_all_read(refs[rule->id].rules); }
+    if (rule->is_macro) { mark_all_read(refs[rule->id].value_rules); }
   }
   for (auto again = true; again;) {
     again = false;
@@ -5136,17 +5270,17 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
       auto id = rule->id;
       auto holds_rule_values = false;
       switch (uses[id].child_values) {
-      case ValueUse::ChildValues::read:
+      case RuleUse::ChildValues::read:
         holds_rule_values = value_read[id] || observed[id];
         break;
-      case ValueUse::ChildValues::unread: break;
-      case ValueUse::ChildValues::passed_up:
+      case RuleUse::ChildValues::unread: break;
+      case RuleUse::ChildValues::passed_up:
         holds_rule_values = value_read[id] && !rule->ignoreSemanticValue;
         break;
       }
       if (!holds_rule_values) { continue; }
       // The value of a `~` rule is not delivered.
-      for (const auto *r : refs[id].rules) {
+      for (const auto *r : refs[id].value_rules) {
         if (!r->ignoreSemanticValue && mark_read(r)) { again = true; }
       }
     }
@@ -5168,23 +5302,98 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
 
     use.value_always_empty = value_always_empty[id];
     if (observed[id] || (read_everywhere && !value_always_empty[id])) {
-      use.recognized = ValueUse::Recognized::never;
+      use.recognized = RuleUse::Recognized::never;
     } else if (value_always_empty[id] || read_nowhere) {
-      use.recognized = ValueUse::Recognized::always;
+      use.recognized = RuleUse::Recognized::always;
     } else {
-      use.recognized = ValueUse::Recognized::where_unread;
+      use.recognized = RuleUse::Recognized::where_unread;
     }
 
-    if (use.child_values == ValueUse::ChildValues::passed_up) {
+    if (use.child_values == RuleUse::ChildValues::passed_up) {
       if (read_everywhere) {
-        use.child_values = ValueUse::ChildValues::read;
+        use.child_values = RuleUse::ChildValues::read;
       } else if (read_nowhere) {
-        use.child_values = ValueUse::ChildValues::unread;
+        use.child_values = RuleUse::ChildValues::unread;
       }
     }
   }
+}
 
-  return uses;
+// A rule that cannot start with the next byte is skipped instead of entered
+// (see Holder::parse_core) only where entering it would run no callback, so
+// that skipping it goes unnoticed. Entered there, the rule fails without
+// consuming anything: its enter and leave run, and so do those of the rules
+// it enters at its start, whose actions and predicates run too if they can
+// match empty; a lookahead, a recovery and a macro there may match anything
+// below them, and so may the whitespace and word skipping. A cut there counts
+// as a callback: it reaches the choice around the rule. An AST action depends
+// on its values alone and does not count. A rule that this start rule does
+// not index is taken to run callbacks.
+inline void
+Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
+                             std::vector<RuleUse> &uses) const {
+  const auto &a = analysis_;
+  auto count = a.rules_by_id.size();
+  std::vector<bool> on_enter(count), on_match(count), below(count);
+  for (auto *rule : a.rules_by_id) {
+    if (!rule) { continue; }
+    auto id = rule->id;
+    on_enter[id] = rule->enter || rule->leave;
+    on_match[id] = rule->predicate || (rule->action && !rule->disable_action &&
+                                       !rule->action.ast_node_type());
+    HasCut cut;
+    rule->get_core_operator()->accept(cut);
+    below[id] = on_enter[id] || on_match[id] || cut.result;
+  }
+  auto any_flagged = [&](const std::vector<bool> &flag,
+                         const std::vector<Definition *> &rules) {
+    return std::any_of(rules.begin(), rules.end(), [&](const auto *r) {
+      return !a.indexes(*r) || flag[r->id];
+    });
+  };
+  // A flag spreads to the rules that refer to a flagged rule.
+  auto spread = [&](std::vector<bool> &flag, auto rules_of) {
+    for (auto again = true; again;) {
+      again = false;
+      for (auto *rule : a.rules_by_id) {
+        if (rule && !flag[rule->id] && any_flagged(flag, rules_of(rule->id))) {
+          flag[rule->id] = again = true;
+        }
+      }
+    }
+  };
+
+  // Anything below a rule may run.
+  spread(below, [&](size_t id) -> const auto & { return refs[id].rules; });
+  for (const auto &ope : {whitespaceOpe, wordOpe}) {
+    if (!ope) { continue; }
+    CollectRuleRefs vis;
+    ope->accept(vis);
+    if (any_flagged(below, vis.rules)) { return; }
+  }
+
+  std::vector<bool> start(count);
+  std::vector<std::vector<Definition *>> entered(count);
+  for (auto *rule : a.rules_by_id) {
+    if (!rule) { continue; }
+    auto id = rule->id;
+    CollectStartRegion region;
+    rule->get_core_operator()->accept(region);
+    start[id] =
+        on_enter[id] || region.unknown || any_flagged(below, region.reached) ||
+        std::any_of(
+            region.entered.begin(), region.entered.end(), [&](const auto *r) {
+              return !a.indexes(*r) || (on_match[r->id] && r->can_be_empty);
+            });
+    entered[id] = std::move(region.entered);
+  }
+  spread(start, [&](size_t id) -> const auto & { return entered[id]; });
+
+  for (auto *rule : a.rules_by_id) {
+    if (rule) {
+      uses[rule->id].skippable = rule->has_start_bytes && !start[rule->id];
+    }
+  }
 }
 
 // Ids are never renumbered: other parses' packrat tables are indexed by them.
