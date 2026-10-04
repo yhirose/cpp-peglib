@@ -199,10 +199,9 @@ TEST(GrammarBlobTest, ParserLoadBlobWithAst) {
   }
 }
 
-// Regression: load_blob() must restore the parser-level packrat flag from the
-// blob so a subsequent enable_packrat_parsing() re-applies packrat instead of
-// clearing the flag baked into the blob. Previously load_blob left the parser
-// member at its false default, so enable_packrat_parsing() silently disabled
+// Regression: enable_packrat_parsing() after load_blob() must keep packrat on
+// when the blob has it baked in. Previously load_blob left the parser-level
+// flag at its false default, so enable_packrat_parsing() silently disabled
 // packrat on the start rule after a blob round-trip.
 TEST(GrammarBlobTest, LoadBlobPreservesPackrat) {
   const char *g = R"(
@@ -288,7 +287,7 @@ TEST(GrammarBlobTest, CaseInsensitiveLiteralAndDictionary) {
 
 // A Dictionary reports vs.choice() as the matched word's index in declaration
 // order. The Trie stores words sorted, so serialization must re-emit them by id
-// or the choice index gets renumbered (found via the spec round-trip oracle).
+// or the choice index gets renumbered.
 TEST(GrammarBlobTest, DictionaryChoiceIndexRoundTrip) {
   const char *g = "S <- 'Jan' | 'January' | 'Feb' | 'February'";
   peg::parser p1;

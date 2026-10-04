@@ -12,7 +12,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(peglib-test-main
+set(PEGLIB_TEST_SOURCES
   test_core.cc
   test_peg_syntax.cc
   test_rules.cc
@@ -32,19 +32,20 @@ add_executable(peglib-test-main
   test_serialize.cc
 )
 
-target_include_directories(peglib-test-main PRIVATE ..)
-
-# Pass the absolute source path of the mini-js grammar so the test can locate it
-# regardless of the working directory it is run from (e.g. nested build trees or
-# package builds).
-target_compile_definitions(peglib-test-main PRIVATE
-  MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../spec/mini-js/grammar.peg"
-  CPPPEGLIB_TEST_BLOB_ROUNDTRIP)
-
 include(GoogleTest)
+
+add_executable(peglib-test-main ${PEGLIB_TEST_SOURCES})
+target_include_directories(peglib-test-main PRIVATE ..)
+# Pass the absolute source path of the mini-js grammar so the test can locate
+# it regardless of the working directory it is run from (e.g. nested build
+# trees or package builds).
+target_compile_definitions(peglib-test-main PRIVATE
+  MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../grammar/mini_js.peg"
+  CPPPEGLIB_TEST_BLOB_ROUNDTRIP)
+target_link_libraries(peglib-test-main PRIVATE gtest_main)
+
 gtest_discover_tests(peglib-test-main)
 # The same tests again with every grammar reloaded from its serialized blob
 # (CPPPEGLIB_TEST_BLOB_ROUNDTRIP in peglib.h).
 gtest_discover_tests(peglib-test-main TEST_PREFIX "BlobRoundTrip."
   PROPERTIES ENVIRONMENT "CPPPEGLIB_TEST_BLOB_ROUNDTRIP=1")
-target_link_libraries(peglib-test-main PRIVATE gtest_main)
