@@ -312,3 +312,39 @@ TEST(CombinatorTest, Rule_attached_after_the_first_parse_reentering) {
     EXPECT_TRUE(def_parse(S, "ca")) << attach_late;
   }
 }
+
+// --- packrat on rules numbered from different start rules ---
+
+TEST(CombinatorTest, Packrat_on_rules_numbered_apart) {
+  Definition S1, A, S2, B, S3;
+  S1 <= cho(seq(A, chr('x')), seq(A, chr('z')));
+  A <= chr('a');
+  S2 <= cho(seq(B, chr('y')), seq(B, chr('w')));
+  B <= chr('b');
+  S3 <= cho(S1, S2);
+  for (auto *d : {&S1, &A, &S2, &B, &S3}) {
+    d->enablePackratParsing = true;
+  }
+
+  EXPECT_TRUE(def_parse(S1, "az"));
+  EXPECT_TRUE(def_parse(S2, "bw"));
+  EXPECT_TRUE(def_parse(S3, "az"));
+  EXPECT_TRUE(def_parse(S3, "bw"));
+  EXPECT_FALSE(def_parse(S3, "bx"));
+  EXPECT_TRUE(def_parse(S1, "az"));
+  EXPECT_TRUE(def_parse(S2, "bw"));
+}
+
+// A rule that a combinator refers to is embedded without a Reference, so a
+// rule that reaches itself at its own start forms a cycle that choosing the
+// rules to memoize must not follow forever.
+TEST(CombinatorTest, Packrat_on_a_rule_that_starts_with_itself) {
+  for (auto packrat : {false, true}) {
+    Definition A;
+    A <= cho(seq(A, chr('b')), chr('a'));
+    A.enablePackratParsing = packrat;
+
+    EXPECT_TRUE(A.parse("a").ret) << packrat;
+    EXPECT_FALSE(A.parse("b").ret) << packrat;
+  }
+}

@@ -296,6 +296,8 @@ Where the next byte cannot start a match of an alternative of a choice, the pars
 
 More generally, whether and how many times callbacks run in an attempt that is later abandoned is not fixed. This skipping leaves them out; packrat parsing can reuse a rule's earlier result at the same position, a match or a failure, instead of trying the rule again, so none of its callbacks run; and a left-recursive rule reuses its results even without packrat parsing, and tries its body once more after its match stops growing. So do not rely on what callbacks do in attempts that may be abandoned: undo in *leave* what *enter* did (such as opening a scope), or build the state from the value or the AST that the parse returns.
 
+When an exception thrown by one of your callbacks leaves the parser, the *leave* actions of the rules it passes through do not run.
+
 You can receive error information via a logger:
 
 ```cpp
@@ -382,12 +384,12 @@ The same can be written with nested token boundaries — the outer `<` ... `>` d
 StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
 ```
 
-**Rules whose name starts with `_` are hidden from error messages.** If you define `%whitespace` in terms of sub-rules (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
+**Rules whose name starts with `_` are hidden from error messages.** If you skip whitespace with rules of your own instead of `%whitespace` (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. What `%whitespace` fails to match while it is skipped is not listed among the expected tokens. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
 
 ```
-%whitespace <- (_SPACE / _COMMENT)*
-_SPACE      <- [ \t\r\n]
-_COMMENT    <- '#' (!'\n' .)*
+~_       <- (_SPACE / _COMMENT)*
+_SPACE   <- [ \t\r\n]
+_COMMENT <- '#' (!'\n' .)*
 ```
 
 **Keyword-like operators need `%word`.** In a scannerless parser, `'and'` happily matches the first three letters of `android`. Declare `%word` so literals that look like words are checked against a word boundary. ([#328](https://github.com/yhirose/cpp-peglib/issues/328)) See the next section.
@@ -655,7 +657,7 @@ A third argument lists the rules to use in place of those marked `no_ast_opt`, f
 parser.enable_ast(true, true, {"ARGUMENTS", "BLOCK"});
 ```
 
-With `enable_ast(true)`, nodes are also built only for the rule matches that end up in the tree, not for alternatives that are tried and then abandoned. The parser records each match and builds its node later, when the node is needed: before a predicate or a `leave` handler sees it, before your own semantic action runs, and when the parse returns. What those callbacks see is the same as when nodes are built right away, with one exception: a node's `parent` is set only when its parent node is built, so it is guaranteed only once the parse has returned. Grammars that backtrack a lot gain the most (about 20% on a C grammar). Where almost every node ends up in the tree, or every rule has a predicate or a `leave` handler, the extra bookkeeping can make parsing up to about a quarter slower. The nodes are built right away as before when packrat parsing or a tracer is enabled, or when the grammar has left recursion. A match whose node nothing reads builds none at all, such as a match of a `~` rule or one inside a token or a lookahead; with packrat parsing, which reuses a match wherever the rule is tried again at the same position, only the matches of rules whose nodes nothing in the parse reads. A `precedence` rule always builds the nodes of its operands and operators, and the nodes it folds them into, right away, even in an alternative that is abandoned later, so that a long chain of operators does not have to be built by a recursion as deep as the chain.
+A node's `parent` is guaranteed only once `parser::parse` has returned: until then, a node that packrat parsing or left recursion reuses can still point to a parent built for an alternative that was abandoned. Where packrat parsing reuses a node of an empty match under two parents, each gets a copy of its own, so such a node in the returned tree can be another object than the one an action or a `leave` handler saw.
 
 A left-associative `precedence` operator or left recursion turns a long chain such as `1+2+3+...` into a tree as deep as the chain is long. Parsing it and building and releasing its tree take no recursion that deep, but `optimize_ast` and `ast_to_s` walk the tree recursively, as your own code may, and can overflow the stack on a tree a few tens of thousands of levels deep with an 8MB stack, and on a much shallower one in a thread with a smaller stack. For such input, use `enable_ast(true)` rather than `optimize_ast`, and `set_max_depth` to make a parse fail on a tree deeper than the code that walks it can take (see [Limit nesting depth](#limit-nesting-depth)). `ast_to_s` indents each node by its depth, so on such a chain its output grows with the square of the chain's length: around a gigabyte for 20,000 operators.
 
@@ -735,8 +737,6 @@ The following are available operators:
 | rec      | Infix expression                | usr      | User defined parser |
 | rep      | Repetition                      |          |                     |
 
-A `usr` parser sees the values that the rule's body has matched before it. Inside a lookahead (`apd`, `npd`) or `ign`, where values are thrown away, some of them may be missing, as the matches there may build none.
-
 Adjust definitions
 ------------------
 
@@ -780,6 +780,8 @@ Error report and recovery
 -------------------------
 
 cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
+
+The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Packrat parsing reuses a rule's earlier failure at the same position instead of trying the rule again, and a reused failure lists nothing more. So when a rule that a token rule uses has already failed there outside that token rule, the name of the token rule is not listed.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
@@ -1031,8 +1033,8 @@ Notes:
   and other callbacks are **not** included and must be re-applied after
   `load_blob`.
 - First-sets are recomputed on load, and references are resolved by name.
-- Grammars that use the `precedence` instruction, a capture / back-reference, or
-  a User operator are not serializable (`serialize_grammar()` throws;
+- Grammars that use a capture / back-reference or a User operator are not
+  serializable (`serialize_grammar()` throws;
   `load_blob()` returns `false` on a bad or incompatible blob).
 
 `peglint` can emit a blob with the `--blob` option:

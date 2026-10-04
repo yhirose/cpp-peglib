@@ -1678,6 +1678,73 @@ TEST(GeneralTest, ReleasedAstKeepsNodesHeldElsewhere) {
   EXPECT_TRUE(kept->nodes[0] && kept->nodes[1]);
 }
 
+// A `leave` handler can put a value in place of its rule's, which the rules
+// above pass up though they have no action.
+TEST(GeneralTest, Value_that_a_leave_handler_sets_is_passed_up) {
+  parser pg(R"(
+    S <- C
+    C <- L
+    L <- 'x'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg["L"].leave = [](const Context &, const char *, size_t, size_t,
+                     std::any &value, std::any &) { value = 42; };
+  auto got = 0;
+  pg["S"] = [&](const SemanticValues &vs) { got = std::any_cast<int>(vs[0]); };
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(42, got);
+}
+
+// A left-recursive rule's match is kept for the later matches at its
+// position, so the one a lookahead makes has its value too.
+TEST(GeneralTest, Value_of_a_left_recursive_rule_first_matched_in_a_lookahead) {
+  parser pg(R"(
+    S <- &(E ';') E ';'
+    E <- E '+' N / N
+    N <- < [0-9]+ >
+  )");
+  ASSERT_TRUE(!!pg);
+  pg["N"] = [](const SemanticValues &vs) { return vs.token_to_number<int>(); };
+  auto got = 0;
+  pg["S"] = [&](const SemanticValues &vs) { got = std::any_cast<int>(vs[0]); };
+
+  EXPECT_TRUE(pg.parse("1+2;"));
+  EXPECT_EQ(1, got);
+}
+
+TEST(GeneralTest, User_operator_in_a_lookahead_sees_the_values_before_it) {
+  Definition R, A;
+  size_t seen = 0;
+  A <= chr('a');
+  A = [](const SemanticValues &) { return 1; };
+  R <= seq(apd(seq(A, usr([&](const char *, size_t, SemanticValues &vs,
+                              std::any &) -> size_t {
+                     seen = vs.size();
+                     return 0;
+                   }))),
+           A);
+
+  EXPECT_TRUE(R.parse("a").ret);
+  EXPECT_EQ(1u, seen);
+}
+
+// What a whitespace operator set without wsp() matches lands in the scope
+// of the rule being parsed.
+TEST(GeneralTest, Value_of_a_rule_in_a_whitespace_set_without_wsp) {
+  Definition S, A, SP;
+  SP <= chr(' ');
+  SP = [](const SemanticValues &) { return 1; };
+  A <= lit("a");
+  S <= seq(A);
+  S.whitespaceOpe = zom(SP);
+  auto got = 0;
+  S = [&](const SemanticValues &vs) { got = std::any_cast<int>(vs[0]); };
+
+  EXPECT_TRUE(S.parse("a ").ret);
+  EXPECT_EQ(1, got);
+}
+
 TEST(GeneralTest, RecognizerPathIsUnobservable) {
   // A rule match whose value nobody reads, or is always empty, builds no
   // value (see Holder::parse_core). Callbacks must see what they see when
@@ -1932,6 +1999,64 @@ TEST(GeneralTest, CollapsedAstParentLinks) {
     std::shared_ptr<Ast> ast;
     ASSERT_TRUE(pg.parse("ab", ast));
     EXPECT_EQ(0u, wrong_parents(ast));
+  }
+}
+
+// The same holds for the tree of enable_ast(): a node reused from a
+// left-recursive rule's memo or the packrat cache may have been taken in by
+// a parent that was then discarded.
+TEST(GeneralTest, AstParentLinks) {
+  std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
+      [&](const std::shared_ptr<Ast> &ast) {
+        size_t n = 0;
+        for (const auto &child : ast->nodes) {
+          if (child->parent.lock() != ast) { n++; }
+          n += wrong_parents(child);
+        }
+        return n;
+      };
+
+  struct {
+    const char *grammar;
+    const char *input;
+  } cases[] = {
+      {R"(
+         S <- E ';'
+         E <- T '+' N / N
+         T <- E
+         N <- < [0-9]+ >
+       )",
+       "1+2+3;"},
+      {R"(
+         E <- E '+' T / T
+         T <- T '*' N / N
+         N <- < [0-9]+ >
+       )",
+       "1*2+3*4"},
+      // Packrat hands the same zero-length E node to both X and Y.
+      {R"(
+         S  <- X Y
+         X  <- A0 E
+         Y  <- E B0 / E C0
+         E  <- 'e'?
+         A0 <- 'a'
+         B0 <- 'b'
+         C0 <- 'c'
+       )",
+       "ab"},
+  };
+  for (const auto &[grammar, input] : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(!!pg) << grammar;
+      pg.enable_ast();
+      if (packrat) { pg.enable_packrat_parsing(); }
+
+      std::shared_ptr<Ast> ast;
+      ASSERT_TRUE(pg.parse(input, ast)) << grammar << packrat;
+      EXPECT_EQ(0u, wrong_parents(ast)) << grammar << packrat;
+      EXPECT_TRUE(ast->parent.expired()) << grammar << packrat;
+    }
   }
 }
 

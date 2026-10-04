@@ -34,3 +34,20 @@ jobs:
     - name: Test with C++20
       working-directory: ${{github.workspace}}/build_20
       run: ctest -C ${{env.BUILD_TYPE}}
+
+  # Release builds define NDEBUG, so the jobs above never run peglib's asserts.
+  assert:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake with assertions enabled
+      run: cmake -B ${{github.workspace}}/build_assert -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE=-O2
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build_assert --parallel 4
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build_assert
+      run: ctest --output-on-failure

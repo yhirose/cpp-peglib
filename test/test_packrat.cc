@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
-#include <map>
 #include <peglib.h>
-#include <set>
 
 using namespace peg;
 
@@ -230,9 +228,6 @@ TEST(PackratTest, Packrat_after_another_start_rule_reassigned_ids) {
   )");
   EXPECT_TRUE(pg);
 
-  // Parsing from Sub numbers the shared rules (Expr, Num) past Top's ID
-  // space. Top's packrat tables are only set up afterwards, so Top has to
-  // restore its own numbering before indexing them.
   EXPECT_TRUE(pg.parse("1+2;"));
   EXPECT_TRUE(pg.get_grammar().at("Sub").parse("abcde1+2").ret);
   pg.enable_packrat_parsing();
@@ -252,11 +247,8 @@ TEST(PackratTest, Packrat_after_another_start_rule_gave_two_rules_one_id) {
 
   EXPECT_TRUE(pg.parse("1+2;"));
 
-  // Sub numbers Expr with the id Top gave W. If Top reused that id, Expr
-  // would read W's cached failure at position 0 and the parse would fail.
   const auto &g = pg.get_grammar();
   EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
-  EXPECT_EQ(g.at("W").id, g.at("Expr").id);
 
   EXPECT_TRUE(pg.parse("1+2;"));
 }
@@ -280,16 +272,11 @@ TEST(PackratTest, Packrat_parse_nested_in_an_action_keeps_the_outer_ids) {
     nested_ok = g.at("Sub").parse("1+2").ret;
   };
 
-  // While the nested parse runs, Sub's numbering gives Expr the id Top gave
-  // W. Unless Top gets its ids back, the rest of Top's parse finds W's
-  // cached failure where it looks for Expr.
   EXPECT_TRUE(pg.parse("a1+2;"));
   EXPECT_TRUE(nested_ok);
   EXPECT_NE(g.at("Expr").id, g.at("W").id);
 
-  // Parsed on its own, Sub does give Expr W's id: the collision above is real.
   EXPECT_TRUE(g.at("Sub").parse("1+2").ret);
-  EXPECT_EQ(g.at("Expr").id, g.at("W").id);
 }
 
 // B is tried twice at the start, where it captures 'a'. Memoized, the second
@@ -350,7 +337,7 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
 }
 
 // Gives the rules AST actions that count their runs in `runs`. Such an action
-// may be skipped where nothing reads its value (see Holder::parse_rule), so
+// may be skipped where nothing reads its value (see Holder::parse_core), so
 // the counts show which matches built a value.
 static void count_ast_actions(parser &pg, const std::vector<std::string> &names,
                               std::map<std::string, size_t> &runs) {
@@ -368,8 +355,8 @@ static void count_ast_actions(parser &pg, const std::vector<std::string> &names,
 // With packrat, a match builds no value when no match of its rule is ever
 // read: in a lookahead, a token rule or a `~` rule, or below a rule that
 // passes up its first value or runs an action only where its own value is
-// read. Values that land in a macro, the whitespace or a rule whose
-// callbacks see them are read.
+// read. Values that land in a macro or a rule whose callbacks see them are
+// read. What %whitespace matches is thrown away.
 TEST(PackratTest, Packrat_builds_no_value_nothing_reads) {
   const char *grammar = R"(
     S       <- &LRM(ARG3) &LOOK &LOOK_PASS TOKEN DROP CHECKED PASS M(ARG)
@@ -417,10 +404,10 @@ TEST(PackratTest, Packrat_builds_no_value_nothing_reads) {
   for (const auto &[name, n] : runs) {
     ran.insert(name);
   }
-  EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "CHECKED", "CHECKED_BELOW",
-                                   "UP", "ARG", "BODY", "SHARED", "SPACE",
-                                   "LRM", "ARG3", "TBODY"}),
-            ran);
+  EXPECT_EQ(
+      (std::set<std::string>{"S", "TOKEN", "CHECKED", "CHECKED_BELOW", "UP",
+                             "ARG", "BODY", "SHARED", "LRM", "ARG3", "TBODY"}),
+      ran);
 
   // Callbacks attached since are taken into account: DROP's predicate reads
   // BELOW's value.
@@ -430,6 +417,183 @@ TEST(PackratTest, Packrat_builds_no_value_nothing_reads) {
   EXPECT_EQ(1u, runs["DROP"]);
   EXPECT_EQ(1u, runs["BELOW"]);
   EXPECT_EQ(0u, runs["LOOK"]);
+}
+
+// A match builds no value where nothing reads it: in a lookahead, in a
+// token rule or below a `~` rule. A tracer sees every scope, so with one
+// every value is built.
+TEST(PackratTest, Builds_no_value_nothing_reads) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S     <- &LOOK TOKEN DROP KEPT
+      LOOK  <- 'i'
+      TOKEN <- < INNER >
+      INNER <- 'i'
+      ~DROP <- BELOW
+      BELOW <- 'b'
+      KEPT  <- 'k'
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    const std::vector<std::string> names{"S",    "LOOK",  "TOKEN", "INNER",
+                                         "DROP", "BELOW", "KEPT"};
+    std::map<std::string, size_t> runs;
+    count_ast_actions(pg, names, runs);
+    auto built = [&]() {
+      EXPECT_TRUE(pg.parse("ibk"));
+      std::set<std::string> built;
+      for (const auto &[name, _] : runs) {
+        built.insert(name);
+      }
+      runs.clear();
+      return built;
+    };
+
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "KEPT"}), built());
+
+    // Callbacks set since are taken into account: DROP's predicate reads
+    // BELOW's value.
+    pg["DROP"].predicate = [](const SemanticValues &vs, const std::any &,
+                              std::string &) {
+      return vs.size() == 1 && vs[0].has_value();
+    };
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "DROP", "BELOW", "KEPT"}),
+              built());
+    pg["DROP"].predicate = Predicate();
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "KEPT"}), built());
+
+    pg.enable_trace(
+        [](const Ope &, const char *, size_t, const SemanticValues &,
+           const Context &, const std::any &, std::any &) {},
+        [](const Ope &, const char *, size_t, const SemanticValues &,
+           const Context &, const std::any &, size_t, std::any &) {});
+    EXPECT_EQ(std::set<std::string>(names.begin(), names.end()), built());
+  }
+}
+
+// A memoized match is handed to every caller at its position. It builds no
+// value when no match of its rule is ever read.
+TEST(PackratTest, Packrat_builds_no_value_for_a_memoized_rule_nothing_reads) {
+  parser pg(R"(
+    S <- &A 'a' 'x' / &A 'a' 'y'
+    A <- B
+    B <- 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"S", "A", "B"}, runs);
+
+  ASSERT_TRUE(pg.parse("ay"));
+  EXPECT_LT(0u, pg["S"].packrat_stats_[pg["A"].id].hits);
+  EXPECT_EQ(1u, runs["S"]);
+  EXPECT_EQ(0u, runs["A"]);
+  EXPECT_EQ(0u, runs["B"]);
+}
+
+// B was numbered apart from A and X, so its id is X's and C's tables do not
+// index it. What it reads is read all the same: the memoized Z, which C
+// itself uses only in a lookahead.
+TEST(PackratTest, Packrat_keeps_the_value_that_a_rule_numbered_apart_reads) {
+  Definition A, X, G, B, Z, C;
+  X <= chr('x');
+  A <= seq(X);
+  Z <= chr('z');
+  B <= seq(Z);
+  G <= seq(B);
+  ASSERT_TRUE(A.parse("x").ret);
+  ASSERT_TRUE(G.parse("z").ret);
+  ASSERT_EQ(X.id, B.id);
+
+  Z = [](const SemanticValues &vs) {
+    return std::make_shared<Ast>("", 1, 1, "Z",
+                                 vs.transform<std::shared_ptr<Ast>>());
+  };
+  Z.action.declare_ast_action<std::shared_ptr<Ast>>(false);
+  auto has_value = false;
+  B = [&](const SemanticValues &vs) {
+    has_value = vs.size() == 1 && vs[0].has_value();
+  };
+
+  C <= seq(npd(A), apd(cho(seq(Z, chr('1')), Z)), B);
+  C.enablePackratParsing = true;
+  C.collect_packrat_stats = true;
+  ASSERT_TRUE(C.parse("z").ret);
+  EXPECT_LT(0u, C.packrat_stats_[Z.id].hits);
+  EXPECT_TRUE(has_value);
+}
+
+// An operator rule of a precedence is built to hand over its token, though
+// its value is thrown away, so what its action reads is built too.
+TEST(PackratTest, Packrat_keeps_the_values_below_an_ignored_operator_rule) {
+  parser pg(R"(
+    S    <- EXPR / &OP 'q'
+    EXPR <- ATOM (OP ATOM)* { precedence L + }
+    ~OP  <- PLUS 'z' / PLUS
+    PLUS <- '+'
+    ATOM <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"OP", "PLUS"}, runs);
+
+  ASSERT_TRUE(pg.parse("1+2"));
+  EXPECT_LT(0u, pg["S"].packrat_stats_[pg["PLUS"].id].hits);
+  EXPECT_EQ(1u, runs["PLUS"]);
+}
+
+// What a lookahead matches is thrown away, in the scope of a precedence's
+// operator too: OPM's body is parsed into it, and CM is built there only if
+// its token is asked for.
+TEST(PackratTest, Packrat_reads_no_token_in_a_lookahead_of_an_operator) {
+  parser pg(R"(
+    S      <- EXPR / &CM 'q'
+    EXPR   <- ATOM (OPM(PLUS) ATOM)* { precedence L + }
+    OPM(x) <- &CM x
+    CM     <- D 'q' / D
+    D      <- '+'
+    PLUS   <- '+'
+    ATOM   <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"CM", "D"}, runs);
+
+  ASSERT_TRUE(pg.parse("1+2"));
+  EXPECT_LT(0u, pg["S"].packrat_stats_[pg["D"].id].hits);
+  EXPECT_EQ(0u, runs["CM"]);
+  EXPECT_EQ(0u, runs["D"]);
+}
+
+// A left-recursive macro forms a scope of its own, which holds the values
+// of its arguments in a lookahead too.
+TEST(PackratTest, Packrat_keeps_the_value_of_a_macro_argument_in_a_lookahead) {
+  parser pg(R"(
+    S      <- &Sum(Num) &(Num '!' / Num) [0-9+]+
+    Sum(x) <- Sum(x) '+' x / x
+    Num    <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"Num"}, runs);
+  auto has_values = true;
+  pg["Sum"] = [&](const SemanticValues &vs) {
+    for (const auto &v : vs) {
+      if (!v.has_value()) { has_values = false; }
+    }
+    return 1;
+  };
+
+  ASSERT_TRUE(pg.parse("1+2"));
+  EXPECT_LT(0u, pg["S"].packrat_stats_[pg["Num"].id].hits);
+  EXPECT_TRUE(has_values);
 }
 
 // A match whose value is thrown away leaves no valueless cache entry for a

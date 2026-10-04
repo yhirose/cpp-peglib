@@ -373,7 +373,7 @@ TEST(UnstartableRuleTest, Is_entered_when_errors_are_reported) {
 
   EXPECT_FALSE(pg.parse("z"));
   EXPECT_EQ(1u, tries(pg, "A"));
-  EXPECT_EQ("syntax error, unexpected 'z', expecting 'x'.", message);
+  EXPECT_EQ("syntax error, unexpected 'z', expecting 'y', 'x'.", message);
 }
 
 TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
@@ -557,6 +557,21 @@ TEST(FirstSetTest, Whitespace_after_an_empty_match) {
     EXPECT_TRUE(pg.parse("ax")) << grammar;
     EXPECT_TRUE(pg.parse("a x")) << grammar;
   }
+}
+
+// A cut in a lookahead reaches the choice around the rule, which then tries
+// no other alternative.
+TEST(UnstartableRuleTest, Is_entered_to_run_a_cut_in_a_lookahead) {
+  parser pg(R"(
+    S <- 'x' R / 'x' 'c'
+    R <- !E 'b'
+    E <- ↑ 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_FALSE(pg.parse("xc"));
+  pg.set_logger([](size_t, size_t, const std::string &) {});
+  EXPECT_FALSE(pg.parse("xc"));
 }
 
 // The same holds where a rule that cannot start with the next byte is not
