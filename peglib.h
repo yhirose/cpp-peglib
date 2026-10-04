@@ -1189,7 +1189,9 @@ public:
   // False when the grammar contains no Cut or Recovery ope (determined once
   // at id-assignment time); lets PrioritizedChoice skip all cut_stack work.
   const bool has_cut;
-  std::vector<bool> cut_stack;
+  // Not std::vector<bool>: GCC 12 to 14 drop its pop_back from a scope_exit
+  // on the path an exception takes.
+  std::vector<char> cut_stack;
 
   const size_t def_count;
   const StartRuleAnalysis *const analysis;
