@@ -352,6 +352,73 @@ static void count_ast_actions(parser &pg, const std::vector<std::string> &names,
   }
 }
 
+// With packrat, a match builds no value when no match of its rule is ever
+// read: in a lookahead, a token rule or a `~` rule, or below a rule that
+// passes up its first value or runs an action only where its own value is
+// read. Values that land in a macro or a rule whose callbacks see them are
+// read. What %whitespace matches is thrown away.
+TEST(PackratTest, Packrat_builds_no_value_nothing_reads) {
+  const char *grammar = R"(
+    S       <- &LRM(ARG3) &LOOK &LOOK_PASS TOKEN DROP CHECKED PASS M(ARG)
+               &SHARED SHARED T('t')
+    LOOK    <- 'i'
+    LOOK_PASS <- LOOK_UP
+    LOOK_UP <- 'i'
+    LRM(X)  <- LRM(X) X / X
+    ARG3    <- 'i'
+    TOKEN   <- < INNER >
+    INNER   <- 'i'
+    ~DROP   <- BELOW
+    BELOW   <- 'b'
+    ~CHECKED <- CHECKED_BELOW
+    CHECKED_BELOW <- 'c'
+    PASS    <- UP
+    UP      <- 'u'
+    M(X)    <- X BODY
+    ARG     <- 'a'
+    BODY    <- 'm'
+    SHARED  <- 's'
+    T(X)    <- < X > TBODY
+    TBODY   <- 'n'
+    %whitespace <- SPACE*
+    SPACE   <- ' '
+  )";
+  const std::vector<std::string> names{
+      "S",       "LOOK",          "TOKEN", "INNER", "DROP", "BELOW",
+      "CHECKED", "CHECKED_BELOW", "UP",    "ARG",   "BODY", "SHARED",
+      "SPACE",   "LOOK_UP",       "LRM",   "ARG3",  "T",    "TBODY"};
+
+  parser pg(grammar);
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, names, runs);
+  auto reads_its_value = [](const SemanticValues &vs, const std::any &,
+                            std::string &) {
+    return vs.size() == 1 && vs[0].has_value();
+  };
+  pg["CHECKED"].predicate = reads_its_value;
+
+  ASSERT_TRUE(pg.parse("i b c u a m s t n"));
+  std::set<std::string> ran;
+  for (const auto &[name, n] : runs) {
+    ran.insert(name);
+  }
+  EXPECT_EQ(
+      (std::set<std::string>{"S", "TOKEN", "CHECKED", "CHECKED_BELOW", "UP",
+                             "ARG", "BODY", "SHARED", "LRM", "ARG3", "TBODY"}),
+      ran);
+
+  // Callbacks attached since are taken into account: DROP's predicate reads
+  // BELOW's value.
+  runs.clear();
+  pg["DROP"].predicate = reads_its_value;
+  ASSERT_TRUE(pg.parse("i b c u a m s t n"));
+  EXPECT_EQ(1u, runs["DROP"]);
+  EXPECT_EQ(1u, runs["BELOW"]);
+  EXPECT_EQ(0u, runs["LOOK"]);
+}
+
 // A match builds no value where nothing reads it: in a lookahead, in a
 // token rule or below a `~` rule. A tracer sees every scope, so with one
 // every value is built.
