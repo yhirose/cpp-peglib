@@ -50,4 +50,4 @@ jobs:
 
     - name: Test
       working-directory: ${{github.workspace}}/build_assert
-      run: ctest
+      run: ctest --output-on-failure
