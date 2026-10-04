@@ -336,6 +336,96 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
   }
 }
 
+// Gives the rules AST actions that count their runs in `runs`. Such an action
+// may be skipped where nothing reads its value (see Holder::parse_core), so
+// the counts show which matches built a value.
+static void count_ast_actions(parser &pg, const std::vector<std::string> &names,
+                              std::map<std::string, size_t> &runs) {
+  for (const auto &name : names) {
+    auto &rule = pg[name.c_str()];
+    rule = [&runs, name](const SemanticValues &vs) {
+      runs[name]++;
+      return std::make_shared<Ast>("", 1, 1, name.c_str(),
+                                   vs.transform<std::shared_ptr<Ast>>());
+    };
+    rule.action.declare_ast_action<std::shared_ptr<Ast>>(false);
+  }
+}
+
+// A match builds no value where nothing reads it: in a lookahead, in a
+// token rule or below a `~` rule. A tracer sees every scope, so with one
+// every value is built.
+TEST(PackratTest, Builds_no_value_nothing_reads) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S     <- &LOOK TOKEN DROP KEPT
+      LOOK  <- 'i'
+      TOKEN <- < INNER >
+      INNER <- 'i'
+      ~DROP <- BELOW
+      BELOW <- 'b'
+      KEPT  <- 'k'
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    const std::vector<std::string> names{"S",    "LOOK",  "TOKEN", "INNER",
+                                         "DROP", "BELOW", "KEPT"};
+    std::map<std::string, size_t> runs;
+    count_ast_actions(pg, names, runs);
+    auto built = [&]() {
+      EXPECT_TRUE(pg.parse("ibk"));
+      std::set<std::string> built;
+      for (const auto &[name, _] : runs) {
+        built.insert(name);
+      }
+      runs.clear();
+      return built;
+    };
+
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "KEPT"}), built());
+
+    // Callbacks set since are taken into account: DROP's predicate reads
+    // BELOW's value.
+    pg["DROP"].predicate = [](const SemanticValues &vs, const std::any &,
+                              std::string &) {
+      return vs.size() == 1 && vs[0].has_value();
+    };
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "DROP", "BELOW", "KEPT"}),
+              built());
+    pg["DROP"].predicate = Predicate();
+    EXPECT_EQ((std::set<std::string>{"S", "TOKEN", "KEPT"}), built());
+
+    pg.enable_trace(
+        [](const Ope &, const char *, size_t, const SemanticValues &,
+           const Context &, const std::any &, std::any &) {},
+        [](const Ope &, const char *, size_t, const SemanticValues &,
+           const Context &, const std::any &, size_t, std::any &) {});
+    EXPECT_EQ(std::set<std::string>(names.begin(), names.end()), built());
+  }
+}
+
+// A match whose value is thrown away leaves no valueless cache entry for a
+// later match of the rule at the same position whose value is read. Both
+// alternatives start with A, so the selective packrat memoizes it.
+TEST(PackratTest,
+     Packrat_keeps_the_value_of_a_rule_read_after_a_dropped_match) {
+  parser pg(R"(
+    S <- ~A 'z' / A 'y'
+    A <- B
+    B <- 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  std::map<std::string, size_t> runs;
+  count_ast_actions(pg, {"B"}, runs);
+  auto has_value = false;
+  pg["S"] = [&](const SemanticValues &vs) {
+    has_value = vs.size() == 1 && vs[0].has_value();
+  };
+  ASSERT_TRUE(pg.parse("ay"));
+  EXPECT_TRUE(has_value);
+}
+
 // Whether a value is read depends on the start rule. A parse from another
 // start rule nested in an action must not change what the enclosing parse
 // builds: S2 reads R only in a lookahead, S1 reads its value.
