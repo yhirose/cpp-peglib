@@ -5572,28 +5572,24 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
 // Compute which rules benefit from packrat memoization.
 // A rule benefits if it's reachable from 2+ alternatives of the same
-// PrioritizedChoice (backtracking will re-visit it at the same position).
+// PrioritizedChoice (backtracking will re-visit it at the same position),
+// unless all of them only reach it through one shared rule, which answers
+// from its own memo.
 inline void Definition::select_packrat_rules() const {
   std::call_once(packrat_rules_init_, [&]() {
     auto def_count = analysis_.rules_by_id.size();
     if (def_count == 0) { return; }
 
-    // Collect rule IDs that can be invoked at the *same start position* as
-    // the given Ope subtree (leftmost reachability). A packrat cache hit
-    // requires the same rule to be queried twice at the same position, and
-    // in a PEG that only happens when alternatives of a choice share a
-    // leftmost prefix — rules reachable only past a consuming element can
-    // never be re-queried by a sibling alternative.
-    struct CollectLeftmostRules : public TraversalVisitor {
+    // Walks what can be invoked at the *same start position* as the given Ope
+    // subtree (leftmost reachability). A packrat cache hit requires the same
+    // rule to be queried twice at the same position, and in a PEG that only
+    // happens when alternatives of a choice share a leftmost prefix — rules
+    // reachable only past a consuming element can never be re-queried by a
+    // sibling alternative.
+    struct LeftmostWalker : public TraversalVisitor {
       using TraversalVisitor::visit;
-      std::vector<bool> reachable; // indexed by def_id
-      std::vector<bool>
-          visited_rules; // indexed by def_id; guards Holder cycles
 
-      CollectLeftmostRules(size_t n)
-          : reachable(n, false), visited_rules(n, false) {}
-
-      // Collect from the position element `from` starts at: element `from`
+      // Walk from the position element `from` starts at: element `from`
       // itself, plus what follows for as long as elements can match empty —
       // only up to (and including) the first one that must consume input.
       void collect(const std::vector<std::shared_ptr<Ope>> &opes, size_t from) {
@@ -5606,6 +5602,18 @@ inline void Definition::select_packrat_rules() const {
       }
 
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
+    };
+
+    // The rule IDs leftmost-reachable from the given subtree.
+    struct CollectLeftmostRules : public LeftmostWalker {
+      using LeftmostWalker::visit;
+      std::vector<bool> reachable; // indexed by def_id
+      std::vector<bool>
+          visited_rules; // indexed by def_id; guards Holder cycles
+
+      CollectLeftmostRules(size_t n)
+          : reachable(n, false), visited_rules(n, false) {}
+
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
         if (id < reachable.size()) {
@@ -5627,6 +5635,45 @@ inline void Definition::select_packrat_rules() const {
           reachable[ope.rule_->id] = true;
           ope.rule_->accept(*this);
         }
+      }
+    };
+
+    // For each leftmost-reachable rule, its gateways: the first shared rule
+    // (one reachable from 2+ alternatives) on each path to it, or the rule
+    // itself when a path reaches it before any shared rule.
+    struct CollectGateways : public LeftmostWalker {
+      using LeftmostWalker::visit;
+      const std::vector<size_t> &share_count;    // indexed by def_id
+      std::vector<std::vector<size_t>> gateways; // indexed by def_id
+      const Definition *gateway = nullptr;       // of the path being walked
+
+      CollectGateways(const std::vector<size_t> &share_count)
+          : share_count(share_count), gateways(share_count.size()) {}
+
+      void visit(Holder &ope) override {
+        auto id = ope.outer_->id;
+        if (id >= gateways.size()) { return; }
+
+        // A rule and the gateway it is reached through are the state of the
+        // walk, so the list doubles as the visited set.
+        auto &list = gateways[id];
+        auto through = gateway ? gateway->id : id;
+        if (std::find(list.begin(), list.end(), through) != list.end()) {
+          return;
+        }
+        list.push_back(through);
+
+        // Only a memoized rule answers for what lies below it, and a macro
+        // is never memoized.
+        auto saved = gateway;
+        if (!gateway && share_count[id] >= 2 && !ope.outer_->is_macro) {
+          gateway = ope.outer_;
+        }
+        ope.ope_->accept(*this);
+        gateway = saved;
+      }
+      void visit(Reference &ope) override {
+        if (ope.rule_) { ope.rule_->accept(*this); }
       }
     };
 
@@ -5662,19 +5709,28 @@ inline void Definition::select_packrat_rules() const {
       void mark_aligned(const std::vector<Elements> &group, size_t k) {
         if (group.size() < 2) { return; }
 
-        std::vector<std::vector<bool>> reachable;
-        reachable.reserve(group.size());
+        std::vector<size_t> share_count(def_count, 0);
         for (const auto &seq : group) {
           CollectLeftmostRules clr(def_count);
           clr.collect(seq, k);
-          reachable.push_back(std::move(clr.reachable));
+          for (size_t id = 0; id < def_count; id++) {
+            if (clr.reachable[id]) { share_count[id]++; }
+          }
+        }
+
+        // A shared rule that is only reached through one other shared rule is
+        // not queried again here: by the time a later alternative gets to it,
+        // that gateway has answered from its own memo.
+        CollectGateways vis(share_count);
+        for (const auto &seq : group) {
+          vis.collect(seq, k);
         }
         for (size_t id = 0; id < def_count; id++) {
-          size_t count = 0;
-          for (const auto &alt : reachable) {
-            if (alt[id]) { count++; }
+          const auto &gateways = vis.gateways[id];
+          if (share_count[id] >= 2 &&
+              (gateways.size() != 1 || gateways[0] == id)) {
+            benefits[id] = true;
           }
-          if (count >= 2) { benefits[id] = true; }
         }
 
         // Only alternatives that also agree on element k stay aligned past it.
