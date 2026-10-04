@@ -1116,8 +1116,9 @@ struct StartRuleAnalysis {
   bool indexes(const Definition &rule) const;
 };
 
-// What Holder::parse_core goes by to leave out what goes unnoticed: building
-// a value that nothing reads, and entering a rule that cannot start.
+// What a rule match goes by to leave out what goes unnoticed: building a
+// value that nothing reads (Holder::parse_core), and entering a rule that
+// cannot start (Reference::parse_dispatch).
 struct RuleUse {
   // Whether a match is only recognized: it runs no callback, forms no scope
   // and builds no value.
@@ -4122,13 +4123,6 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   auto has_id = c.has_id(*outer_);
   const auto use = has_id ? c.rule_use[outer_->id] : RuleUse();
 
-  // A rule that cannot start with the next byte fails without being entered
-  // where that goes unnoticed, as a choice skips an alternative that cannot.
-  if (use.skippable && c.skips_rules && n > 0 &&
-      !outer_->start_bytes.test(static_cast<unsigned char>(*s))) {
-    return static_cast<size_t>(-1);
-  }
-
   Context::RuleMatch match;
 
   // A match that nothing observes, and whose value and token nothing reads,
@@ -4379,14 +4373,23 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
+      auto has_id = c.has_id(*rule_);
+
+      // A rule that cannot start with the next byte fails without being
+      // entered where that goes unnoticed, as a choice skips an alternative
+      // that cannot.
+      if (has_id && c.skips_rules && n > 0 && c.rule_use[rule_->id].skippable &&
+          !rule_->start_bytes.test(static_cast<unsigned char>(*s))) {
+        return static_cast<size_t>(-1);
+      }
+
       // Definition. The empty argument scope only exists to shadow the
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
       // top_macro_inst reads in the left-recursion machinery and the re-entry
       // guard of a rule without an id. A callee with no such reader parses
       // directly on the caller's frame.
-      if (!rule_->has_macro_ref && !rule_->is_left_recursive &&
-          c.has_id(*rule_)) {
+      if (!rule_->has_macro_ref && !rule_->is_left_recursive && has_id) {
         return rule_->holder_->parse(s, n, vs, c, dt);
       }
       c.push_empty_args();
@@ -5421,8 +5424,8 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
 }
 
 // A rule that cannot start with the next byte is skipped instead of entered
-// (see Holder::parse_core) only where entering it would run no callback, so
-// that skipping it goes unnoticed. Entered there, the rule fails without
+// (see Reference::parse_dispatch) only where entering it would run no callback,
+// so that skipping it goes unnoticed. Entered there, the rule fails without
 // consuming anything: its enter and leave run, and so do those of the rules
 // it enters at its start, whose actions and predicates run too if they can
 // match empty; a lookahead, a recovery and a macro there may match anything
