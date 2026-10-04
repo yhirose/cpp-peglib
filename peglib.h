@@ -3524,10 +3524,9 @@ public:
   bool disable_action = false;
   bool is_left_recursive = false;
   bool can_be_empty = false;
-  // The bytes a match of this rule can start with, when it cannot match empty
-  // and they are known (set up with the first sets).
-  bool has_start_bytes = false;
-  std::bitset<256> start_bytes;
+  // The bytes a match of this rule can start with: any, unless it cannot
+  // match empty and they are known (set up with the first sets).
+  std::bitset<256> start_bytes = std::bitset<256>().set();
   // Body contains a macro invocation, whose arguments resolve against the
   // innermost rule on rule_stack; computed by AssignIDToDefinition. The
   // conservative default keeps the stack maintained until then.
@@ -4373,23 +4372,21 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       auto se = scope_exit([&]() { c.pop_args(); });
       return rule_->holder_->parse(s, n, vs, c, dt);
     } else {
-      auto has_id = c.has_id(*rule_);
-
       // A rule that cannot start with the next byte fails without being
       // entered where that goes unnoticed, as a choice skips an alternative
       // that cannot.
-      if (has_id && c.skips_rules && n > 0 && c.rule_use[rule_->id].skippable &&
-          !rule_->start_bytes.test(static_cast<unsigned char>(*s))) {
+      if (c.skips_rules && n > 0 &&
+          !rule_->start_bytes.test(static_cast<unsigned char>(*s)) &&
+          c.has_id(*rule_) && c.rule_use[rule_->id].skippable) {
         return static_cast<size_t>(-1);
       }
 
       // Definition. The empty argument scope only exists to shadow the
       // caller's frame for readers inside the callee: a macro invocation in
       // its body (FindReference/top_args, tracked by has_macro_ref) and the
-      // top_macro_inst reads in the left-recursion machinery and the re-entry
-      // guard of a rule without an id. A callee with no such reader parses
-      // directly on the caller's frame.
-      if (!rule_->has_macro_ref && !rule_->is_left_recursive && has_id) {
+      // top_macro_inst reads in the left-recursion machinery. A callee with
+      // no such reader parses directly on the caller's frame.
+      if (!rule_->has_macro_ref && !rule_->is_left_recursive) {
         return rule_->holder_->parse(s, n, vs, c, dt);
       }
       c.push_empty_args();
@@ -4953,9 +4950,9 @@ inline void SetupFirstSets::visit(Holder &ope) {
   ComputeFirstSet cfs(first_set_cache_, whitespace_);
   ope.ope_->accept(cfs);
   const auto &fs = cfs.result_;
-  rule.has_start_bytes = !fs.any_char && !fs.can_be_empty && !rule.is_macro &&
-                         !rule.is_left_recursive;
-  rule.start_bytes = fs.chars;
+  auto known = !fs.any_char && !fs.can_be_empty && !rule.is_macro &&
+               !rule.is_left_recursive;
+  rule.start_bytes = known ? fs.chars : std::bitset<256>().set();
 
   ope.ope_->accept(*this);
 }
@@ -5494,9 +5491,7 @@ Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
   spread(start, [&](size_t id) -> const auto & { return entered[id]; });
 
   for (auto *rule : a.rules_by_id) {
-    if (rule) {
-      uses[rule->id].skippable = rule->has_start_bytes && !start[rule->id];
-    }
+    if (rule) { uses[rule->id].skippable = !start[rule->id]; }
   }
 }
 
@@ -5527,7 +5522,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
                                     bool rule_has_id, bool needs_token,
                                     RuleMatch &match, T fn) {
   if (!rule_has_id) {
-    auto key = LRKey({&rule, top_macro_inst()}, a_s);
+    auto key = LRKey({&rule, 0}, a_s);
     if (!in_progress.emplace(key, RuleMatch()).second) {
       match.len = static_cast<size_t>(-1);
       return;
