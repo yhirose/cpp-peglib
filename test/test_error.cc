@@ -339,6 +339,19 @@ TEST(ErrorTest, Expected_token_is_listed_once) {
             syntax_error(pg, "k-"));
 }
 
+// A parse that keeps failing at one position expects the same few tokens
+// over and over.
+TEST(ErrorTest, Expected_tokens_of_many_failures_at_one_position) {
+  parser pg(R"(
+    S <- N{1000} 'z'
+    N <- !'p' !'q'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected 'y', expecting 'p', 'q', 'z'.",
+            syntax_error(pg, "y"));
+}
+
 TEST(ErrorTest, Default_error_handling_fiblang) {
   parser pg(R"(
     # Syntax
