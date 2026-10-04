@@ -4206,7 +4206,13 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
 inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
                                const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
-    return outer_->action(vs, dt, predicate_data);
+    auto val = outer_->action(vs, dt, predicate_data);
+    // Release the values now instead of when this scope is next used: the
+    // AST node an action just returned is then held only by the caller, which
+    // lets a collapsing parent take it over in place.
+    vs.clear();
+    vs.tags.clear();
+    return val;
   } else if (vs.empty()) {
     return std::any();
   } else {
@@ -7451,9 +7457,25 @@ void add_ast_action(Definition &rule, bool collapse = false) {
     }
 
     if (collapse && vs.size() == 1) {
-      return collapse_ast_node(
-          *std::any_cast<const std::shared_ptr<T> &>(vs[0]), node_name,
-          position, length, vs.choice_count(), vs.choice());
+      const auto &child = std::any_cast<const std::shared_ptr<T> &>(vs[0]);
+
+      // Unless something else holds the child (the packrat cache, a user
+      // action), it stands in for this node itself instead of a copy of it.
+      // It then keeps its Annotation, which a copy would reset.
+      if (child.use_count() == 1) {
+        if (!child->preserve_position) {
+          child->position = position;
+          child->length = length;
+        }
+        child->original_name = node_name;
+        child->original_tag = str2tag(node_name);
+        child->original_choice_count = vs.choice_count();
+        child->original_choice = vs.choice();
+        return child;
+      }
+
+      return collapse_ast_node(*child, node_name, position, length,
+                               vs.choice_count(), vs.choice());
     }
 
     auto line = vs.line_info();
