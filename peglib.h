@@ -5856,8 +5856,11 @@ inline void Definition::select_packrat_rules() const {
     analysis_.packrat_index.assign(def_count, -1);
     int32_t k = 0;
     for (size_t id = 0; id < def_count; id++) {
-      // A left-recursive rule keeps its matches in lr_memo.
-      if (benefits[id] && !analysis_.rules_by_id[id]->is_left_recursive) {
+      if (!benefits[id]) { continue; }
+      // A macro parses in its caller's scope and is never memoized, and a
+      // left-recursive rule keeps its matches in lr_memo.
+      const auto &rule = *analysis_.rules_by_id[id];
+      if (!rule.is_macro && !rule.is_left_recursive) {
         analysis_.packrat_index[id] = k++;
       }
     }
