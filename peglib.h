@@ -1089,6 +1089,7 @@ struct ValueUse {
   };
   Recognized recognized = Recognized::never;
   ChildValues child_values = ChildValues::read;
+  bool value_always_empty = false;
 };
 
 class Context {
@@ -1279,13 +1280,18 @@ public:
   // is built and every value delivered.
   bool builds_everything = false;
 
-  // Until the returned guard goes, the values of rule matches are not
-  // delivered to `vs`.
-  auto values_unread_in(SemanticValues &vs) {
-    auto se = scope_exit([&vs, save = vs.holds_rule_values_]() {
-      vs.holds_rule_values_ = save;
+  // Until the returned guard goes, neither the values nor the tokens of
+  // rule matches are delivered to `vs`: what is parsed is thrown away.
+  auto unread_in(SemanticValues &vs) {
+    auto se = scope_exit([&vs, values = vs.holds_rule_values_,
+                          tokens = vs.holds_rule_tokens_]() {
+      vs.holds_rule_values_ = values;
+      vs.holds_rule_tokens_ = tokens;
     });
-    if (!builds_everything) { vs.holds_rule_values_ = false; }
+    if (!builds_everything) {
+      vs.holds_rule_values_ = false;
+      vs.holds_rule_tokens_ = false;
+    }
     return se;
   }
 
@@ -1837,7 +1843,7 @@ public:
     auto snap = c.snapshot(vs);
     size_t len;
     {
-      auto unread = c.values_unread_in(vs);
+      auto unread = c.unread_in(vs);
       len = ope_->parse(s, n, vs, c, dt);
     }
     c.rollback(vs, snap); // Always rollback — predicates consume nothing
@@ -1862,7 +1868,7 @@ public:
     auto snap = c.snapshot(vs);
     size_t len;
     {
-      auto unread = c.values_unread_in(vs);
+      auto unread = c.unread_in(vs);
       len = ope_->parse(s, n, vs, c, dt);
     }
     c.rollback(vs, snap); // Always rollback — predicates consume nothing
@@ -2124,7 +2130,7 @@ public:
                     Context &c, std::any &dt) const override {
     auto &chvs = c.push_semantic_values_scope();
     auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
-    auto unread = c.values_unread_in(chvs);
+    auto unread = c.unread_in(chvs);
     return ope_->parse(s, n, chvs, c, dt);
   }
 
@@ -4015,6 +4021,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     });
     if (success(match.len) && vs.holds_rule_values_ &&
         !outer_->ignoreSemanticValue) {
+      // A value that might not be empty is read nowhere.
+      assert(use.value_always_empty);
       vs.emplace_back();
       vs.tags.emplace_back(outer_->tag());
     }
@@ -4934,30 +4942,53 @@ inline void Definition::analyze() const {
   number_new_rules();
 }
 
-// The rules whose values land in the scope an operator is parsed into: the
-// ones it refers to, without walking into them, macros and the rules in
-// their arguments included, but not where what they match is thrown away.
+// The rules an operator refers to, without walking into them, macros and
+// the rules in their arguments included.
 struct CollectValueRules : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  void visit(AndPredicate &) override {}
-  void visit(NotPredicate &) override {}
-  void visit(Ignore &) override {}
-  void visit(Holder &ope) override { rules.push_back(ope.outer_); }
+  void visit(AndPredicate &ope) override { thrown_away(*ope.ope_); }
+  void visit(NotPredicate &ope) override { thrown_away(*ope.ope_); }
+  void visit(Ignore &ope) override { thrown_away(*ope.ope_); }
+  void visit(Holder &ope) override { add(ope.outer_); }
   void visit(Reference &ope) override {
-    if (ope.rule_) { rules.push_back(ope.rule_); }
+    if (ope.rule_) { add(ope.rule_); }
     for (const auto &arg : ope.args_) {
-      arg->accept(*this);
+      read(*arg);
     }
   }
   void visit(PrecedenceClimbing &ope) override {
     has_precedence = true;
     ope.atom_->accept(*this);
-    ope.binop_->accept(*this);
+    read(*ope.binop_);
   }
 
+  // The rules whose values land in the scope the operator is parsed into:
+  // not those whose match is thrown away.
   std::vector<Definition *> rules;
+  // The rules whose values are read whatever that scope is to its reader:
+  // those in a macro argument, which land where the macro puts them, and a
+  // precedence's operator, whose action runs as it hands over its token.
+  std::vector<Definition *> read_rules;
   bool has_precedence = false; // which reads the scope it folds
+
+private:
+  void add(Definition *rule) {
+    if (!thrown_away_) { rules.push_back(rule); }
+    if (reading_) { read_rules.push_back(rule); }
+  }
+  void read(Ope &ope) {
+    reading_++;
+    ope.accept(*this);
+    reading_--;
+  }
+  void thrown_away(Ope &ope) {
+    thrown_away_++;
+    ope.accept(*this);
+    thrown_away_--;
+  }
+  size_t reading_ = 0;
+  size_t thrown_away_ = 0;
 };
 
 // How the matches of each rule use values depends on the callbacks of the
@@ -5068,32 +5099,86 @@ inline std::vector<ValueUse> Definition::analyze_value_use() const {
     }
   }
 
+  // Whether a match of the rule may be delivered to a scope that holds rule
+  // values. It starts from the rules whose scope is not followed: the parse
+  // result, whatever a whitespace operator, a macro or a rule that this
+  // start rule does not index refers to, the rules in macro arguments and a
+  // precedence's operator.
+  std::vector<bool> value_read(count, false);
+  auto mark_read = [&](const Definition *rule) {
+    if (!a.indexes(*rule) || value_read[rule->id]) { return false; }
+    value_read[rule->id] = true;
+    return true;
+  };
+  auto mark_all_read = [&](const std::vector<Definition *> &rules) {
+    for (const auto *r : rules) {
+      mark_read(r);
+    }
+  };
+  mark_read(this);
+  mark_all_read(whitespace.rules);
+  mark_all_read(whitespace.read_rules);
+  for (auto *rule : a.rules) {
+    if (!a.indexes(*rule)) {
+      CollectValueRules vis;
+      rule->get_core_operator()->accept(vis);
+      mark_all_read(vis.rules);
+      mark_all_read(vis.read_rules);
+      continue;
+    }
+    mark_all_read(refs[rule->id].read_rules);
+    if (rule->is_macro) { mark_all_read(refs[rule->id].rules); }
+  }
+  for (auto again = true; again;) {
+    again = false;
+    for (auto *rule : a.rules_by_id) {
+      if (!rule) { continue; }
+      auto id = rule->id;
+      auto holds_rule_values = false;
+      switch (uses[id].child_values) {
+      case ValueUse::ChildValues::read:
+        holds_rule_values = value_read[id] || observed[id];
+        break;
+      case ValueUse::ChildValues::unread: break;
+      case ValueUse::ChildValues::passed_up:
+        holds_rule_values = value_read[id] && !rule->ignoreSemanticValue;
+        break;
+      }
+      if (!holds_rule_values) { continue; }
+      // The value of a `~` rule is not delivered.
+      for (const auto *r : refs[id].rules) {
+        if (!r->ignoreSemanticValue && mark_read(r)) { again = true; }
+      }
+    }
+  }
+
   for (auto *rule : a.rules_by_id) {
     if (!rule) { continue; }
     auto id = rule->id;
     auto &use = uses[id];
 
-    // A memoized match is handed to every caller at its position, so
-    // whether its value is read cannot depend on the one that makes it.
+    // A memoized match is handed to every caller at its position, so whether
+    // its value is read cannot depend on the one that makes it. Neither can
+    // it for a `~` rule, whose value no caller gets.
     auto has_memo = rule->is_left_recursive ||
                     (enablePackratParsing && a.packrat_index[id] >= 0);
+    auto read_nowhere =
+        rule->ignoreSemanticValue || (has_memo && !value_read[id]);
+    auto read_everywhere = has_memo && !read_nowhere;
 
-    if (observed[id]) {
+    use.value_always_empty = value_always_empty[id];
+    if (observed[id] || (read_everywhere && !value_always_empty[id])) {
       use.recognized = ValueUse::Recognized::never;
-    } else if (value_always_empty[id]) {
-      use.recognized = ValueUse::Recognized::always;
-    } else if (has_memo) {
-      use.recognized = ValueUse::Recognized::never;
-    } else if (rule->ignoreSemanticValue) {
+    } else if (value_always_empty[id] || read_nowhere) {
       use.recognized = ValueUse::Recognized::always;
     } else {
       use.recognized = ValueUse::Recognized::where_unread;
     }
 
     if (use.child_values == ValueUse::ChildValues::passed_up) {
-      if (has_memo) {
+      if (read_everywhere) {
         use.child_values = ValueUse::ChildValues::read;
-      } else if (rule->ignoreSemanticValue) {
+      } else if (read_nowhere) {
         use.child_values = ValueUse::ChildValues::unread;
       }
     }
