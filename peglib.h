@@ -3349,6 +3349,11 @@ public:
     return ast_name.empty() ? name : ast_name;
   }
 
+  unsigned int tag() const {
+    std::call_once(tag_init_, [this]() { tag_ = str2tag(name); });
+    return tag_;
+  }
+
   std::string name;
   const char *s_ = nullptr;
   std::pair<size_t, size_t> line_ = {1, 1};
@@ -3493,6 +3498,8 @@ private:
   std::shared_ptr<Holder> holder_;
   mutable std::once_flag is_token_init_;
   mutable bool is_token_ = false;
+  mutable std::once_flag tag_init_;
+  mutable unsigned int tag_ = 0;
   mutable bool has_id_ = false;
   mutable std::once_flag analysis_init_;
   mutable std::once_flag packrat_rules_init_;
@@ -4053,7 +4060,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   if (success(match.len)) {
     if (!outer_->ignoreSemanticValue && !c.recognize_only) {
       vs.emplace_back(std::move(match.val));
-      vs.tags.emplace_back(str2tag(outer_->name));
+      vs.tags.emplace_back(outer_->tag());
     }
     if (vs.holds_rule_tokens_) { vs.tokens.push_back(match.token); }
   }
@@ -4274,7 +4281,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     // fold with its own tag, as Holder::reduce hands it over. After a
     // recovered error no value is built, as for a rule.
     std::any val;
-    auto tag = str2tag(rule_.name);
+    auto tag = rule_.tag();
     if (!c.recovered) {
       if (rule_.action) {
         vs.sv_ = std::string_view(s, i);
