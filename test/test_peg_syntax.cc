@@ -235,6 +235,36 @@ TEST(PredefinedClassTest, Posix_class_case_insensitive) {
   EXPECT_FALSE(pg.parse("ab1"));
 }
 
+TEST(PredefinedClassTest, Negated_posix_class_case_insensitive) {
+  // Case is ignored before the class is negated, which leaves no letter.
+  for (auto cls :
+       {"[[:^lower:]]i", "[[:^upper:]]i", "[^[:lower:]]i", "[^[:upper:]]i"}) {
+    parser pg(std::string("S <- ") + cls + "+");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("1_!")) << cls;
+    EXPECT_FALSE(pg.parse("a")) << cls;
+    EXPECT_FALSE(pg.parse("A")) << cls;
+  }
+  for (auto cls : {"[^[:^lower:]]i", "[^[:^upper:]]i"}) {
+    parser pg(std::string("S <- ") + cls + "+");
+    ASSERT_TRUE(!!pg);
+    EXPECT_TRUE(pg.parse("aA")) << cls;
+    EXPECT_FALSE(pg.parse("1")) << cls;
+  }
+
+  // Without `i`, and for the other classes, a name is what it says.
+  parser as_written(R"(S <- [[:^lower:]] [^[:lower:]])");
+  ASSERT_TRUE(!!as_written);
+  EXPECT_TRUE(as_written.parse("AZ"));
+  EXPECT_FALSE(as_written.parse("aZ"));
+  EXPECT_FALSE(as_written.parse("Az"));
+
+  parser xdigit(R"(S <- [[:xdigit:]]i+)");
+  ASSERT_TRUE(!!xdigit);
+  EXPECT_TRUE(xdigit.parse("fF9"));
+  EXPECT_FALSE(xdigit.parse("g"));
+}
+
 TEST(PredefinedClassTest, Unknown_posix_class_is_error) {
   parser pg(R"(S <- [[:foo:]])");
   EXPECT_FALSE(!!pg);

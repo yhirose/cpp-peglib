@@ -1,4 +1,5 @@
-﻿#include <gtest/gtest.h>
+﻿#include <clocale>
+#include <gtest/gtest.h>
 #include <peglib.h>
 
 using namespace peg;
@@ -618,6 +619,70 @@ TEST(GeneralTest, Ignore_case_negate_character_class_test) {
 
   EXPECT_TRUE(parser.parse("123"));
   EXPECT_FALSE(parser.parse("ABC"));
+}
+
+TEST(GeneralTest, Ignore_case_character_class_range_test) {
+  auto escaped = [](char c) {
+    const char *digits = "0123456789abcdef";
+    return std::string("\\x") + digits[c >> 4] + digits[c & 15];
+  };
+  auto other_case = [](char c) {
+    if ('a' <= c && c <= 'z') { return static_cast<char>(c - 'a' + 'A'); }
+    if ('A' <= c && c <= 'Z') { return static_cast<char>(c - 'A' + 'a'); }
+    return c;
+  };
+
+  // The ends cover every way a range can meet the two blocks of letters.
+  const std::string ends = "09@AZ[_`az{";
+
+  for (size_t i = 0; i < ends.size(); i++) {
+    for (size_t j = i; j < ends.size(); j++) {
+      auto range = escaped(ends[i]) + "-" + escaped(ends[j]);
+      auto cls_i = "[" + range + "]i";
+      parser as_written("S <- [" + range + "]");
+      parser alone("S <- " + cls_i);
+      parser repeated("S <- " + cls_i + "+");
+      parser alternative("S <- A / '\\x80'\nA <- " + cls_i);
+      parser keyword_guarded("S <- !K < " + cls_i + " " + cls_i +
+                             "* >\nK <- 'if'i / 'in'i");
+      parser negated("S <- [^" + range + "]i");
+      Definition combinator;
+      combinator <= cls({{ends[i], ends[j]}}, true);
+
+      for (auto c = 0; c < 128; c++) {
+        auto ch = static_cast<char>(c);
+        auto in = std::string(1, ch);
+        auto expected = as_written.parse(in) ||
+                        as_written.parse(std::string(1, other_case(ch)));
+
+        EXPECT_EQ(expected, alone.parse(in)) << range << " " << c;
+        EXPECT_EQ(expected, repeated.parse(in)) << range << " " << c;
+        EXPECT_EQ(expected, alternative.parse(in)) << range << " " << c;
+        EXPECT_EQ(expected, keyword_guarded.parse(in + in))
+            << range << " " << c;
+        EXPECT_EQ(!expected, negated.parse(in)) << range << " " << c;
+        EXPECT_EQ(expected, combinator.parse(in.data(), 1).ret)
+            << range << " " << c;
+      }
+    }
+  }
+}
+
+TEST(GeneralTest, Ignore_case_character_class_folds_ascii_letters_only) {
+  // In a UTF-8 locale, where there is one, the C library folds more.
+  std::string locale = std::setlocale(LC_CTYPE, nullptr);
+  auto restore =
+      scope_exit([&]() { std::setlocale(LC_CTYPE, locale.c_str()); });
+  std::setlocale(LC_CTYPE, "en_US.UTF-8");
+
+  parser alone(R"(S <- [a-z\u00e0-\u00fe]i)");
+  parser repeated(R"(S <- [a-z]i+)");
+
+  EXPECT_TRUE(alone.parse("K"));
+  EXPECT_TRUE(alone.parse("\xC3\xA9"));      // U+00E9
+  EXPECT_FALSE(alone.parse("\xC3\x89"));     // U+00C9, its capital
+  EXPECT_FALSE(alone.parse("\xE2\x84\xAA")); // U+212A KELVIN SIGN
+  EXPECT_FALSE(repeated.parse("\xE2\x84\xAA"));
 }
 
 TEST(GeneralTest, mutable_lambda_test) {

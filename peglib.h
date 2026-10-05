@@ -411,16 +411,36 @@ predefined_character_class(std::string_view name) {
   return it != table.end() ? &it->second : nullptr;
 }
 
-// Ranges must be sorted and non-overlapping.
-inline std::vector<std::pair<char32_t, char32_t>> complement_character_ranges(
-    const std::vector<std::pair<char32_t, char32_t>> &ranges) {
+inline std::vector<std::pair<char32_t, char32_t>>
+complement_character_ranges(std::vector<std::pair<char32_t, char32_t>> ranges) {
+  std::sort(ranges.begin(), ranges.end());
   std::vector<std::pair<char32_t, char32_t>> r;
   char32_t next = 0;
   for (const auto &[lo, hi] : ranges) {
     if (lo > next) { r.emplace_back(next, lo - 1); }
-    next = hi + 1;
+    next = std::max<char32_t>(next, hi + 1);
   }
   if (next <= 0x10FFFF) { r.emplace_back(next, 0x10FFFF); }
+  return r;
+}
+
+// Only an ASCII letter has another case.
+inline char32_t other_case(char32_t cp) {
+  if ('a' <= cp && cp <= 'z') { return cp - 'a' + 'A'; }
+  if ('A' <= cp && cp <= 'Z') { return cp - 'A' + 'a'; }
+  return cp;
+}
+
+inline std::vector<std::pair<char32_t, char32_t>>
+add_other_case(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
+  auto r = ranges;
+  for (const auto &[lo, hi] : ranges) {
+    for (auto cp = lo; cp <= std::min<char32_t>(hi, 'z'); cp++) {
+      if (auto other = other_case(cp); other != cp) {
+        r.emplace_back(other, other);
+      }
+    }
+  }
   return r;
 }
 
@@ -2043,29 +2063,14 @@ public:
 
     char32_t cp = 0;
     auto len = decode_codepoint(s, n, cp);
+    if (matches(cp)) { return len; }
 
-    for (const auto &range : ranges_) {
-      if (in_range(range, cp)) {
-        if (negated_) {
-          c.set_error_pos(s);
-          return static_cast<size_t>(-1);
-        } else {
-          return len;
-        }
-      }
-    }
-
-    if (negated_) {
-      return len;
-    } else {
-      c.set_error_pos(s);
-      return static_cast<size_t>(-1);
-    }
+    c.set_error_pos(s);
+    return static_cast<size_t>(-1);
   }
 
   void accept(Visitor &v) override;
 
-  friend struct ComputeFirstSet;
   friend struct GrammarBlob;
   friend struct OpeSignature;
 
@@ -2073,14 +2078,16 @@ public:
   const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
 
 private:
-  bool in_range(const std::pair<char32_t, char32_t> &range, char32_t cp) const {
-    if (ignore_case_) {
-      auto cpl = std::tolower(cp);
-      return std::tolower(range.first) <= cpl &&
-             cpl <= std::tolower(range.second);
-    } else {
+  bool in_ranges(char32_t cp) const {
+    return std::any_of(ranges_.begin(), ranges_.end(), [cp](const auto &range) {
       return range.first <= cp && cp <= range.second;
-    }
+    });
+  }
+
+  // With `i`, a letter is listed when either of its cases is in the ranges.
+  bool matches(char32_t cp) const {
+    auto listed = in_ranges(cp) || (ignore_case_ && in_ranges(other_case(cp)));
+    return listed != negated_;
   }
 
   void setup_ascii_bitset() {
@@ -2089,15 +2096,8 @@ private:
       if (lo > 0x7F || hi > 0x7F) { return; }
     }
     is_ascii_only_ = true;
-    for (const auto &[lo, hi] : ranges_) {
-      for (auto cp = lo; cp <= hi; cp++) {
-        auto ch = static_cast<unsigned char>(cp);
-        ascii_bitset_.set(ch);
-        if (ignore_case_) {
-          ascii_bitset_.set(static_cast<unsigned char>(std::toupper(ch)));
-          ascii_bitset_.set(static_cast<unsigned char>(std::tolower(ch)));
-        }
-      }
+    for (char32_t cp = 0; cp <= 0x7F; cp++) {
+      if (matches(cp)) { ascii_bitset_.set(cp); }
     }
   }
 
@@ -3199,26 +3199,10 @@ struct ComputeFirstSet : public TraversalVisitor {
     }
   }
   void visit(CharacterClass &ope) override {
-    for (const auto &range : ope.ranges_) {
-      auto cp1 = range.first;
-      auto cp2 = range.second;
-      if (cp1 > 0x7F || cp2 > 0x7F) {
-        // Non-ASCII range: conservative fallback
-        result_.any_char = true;
-        return;
-      }
-      for (auto cp = cp1; cp <= cp2; cp++) {
-        auto ch = static_cast<unsigned char>(cp);
-        result_.chars.set(ch);
-        if (ope.ignore_case_) {
-          result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
-          result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
-        }
-      }
-    }
-    if (ope.negated_) {
-      result_.chars.flip();
-      result_.any_char = true; // negated class can match non-ASCII
+    if (ope.is_ascii_only()) {
+      result_.chars |= ope.ascii_bitset();
+    } else {
+      result_.any_char = true;
     }
   }
   void visit(Character &ope) override {
@@ -6858,34 +6842,43 @@ private:
       return resolve_escape_sequence(tok.data(), tok.size());
     };
 
-    // A Range produces either a single range (std::pair) or a range list
-    // (std::vector<std::pair>) for `\d`-style escapes and POSIX classes.
-    auto collect_ranges = [](const SemanticValues &vs) {
+    // A `\d`-style escape or a POSIX class, negated once its class tells
+    // whether it ignores case.
+    struct PredefinedClass {
+      std::vector<std::pair<char32_t, char32_t>> ranges;
+      bool negated;
+    };
+
+    // A Range produces either a single range (std::pair) or a PredefinedClass.
+    auto collect_ranges = [](const SemanticValues &vs, bool ignore_case) {
       std::vector<std::pair<char32_t, char32_t>> ranges;
       for (const auto &v : vs) {
         if (v.type() == typeid(std::pair<char32_t, char32_t>)) {
           ranges.push_back(std::any_cast<std::pair<char32_t, char32_t>>(v));
         } else {
-          const auto &vec =
-              std::any_cast<const std::vector<std::pair<char32_t, char32_t>> &>(
-                  v);
-          ranges.insert(ranges.end(), vec.begin(), vec.end());
+          auto [named, negated] = std::any_cast<PredefinedClass>(v);
+          if (negated) {
+            // Case is ignored before the class is negated.
+            if (ignore_case) { named = add_other_case(named); }
+            named = complement_character_ranges(named);
+          }
+          ranges.insert(ranges.end(), named.begin(), named.end());
         }
       }
       return ranges;
     };
 
     g["Class"] = [collect_ranges](const SemanticValues &vs) {
-      return cls(collect_ranges(vs));
+      return cls(collect_ranges(vs, false));
     };
     g["ClassI"] = [collect_ranges](const SemanticValues &vs) {
-      return cls(collect_ranges(vs), true);
+      return cls(collect_ranges(vs, true), true);
     };
     g["NegatedClass"] = [collect_ranges](const SemanticValues &vs) {
-      return ncls(collect_ranges(vs));
+      return ncls(collect_ranges(vs, false));
     };
     g["NegatedClassI"] = [collect_ranges](const SemanticValues &vs) {
-      return ncls(collect_ranges(vs), true);
+      return ncls(collect_ranges(vs, true), true);
     };
     g["Range"] = [](const SemanticValues &vs) -> std::any {
       switch (vs.choice()) {
@@ -6921,11 +6914,8 @@ private:
       case 'S': name = "space"; break;
       default: name = "word"; break;
       }
-      auto ranges = *predefined_character_class(name);
-      if (ch == 'D' || ch == 'S' || ch == 'W') {
-        ranges = complement_character_ranges(ranges);
-      }
-      return ranges;
+      return PredefinedClass{*predefined_character_class(name),
+                             ch == 'D' || ch == 'S' || ch == 'W'};
     };
     g["PosixClass"] = [](const SemanticValues &vs) {
       auto sv = vs.sv(); // `[:name:]` or `[:^name:]`
@@ -6936,7 +6926,7 @@ private:
         auto msg = "invalid POSIX character class '" + std::string(name) + "'";
         throw SyntaxErrorException(msg.c_str(), vs.line_info());
       }
-      return negated ? complement_character_ranges(*ranges) : *ranges;
+      return PredefinedClass{*ranges, negated};
     };
     g["Char"] = [](const SemanticValues &vs) {
       return resolve_escape_sequence(vs.sv().data(), vs.sv().length());
