@@ -44,6 +44,8 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 
 This library supports the linear-time parsing known as the [*Packrat*](http://pdos.csail.mit.edu/~baford/packrat/thesis/thesis.pdf) parsing. It also supports *left recursive* grammars (direct, indirect, and mutual) via a seed-growing algorithm, allowing natural expression of left-associative operators.
 
+Packrat parsing is turned on with `enable_packrat_parsing`. It remembers the result of a rule at a position and reuses it when the rule is tried there again, which takes memory that grows with the input, more so when the parse builds values or an AST. It pays where a grammar often tries a rule again at one position, and can cost more than it saves where it seldom does, so measure with your own grammar and input.
+
 IMPORTANT NOTE for some Linux distributions such as Ubuntu and CentOS: Need `-pthread` option when linking. See [#23](https://github.com/yhirose/cpp-peglib/issues/23#issuecomment-261126127), [#46](https://github.com/yhirose/cpp-peglib/issues/46#issuecomment-417870473) and [#62](https://github.com/yhirose/cpp-peglib/issues/62#issuecomment-492032680).
 
 I am sure that you will enjoy this excellent ["Practical parsing with PEG and cpp-peglib"](https://berthub.eu/articles/posts/practical-peg-parsing/) article by [bert hubert](https://berthub.eu/)!
