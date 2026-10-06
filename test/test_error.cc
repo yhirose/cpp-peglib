@@ -339,6 +339,18 @@ TEST(ErrorTest, Expected_token_is_listed_once) {
             syntax_error(pg, "k-"));
 }
 
+TEST(ErrorTest, Expected_tokens_follow_the_order_of_the_alternatives) {
+  parser pg(R"(
+    S <- 'ax' / 'b1' / 'cx' / 'b2' / 'ex'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  // 'b1' and 'b2' are tried. The next byte rules out the others.
+  EXPECT_EQ(
+      "syntax error, unexpected 'b9', expecting 'ax', 'b1', 'cx', 'b2', 'ex'.",
+      syntax_error(pg, "b9"));
+}
+
 // A parse that keeps failing at one position expects the same few tokens
 // over and over.
 TEST(ErrorTest, Expected_tokens_of_many_failures_at_one_position) {

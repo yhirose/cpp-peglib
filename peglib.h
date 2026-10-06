@@ -1766,6 +1766,10 @@ struct FirstSet {
   const Definition *first_rule =
       nullptr; // first token rule for error reporting
 
+  bool can_start_with(unsigned char byte) const {
+    return any_char || can_be_empty || chars.test(byte);
+  }
+
   void merge(const FirstSet &other) {
     chars |= other.chars;
     if (other.can_be_empty) { can_be_empty = true; }
@@ -1781,15 +1785,18 @@ public:
       : opes_{static_cast<std::shared_ptr<Ope>>(args)...},
         for_label_(for_label) {
     is_choice_like = true;
+    list_alternatives();
   }
   PrioritizedChoice(const std::vector<std::shared_ptr<Ope>> &opes)
       : opes_(opes) {
     is_choice_like = true;
+    list_alternatives();
   }
   PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes,
                     bool for_label = false)
       : opes_(std::move(opes)), for_label_(for_label) {
     is_choice_like = true;
+    list_alternatives();
   }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
@@ -1802,51 +1809,107 @@ public:
       if (track_cut) { c.cut_stack.pop_back(); }
     });
 
-    size_t id = 0;
-    for (const auto &ope : opes_) {
-      // First-Set filtering: skip if next byte cannot start this alternative
-      if (n > 0 && id < first_sets_.size()) {
-        const auto &fs = first_sets_[id];
-        if (!fs.any_char && !fs.can_be_empty &&
-            !fs.chars.test(static_cast<unsigned char>(*s))) {
-          if (c.collects_expected_tokens() &&
-              (fs.first_literal || fs.first_rule) &&
-              c.error_info.advance_to(s)) {
-            c.error_info.add_skipped(this, id);
-          }
-          id++;
-          continue;
-        }
-      }
+    const auto reports = c.collects_expected_tokens();
+    const auto list = list_at(s, n);
+    size_t skipped_from = 0;
+
+    const auto *ids = lists_.data();
+    const auto end = list_begin_[list + 1];
+    for (auto i = list_begin_[list]; i < end; i++) {
+      const size_t id = ids[i];
+
+      if (reports) { note_skipped(skipped_from, id, s, c); }
+      skipped_from = id + 1;
 
       if (c.has_cut && !c.cut_stack.empty()) { c.cut_stack.back() = false; }
 
       auto snap = c.snapshot(vs);
-      len = ope->parse(s, n, vs, c, dt);
+      len = opes_[id]->parse(s, n, vs, c, dt);
 
       if (success(len)) {
         vs.choice_count_ = opes_.size();
         vs.choice_ = id;
-        break;
+        return len;
       }
 
       c.rollback(vs, snap);
 
-      if (c.has_cut && !c.cut_stack.empty() && c.cut_stack.back()) { break; }
-
-      id++;
+      if (c.has_cut && !c.cut_stack.empty() && c.cut_stack.back()) {
+        return len;
+      }
     }
+
+    if (reports) { note_skipped(skipped_from, opes_.size(), s, c); }
 
     return len;
   }
+
+  const std::vector<FirstSet> &first_sets() const { return first_sets_; }
 
   void accept(Visitor &v) override;
 
   size_t size() const { return opes_.size(); }
 
-  std::vector<std::shared_ptr<Ope>> opes_;
+  const std::vector<std::shared_ptr<Ope>> opes_;
   bool for_label_ = false;
+
+private:
+  friend struct SetupFirstSets;
+
+  void set_first_sets(std::vector<FirstSet> first_sets) {
+    first_sets_ = std::move(first_sets);
+    list_alternatives();
+  }
+
+  // The alternatives to try are read from a list. List 0 has them all. With
+  // first sets there is also a list for each byte, of the ones that can
+  // start with it.
+  void list_alternatives() {
+    lists_.clear();
+    list_begin_.clear();
+    lists_.reserve(opes_.size());
+    const size_t list_count = first_sets_.empty() ? 1 : 1 + 256;
+    list_begin_.reserve(list_count + 1);
+
+    auto add_list = [&](auto is_listed) {
+      list_begin_.push_back(static_cast<uint32_t>(lists_.size()));
+      for (size_t id = 0; id < opes_.size(); id++) {
+        if (is_listed(id)) { lists_.push_back(static_cast<uint32_t>(id)); }
+      }
+    };
+
+    add_list([](size_t) { return true; });
+    if (!first_sets_.empty()) {
+      for (size_t byte = 0; byte < 256; byte++) {
+        add_list([&](size_t id) {
+          return first_sets_[id].can_start_with(
+              static_cast<unsigned char>(byte));
+        });
+      }
+    }
+    list_begin_.push_back(static_cast<uint32_t>(lists_.size()));
+    lists_.shrink_to_fit();
+  }
+
+  size_t list_at(const char *s, size_t n) const {
+    if (n == 0 || first_sets_.empty()) { return 0; }
+    return 1 + static_cast<unsigned char>(*s);
+  }
+
+  // An error report names what the skipped alternatives expected.
+  void note_skipped(size_t begin, size_t end, const char *s, Context &c) const {
+    for (auto id = begin; id < end; id++) {
+      const auto &fs = first_sets_[id];
+      if ((fs.first_literal || fs.first_rule) && c.error_info.advance_to(s)) {
+        c.error_info.add_skipped(this, id);
+      }
+    }
+  }
+
   std::vector<FirstSet> first_sets_;
+  std::vector<uint32_t> lists_;
+  // Where each list starts in lists_, then where the last one ends.
+  std::vector<uint32_t> list_begin_;
 };
 
 class Repetition : public Ope {
@@ -3256,13 +3319,14 @@ struct SetupFirstSets : public TraversalVisitor {
   void setup_keyword_guarded_identifier(Sequence &ope);
 
   void visit(PrioritizedChoice &ope) override {
-    ope.first_sets_.clear();
-    ope.first_sets_.reserve(ope.opes_.size());
+    std::vector<FirstSet> first_sets;
+    first_sets.reserve(ope.opes_.size());
     for (const auto &op : ope.opes_) {
       ComputeFirstSet cfs(first_set_cache_, whitespace_);
       op->accept(cfs);
-      ope.first_sets_.push_back(cfs.result_);
+      first_sets.push_back(cfs.result_);
     }
+    ope.set_first_sets(std::move(first_sets));
     for (const auto &op : ope.opes_) {
       op->accept(*this);
     }
@@ -3730,7 +3794,7 @@ inline void ErrorInfo::resolve_expected_tokens() {
       continue;
     }
     for (auto id = e.begin; id < e.end; id++) {
-      const auto &fs = e.choice->first_sets_[id];
+      const auto &fs = e.choice->first_sets()[id];
       if (fs.first_literal) {
         insert_expected(fs.first_literal, nullptr);
       } else {
@@ -5078,8 +5142,8 @@ struct CollectStartRegion : public TraversalVisitor {
   // set.
   void visit(PrioritizedChoice &ope) override {
     for (size_t i = 0; i < ope.opes_.size(); i++) {
-      if (i < ope.first_sets_.size()) {
-        const auto &fs = ope.first_sets_[i];
+      if (i < ope.first_sets().size()) {
+        const auto &fs = ope.first_sets()[i];
         if (!fs.any_char && !fs.can_be_empty) { continue; }
       }
       ope.opes_[i]->accept(*this);

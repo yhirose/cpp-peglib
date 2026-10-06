@@ -1171,6 +1171,44 @@ TEST(GeneralTest, Ordered_choice_count_2) {
   parser.parse("b");
 }
 
+TEST(GeneralTest, Ordered_choice_by_next_byte) {
+  parser parser(R"(
+        S  <- C 'x'?
+        C  <- 'a0' / 'a1' / 'b0' / 'b1' / B2 / 'c' ↑ '0' / 'c1'
+            / &'x' / !. / [0-9] / .
+        B2 <- 'b2'
+    )");
+  ASSERT_TRUE(parser);
+
+  size_t choice = 0;
+  parser["C"] = [&](const SemanticValues &vs) {
+    EXPECT_EQ(11, vs.choice_count());
+    choice = vs.choice();
+  };
+
+  struct Case {
+    const char *input;
+    bool matches;
+    size_t expected_choice;
+  };
+  const Case cases[] = {
+      {"a0", true, 0}, {"a1", true, 1},  {"b1", true, 3},  {"b2", true, 4},
+      {"c0", true, 5}, {"c1", false, 0}, {"x", true, 7},   {"", true, 8},
+      {"7", true, 9},  {"z", true, 10},  {"a9", false, 0},
+  };
+
+  // A logger has the alternatives that the next byte rules out noted.
+  for (auto with_logger : {false, true}) {
+    if (with_logger) {
+      parser.set_logger([](size_t, size_t, const std::string &) {});
+    }
+    for (const auto &[input, matches, expected_choice] : cases) {
+      EXPECT_EQ(matches, parser.parse(input)) << input;
+      if (matches) { EXPECT_EQ(expected_choice, choice) << input; }
+    }
+  }
+}
+
 TEST(GeneralTest, Semantic_value_tag) {
   parser parser(R"(
         S <- A? B* C?
