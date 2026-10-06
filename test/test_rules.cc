@@ -262,6 +262,31 @@ TEST(MacroEdgeTest, Macro_with_complex_arguments) {
   EXPECT_FALSE(pg.parse("key=other"));
 }
 
+TEST(MacroEdgeTest, Macro_with_a_back_reference_argument) {
+  parser pg(R"(
+    S    <- $c< 'a' / 'b' > M($c)
+    M(P) <- P
+  )");
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("aa"));
+  EXPECT_TRUE(pg.parse("bb"));
+  EXPECT_FALSE(pg.parse("ab"));
+}
+
+TEST(MacroEdgeTest, Label_in_an_argument_acts_as_outside_a_macro) {
+  // A failed label recovers, which cuts the choice it is in.
+  for (auto grammar : {"S <- 'a'^L / 'b'", "S <- M('a'^L) / 'b'",
+                       "S <- W('a')\n W(X) <- M(X^L) / 'b'"}) {
+    parser pg(std::string(grammar) + R"(
+      M(P) <- P
+      L    <- 'z'
+    )");
+    EXPECT_TRUE(pg) << grammar;
+    EXPECT_FALSE(pg.parse("b")) << grammar;
+  }
+}
+
 TEST(MacroEdgeTest, Macro_with_whitespace) {
   parser pg(R"(
     S          <- LIST(ITEM, ',')

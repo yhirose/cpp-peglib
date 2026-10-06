@@ -802,6 +802,20 @@ TEST(LeftRecursionMacroTest, Instantiation_is_not_shared_across_arguments) {
   EXPECT_FALSE(p.parse("1+2"));
 }
 
+TEST(LeftRecursionMacroTest, Compound_arguments_are_told_apart) {
+  parser p(R"(
+        S    <- A 'x' / A 'y' / B 'z'
+        A    <- M('a' / 'b')
+        B    <- M('a' / 'c')
+        M(P) <- M(P) '+' P / P
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("a+by"));
+  EXPECT_TRUE(p.parse("a+cz"));
+  EXPECT_FALSE(p.parse("a+bz"));
+}
+
 TEST(LeftRecursionMacroTest, Indirectly_left_recursive_macro) {
   parser p(R"(
         S      <- M(N)

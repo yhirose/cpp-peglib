@@ -1786,8 +1786,9 @@ public:
       : opes_(opes) {
     is_choice_like = true;
   }
-  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes)
-      : opes_(std::move(opes)) {
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes,
+                    bool for_label = false)
+      : opes_(std::move(opes)), for_label_(for_label) {
     is_choice_like = true;
   }
 
@@ -3055,79 +3056,59 @@ struct FindReference : public Ope::Visitor {
                 const std::vector<std::string> &params)
       : args_(args), params_(params) {}
 
+  // `ope` with the parameters in it replaced by the arguments, or `ope`
+  // itself when it names none.
+  std::shared_ptr<Ope> resolve(const std::shared_ptr<Ope> &ope) {
+    resolved_ = nullptr;
+    ope->accept(*this);
+    return resolved_ ? std::move(resolved_) : ope;
+  }
+
   void visit(Sequence &ope) override {
-    std::vector<std::shared_ptr<Ope>> opes;
-    for (const auto &o : ope.opes_) {
-      o->accept(*this);
-      opes.emplace_back(std::move(found_ope));
-    }
-    found_ope = std::make_shared<Sequence>(opes);
+    auto opes = resolve_all(ope.opes_);
+    if (opes) { resolved_ = std::make_shared<Sequence>(std::move(*opes)); }
   }
   void visit(PrioritizedChoice &ope) override {
-    std::vector<std::shared_ptr<Ope>> opes;
-    for (const auto &o : ope.opes_) {
-      o->accept(*this);
-      opes.emplace_back(std::move(found_ope));
+    auto opes = resolve_all(ope.opes_);
+    if (opes) {
+      resolved_ =
+          std::make_shared<PrioritizedChoice>(std::move(*opes), ope.for_label_);
     }
-    found_ope = std::make_shared<PrioritizedChoice>(opes);
   }
   void visit(Repetition &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = rep(found_ope, ope.min_, ope.max_);
+    rewrap(ope.ope_, [&](auto o) { return rep(o, ope.min_, ope.max_); });
   }
-  void visit(AndPredicate &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = apd(found_ope);
-  }
-  void visit(NotPredicate &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = npd(found_ope);
-  }
-  void visit(Dictionary &ope) override { found_ope = ope.shared_from_this(); }
-  void visit(LiteralString &ope) override {
-    found_ope = ope.shared_from_this();
-  }
-  void visit(CharacterClass &ope) override {
-    found_ope = ope.shared_from_this();
-  }
-  void visit(Character &ope) override { found_ope = ope.shared_from_this(); }
-  void visit(AnyCharacter &ope) override { found_ope = ope.shared_from_this(); }
-  void visit(CaptureScope &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = csc(found_ope);
-  }
+  void visit(AndPredicate &ope) override { rewrap(ope.ope_, apd); }
+  void visit(NotPredicate &ope) override { rewrap(ope.ope_, npd); }
+  void visit(CaptureScope &ope) override { rewrap(ope.ope_, csc); }
   void visit(Capture &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = cap(found_ope, ope.match_action_);
+    rewrap(ope.ope_, [&](auto o) { return cap(o, ope.match_action_); });
   }
-  void visit(TokenBoundary &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = tok(found_ope);
-  }
-  void visit(Ignore &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = ign(found_ope);
-  }
-  void visit(WeakHolder &ope) override { ope.weak_.lock()->accept(*this); }
-  void visit(Holder &ope) override { ope.ope_->accept(*this); }
+  void visit(TokenBoundary &ope) override { rewrap(ope.ope_, tok); }
+  void visit(Ignore &ope) override { rewrap(ope.ope_, ign); }
   void visit(Reference &ope) override;
-  void visit(Whitespace &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = wsp(found_ope);
-  }
-  void visit(PrecedenceClimbing &ope) override {
-    ope.atom_->accept(*this);
-    found_ope = csc(found_ope);
-  }
-  void visit(Recovery &ope) override {
-    ope.ope_->accept(*this);
-    found_ope = rec(found_ope);
-  }
-  void visit(Cut &ope) override { found_ope = ope.shared_from_this(); }
-
-  std::shared_ptr<Ope> found_ope;
+  void visit(Recovery &ope) override { rewrap(ope.ope_, rec); }
 
 private:
+  template <typename Make>
+  void rewrap(const std::shared_ptr<Ope> &inner, Make make) {
+    auto o = resolve(inner);
+    if (o != inner) { resolved_ = make(o); }
+  }
+
+  std::optional<std::vector<std::shared_ptr<Ope>>>
+  resolve_all(const std::vector<std::shared_ptr<Ope>> &opes) {
+    std::optional<std::vector<std::shared_ptr<Ope>>> rebuilt;
+    for (size_t i = 0; i < opes.size(); i++) {
+      auto o = resolve(opes[i]);
+      if (o == opes[i]) { continue; }
+      if (!rebuilt) { rebuilt.emplace(opes); }
+      (*rebuilt)[i] = std::move(o);
+    }
+    return rebuilt;
+  }
+
+  std::shared_ptr<Ope> resolved_;
   const std::vector<std::shared_ptr<Ope>> &args_;
   const std::vector<std::string> &params_;
 };
@@ -4290,8 +4271,7 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       // below will occupy, so no allocation happens on a warm path)
       auto args = c.take_args_buffer();
       for (const auto &arg : args_) {
-        arg->accept(vis);
-        args.emplace_back(std::move(vis.found_ope));
+        args.emplace_back(vis.resolve(arg));
       }
 
       auto inst = rule_->is_left_recursive
@@ -5881,11 +5861,10 @@ inline void FindReference::visit(Reference &ope) {
   for (size_t i = 0; i < args_.size(); i++) {
     const auto &name = params_[i];
     if (name == ope.name_) {
-      found_ope = args_[i];
+      resolved_ = args_[i];
       return;
     }
   }
-  found_ope = ope.shared_from_this();
 }
 
 /*-----------------------------------------------------------------------------
@@ -6100,9 +6079,7 @@ struct GrammarBlob {
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
         v.push_back(read_ope(r, g, owner));
-      auto c = std::make_shared<PrioritizedChoice>(std::move(v));
-      c->for_label_ = fl;
-      return c;
+      return std::make_shared<PrioritizedChoice>(std::move(v), fl);
     }
     case T_Repetition: {
       uint64_t mn = r.u64(), mx = r.u64();
