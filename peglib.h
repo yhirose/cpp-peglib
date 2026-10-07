@@ -2369,8 +2369,11 @@ public:
   const Definition &rule_;
 
 private:
+  // Sets operand_missing when an operator is left without its right
+  // operand: every enclosing level would read it again and stop there too.
   size_t parse_expression(const char *s, size_t n, SemanticValues &vs,
-                          Context &c, std::any &dt, size_t min_prec) const;
+                          Context &c, std::any &dt, size_t min_prec,
+                          bool &operand_missing) const;
 
   template <typename F>
   static size_t parse_in_scope(SemanticValues &vs, Context &c, F parse);
@@ -4316,15 +4319,16 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
 inline size_t PrecedenceClimbing::parse_core(const char *s, size_t n,
                                              SemanticValues &vs, Context &c,
                                              std::any &dt) const {
+  auto operand_missing = false;
   if (!rule_.is_macro || rule_.is_left_recursive) {
-    return parse_expression(s, n, vs, c, dt, 0);
+    return parse_expression(s, n, vs, c, dt, 0, operand_missing);
   }
 
   // A macro's body parses on its caller's values, unless it is left-recursive
   // (see Holder::parse_core). Fold the operands in a scope of their own, so
   // that the caller's values stay out of the actions and the fold.
   return parse_in_scope(vs, c, [&](SemanticValues &chvs) {
-    return parse_expression(s, n, chvs, c, dt, 0);
+    return parse_expression(s, n, chvs, c, dt, 0, operand_missing);
   });
 }
 
@@ -4345,10 +4349,9 @@ inline size_t PrecedenceClimbing::parse_in_scope(SemanticValues &vs, Context &c,
   return len;
 }
 
-inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
-                                                   SemanticValues &vs,
-                                                   Context &c, std::any &dt,
-                                                   size_t min_prec) const {
+inline size_t PrecedenceClimbing::parse_expression(
+    const char *s, size_t n, SemanticValues &vs, Context &c, std::any &dt,
+    size_t min_prec, bool &operand_missing) const {
   auto len = atom_->parse(s, n, vs, c, dt);
   if (fail(len)) { return len; }
 
@@ -4391,11 +4394,15 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
     // chain of right-associative operators is as deep as it is long.
     auto rhs_len = parse_in_scope(vs, c, [&](SemanticValues &rhs) {
       auto nesting = c.nest(s + i, rule_);
-      return parse_expression(s + i, n - i, rhs, c, dt, next_min_prec);
+      return parse_expression(s + i, n - i, rhs, c, dt, next_min_prec,
+                              operand_missing);
     });
 
+    // Without a right operand the operator goes unused, as the repetition
+    // stops before it.
     if (fail(rhs_len)) {
-      i = rhs_len;
+      i -= op_len;
+      operand_missing = true;
       break;
     }
     i += rhs_len;
@@ -4425,7 +4432,7 @@ inline size_t PrecedenceClimbing::parse_expression(const char *s, size_t n,
 
     // Like a repetition (see Repetition::parse_core), a round that consumes
     // nothing ends the loop.
-    if (op_len == 0 && rhs_len == 0) { break; }
+    if (operand_missing || (op_len == 0 && rhs_len == 0)) { break; }
   }
 
   return i;

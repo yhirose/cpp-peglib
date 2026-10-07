@@ -644,6 +644,34 @@ TEST(PrecedenceTest,
   }
 }
 
+// An operator without a right operand ends the expression before it, as the
+// repetition stops before an iteration that fails.
+TEST(PrecedenceTest,
+     Precedence_climbing_leaves_an_operator_without_a_right_operand) {
+  for (std::string precedence : {"", "{ precedence L + - L * }"}) {
+    parser pg(R"(
+      S    <- E ('+' / '*' '*')?
+      E    <- NUM (OP NUM)* )" +
+              precedence + R"(
+      NUM  <- < [0-9]+ > / '(' E ')'
+      OP   <- < [-+*] >
+    )");
+    ASSERT_TRUE(!!pg) << precedence;
+
+    EXPECT_TRUE(pg.parse("1+")) << precedence;
+    EXPECT_TRUE(pg.parse("1+2*3+")) << precedence;
+    EXPECT_TRUE(pg.parse("1*2**")) << precedence;
+    EXPECT_FALSE(pg.parse("1-")) << precedence;
+
+    // Each level reads the operator once, not once per enclosing level.
+    std::string unclosed;
+    for (auto i = 0; i < 30; i++) {
+      unclosed += "1+2*(";
+    }
+    EXPECT_FALSE(pg.parse(unclosed + "1")) << precedence;
+  }
+}
+
 // A precedence action sees what the repetition `atom (binop atom)*` would
 // produce: each value with its tag, and no value for an operand without one.
 // Its result carries the rule's tag.
