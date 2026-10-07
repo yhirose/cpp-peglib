@@ -774,7 +774,7 @@ assert(g.parse(" Hello BNF! "));
 Unicode support
 ---------------
 
-cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`.
+cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`. Bytes that are not well-formed UTF-8 match neither `.` nor a character class, negated or not, and errors count each such byte as one column.
 
 Columns are counted in two ways. Errors, the ones passed to the logger and to the error reporter, count `col` in Unicode codepoints from the start of the line, as a text editor does. Matches count it in bytes: the column of `SemanticValues::line_info()` and the `column` of an AST node. The `position` of an `ErrorReport` and of an AST node is a byte offset in the input in both cases.
 

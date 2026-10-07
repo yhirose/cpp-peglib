@@ -158,6 +158,22 @@ TEST(Utf8Test, Decode_codepoint_convenience_simple) {
   EXPECT_EQ(cp, U'\u3042');
 }
 
+// Overlong, cut short, surrogate, past U+10FFFF, stray continuation, never a
+// lead, and a lead followed by no continuation.
+static const char *ill_formed[] = {
+    "\xC1\x81", "\xE3\x81", "\xED\xA0\x80", "\xF4\x90\x80\x80",
+    "\x81",     "\xFF",     "\xE3\x41\x41"};
+
+TEST(Utf8Test, Decode_codepoint_ill_formed) {
+  for (auto s : ill_formed) {
+    size_t bytes = 0;
+    char32_t cp = 0;
+    EXPECT_FALSE(decode_codepoint(s, strlen(s), bytes, cp)) << s;
+    EXPECT_EQ(codepoint_length(s, strlen(s)), 0u) << s;
+    EXPECT_EQ(codepoint_count(s, strlen(s)), strlen(s)) << s;
+  }
+}
+
 // --- decode (full string) ---
 
 TEST(Utf8Test, Decode_full_string) {
@@ -185,6 +201,26 @@ TEST(Utf8Test, Encode_decode_roundtrip) {
     auto decoded = decode_codepoint(encoded.c_str(), encoded.size());
     EXPECT_EQ(decoded, cp);
   }
+}
+
+// Where no well-formed code point starts, nothing that reads one matches,
+// however it is written.
+TEST(Utf8Test, Ill_formed_input_is_no_character) {
+  for (auto grammar : {"S <- .", "S <- [^a]", "S <- [A-Z]", "S <- [A-Z]+",
+                       "S <- [\\x00-\\u10FFFF]", "S <- 'A' / [^a]+"}) {
+    parser pg(grammar);
+    ASSERT_TRUE(!!pg) << grammar;
+    for (auto s : ill_formed) {
+      EXPECT_FALSE(pg.parse(s)) << grammar << " " << s;
+    }
+  }
+  parser pg("S <- . [^a]");
+  EXPECT_TRUE(pg.parse("\xC3\xA9\xE3\x81\x82"));
+}
+
+TEST(Utf8Test, Ill_formed_grammar_text_is_a_syntax_error) {
+  parser pg;
+  EXPECT_FALSE(pg.load_grammar("S <- [\xE3\x81\\\\]"));
 }
 
 // =============================================================================

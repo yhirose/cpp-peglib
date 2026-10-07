@@ -97,31 +97,66 @@ private:
  *  UTF8 functions
  *---------------------------------------------------------------------------*/
 
-inline size_t codepoint_length(const char *s8, size_t l) {
-  if (l) {
-    auto b = static_cast<uint8_t>(s8[0]);
-    if ((b & 0x80) == 0) {
-      return 1;
-    } else if ((b & 0xE0) == 0xC0 && l >= 2) {
-      return 2;
-    } else if ((b & 0xF0) == 0xE0 && l >= 3) {
-      return 3;
-    } else if ((b & 0xF8) == 0xF0 && l >= 4) {
-      return 4;
-    }
+// Only a well-formed sequence is a code point: not an overlong form, a
+// surrogate, a code point past U+10FFFF, a sequence cut short or a stray
+// byte.
+inline bool decode_codepoint(const char *s8, size_t l, size_t &bytes,
+                             char32_t &cp) {
+  if (!l) { return false; }
+  auto b = static_cast<uint8_t>(s8[0]);
+  if (b < 0x80) {
+    bytes = 1;
+    cp = b;
+    return true;
   }
-  return 0;
+  size_t len = 0;
+  char32_t min = 0;
+  char32_t value = 0;
+  if ((b & 0xE0) == 0xC0) {
+    len = 2;
+    value = b & 0x1F;
+    min = 0x80;
+  } else if ((b & 0xF0) == 0xE0) {
+    len = 3;
+    value = b & 0x0F;
+    min = 0x800;
+  } else if ((b & 0xF8) == 0xF0) {
+    len = 4;
+    value = b & 0x07;
+    min = 0x10000;
+  }
+  if (!len || len > l) { return false; }
+  for (size_t i = 1; i < len; i++) {
+    auto c = static_cast<uint8_t>(s8[i]);
+    if ((c & 0xC0) != 0x80) { return false; }
+    value = (value << 6) | (c & 0x3F);
+  }
+  if (value < min || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+    return false;
+  }
+  bytes = len;
+  cp = value;
+  return true;
+}
+
+// 0 where no well-formed code point starts.
+inline size_t codepoint_length(const char *s8, size_t l) {
+  size_t bytes = 0;
+  char32_t cp;
+  decode_codepoint(s8, l, bytes, cp);
+  return bytes;
+}
+
+// Text shown to a person steps over what is not well-formed a byte at a
+// time.
+inline size_t codepoint_or_byte_length(const char *s8, size_t l) {
+  auto len = codepoint_length(s8, l);
+  return len || !l ? len : 1;
 }
 
 inline size_t codepoint_count(const char *s8, size_t l) {
   size_t count = 0;
-  for (size_t i = 0; i < l;) {
-    auto len = codepoint_length(s8 + i, l - i);
-    if (len == 0) {
-      // Invalid UTF-8 byte, treat as single byte to avoid infinite loop
-      len = 1;
-    }
-    i += len;
+  for (size_t i = 0; i < l; i += codepoint_or_byte_length(s8 + i, l - i)) {
     count++;
   }
   return count;
@@ -164,43 +199,6 @@ inline std::string encode_codepoint(char32_t cp) {
   return std::string(buff, l);
 }
 
-inline bool decode_codepoint(const char *s8, size_t l, size_t &bytes,
-                             char32_t &cp) {
-  if (l) {
-    auto b = static_cast<uint8_t>(s8[0]);
-    if ((b & 0x80) == 0) {
-      bytes = 1;
-      cp = b;
-      return true;
-    } else if ((b & 0xE0) == 0xC0) {
-      if (l >= 2) {
-        bytes = 2;
-        cp = ((static_cast<char32_t>(s8[0] & 0x1F)) << 6) |
-             (static_cast<char32_t>(s8[1] & 0x3F));
-        return true;
-      }
-    } else if ((b & 0xF0) == 0xE0) {
-      if (l >= 3) {
-        bytes = 3;
-        cp = ((static_cast<char32_t>(s8[0] & 0x0F)) << 12) |
-             ((static_cast<char32_t>(s8[1] & 0x3F)) << 6) |
-             (static_cast<char32_t>(s8[2] & 0x3F));
-        return true;
-      }
-    } else if ((b & 0xF8) == 0xF0) {
-      if (l >= 4) {
-        bytes = 4;
-        cp = ((static_cast<char32_t>(s8[0] & 0x07)) << 18) |
-             ((static_cast<char32_t>(s8[1] & 0x3F)) << 12) |
-             ((static_cast<char32_t>(s8[2] & 0x3F)) << 6) |
-             (static_cast<char32_t>(s8[3] & 0x3F));
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 inline size_t decode_codepoint(const char *s8, size_t l, char32_t &cp) {
   size_t bytes;
   if (decode_codepoint(s8, l, bytes, cp)) { return bytes; }
@@ -215,13 +213,8 @@ inline char32_t decode_codepoint(const char *s8, size_t l) {
 
 inline std::u32string decode(const char *s8, size_t l) {
   std::u32string out;
-  size_t i = 0;
-  while (i < l) {
-    auto beg = i++;
-    while (i < l && (s8[i] & 0xc0) == 0x80) {
-      i++;
-    }
-    out += decode_codepoint(&s8[beg], (i - beg));
+  for (size_t i = 0; i < l; i += codepoint_or_byte_length(s8 + i, l - i)) {
+    out += decode_codepoint(s8 + i, l - i);
   }
   return out;
 }
@@ -1015,7 +1008,7 @@ private:
       size_t count = CPPPEGLIB_HEURISTIC_ERROR_TOKEN_MAX_CHAR_COUNT;
       size_t j = 0;
       while (count > 0 && j < i) {
-        j += codepoint_length(&pos[j], i - j);
+        j += codepoint_or_byte_length(&pos[j], i - j);
         count--;
       }
 
@@ -1988,14 +1981,9 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
-    if (n < 1) {
-      c.set_error_pos(s);
-      return static_cast<size_t>(-1);
-    }
-
     char32_t cp = 0;
     auto len = decode_codepoint(s, n, cp);
-    if (matches(cp)) { return len; }
+    if (len && matches(cp)) { return len; }
 
     c.set_error_pos(s);
     return static_cast<size_t>(-1);
@@ -2046,15 +2034,10 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
-    if (n < 1) {
-      c.set_error_pos(s);
-      return static_cast<size_t>(-1);
-    }
-
     char32_t cp = 0;
     auto len = decode_codepoint(s, n, cp);
 
-    if (cp != ch_) {
+    if (!len || cp != ch_) {
       c.set_error_pos(s);
       return static_cast<size_t>(-1);
     }
@@ -3673,8 +3656,8 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
         msg = replace_all(message, "%t", unexpected_token);
 
         auto unexpected_char = unexpected_token.substr(
-            0,
-            codepoint_length(unexpected_token.data(), unexpected_token.size()));
+            0, codepoint_or_byte_length(unexpected_token.data(),
+                                        unexpected_token.size()));
 
         msg = replace_all(msg, "%c", unexpected_char);
       } else {
