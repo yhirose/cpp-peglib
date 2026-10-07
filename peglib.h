@@ -4339,7 +4339,11 @@ inline size_t PrecedenceClimbing::parse_expression(
     auto tag = rule_.tag();
     if (!c.recovered) {
       if (rule_.action) {
+        // As Holder::parse_core sets them for a rule whose body is no choice
         vs.sv_ = std::string_view(s, i);
+        vs.name_ = &rule_.name;
+        vs.choice_count_ = 0;
+        vs.choice_ = 0;
         static const std::any empty_predicate_data;
         val = rule_.action(vs, dt, empty_predicate_data);
       } else if (!vs.empty()) {

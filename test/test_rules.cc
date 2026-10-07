@@ -672,6 +672,25 @@ TEST(PrecedenceTest,
   }
 }
 
+// The operand's choice is the macro's, which parses on the rule's values.
+TEST(PrecedenceTest, Precedence_climbing_action_sees_the_rule_as_matched) {
+  parser pg(R"(
+    E    <- A(NUM) (OP A(NUM))* { precedence L + L * }
+    A(x) <- 'x' / x
+    NUM  <- < [0-9]+ >
+    OP   <- < [-+*] >
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<std::string> seen;
+  pg["E"] = [&](const SemanticValues &vs) {
+    seen.push_back(vs.name() + " " + std::to_string(vs.choice_count()));
+    return 0;
+  };
+  EXPECT_TRUE(pg.parse("1+2*3"));
+  EXPECT_EQ((std::vector<std::string>{"E 0", "E 0"}), seen);
+}
+
 // A precedence action sees what the repetition `atom (binop atom)*` would
 // produce: each value with its tag, and no value for an operand without one.
 // Its result carries the rule's tag.
