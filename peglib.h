@@ -3572,6 +3572,10 @@ public:
                               // (like a token boundary, without capturing)
   std::string ast_name; // When non-empty, AST nodes produced by this rule carry
                         // this name/tag instead of the rule's own name
+  // Fixed by add_ast_action when it attaches the AST action, which gives its
+  // nodes this name and tag.
+  std::string ast_node_name;
+  unsigned int ast_node_tag = 0;
 
   bool eoi_check = true;
 
@@ -7630,10 +7634,10 @@ using Ast = AstBase<EmptyType>;
 
 template <typename T = Ast>
 void add_ast_action(Definition &rule, bool collapse = false) {
+  rule.ast_node_name = rule.node_name();
+  rule.ast_node_tag = str2tag(rule.ast_node_name);
   rule.action = [&rule, collapse](const SemanticValues &vs) {
-    // `{ ast_name: X }` overrides the node's name/tag (falls back to the
-    // rule's own name when unset).
-    const char *node_name = rule.node_name().data();
+    const char *node_name = rule.ast_node_name.c_str();
     auto position = static_cast<size_t>(std::distance(vs.ss, vs.sv().data()));
     auto length = vs.sv().length();
 
@@ -7655,8 +7659,8 @@ void add_ast_action(Definition &rule, bool collapse = false) {
           child->position = position;
           child->length = length;
         }
-        child->original_name = node_name;
-        child->original_tag = str2tag(node_name);
+        child->original_name = rule.ast_node_name;
+        child->original_tag = rule.ast_node_tag;
         child->original_choice_count = vs.choice_count();
         child->original_choice = vs.choice();
         return child;
