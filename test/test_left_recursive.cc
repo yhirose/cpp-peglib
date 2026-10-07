@@ -867,6 +867,30 @@ TEST(LeftRecursionMacroTest, Detection_sees_every_instantiation) {
   EXPECT_FALSE(!!off);
 }
 
+TEST(LeftRecursionMacroTest, Macro_call_arguments_are_told_apart) {
+  // N('a') and N(R) are different arguments, though both call N.
+  parser p(R"(
+        R    <- M(N('a')) 'x' / M(N(R)) 'b' / 'c'
+        M(X) <- X
+        N(Y) <- Y
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p["R"].is_left_recursive);
+  EXPECT_TRUE(p.parse("cb"));
+
+  parser q(R"(
+        S    <- M(N('a')) 'x' / M(N('b'))
+        M(P) <- M(P) '+' P / P
+        N(Q) <- Q
+    )");
+
+  EXPECT_TRUE(!!q);
+  EXPECT_TRUE(q.parse("a+ax"));
+  // M(N('a')) matches "a" and then 'x' fails; M(N('b')) must not reuse that.
+  EXPECT_TRUE(q.parse("b+b"));
+}
+
 TEST(LeftRecursionMacroTest, Left_recursive_macro_is_rejected_when_disabled) {
   parser p;
   p.enable_left_recursion(false);

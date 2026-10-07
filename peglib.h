@@ -867,6 +867,8 @@ using ErrorReporter = std::function<void(const ErrorReport &report)>;
  * ErrorInfo
  */
 class Definition;
+class Holder;
+class Reference;
 class PrioritizedChoice;
 
 // Thrown when a parse nests more rule matches than its start rule's
@@ -1190,17 +1192,6 @@ public:
     }
   }
 
-  // One frame per rule reference: the macro arguments in scope, and the
-  // instantiation they identify (0 for anything but a left-recursive macro).
-  struct ArgsFrame {
-    std::vector<std::shared_ptr<Ope>> args;
-    size_t macro_inst = 0;
-  };
-  // Popped frames stay in the vector so their args keep their capacity for
-  // the next push at the same depth (same reuse scheme as value_stack).
-  std::vector<ArgsFrame> args_stack;
-  size_t args_stack_size = 0;
-
   size_t in_token_boundary_count = 0;
 
   std::shared_ptr<Ope> whitespaceOpe;
@@ -1240,10 +1231,9 @@ public:
   };
 
   // Left recursion support
-  // A left-recursive rule instance: the definition plus, for a macro, the
-  // instantiation it was invoked with (0 for a plain rule). Two
-  // instantiations of the same macro grow independent seeds.
-  using LRRule = std::pair<const Definition *, size_t>;
+  // A rule by the body it parses: a macro has one per instance, and two
+  // instances of the same macro grow independent seeds.
+  using LRRule = const Holder *;
   using LRKey = std::pair<LRRule, const char *>;
 
   // Rules being parsed. A rule with an id only needs its innermost start,
@@ -1276,9 +1266,15 @@ public:
   // Used to track LR cycle membership.
   std::set<LRRule> lr_refs_hit;
 
-  // Interned macro instantiations: (definition, resolved arguments) -> id.
-  std::map<std::vector<const void *>, size_t> macro_inst_ids;
-  size_t next_macro_inst_ = 1;
+  // The instances of the macros this parse calls: their bodies with the
+  // parameters replaced by the arguments, keyed by macro_inst_key. Released
+  // last made first: a later one may take an argument that an earlier one
+  // made, and releasing the earlier ones first would leave a chain of such
+  // arguments (`M(s) <- M(s / 'x')`) to be freed recursively at once.
+  const Holder &instance(const Reference &call);
+  std::vector<std::shared_ptr<Holder>> instances;
+  std::map<std::vector<const void *>, const Holder *> instance_by_key;
+  std::unordered_map<const Reference *, const Holder *> instance_of_call;
 
   bool has_id(const Definition &rule) const {
     return analysis && analysis->indexes(rule);
@@ -1345,10 +1341,8 @@ public:
     });
   }
 
-  // True when error reporting or tracing is active, i.e. when rule_stack
-  // must reflect the full chain of rules being parsed. Without them only
-  // rules whose body invokes a macro need to appear on the stack (their
-  // arguments resolve against the innermost rule's params).
+  // True when error reporting or tracing is active, the only readers of
+  // rule_stack.
   const bool needs_rule_stack;
 
   Log log;
@@ -1418,11 +1412,12 @@ public:
     unread_scope.ss = s;
     unread_scope.holds_rule_values_ = false;
     unread_scope.is_read_ = false;
-
-    push_empty_args();
   }
 
   ~Context() {
+    while (!instances.empty()) {
+      instances.pop_back();
+    }
     assert(!value_stack_size);
     assert(cut_stack.empty());
   }
@@ -1451,7 +1446,7 @@ public:
   // parsed again for as long as that makes the seed grow. Its confirmed match
   // is reused.
   template <typename T>
-  void reuse_or_grow(const char *a_s, const Definition &rule, RuleMatch &match,
+  void reuse_or_grow(const char *a_s, const Holder &rule, RuleMatch &match,
                      T parse);
 
   // Semantic values
@@ -1481,62 +1476,6 @@ public:
   }
 
   void pop_semantic_values_scope() { value_stack_size--; }
-
-  // Arguments
-  // Borrow the retained vector of the frame the next push will occupy, so a
-  // caller can fill it before pushing without a fresh heap allocation.
-  std::vector<std::shared_ptr<Ope>> take_args_buffer() {
-    if (args_stack_size < args_stack.size()) {
-      auto v = std::move(args_stack[args_stack_size].args);
-      v.clear();
-      return v;
-    }
-    return {};
-  }
-
-  void push_args(std::vector<std::shared_ptr<Ope>> &&args,
-                 size_t macro_inst = 0) {
-    if (args_stack_size == args_stack.size()) {
-      args_stack.push_back({std::move(args), macro_inst});
-    } else {
-      auto &frame = args_stack[args_stack_size];
-      frame.args = std::move(args);
-      frame.macro_inst = macro_inst;
-    }
-    args_stack_size++;
-  }
-
-  // An empty argument scope keeps the frame's retained vector (just
-  // cleared), where push_args({}) would deallocate it.
-  void push_empty_args() {
-    if (args_stack_size == args_stack.size()) { args_stack.emplace_back(); }
-    auto &frame = args_stack[args_stack_size];
-    frame.args.clear();
-    frame.macro_inst = 0;
-    args_stack_size++;
-  }
-
-  void pop_args() { args_stack_size--; }
-
-  const std::vector<std::shared_ptr<Ope>> &top_args() const {
-    return args_stack[args_stack_size - 1].args;
-  }
-
-  size_t top_macro_inst() const {
-    return args_stack[args_stack_size - 1].macro_inst;
-  }
-
-  // Identify a macro invocation by what its resolved arguments denote (see
-  // macro_inst_key). `Sum(A)` inside `Sum(N)`'s own body resolves A back to
-  // the argument the outer call was given, so both invocations intern to the
-  // same id and the inner one finds the outer's seed — which is what makes
-  // growing terminate.
-  size_t intern_macro_inst(std::vector<const void *> &&key) {
-    auto [it, inserted] =
-        macro_inst_ids.emplace(std::move(key), next_macro_inst_);
-    if (inserted) { next_macro_inst_++; }
-    return it->second;
-  }
 
   // Snapshot/Rollback
   struct Snapshot {
@@ -1791,6 +1730,15 @@ public:
       : opes_(std::move(opes)), for_label_(for_label) {
     is_choice_like = true;
     list_alternatives();
+  }
+  // `like` with these alternatives in place of its own, which start as its
+  // own do.
+  PrioritizedChoice(std::vector<std::shared_ptr<Ope>> &&opes,
+                    const PrioritizedChoice &like)
+      : opes_(std::move(opes)), for_label_(like.for_label_),
+        first_sets_(like.first_sets_), lists_(like.lists_),
+        list_begin_(like.list_begin_) {
+    is_choice_like = true;
   }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
@@ -2701,8 +2649,7 @@ struct AssignIDToDefinition : public TraversalVisitor {
   void visit(User &) override { has_user = true; }
 
   std::unordered_map<void *, size_t> ids;
-  Definition *current_def = nullptr; // rule whose body is being walked
-  bool has_cut = false;              // grammar contains a Cut or Recovery ope
+  bool has_cut = false; // grammar contains a Cut or Recovery ope
   bool has_user = false;
 };
 
@@ -3106,12 +3053,11 @@ private:
   const std::vector<std::string> &params_;
 };
 
-struct FindReference : public Ope::Visitor {
+struct ReplaceParameters : public Ope::Visitor {
   using Ope::Visitor::visit;
 
-  FindReference(const std::vector<std::shared_ptr<Ope>> &args,
-                const std::vector<std::string> &params)
-      : args_(args), params_(params) {}
+  explicit ReplaceParameters(const std::vector<std::shared_ptr<Ope>> &args)
+      : args_(args) {}
 
   // `ope` with the parameters in it replaced by the arguments, or `ope`
   // itself when it names none.
@@ -3128,8 +3074,7 @@ struct FindReference : public Ope::Visitor {
   void visit(PrioritizedChoice &ope) override {
     auto opes = resolve_all(ope.opes_);
     if (opes) {
-      resolved_ =
-          std::make_shared<PrioritizedChoice>(std::move(*opes), ope.for_label_);
+      resolved_ = std::make_shared<PrioritizedChoice>(std::move(*opes), ope);
     }
   }
   void visit(Repetition &ope) override {
@@ -3145,6 +3090,7 @@ struct FindReference : public Ope::Visitor {
   void visit(Ignore &ope) override { rewrap(ope.ope_, ign); }
   void visit(Reference &ope) override;
   void visit(Recovery &ope) override { rewrap(ope.ope_, rec); }
+  void visit(PrecedenceClimbing &ope) override;
 
 private:
   template <typename Make>
@@ -3167,7 +3113,6 @@ private:
 
   std::shared_ptr<Ope> resolved_;
   const std::vector<std::shared_ptr<Ope>> &args_;
-  const std::vector<std::string> &params_;
 };
 
 /*
@@ -3555,10 +3500,6 @@ public:
   // The bytes a match of this rule can start with: any, unless it cannot
   // match empty and they are known (set up with the first sets).
   std::bitset<256> start_bytes = std::bitset<256>().set();
-  // Body contains a macro invocation, whose arguments resolve against the
-  // innermost rule on rule_stack; computed by AssignIDToDefinition. The
-  // conservative default keeps the stack maintained until then.
-  bool has_macro_ref = true;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -4097,14 +4038,11 @@ inline std::string resolve_capture_placeholders(const std::string &msg,
 }
 
 // Parses the rule's operator into the given scope, maintaining the rule
-// stack and honouring no_whitespace. The rule stack feeds error reports,
-// user tracers, and the resolution of macro arguments written in this
-// rule's body; a rule that serves none of those skips the bookkeeping.
+// stack and honouring no_whitespace.
 inline size_t Holder::parse_ope_body(const char *s, size_t n,
                                      SemanticValues &vs, Context &c,
                                      std::any &dt) const {
-  const auto push_rule = c.needs_rule_stack || outer_->has_macro_ref;
-  if (push_rule) { c.push_rule(outer_); }
+  if (c.needs_rule_stack) { c.push_rule(outer_); }
 
   size_t len;
   if (outer_->no_whitespace) {
@@ -4125,7 +4063,7 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
     len = ope_->parse(s, n, vs, c, dt);
   }
 
-  if (push_rule) { c.pop_rule(); }
+  if (c.needs_rule_stack) { c.pop_rule(); }
   return len;
 }
 
@@ -4142,9 +4080,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // semantic value scope to memoise. Such a macro forms a scope like a plain
   // rule does.
   if (outer_->is_macro && !outer_->is_left_recursive) {
-    c.push_rule(outer_);
+    if (c.needs_rule_stack) { c.push_rule(outer_); }
     auto len = ope_->parse(s, n, vs, c, dt);
-    c.pop_rule();
+    if (c.needs_rule_stack) { c.pop_rule(); }
     return len;
   }
 
@@ -4235,7 +4173,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   };
 
   if (outer_->is_left_recursive) {
-    c.reuse_or_grow(s, *outer_, match, do_parse);
+    c.reuse_or_grow(s, *this, match, do_parse);
   } else {
     c.reuse_or_parse(s, *outer_, has_id, vs.holds_rule_tokens_, match,
                      do_parse);
@@ -4279,7 +4217,8 @@ inline const std::string &Holder::trace_name() const {
 
 // Key a macro instantiation by what each argument denotes rather than by the
 // node that spells it: `M(N)` written at two call sites builds two Reference
-// nodes for the same rule N, and those are the same instantiation.
+// nodes for the same rule N, and those are the same instantiation. Any other
+// argument, a macro call among them, is the node itself.
 inline std::vector<const void *>
 macro_inst_key(const Definition *def,
                const std::vector<std::shared_ptr<Ope>> &args) {
@@ -4288,10 +4227,29 @@ macro_inst_key(const Definition *def,
   key.push_back(def);
   for (const auto &arg : args) {
     auto ref = dynamic_cast<Reference *>(arg.get());
-    key.push_back(ref && ref->rule_ ? static_cast<const void *>(ref->rule_)
-                                    : static_cast<const void *>(arg.get()));
+    key.push_back(ref && ref->rule_ && !ref->is_macro_
+                      ? static_cast<const void *>(ref->rule_)
+                      : static_cast<const void *>(arg.get()));
   }
   return key;
+}
+
+// A parameter passes its caller's argument on as it is, so a call that
+// passes a parameter on finds its own instance again.
+inline const Holder &Context::instance(const Reference &call) {
+  auto &inst = instance_of_call[&call];
+  if (!inst) {
+    auto &by_key = instance_by_key[macro_inst_key(call.rule_, call.args_)];
+    if (!by_key) {
+      auto made = std::make_shared<Holder>(call.rule_);
+      made->ope_ = ReplaceParameters(call.args_)
+                       .resolve(call.rule_->get_core_operator());
+      instances.push_back(made);
+      by_key = made.get();
+    }
+    inst = by_key;
+  }
+  return *inst;
 }
 
 inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
@@ -4313,52 +4271,21 @@ inline size_t Reference::parse_core(const char *s, size_t n, SemanticValues &vs,
 inline size_t Reference::parse_dispatch(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
-  if (rule_) {
-    // Reference rule
-    if (rule_->is_macro) {
-      // Macro
-      FindReference vis(c.top_args(), c.rule_stack.back()->params);
-
-      // Collect arguments (into the retained buffer of the frame the push
-      // below will occupy, so no allocation happens on a warm path)
-      auto args = c.take_args_buffer();
-      for (const auto &arg : args_) {
-        args.emplace_back(vis.resolve(arg));
-      }
-
-      auto inst = rule_->is_left_recursive
-                      ? c.intern_macro_inst(macro_inst_key(rule_, args))
-                      : 0;
-      c.push_args(std::move(args), inst);
-      auto se = scope_exit([&]() { c.pop_args(); });
-      return rule_->holder_->parse(s, n, vs, c, dt);
-    } else {
-      // A rule that cannot start with the next byte fails without being
-      // entered where that goes unnoticed, as a choice skips an alternative
-      // that cannot.
-      if (c.skips_rules && n > 0 &&
-          !rule_->start_bytes.test(static_cast<unsigned char>(*s)) &&
-          c.has_id(*rule_) && c.rule_use[rule_->id].skippable) {
-        return static_cast<size_t>(-1);
-      }
-
-      // Definition. The empty argument scope only exists to shadow the
-      // caller's frame for readers inside the callee: a macro invocation in
-      // its body (FindReference/top_args, tracked by has_macro_ref) and the
-      // top_macro_inst reads in the left-recursion machinery. A callee with
-      // no such reader parses directly on the caller's frame.
-      if (!rule_->has_macro_ref && !rule_->is_left_recursive) {
-        return rule_->holder_->parse(s, n, vs, c, dt);
-      }
-      c.push_empty_args();
-      auto se2 = scope_exit([&]() { c.pop_args(); });
-      return rule_->holder_->parse(s, n, vs, c, dt);
-    }
-  } else {
-    // Reference parameter in macro
-    const auto &args = c.top_args();
-    return args[iarg_]->parse(s, n, vs, c, dt);
+  // An instance has its parameters replaced, and only instances are parsed.
+  if (!rule_) {
+    throw std::logic_error("A macro parameter was parsed outside its macro...");
   }
+
+  if (rule_->is_macro) { return c.instance(*this).parse(s, n, vs, c, dt); }
+
+  // A rule that cannot start with the next byte fails without being entered
+  // where that goes unnoticed, as a choice skips an alternative that cannot.
+  if (c.skips_rules && n > 0 &&
+      !rule_->start_bytes.test(static_cast<unsigned char>(*s)) &&
+      c.has_id(*rule_) && c.rule_use[rule_->id].skippable) {
+    return static_cast<size_t>(-1);
+  }
+  return rule_->holder_->parse(s, n, vs, c, dt);
 }
 
 inline std::shared_ptr<Ope> Reference::get_core_operator() const {
@@ -4588,18 +4515,11 @@ inline void AssignIDToDefinition::visit(Holder &ope) {
   if (ids.count(p)) { return; }
   auto order = ids.size();
   ids[p] = order;
-  ope.outer_->has_macro_ref = false; // set below when the body walk finds one
-  auto save = current_def;
-  current_def = ope.outer_;
   ope.ope_->accept(*this);
-  current_def = save;
 }
 
 inline void AssignIDToDefinition::visit(Reference &ope) {
   if (ope.rule_) {
-    if (ope.rule_->is_macro && current_def) {
-      current_def->has_macro_ref = true;
-    }
     for (const auto &arg : ope.args_) {
       arg->accept(*this);
     }
@@ -5050,7 +4970,10 @@ struct CollectRuleRefs : public TraversalVisitor {
   void visit(Ignore &ope) override { thrown_away(*ope.ope_); }
   void visit(Holder &ope) override { add(ope.outer_); }
   void visit(Reference &ope) override {
-    if (ope.rule_) { add(ope.rule_); }
+    if (ope.rule_) {
+      add(ope.rule_);
+      if (ope.rule_->is_macro) { calls_macro = true; }
+    }
     for (const auto &arg : ope.args_) {
       read(*arg);
     }
@@ -5071,6 +4994,9 @@ struct CollectRuleRefs : public TraversalVisitor {
   // precedence's operator, whose action runs as it hands over its token.
   std::vector<Definition *> read_rules;
   bool has_precedence = false; // which reads the scope it folds
+  // A macro's body parses in the scope too, putting there the values of
+  // rules not listed above.
+  bool calls_macro = false;
 
 private:
   void add(Definition *rule) {
@@ -5257,7 +5183,7 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
     // Not running an AST action goes unnoticed, unless it would have thrown
     // on a value that is not a node.
     auto values_are_nodes =
-        token_node || (node_type && !rule->has_macro_ref &&
+        token_node || (node_type && !refs[id].calls_macro &&
                        std::all_of(rules.begin(), rules.end(), [&](auto *r) {
                          return r->action.ast_node_type() == node_type;
                        }));
@@ -5483,7 +5409,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
                                     bool rule_has_id, bool needs_token,
                                     RuleMatch &match, T parse) {
   if (!rule_has_id) {
-    auto key = LRKey({&rule, 0}, a_s);
+    auto key = LRKey(rule.holder_.get(), a_s);
     if (!in_progress.emplace(key, RuleMatch()).second) {
       match.len = static_cast<size_t>(-1);
       return;
@@ -5535,11 +5461,9 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 }
 
 template <typename T>
-inline void Context::reuse_or_grow(const char *a_s, const Definition &rule,
+inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
                                    RuleMatch &match, T parse) {
-  // A macro grows one seed per instantiation: Sum(D) and Sum(L) are
-  // different rules as far as the memo is concerned.
-  auto lr_rule = LRRule(&rule, top_macro_inst());
+  auto lr_rule = LRRule(&rule);
   auto lr_key = LRKey(lr_rule, a_s);
 
   if (auto memo = find_lr_match(lr_key)) {
@@ -5909,13 +5833,22 @@ inline void LinkReferences::visit(Reference &ope) {
   }
 }
 
-inline void FindReference::visit(Reference &ope) {
-  for (size_t i = 0; i < args_.size(); i++) {
-    const auto &name = params_[i];
-    if (name == ope.name_) {
-      resolved_ = args_[i];
-      return;
-    }
+inline void ReplaceParameters::visit(Reference &ope) {
+  if (!ope.rule_) {
+    resolved_ = args_[ope.iarg_];
+  } else if (auto args = resolve_all(ope.args_)) {
+    auto call = std::make_shared<Reference>(ope.grammar_, ope.name_, ope.s_,
+                                            ope.is_macro_, std::move(*args));
+    call->rule_ = ope.rule_;
+    resolved_ = std::move(call);
+  }
+}
+
+inline void ReplaceParameters::visit(PrecedenceClimbing &ope) {
+  auto atom = resolve(ope.atom_);
+  auto binop = resolve(ope.binop_);
+  if (atom != ope.atom_ || binop != ope.binop_) {
+    resolved_ = pre(atom, binop, ope.info_, ope.rule_);
   }
 }
 
@@ -7279,6 +7212,17 @@ private:
         }
         ret = false;
       }
+    }
+
+    // A macro has nothing to fill its parameters with as the start rule
+    if (start_rule.is_macro) {
+      if (log) {
+        auto line = line_info(s, start_rule.s_);
+        log(line.first, line.second,
+            "the macro '" + start_rule.name + "' cannot be the start rule.",
+            "");
+      }
+      ret = false;
     }
 
     if (!ret) { return {}; }

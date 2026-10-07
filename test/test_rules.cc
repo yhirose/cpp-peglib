@@ -68,6 +68,16 @@ TEST(MacroTest, Macro_invalid_macro_reference_error) {
   EXPECT_FALSE(ret);
 }
 
+TEST(MacroTest, Macro_cannot_be_the_start_rule) {
+  parser parser(R"(
+		T(a) <- a
+		S    <- T('hello')
+	)");
+
+  bool ret = parser;
+  EXPECT_FALSE(ret);
+}
+
 TEST(MacroTest, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(
@@ -237,6 +247,18 @@ TEST(MacroTest, Nested_macro_call) {
   EXPECT_TRUE(parser.parse("val"));
 }
 
+TEST(MacroTest, Nested_macro_call_with_a_parameter_as_argument) {
+  parser parser(R"(
+        A     <- B(T)
+        C(Y)  <- Y
+        B(X)  <- C(C(X))
+        T     <- 'val'
+	)");
+
+  EXPECT_TRUE(parser.parse("val"));
+  EXPECT_FALSE(parser.parse("x"));
+}
+
 TEST(MacroTest, Nested_macro_call2) {
   parser parser(R"(
         START           <- A('TestVal1', 'TestVal2')+
@@ -285,6 +307,22 @@ TEST(MacroEdgeTest, Label_in_an_argument_acts_as_outside_a_macro) {
     EXPECT_TRUE(pg) << grammar;
     EXPECT_FALSE(pg.parse("b")) << grammar;
   }
+}
+
+TEST(MacroEdgeTest, Label_given_as_an_argument_acts_as_outside_a_macro) {
+  std::vector<std::string> logs[2];
+  auto i = 0;
+  for (auto grammar : {"S <- 'a'^E / 'q'", "S <- M(E) / 'q'\n M(L) <- 'a'^L"}) {
+    parser pg(std::string(grammar) + "\n E <- 'x'");
+    EXPECT_TRUE(pg) << grammar;
+    pg.set_logger([&](size_t, size_t col, const std::string &msg) {
+      logs[i].push_back(std::to_string(col) + " " + msg);
+    });
+    EXPECT_FALSE(pg.parse("x")) << grammar;
+    EXPECT_TRUE(pg.parse("a")) << grammar;
+    i++;
+  }
+  EXPECT_EQ(logs[0], logs[1]);
 }
 
 TEST(MacroEdgeTest, Macro_with_whitespace) {
