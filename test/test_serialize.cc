@@ -171,6 +171,18 @@ TEST(GrammarBlobTest, RejectsBadMagic) {
   EXPECT_THROW(GrammarBlob::deserialize(junk, start), std::runtime_error);
 }
 
+// v1.20.0 stored `[[:^lower:]]i` as ranges that now match every character,
+// so its blobs are not read.
+TEST(GrammarBlobTest, RejectsBlobsOfV1_20) {
+  parser pg("S <- [[:^lower:]]i");
+  auto blob = pg.serialize_grammar();
+  const uint8_t peg2[] = {0x32, 0x47, 0x45, 0x50};
+  std::copy(std::begin(peg2), std::end(peg2), blob.begin());
+
+  parser restored;
+  EXPECT_FALSE(restored.load_blob(blob));
+}
+
 // parser-level API: serialize_grammar() -> load_blob(), then parse with AST and
 // compare against a freshly loaded grammar.
 TEST(GrammarBlobTest, ParserLoadBlobWithAst) {

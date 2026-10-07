@@ -5953,7 +5953,7 @@ struct GrammarBlob {
     }
   }
 
-  static const uint32_t MAGIC = 0x50454732; // "PEG2"
+  static const uint32_t MAGIC = 0x50454733; // "PEG3"
 
   static std::vector<uint8_t> serialize(const Grammar &g,
                                         const std::string &start) {
