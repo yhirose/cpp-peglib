@@ -144,6 +144,8 @@ The improvement is most pronounced on small inputs (Q1: -22.7%) where per-rule a
 
 ## Keyword Guard (Phase 3)
 
+This fast path was later removed: it accepted identifiers that `!K` rejects, such as `online` for `K <- 'on'i`.
+
 At grammar compilation time, the pattern `!ReservedKeyword <[a-z_]i[a-z0-9_]i*>` is detected. At parse time, instead of running the full NotPredicate → Holder → PrioritizedChoice chain for each keyword alternative, the fast path scans the identifier using a bitset, then checks the result against a precomputed keyword table. Identifiers whose length falls outside the keyword length range skip the lookup entirely.
 
 Key techniques:

@@ -488,6 +488,25 @@ TEST(GeneralTest, Word_expression_case_ignore_test_Dictionary) {
   EXPECT_TRUE(parser.parse("toa"));
 }
 
+// Without %word, a keyword rejects every identifier it begins, and the
+// identifier keeps its own repetition counts; whitespace changes neither.
+TEST(GeneralTest, Keyword_lookahead_matches_a_prefix_without_word) {
+  for (std::string whitespace : {"", "%whitespace <- [ \t]*"}) {
+    parser pg(R"(
+      Id <- !K < [a-z_]i [a-z0-9_]i{1,2} >
+      K  <- 'on'i / 'select'i
+    )" + whitespace);
+    ASSERT_TRUE(!!pg) << whitespace;
+
+    EXPECT_FALSE(pg.parse("on")) << whitespace;
+    EXPECT_FALSE(pg.parse("online")) << whitespace;
+    EXPECT_FALSE(pg.parse("ONx")) << whitespace;
+    EXPECT_TRUE(pg.parse("oxn")) << whitespace;
+    EXPECT_FALSE(pg.parse("a")) << whitespace;
+    EXPECT_FALSE(pg.parse("abcd")) << whitespace;
+  }
+}
+
 TEST(GeneralTest, Word_expression_syntax_error_test_Dictionary) {
   parser parser(R"(
     Identifier  ← < !Keyword [a-z][a-z]* >
@@ -643,8 +662,6 @@ TEST(GeneralTest, Ignore_case_character_class_range_test) {
       parser alone("S <- " + cls_i);
       parser repeated("S <- " + cls_i + "+");
       parser alternative("S <- A / '\\x80'\nA <- " + cls_i);
-      parser keyword_guarded("S <- !K < " + cls_i + " " + cls_i +
-                             "* >\nK <- 'if'i / 'in'i");
       parser negated("S <- [^" + range + "]i");
       Definition combinator;
       combinator <= cls({{ends[i], ends[j]}}, true);
@@ -658,8 +675,6 @@ TEST(GeneralTest, Ignore_case_character_class_range_test) {
         EXPECT_EQ(expected, alone.parse(in)) << range << " " << c;
         EXPECT_EQ(expected, repeated.parse(in)) << range << " " << c;
         EXPECT_EQ(expected, alternative.parse(in)) << range << " " << c;
-        EXPECT_EQ(expected, keyword_guarded.parse(in + in))
-            << range << " " << c;
         EXPECT_EQ(!expected, negated.parse(in)) << range << " " << c;
         EXPECT_EQ(expected, combinator.parse(in.data(), 1).ret)
             << range << " " << c;

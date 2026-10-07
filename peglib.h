@@ -1591,23 +1591,6 @@ private:
                       std::any &dt) const;
 };
 
-// Keyword-guarded identifier data, heap-allocated only for matching Sequences.
-// Avoids bloating all Sequence objects with bitsets and keyword sets.
-struct KeywordGuardData {
-  std::bitset<256> identifier_first;        // first char of identifier
-  std::bitset<256> identifier_rest;         // subsequent chars of identifier
-  std::vector<std::string> exact_keywords;  // single-word keywords (lowercase)
-  std::vector<std::string> prefix_keywords; // first word of compound keywords
-  size_t min_keyword_len = 0;
-  size_t max_keyword_len = 0;
-
-  static bool matches_any(const std::vector<std::string> &keywords,
-                          std::string_view input) {
-    return std::any_of(keywords.begin(), keywords.end(),
-                       [&](const auto &kw) { return kw == input; });
-  }
-};
-
 class Sequence : public Ope {
 public:
   template <typename... Args>
@@ -1618,14 +1601,6 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {
-    // Keyword-guarded identifier fast path:
-    // Fuses !ReservedKeyword <identifier> into scan-then-lookup
-    if (kw_guard_) {
-      if (auto result = parse_keyword_guarded(s, n, vs, c, dt)) {
-        return *result;
-      }
-      // nullopt means prefix keyword match — fall through to normal path
-    }
     size_t i = 0;
     for (const auto &ope : opes_) {
       auto len = ope->parse(s + i, n - i, vs, c, dt);
@@ -1638,55 +1613,6 @@ public:
   void accept(Visitor &v) override;
 
   std::vector<std::shared_ptr<Ope>> opes_;
-
-private:
-  friend struct SetupFirstSets;
-  std::unique_ptr<KeywordGuardData> kw_guard_;
-
-  // Returns parse result, or nullopt to fall through to normal path
-  std::optional<size_t> parse_keyword_guarded(const char *s, size_t n,
-                                              SemanticValues &vs, Context &c,
-                                              std::any &dt) const {
-    const auto &kw = *kw_guard_;
-    if (n < 1 || !kw.identifier_first.test(static_cast<unsigned char>(*s))) {
-      c.set_error_pos(s);
-      return static_cast<size_t>(-1);
-    }
-    // Scan identifier using bitset
-    size_t id_len = 1;
-    while (id_len < n &&
-           kw.identifier_rest.test(static_cast<unsigned char>(s[id_len]))) {
-      id_len++;
-    }
-    // Skip keyword matching if identifier length is out of range
-    if (id_len >= kw.min_keyword_len && id_len <= kw.max_keyword_len) {
-      char lower_buf[64];
-      std::unique_ptr<char[]> lower_heap;
-      char *lower = lower_buf;
-      if (id_len > sizeof(lower_buf)) {
-        lower_heap.reset(new char[id_len]);
-        lower = lower_heap.get();
-      }
-      std::transform(s, s + id_len, lower,
-                     [](char ch) { return to_lower(ch); });
-      std::string_view lower_sv(lower, id_len);
-
-      if (KeywordGuardData::matches_any(kw.exact_keywords, lower_sv)) {
-        c.set_error_pos(s);
-        return static_cast<size_t>(-1);
-      }
-      if (KeywordGuardData::matches_any(kw.prefix_keywords, lower_sv)) {
-        return std::nullopt;
-      }
-    }
-    // Success: emit token and consume trailing whitespace
-    if (vs.is_read_ && !vs.holds_rule_tokens_) {
-      vs.tokens.emplace_back(std::string_view(s, id_len));
-    }
-    auto wl = c.skip_whitespace(s + id_len, n - id_len, vs, dt);
-    if (fail(wl)) { return wl; }
-    return id_len + wl;
-  }
 };
 
 struct FirstSet {
@@ -3250,9 +3176,6 @@ struct SetupFirstSets : public TraversalVisitor {
       whitespace_ = cfs.result_;
     }
   }
-
-  void visit(Sequence &ope) override;
-  void setup_keyword_guarded_identifier(Sequence &ope);
 
   void visit(PrioritizedChoice &ope) override {
     std::vector<FirstSet> first_sets;
@@ -4845,113 +4768,6 @@ inline void SetupFirstSets::visit(Holder &ope) {
   ope.ope_->accept(*this);
 }
 
-inline void SetupFirstSets::visit(Sequence &ope) {
-  ope.kw_guard_.reset();
-  setup_keyword_guarded_identifier(ope);
-  for (const auto &op : ope.opes_) {
-    op->accept(*this);
-  }
-}
-
-inline void SetupFirstSets::setup_keyword_guarded_identifier(Sequence &seq) {
-  // Detect pattern: NotPredicate(Reference→PrioritizedChoice<literals>)
-  //                 TokenBoundary(Sequence[CharacterClass,
-  //                 Repetition(CharacterClass)])
-  // This is the pattern used by: PlainIdentifier <- !ReservedKeyword
-  // <[a-z_]i[a-z0-9_]i*>
-  if (seq.opes_.size() != 2) { return; }
-
-  // Child 0 must be NotPredicate
-  auto *not_pred = dynamic_cast<NotPredicate *>(seq.opes_[0].get());
-  if (!not_pred) { return; }
-
-  // NotPredicate's child must be Reference to a rule
-  auto *ref = dynamic_cast<Reference *>(not_pred->ope_.get());
-  if (!ref || !ref->rule_) { return; }
-
-  // The referenced rule's inner operator (Holder) must contain
-  // PrioritizedChoice
-  auto *holder = dynamic_cast<Holder *>(ref->get_core_operator().get());
-  if (!holder) { return; }
-  auto *choice = dynamic_cast<PrioritizedChoice *>(holder->ope_.get());
-  if (!choice) { return; }
-
-  // Extract keywords from PrioritizedChoice alternatives
-  std::vector<std::string> exact_keywords;
-  std::vector<std::string> prefix_keywords;
-
-  for (const auto &alt : choice->opes_) {
-    auto *lit = dynamic_cast<LiteralString *>(alt.get());
-    if (lit) {
-      if (!lit->ignore_case_) { return; }
-      exact_keywords.push_back(to_lower(lit->lit_));
-      continue;
-    }
-    // Check for compound keyword (Sequence of LiteralStrings)
-    auto *sub_seq = dynamic_cast<Sequence *>(alt.get());
-    if (sub_seq && !sub_seq->opes_.empty()) {
-      auto *first_lit = dynamic_cast<LiteralString *>(sub_seq->opes_[0].get());
-      if (first_lit) {
-        auto all_ignore_case_lits =
-            std::all_of(sub_seq->opes_.begin(), sub_seq->opes_.end(),
-                        [](const auto &child) {
-                          auto *l = dynamic_cast<LiteralString *>(child.get());
-                          return l && l->ignore_case_;
-                        });
-        if (all_ignore_case_lits) {
-          prefix_keywords.push_back(to_lower(first_lit->lit_));
-          continue;
-        }
-      }
-    }
-    // Unrecognized alternative — bail out
-    return;
-  }
-
-  if (exact_keywords.empty()) { return; }
-
-  // Child 1 must be TokenBoundary
-  auto *tb = dynamic_cast<TokenBoundary *>(seq.opes_[1].get());
-  if (!tb) { return; }
-
-  // TokenBoundary content: Sequence[CharacterClass, Repetition(CharacterClass)]
-  // or just CharacterClass (single char identifier)
-  CharacterClass *first_cc = nullptr;
-  CharacterClass *rest_cc = nullptr;
-
-  auto *inner_seq = dynamic_cast<Sequence *>(tb->ope_.get());
-  if (inner_seq && inner_seq->opes_.size() == 2) {
-    first_cc = dynamic_cast<CharacterClass *>(inner_seq->opes_[0].get());
-    auto *rep = dynamic_cast<Repetition *>(inner_seq->opes_[1].get());
-    if (rep) { rest_cc = dynamic_cast<CharacterClass *>(rep->ope_.get()); }
-  }
-
-  if (!first_cc || !rest_cc) { return; }
-  if (!first_cc->is_ascii_only() || !rest_cc->is_ascii_only()) { return; }
-
-  // All conditions met — set up the fast path
-  auto kw = std::make_unique<KeywordGuardData>();
-  kw->identifier_first = first_cc->ascii_bitset();
-  kw->identifier_rest = rest_cc->ascii_bitset();
-
-  // Compute keyword length range for early-out in hot path
-  size_t min_len = SIZE_MAX, max_len = 0;
-  for (const auto &k : exact_keywords) {
-    min_len = std::min(min_len, k.size());
-    max_len = std::max(max_len, k.size());
-  }
-  for (const auto &k : prefix_keywords) {
-    min_len = std::min(min_len, k.size());
-    max_len = std::max(max_len, k.size());
-  }
-  kw->min_keyword_len = min_len;
-  kw->max_keyword_len = max_len;
-
-  kw->exact_keywords = std::move(exact_keywords);
-  kw->prefix_keywords = std::move(prefix_keywords);
-  seq.kw_guard_ = std::move(kw);
-}
-
 inline void Definition::analyze() const {
   AssignIDToDefinition vis;
   holder_->accept(vis);
@@ -5867,7 +5683,7 @@ inline void ReplaceParameters::visit(PrecedenceClimbing &ope) {
  *  prebuilt blob. Structure only: semantic callbacks (actions / enter / leave /
  *  predicate, attached by enable_ast() etc.) are NOT serialized and must be
  *  re-applied after deserialize. References resolve by name (no pointer fixup);
- *  first-sets and keyword guards are recomputed on load (O(N)). The
+ *  first-sets are recomputed on load (O(N)). The
  *  `precedence` instruction is supported (its operator table is structural).
  *  Grammars using the `User` operator or a Capture with a match action are
  *  rejected. The blob is specific to this peglib version's layout.
