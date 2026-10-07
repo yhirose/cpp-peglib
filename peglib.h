@@ -444,6 +444,17 @@ add_other_case(const std::vector<std::pair<char32_t, char32_t>> &ranges) {
   return r;
 }
 
+inline char to_lower(char c) {
+  return 'A' <= c && c <= 'Z' ? static_cast<char>(other_case(c)) : c;
+}
+
+inline std::string to_lower(std::string s) {
+  for (auto &c : s) {
+    c = to_lower(c);
+  }
+  return s;
+}
+
 /*-----------------------------------------------------------------------------
  *  token_to_number_ - This function should be removed eventually
  *---------------------------------------------------------------------------*/
@@ -462,13 +473,6 @@ template <typename T> T token_to_number_(std::string_view sv) {
     ss >> n;
   }
   return n;
-}
-
-inline std::string to_lower(std::string s) {
-  for (auto &c : s) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  return s;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1347,10 +1351,6 @@ public:
   // arguments resolve against the innermost rule's params).
   const bool needs_rule_stack;
 
-  // Byte-wise tolower frozen at parse start, so case-insensitive matching
-  // avoids a locale-sensitive libc call per input byte.
-  unsigned char tolower_table[256];
-
   Log log;
   ErrorReporter error_reporter;
 
@@ -1418,11 +1418,6 @@ public:
     unread_scope.ss = s;
     unread_scope.holds_rule_values_ = false;
     unread_scope.is_read_ = false;
-
-    for (size_t i = 0; i < 256; i++) {
-      tolower_table[i] =
-          static_cast<unsigned char>(std::tolower(static_cast<int>(i)));
-    }
 
     push_empty_args();
   }
@@ -1733,9 +1728,8 @@ private:
         lower_heap.reset(new char[id_len]);
         lower = lower_heap.get();
       }
-      std::transform(s, s + id_len, lower, [&c](unsigned char ch) {
-        return static_cast<char>(c.tolower_table[ch]);
-      });
+      std::transform(s, s + id_len, lower,
+                     [](char ch) { return to_lower(ch); });
       std::string_view lower_sv(lower, id_len);
 
       if (KeywordGuardData::matches_any(kw.exact_keywords, lower_sv)) {
@@ -3221,10 +3215,7 @@ struct ComputeFirstSet : public TraversalVisitor {
       if (!key.empty()) {
         auto ch = static_cast<unsigned char>(key[0]);
         result_.chars.set(ch);
-        if (ope.trie_.ignore_case_) {
-          result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
-          result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
-        }
+        if (ope.trie_.ignore_case_) { result_.chars.set(other_case(ch)); }
       }
     }
   }
@@ -3235,10 +3226,7 @@ struct ComputeFirstSet : public TraversalVisitor {
     } else {
       auto ch = static_cast<unsigned char>(ope.lit_[0]);
       result_.chars.set(ch);
-      if (ope.ignore_case_) {
-        result_.chars.set(static_cast<unsigned char>(std::toupper(ch)));
-        result_.chars.set(static_cast<unsigned char>(std::tolower(ch)));
-      }
+      if (ope.ignore_case_) { result_.chars.set(other_case(ch)); }
       if (!result_.first_literal) { result_.first_literal = ope.lit_.c_str(); }
     }
   }
@@ -3730,11 +3718,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
   size_t i = 0;
   for (; i < lit.size(); i++) {
     if (i >= n ||
-        (ignore_case
-             ? (static_cast<char>(
-                    c.tolower_table[static_cast<unsigned char>(s[i])]) !=
-                lower_lit[i])
-             : (s[i] != lit[i]))) {
+        (ignore_case ? to_lower(s[i]) != lower_lit[i] : s[i] != lit[i])) {
       c.set_error_pos(s, lit.data(), copy_lit);
       return static_cast<size_t>(-1);
     }

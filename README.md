@@ -12,7 +12,7 @@ You can also try the online version, PEG Playground at https://yhirose.github.io
 
 The PEG syntax is well described on page 2 in the [document](http://www.brynosaurus.com/pub/lang/peg.pdf) by Bryan Ford. *cpp-peglib* also supports the following additional syntax for now:
 
-* `'...'i` (Case-insensitive literal operator)
+* `'...'i` (Case-insensitive literal operator, ASCII letters)
 * `[...]i` (Case-insensitive character class operator, ASCII letters)
 * `[^...]` (Negated character class operator)
 * `[^...]i` (Case-insensitive negated character class operator, ASCII letters)
@@ -450,7 +450,7 @@ parser["MONTH"] = [](const SemanticValues &vs) {
 };
 ```
 
-It supports the case-insensitive mode.
+It supports the case-insensitive mode, which folds ASCII letters.
 
 ```peg
 START <- 'This month is ' MONTH '.'

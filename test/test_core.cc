@@ -668,7 +668,7 @@ TEST(GeneralTest, Ignore_case_character_class_range_test) {
   }
 }
 
-TEST(GeneralTest, Ignore_case_character_class_folds_ascii_letters_only) {
+TEST(GeneralTest, Ignore_case_folds_ascii_letters_only) {
   // In a UTF-8 locale, where there is one, the C library folds more.
   std::string locale = std::setlocale(LC_CTYPE, nullptr);
   auto restore =
@@ -683,6 +683,13 @@ TEST(GeneralTest, Ignore_case_character_class_folds_ascii_letters_only) {
   EXPECT_FALSE(alone.parse("\xC3\x89"));     // U+00C9, its capital
   EXPECT_FALSE(alone.parse("\xE2\x84\xAA")); // U+212A KELVIN SIGN
   EXPECT_FALSE(repeated.parse("\xE2\x84\xAA"));
+
+  for (auto grammar : {"S <- 'ét'i", "S <- 'ét'i | 'x'i"}) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg.parse("\xC3\xA9T")) << grammar;
+    // The C library there lowers the byte 0xC3 to 0xE3.
+    EXPECT_FALSE(pg.parse("\xE3\xA9t")) << grammar;
+  }
 }
 
 TEST(GeneralTest, mutable_lambda_test) {
