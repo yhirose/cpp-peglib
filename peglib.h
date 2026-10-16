@@ -281,9 +281,8 @@ inline bool is_octal(char c, int &v) {
   return false;
 }
 
-inline std::pair<int, size_t>
-parse_hex_number(const char *s, size_t n, size_t i,
-                 size_t max_digits = std::numeric_limits<size_t>::max()) {
+inline std::pair<int, size_t> parse_hex_number(const char *s, size_t n,
+                                               size_t i, size_t max_digits) {
   int ret = 0;
   int val;
   const auto end = i + std::min(max_digits, n - i);
@@ -294,9 +293,8 @@ parse_hex_number(const char *s, size_t n, size_t i,
   return std::pair(ret, i);
 }
 
-inline std::pair<int, size_t>
-parse_octal_number(const char *s, size_t n, size_t i,
-                   size_t max_digits = std::numeric_limits<size_t>::max()) {
+inline std::pair<int, size_t> parse_octal_number(const char *s, size_t n,
+                                                 size_t i, size_t max_digits) {
   int ret = 0;
   int val;
   const auto end = i + std::min(max_digits, n - i);
@@ -2773,8 +2771,11 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
     });
   }
   void visit(Repetition &ope) override {
-    ope.ope_->accept(*this);
-    result = result || ope.min_ == 0;
+    if (ope.min_ == 0) {
+      result = true;
+    } else {
+      ope.ope_->accept(*this);
+    }
   }
   void visit(AndPredicate &) override { result = true; }
   void visit(NotPredicate &) override { result = true; }
@@ -3264,7 +3265,8 @@ public:
   Definition &operator=(const Definition &) = delete;
   Definition &operator=(Definition &&) = delete;
 
-  Definition(Definition &&rhs) : name(rhs.name), holder_(rhs.holder_) {
+  Definition(Definition &&rhs)
+      : name(std::move(rhs.name)), holder_(std::move(rhs.holder_)) {
     holder_->outer_ = this;
   }
 
@@ -5879,6 +5881,7 @@ struct GrammarBlob {
 
   struct Reader {
     const uint8_t *p, *end;
+    size_t depth = 0; // how deeply read_ope has nested
     uint8_t u8() {
       if (p >= end)
         throw std::runtime_error("GrammarBlob: unexpected end of blob");
@@ -5911,22 +5914,20 @@ struct GrammarBlob {
   // the stack.
   static constexpr size_t MAX_OPE_DEPTH = 2048;
 
-  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g, Definition *owner,
-                                       size_t depth = 0) {
-    if (depth == MAX_OPE_DEPTH)
+  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g,
+                                       Definition *owner) {
+    if (r.depth == MAX_OPE_DEPTH)
       throw std::runtime_error("GrammarBlob: operators nest too deeply");
-    return read_ope_core(r, g, owner, depth + 1);
-  }
+    r.depth++;
+    auto se = scope_exit([&]() { r.depth--; });
 
-  static std::shared_ptr<Ope> read_ope_core(Reader &r, Grammar &g,
-                                            Definition *owner, size_t depth) {
     switch (r.u8()) {
     case T_Null: return nullptr;
     case T_Sequence: {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g, owner, depth));
+        v.push_back(read_ope(r, g, owner));
       return std::make_shared<Sequence>(std::move(v));
     }
     case T_Choice: {
@@ -5934,18 +5935,16 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g, owner, depth));
+        v.push_back(read_ope(r, g, owner));
       return std::make_shared<PrioritizedChoice>(std::move(v), fl);
     }
     case T_Repetition: {
       uint64_t mn = r.u64(), mx = r.u64();
-      auto o = read_ope(r, g, owner, depth);
+      auto o = read_ope(r, g, owner);
       return std::make_shared<Repetition>(o, mn, mx);
     }
-    case T_And:
-      return std::make_shared<AndPredicate>(read_ope(r, g, owner, depth));
-    case T_Not:
-      return std::make_shared<NotPredicate>(read_ope(r, g, owner, depth));
+    case T_And: return std::make_shared<AndPredicate>(read_ope(r, g, owner));
+    case T_Not: return std::make_shared<NotPredicate>(read_ope(r, g, owner));
     case T_Dictionary: {
       bool ic = r.u8();
       uint32_t n = r.u32();
@@ -5972,15 +5971,14 @@ struct GrammarBlob {
     case T_Char: return std::make_shared<Character>((char32_t)r.u32());
     case T_AnyChar: return std::make_shared<AnyCharacter>();
     case T_CaptureScope:
-      return std::make_shared<CaptureScope>(read_ope(r, g, owner, depth));
+      return std::make_shared<CaptureScope>(read_ope(r, g, owner));
     case T_Capture: {
-      auto o = read_ope(r, g, owner, depth);
+      auto o = read_ope(r, g, owner);
       return std::make_shared<Capture>(o, nullptr);
     }
     case T_TokenBoundary:
-      return std::make_shared<TokenBoundary>(read_ope(r, g, owner, depth));
-    case T_Ignore:
-      return std::make_shared<Ignore>(read_ope(r, g, owner, depth));
+      return std::make_shared<TokenBoundary>(read_ope(r, g, owner));
+    case T_Ignore: return std::make_shared<Ignore>(read_ope(r, g, owner));
     case T_BackRef: return std::make_shared<BackReference>(r.str());
     case T_Reference: {
       bool im = r.u8();
@@ -5988,21 +5986,20 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> args;
       for (uint32_t i = 0; i < n; i++)
-        args.push_back(read_ope(r, g, owner, depth));
+        args.push_back(read_ope(r, g, owner));
       return std::make_shared<Reference>(g, nm, nullptr, im, args);
     }
     case T_Whitespace:
-      return std::make_shared<Whitespace>(read_ope(r, g, owner, depth));
-    case T_Recovery:
-      return std::make_shared<Recovery>(read_ope(r, g, owner, depth));
+      return std::make_shared<Whitespace>(read_ope(r, g, owner));
+    case T_Recovery: return std::make_shared<Recovery>(read_ope(r, g, owner));
     case T_Cut: return std::make_shared<Cut>();
     case T_PrecedenceClimbing: {
       if (!owner) {
         throw std::runtime_error(
             "GrammarBlob: 'precedence' operator outside a rule body");
       }
-      auto atom = read_ope(r, g, owner, depth);
-      auto binop = read_ope(r, g, owner, depth);
+      auto atom = read_ope(r, g, owner);
+      auto binop = read_ope(r, g, owner);
       uint32_t n = r.u32();
       auto pc = std::make_shared<PrecedenceClimbing>(
           atom, binop, PrecedenceClimbing::BinOpeInfo{}, *owner);
