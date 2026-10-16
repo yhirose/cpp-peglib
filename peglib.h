@@ -957,7 +957,6 @@ struct ErrorInfo {
 
   void resolve_expected_tokens();
 
-  // The message to report for `lbl` at `pos`.
   void set_message(const char *pos, std::string msg, const std::string &lbl) {
     message_pos = pos;
     message = std::move(msg);
@@ -2525,7 +2524,7 @@ inline std::shared_ptr<Ope> cut() { return std::make_shared<Cut>(); }
  * Visitor
  */
 /*
- * Every operator type, in the order the visitor lists them.
+ * Every operator type, in the order of Ope::Visitor's overloads.
  */
 // clang-format off
 #define PEGLIB_OPE_TYPES(X) \
@@ -2543,6 +2542,15 @@ struct Ope::Visitor {
   virtual ~Visitor() {}
 #define PEGLIB_VISIT(T)                                                        \
   virtual void visit(T &) {}
+  PEGLIB_OPE_TYPES(PEGLIB_VISIT)
+#undef PEGLIB_VISIT
+};
+
+// A visitor that must handle every operator type: one that leaves an
+// overload out is abstract, so it fails to build instead of skipping the type.
+struct StrictVisitor : public Ope::Visitor {
+  using Ope::Visitor::visit;
+#define PEGLIB_VISIT(T) void visit(T &) override = 0;
   PEGLIB_OPE_TYPES(PEGLIB_VISIT)
 #undef PEGLIB_VISIT
 };
@@ -2589,9 +2597,7 @@ struct TraceOpeName : public Ope::Visitor {
 
 private:
   // A rule is traced by its name, every other operator by its type.
-  template <typename T> static const char *name_of(T &, const char *type) {
-    return type;
-  }
+  static const char *name_of(Ope &, const char *type) { return type; }
   static const char *name_of(Holder &ope, const char *) {
     return ope.trace_name().data();
   }
@@ -5771,8 +5777,8 @@ struct GrammarBlob {
     o->accept(vis);
   }
 
-  struct OpeWriter : Ope::Visitor {
-    using Ope::Visitor::visit;
+  struct OpeWriter : StrictVisitor {
+    using StrictVisitor::visit;
 
     explicit OpeWriter(Writer &w) : w(w) {}
 
@@ -7122,7 +7128,7 @@ private:
     }
 
     for (auto &[name, rule] : grammar) {
-      if (!referenced.count(name)) {
+      if (log && !referenced.count(name)) {
         log_at(log, s, rule.s_, "'" + name + "' is not referenced.");
       }
     }
@@ -7156,10 +7162,9 @@ private:
     for (auto &[name, rule] : grammar) {
       DetectLeftRecursion vis(name);
       rule.accept(vis);
-      if (!vis.error_s) { continue; }
-      if (enable_left_recursion) {
+      if (vis.error_s && enable_left_recursion) {
         rule.is_left_recursive = true;
-      } else {
+      } else if (vis.error_s) {
         log_at(log, s, vis.error_s, "'" + name + "' is left recursive.");
         ret = false;
       }
