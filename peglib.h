@@ -957,6 +957,13 @@ struct ErrorInfo {
 
   void resolve_expected_tokens();
 
+  // The message to report for `lbl` at `pos`.
+  void set_message(const char *pos, std::string msg, const std::string &lbl) {
+    message_pos = pos;
+    message = std::move(msg);
+    label = lbl;
+  }
+
   // A parse went past its max_depth at `pos`, where the rule match or the
   // returned AST node that `label` names starts. It is reported even at or
   // before a position a recovered error already was.
@@ -1443,6 +1450,33 @@ public:
   Context(const Context &) = delete;
   Context(Context &&) = delete;
   Context operator=(const Context &) = delete;
+
+  // A context to parse on the side with: it reads the input of `c`, and
+  // reports and traces nothing.
+  static Context detached(const Context &c) {
+    return Context(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false, nullptr,
+                   nullptr, nullptr, false, nullptr);
+  }
+
+  // Keeps what is parsed in its scope out of the trace, unless it is verbose.
+  struct TraceMute {
+    explicit TraceMute(Context &c) : c_(c), save_(c.ignore_trace_state) {
+      c.ignore_trace_state = !c.verbose_trace;
+    }
+    ~TraceMute() { c_.ignore_trace_state = save_; }
+    TraceMute(const TraceMute &) = delete;
+    TraceMute &operator=(const TraceMute &) = delete;
+
+  private:
+    Context &c_;
+    bool save_;
+  };
+
+  // Whether a message at `pos` is reported: someone listens, and no message
+  // lies further on.
+  bool reports_message_at(const char *pos) const {
+    return (log || error_reporter) && error_info.message_pos < pos;
+  }
 
   // Per-rule packrat stats (populated when packrat_stats is non-null)
   struct PackratStats {
@@ -3554,10 +3588,7 @@ private:
       size_t i = 0;
 
       if (whitespaceOpe) {
-        auto save_ignore_trace_state = c.ignore_trace_state;
-        c.ignore_trace_state = !c.verbose_trace;
-        auto se = scope_exit(
-            [&]() { c.ignore_trace_state = save_ignore_trace_state; });
+        Context::TraceMute mute(c);
 
         auto len = whitespaceOpe->parse(s, n, vs, c, dt);
         if (fail(len)) { return result(false, i); }
@@ -3632,15 +3663,11 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
   // Word check
   if (c.wordOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    Context::TraceMute mute(c);
 
     std::call_once(init_is_word, [&]() {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
-                      nullptr, nullptr, nullptr, false, nullptr);
+      auto dummy_c = Context::detached(c);
       std::any dummy_dt;
 
       auto len =
@@ -3650,8 +3677,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
     if (is_word) {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
-                      nullptr, nullptr, nullptr, false, nullptr);
+      auto dummy_c = Context::detached(c);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -3795,9 +3821,7 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
 inline size_t Context::skip_whitespace(const char *a_s, size_t n,
                                        SemanticValues &vs, std::any &dt) {
   if (in_token_boundary_count || !whitespaceOpe) { return 0; }
-  auto save = ignore_trace_state;
-  ignore_trace_state = !verbose_trace;
-  auto se = scope_exit([&]() { ignore_trace_state = save; });
+  TraceMute mute(*this);
   return whitespaceOpe->parse(a_s, n, vs, *this, dt);
 }
 
@@ -3895,15 +3919,11 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
 
   // Word check
   if (c.wordOpe) {
-    auto save_ignore_trace_state = c.ignore_trace_state;
-    c.ignore_trace_state = !c.verbose_trace;
-    auto se =
-        scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+    Context::TraceMute mute(c);
 
     {
       SemanticValues dummy_vs;
-      Context dummy_c(nullptr, c.s, c.l, nullptr, nullptr, nullptr, false,
-                      nullptr, nullptr, nullptr, false, nullptr);
+      auto dummy_c = Context::detached(c);
       std::any dummy_dt;
 
       NotPredicate ope(c.wordOpe);
@@ -3934,10 +3954,7 @@ inline size_t LiteralString::parse_core(const char *s, size_t n,
 inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
-  auto save_ignore_trace_state = c.ignore_trace_state;
-  c.ignore_trace_state = !c.verbose_trace;
-  auto se =
-      scope_exit([&]() { c.ignore_trace_state = save_ignore_trace_state; });
+  Context::TraceMute mute(c);
 
   size_t len;
   {
@@ -4102,11 +4119,8 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         std::string msg;
         std::any predicate_data;
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
-          if ((c.log || c.error_reporter) && !msg.empty() &&
-              c.error_info.message_pos < s) {
-            c.error_info.message_pos = s;
-            c.error_info.message = msg;
-            c.error_info.label = outer_->name;
+          if (!msg.empty() && c.reports_message_at(s)) {
+            c.error_info.set_message(s, std::move(msg), outer_->name);
           }
           m.len = static_cast<size_t>(-1);
         } else if (!c.recovered) {
@@ -4117,12 +4131,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         m.val = reduce(chvs, dt, predicate_data);
       }
     } else {
-      if ((c.log || c.error_reporter) && !outer_->error_message.empty() &&
-          c.error_info.message_pos < s) {
-        c.error_info.message_pos = s;
-        c.error_info.message =
-            resolve_capture_placeholders(outer_->error_message, c);
-        c.error_info.label = outer_->name;
+      if (!outer_->error_message.empty() && c.reports_message_at(s)) {
+        c.error_info.set_message(
+            s, resolve_capture_placeholders(outer_->error_message, c),
+            outer_->name);
       }
     }
 
@@ -4406,10 +4418,9 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   if (c.log || c.error_reporter) {
     auto label = dynamic_cast<Reference *>(rule.args_[0].get());
     if (label && !label->rule_->error_message.empty()) {
-      c.error_info.message_pos = s;
-      c.error_info.message =
-          resolve_capture_placeholders(label->rule_->error_message, c);
-      c.error_info.label = label->rule_->name;
+      c.error_info.set_message(
+          s, resolve_capture_placeholders(label->rule_->error_message, c),
+          label->rule_->name);
     }
   }
 
@@ -6929,9 +6940,24 @@ private:
     };
   }
 
+  // Reports `msg` at `pos` in the grammar `s`, if there is a log.
+  static void log_at(const Log &log, const char *s, const char *pos,
+                     const std::string &msg, const std::string &label = "") {
+    if (!log) { return; }
+    auto line = line_info(s, pos);
+    log(line.first, line.second, msg, label);
+  }
+
   bool apply_precedence_instruction(Definition &rule,
                                     const PrecedenceClimbing::BinOpeInfo &info,
-                                    const char *s, Log log) {
+                                    const char *s, const Log &log) {
+    auto cannot_apply = [&]() {
+      log_at(log, s, rule.s_,
+             "'precedence' instruction cannot be applied to '" + rule.name +
+                 "'.");
+      return false;
+    };
+
     try {
       auto &seq = dynamic_cast<Sequence &>(*rule.get_core_operator());
       auto atom = seq.opes_[0];
@@ -6945,28 +6971,12 @@ private:
       auto atom1_name = dynamic_cast<Reference &>(*atom1).name_;
 
       if (!rep.is_zom() || atom_name != atom1_name || atom_name == binop_name) {
-        if (log) {
-          auto line = line_info(s, rule.s_);
-          log(line.first, line.second,
-              "'precedence' instruction cannot be applied to '" + rule.name +
-                  "'.",
-              "");
-        }
-        return false;
+        return cannot_apply();
       }
 
       rule.holder_->ope_ = pre(atom, binop, info, rule);
       rule.disable_action = true;
-    } catch (...) {
-      if (log) {
-        auto line = line_info(s, rule.s_);
-        log(line.first, line.second,
-            "'precedence' instruction cannot be applied to '" + rule.name +
-                "'.",
-            "");
-      }
-      return false;
-    }
+    } catch (...) { return cannot_apply(); }
     return true;
   }
 
@@ -6995,15 +7005,12 @@ private:
       auto r = g["Grammar"].parse(s, n, dt, nullptr, log);
 
       if (!r.ret) {
-        if (log) {
-          if (r.error_info.message_pos) {
-            auto line = line_info(s, r.error_info.message_pos);
-            log(line.first, line.second, r.error_info.message,
-                r.error_info.label);
-          } else {
-            auto line = line_info(s, r.error_info.error_pos);
-            log(line.first, line.second, "syntax error", r.error_info.label);
-          }
+        if (r.error_info.message_pos) {
+          log_at(log, s, r.error_info.message_pos, r.error_info.message,
+                 r.error_info.label);
+        } else {
+          log_at(log, s, r.error_info.error_pos, "syntax error",
+                 r.error_info.label);
         }
         return {};
       }
@@ -7036,11 +7043,8 @@ private:
 
     if (!data.duplicates_of_definition.empty()) {
       for (const auto &[name, ptr] : data.duplicates_of_definition) {
-        if (log) {
-          auto line = line_info(s, ptr);
-          log(line.first, line.second,
-              "the definition '" + name + "' is already defined.", "");
-        }
+        log_at(log, s, ptr,
+               "the definition '" + name + "' is already defined.");
       }
       ret = false;
     }
@@ -7048,11 +7052,8 @@ private:
     // Check duplicated instructions
     if (!data.duplicates_of_instruction.empty()) {
       for (const auto &[type, ptr] : data.duplicates_of_instruction) {
-        if (log) {
-          auto line = line_info(s, ptr);
-          log(line.first, line.second,
-              "the instruction '" + type + "' is already defined.", "");
-        }
+        log_at(log, s, ptr,
+               "the instruction '" + type + "' is already defined.");
       }
       ret = false;
     }
@@ -7060,11 +7061,7 @@ private:
     // Check undefined back references
     if (!data.undefined_back_references.empty()) {
       for (const auto &[name, ptr] : data.undefined_back_references) {
-        if (log) {
-          auto line = line_info(s, ptr);
-          log(line.first, line.second,
-              "the back reference '" + name + "' is undefined.", "");
-        }
+        log_at(log, s, ptr, "the back reference '" + name + "' is undefined.");
       }
       ret = false;
     }
@@ -7076,13 +7073,9 @@ private:
       if (grammar.count(requested_start)) {
         start = requested_start;
       } else {
-        if (log) {
-          auto line = line_info(s, s);
-          log(line.first, line.second,
-              "the specified start rule '" + requested_start +
-                  "' is undefined.",
-              "");
-        }
+        log_at(log, s, s,
+               "the specified start rule '" + requested_start +
+                   "' is undefined.");
         ret = false;
       }
     }
@@ -7094,24 +7087,17 @@ private:
     // Check if the start rule has ignore operator
     {
       if (start_rule.ignoreSemanticValue) {
-        if (log) {
-          auto line = line_info(s, start_rule.s_);
-          log(line.first, line.second,
-              "ignore operator cannot be applied to '" + start_rule.name + "'.",
-              "");
-        }
+        log_at(log, s, start_rule.s_,
+               "ignore operator cannot be applied to '" + start_rule.name +
+                   "'.");
         ret = false;
       }
     }
 
     // A macro has nothing to fill its parameters with as the start rule
     if (start_rule.is_macro) {
-      if (log) {
-        auto line = line_info(s, start_rule.s_);
-        log(line.first, line.second,
-            "the macro '" + start_rule.name + "' cannot be the start rule.",
-            "");
-      }
+      log_at(log, s, start_rule.s_,
+             "the macro '" + start_rule.name + "' cannot be the start rule.");
       ret = false;
     }
 
@@ -7130,21 +7116,14 @@ private:
       rule.accept(vis);
       referenced.insert(vis.referenced.begin(), vis.referenced.end());
       for (const auto &[name, ptr] : vis.error_s) {
-        if (log) {
-          auto line = line_info(s, ptr);
-          log(line.first, line.second, vis.error_message[name], "");
-        }
+        log_at(log, s, ptr, vis.error_message[name]);
         ret = false;
       }
     }
 
     for (auto &[name, rule] : grammar) {
       if (!referenced.count(name)) {
-        if (log) {
-          auto line = line_info(s, rule.s_);
-          auto msg = "'" + name + "' is not referenced.";
-          log(line.first, line.second, msg, "");
-        }
+        log_at(log, s, rule.s_, "'" + name + "' is not referenced.");
       }
     }
 
@@ -7174,30 +7153,19 @@ private:
     }
 
     // Check left recursion
-    if (enable_left_recursion) {
-      for (auto &[name, rule] : grammar) {
-        DetectLeftRecursion vis(name);
-        rule.accept(vis);
-        if (vis.error_s) { rule.is_left_recursive = true; }
+    for (auto &[name, rule] : grammar) {
+      DetectLeftRecursion vis(name);
+      rule.accept(vis);
+      if (!vis.error_s) { continue; }
+      if (enable_left_recursion) {
+        rule.is_left_recursive = true;
+      } else {
+        log_at(log, s, vis.error_s, "'" + name + "' is left recursive.");
+        ret = false;
       }
-    } else {
-      ret = true;
-
-      for (auto &[name, rule] : grammar) {
-        DetectLeftRecursion vis(name);
-        rule.accept(vis);
-        if (vis.error_s) {
-          if (log) {
-            auto line = line_info(s, vis.error_s);
-            log(line.first, line.second, "'" + name + "' is left recursive.",
-                "");
-          }
-          ret = false;
-        }
-      }
-
-      if (!ret) { return {}; }
     }
+
+    if (!ret) { return {}; }
 
     // Check infinite loop
     if (detect_infiniteLoop(data, start_rule, log, s)) { return {}; }
@@ -7267,11 +7235,8 @@ private:
     DetectInfiniteLoop vis(data.start_pos, rule.name, refs, has_error_cache);
     rule.accept(vis);
     if (vis.has_error) {
-      if (log) {
-        auto line = line_info(s, vis.error_s);
-        log(line.first, line.second,
-            "infinite loop is detected in '" + vis.error_name + "'.", "");
-      }
+      log_at(log, s, vis.error_s,
+             "infinite loop is detected in '" + vis.error_name + "'.");
       return true;
     }
     return false;
