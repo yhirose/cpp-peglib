@@ -2524,31 +2524,24 @@ inline std::shared_ptr<Ope> cut() { return std::make_shared<Cut>(); }
 /*
  * Visitor
  */
+/*
+ * Every operator type, in the order the visitor lists them.
+ */
+#define PEGLIB_OPE_TYPES(X)                                                    \
+  X(Sequence)                                                                  \
+  X(PrioritizedChoice) X(Repetition) X(AndPredicate) X(NotPredicate)           \
+      X(Dictionary) X(LiteralString) X(CharacterClass) X(Character)            \
+          X(AnyCharacter) X(CaptureScope) X(Capture) X(TokenBoundary)          \
+              X(Ignore) X(User) X(WeakHolder) X(Holder) X(Reference)           \
+                  X(Whitespace) X(BackReference) X(PrecedenceClimbing)         \
+                      X(Recovery) X(Cut)
+
 struct Ope::Visitor {
   virtual ~Visitor() {}
-  virtual void visit(Sequence &) {}
-  virtual void visit(PrioritizedChoice &) {}
-  virtual void visit(Repetition &) {}
-  virtual void visit(AndPredicate &) {}
-  virtual void visit(NotPredicate &) {}
-  virtual void visit(Dictionary &) {}
-  virtual void visit(LiteralString &) {}
-  virtual void visit(CharacterClass &) {}
-  virtual void visit(Character &) {}
-  virtual void visit(AnyCharacter &) {}
-  virtual void visit(CaptureScope &) {}
-  virtual void visit(Capture &) {}
-  virtual void visit(TokenBoundary &) {}
-  virtual void visit(Ignore &) {}
-  virtual void visit(User &) {}
-  virtual void visit(WeakHolder &) {}
-  virtual void visit(Holder &) {}
-  virtual void visit(Reference &) {}
-  virtual void visit(Whitespace &) {}
-  virtual void visit(BackReference &) {}
-  virtual void visit(PrecedenceClimbing &) {}
-  virtual void visit(Recovery &) {}
-  virtual void visit(Cut &) {}
+#define PEGLIB_VISIT(T)                                                        \
+  virtual void visit(T &) {}
+  PEGLIB_OPE_TYPES(PEGLIB_VISIT)
+#undef PEGLIB_VISIT
 };
 
 struct TraversalVisitor : public Ope::Visitor {
@@ -2580,29 +2573,10 @@ struct TraversalVisitor : public Ope::Visitor {
 struct TraceOpeName : public Ope::Visitor {
   using Ope::Visitor::visit;
 
-  void visit(Sequence &) override { name_ = "Sequence"; }
-  void visit(PrioritizedChoice &) override { name_ = "PrioritizedChoice"; }
-  void visit(Repetition &) override { name_ = "Repetition"; }
-  void visit(AndPredicate &) override { name_ = "AndPredicate"; }
-  void visit(NotPredicate &) override { name_ = "NotPredicate"; }
-  void visit(Dictionary &) override { name_ = "Dictionary"; }
-  void visit(LiteralString &) override { name_ = "LiteralString"; }
-  void visit(CharacterClass &) override { name_ = "CharacterClass"; }
-  void visit(Character &) override { name_ = "Character"; }
-  void visit(AnyCharacter &) override { name_ = "AnyCharacter"; }
-  void visit(CaptureScope &) override { name_ = "CaptureScope"; }
-  void visit(Capture &) override { name_ = "Capture"; }
-  void visit(TokenBoundary &) override { name_ = "TokenBoundary"; }
-  void visit(Ignore &) override { name_ = "Ignore"; }
-  void visit(User &) override { name_ = "User"; }
-  void visit(WeakHolder &) override { name_ = "WeakHolder"; }
-  void visit(Holder &ope) override { name_ = ope.trace_name().data(); }
-  void visit(Reference &) override { name_ = "Reference"; }
-  void visit(Whitespace &) override { name_ = "Whitespace"; }
-  void visit(BackReference &) override { name_ = "BackReference"; }
-  void visit(PrecedenceClimbing &) override { name_ = "PrecedenceClimbing"; }
-  void visit(Recovery &) override { name_ = "Recovery"; }
-  void visit(Cut &) override { name_ = "Cut"; }
+#define PEGLIB_VISIT(T)                                                        \
+  void visit(T &ope) override { name_ = name_of(ope, #T); }
+  PEGLIB_OPE_TYPES(PEGLIB_VISIT)
+#undef PEGLIB_VISIT
 
   static std::string get(Ope &ope) {
     TraceOpeName vis;
@@ -2611,6 +2585,14 @@ struct TraceOpeName : public Ope::Visitor {
   }
 
 private:
+  // A rule is traced by its name, every other operator by its type.
+  template <typename T> static const char *name_of(T &, const char *type) {
+    return type;
+  }
+  static const char *name_of(Holder &ope, const char *) {
+    return ope.trace_name().data();
+  }
+
   const char *name_ = nullptr;
 };
 
@@ -4463,29 +4445,11 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   return len;
 }
 
-inline void Sequence::accept(Visitor &v) { v.visit(*this); }
-inline void PrioritizedChoice::accept(Visitor &v) { v.visit(*this); }
-inline void Repetition::accept(Visitor &v) { v.visit(*this); }
-inline void AndPredicate::accept(Visitor &v) { v.visit(*this); }
-inline void NotPredicate::accept(Visitor &v) { v.visit(*this); }
-inline void Dictionary::accept(Visitor &v) { v.visit(*this); }
-inline void LiteralString::accept(Visitor &v) { v.visit(*this); }
-inline void CharacterClass::accept(Visitor &v) { v.visit(*this); }
-inline void Character::accept(Visitor &v) { v.visit(*this); }
-inline void AnyCharacter::accept(Visitor &v) { v.visit(*this); }
-inline void CaptureScope::accept(Visitor &v) { v.visit(*this); }
-inline void Capture::accept(Visitor &v) { v.visit(*this); }
-inline void TokenBoundary::accept(Visitor &v) { v.visit(*this); }
-inline void Ignore::accept(Visitor &v) { v.visit(*this); }
-inline void User::accept(Visitor &v) { v.visit(*this); }
-inline void WeakHolder::accept(Visitor &v) { v.visit(*this); }
-inline void Holder::accept(Visitor &v) { v.visit(*this); }
-inline void Reference::accept(Visitor &v) { v.visit(*this); }
-inline void Whitespace::accept(Visitor &v) { v.visit(*this); }
-inline void BackReference::accept(Visitor &v) { v.visit(*this); }
-inline void PrecedenceClimbing::accept(Visitor &v) { v.visit(*this); }
-inline void Recovery::accept(Visitor &v) { v.visit(*this); }
-inline void Cut::accept(Visitor &v) { v.visit(*this); }
+#define PEGLIB_ACCEPT(T)                                                       \
+  inline void T::accept(Visitor &v) { v.visit(*this); }
+PEGLIB_OPE_TYPES(PEGLIB_ACCEPT)
+#undef PEGLIB_ACCEPT
+#undef PEGLIB_OPE_TYPES
 
 inline void AssignIDToDefinition::visit(Holder &ope) {
   auto p = static_cast<void *>(ope.outer_);
