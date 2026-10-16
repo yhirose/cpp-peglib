@@ -2712,8 +2712,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   DetectLeftRecursion(const std::string &name) : name_(name) {}
 
-  // The operator comes after the atom, which decides alone whether this
-  // matches empty, loops or recurses on the left.
+  // Only the atom matters here; see ComputeCanBeEmpty.
   void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   void visit(Sequence &ope) override {
@@ -2948,6 +2947,7 @@ struct HasEmptyElement : public TraversalVisitor {
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override;
+  // Only the atom matters here; see ComputeCanBeEmpty.
   void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(PrioritizedChoice &ope) override {
     for (const auto &op : ope.opes_) {
@@ -2996,6 +2996,7 @@ struct DetectInfiniteLoop : public TraversalVisitor {
                      std::unordered_map<std::string, bool> &has_error_cache)
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
+  // Only the atom matters here; see ComputeCanBeEmpty.
   void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
@@ -3409,54 +3410,50 @@ public:
 #if defined(__cpp_lib_char8_t)
   Result parse(const char8_t *s, size_t n, const char *path = nullptr,
                Log log = nullptr) const {
-    return parse(reinterpret_cast<const char *>(s), n, path, log);
+    return parse(u8(s), n, path, log);
   }
 
   Result parse(const char8_t *s, const char *path = nullptr,
                Log log = nullptr) const {
-    return parse(reinterpret_cast<const char *>(s), path, log);
+    return parse(u8(s), path, log);
   }
 
   Result parse(const char8_t *s, size_t n, std::any &dt,
                const char *path = nullptr, Log log = nullptr) const {
-    return parse(reinterpret_cast<const char *>(s), n, dt, path, log);
+    return parse(u8(s), n, dt, path, log);
   }
 
   Result parse(const char8_t *s, std::any &dt, const char *path = nullptr,
                Log log = nullptr) const {
-    return parse(reinterpret_cast<const char *>(s), dt, path, log);
+    return parse(u8(s), dt, path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, size_t n, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), n, val, path,
-                               log);
+    return parse_and_get_value(u8(s), n, val, path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), val, path,
-                               log);
+    return parse_and_get_value(u8(s), val, path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, size_t n, std::any &dt, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), n, dt, val,
-                               path, log);
+    return parse_and_get_value(u8(s), n, dt, val, path, log);
   }
 
   template <typename T>
   Result parse_and_get_value(const char8_t *s, std::any &dt, T &val,
                              const char *path = nullptr,
                              Log log = nullptr) const {
-    return parse_and_get_value(reinterpret_cast<const char *>(s), dt, val, path,
-                               log);
+    return parse_and_get_value(u8(s), dt, val, path, log);
   }
 #endif
 
@@ -5437,7 +5434,10 @@ inline void Definition::select_packrat_rules() const {
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
       // An operator is parsed where the atom ends, if it matches empty.
       void visit(PrecedenceClimbing &ope) override {
-        collect({ope.atom_, ope.binop_}, 0);
+        ope.atom_->accept(*this);
+        ComputeCanBeEmpty empty_vis;
+        ope.atom_->accept(empty_vis);
+        if (empty_vis.result) { ope.binop_->accept(*this); }
       }
     };
 
@@ -6217,7 +6217,7 @@ public:
 
 #if defined(__cpp_lib_char8_t)
   static bool parse_test(const char *d, const char8_t *s) {
-    return parse_test(d, reinterpret_cast<const char *>(s));
+    return parse_test(d, u8(s));
   }
 #endif
 
