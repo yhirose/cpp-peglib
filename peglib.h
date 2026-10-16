@@ -2527,14 +2527,17 @@ inline std::shared_ptr<Ope> cut() { return std::make_shared<Cut>(); }
 /*
  * Every operator type, in the order the visitor lists them.
  */
-#define PEGLIB_OPE_TYPES(X)                                                    \
-  X(Sequence)                                                                  \
-  X(PrioritizedChoice) X(Repetition) X(AndPredicate) X(NotPredicate)           \
-      X(Dictionary) X(LiteralString) X(CharacterClass) X(Character)            \
-          X(AnyCharacter) X(CaptureScope) X(Capture) X(TokenBoundary)          \
-              X(Ignore) X(User) X(WeakHolder) X(Holder) X(Reference)           \
-                  X(Whitespace) X(BackReference) X(PrecedenceClimbing)         \
-                      X(Recovery) X(Cut)
+// clang-format off
+#define PEGLIB_OPE_TYPES(X) \
+  X(Sequence) X(PrioritizedChoice) X(Repetition) \
+  X(AndPredicate) X(NotPredicate) X(Dictionary) \
+  X(LiteralString) X(CharacterClass) X(Character) \
+  X(AnyCharacter) X(CaptureScope) X(Capture) \
+  X(TokenBoundary) X(Ignore) X(User) \
+  X(WeakHolder) X(Holder) X(Reference) \
+  X(Whitespace) X(BackReference) X(PrecedenceClimbing) \
+  X(Recovery) X(Cut)
+// clang-format on
 
 struct Ope::Visitor {
   virtual ~Visitor() {}
@@ -5701,28 +5704,45 @@ inline void ReplaceParameters::visit(PrecedenceClimbing &ope) {
  *---------------------------------------------------------------------------*/
 
 struct GrammarBlob {
+  // The values are what a blob stores, so they only ever grow at the end.
   enum Tag : uint8_t {
-    T_Sequence,
-    T_Choice,
-    T_Repetition,
-    T_And,
-    T_Not,
-    T_Dictionary,
-    T_Literal,
-    T_CharClass,
-    T_Char,
-    T_AnyChar,
-    T_CaptureScope,
-    T_Capture,
-    T_TokenBoundary,
-    T_Ignore,
-    T_BackRef,
-    T_Reference,
-    T_Whitespace,
-    T_Recovery,
-    T_Cut,
-    T_PrecedenceClimbing,
-    T_Null
+    T_Sequence = 0,
+    T_Choice = 1,
+    T_Repetition = 2,
+    T_And = 3,
+    T_Not = 4,
+    T_Dictionary = 5,
+    T_Literal = 6,
+    T_CharClass = 7,
+    T_Char = 8,
+    T_AnyChar = 9,
+    T_CaptureScope = 10,
+    T_Capture = 11,
+    T_TokenBoundary = 12,
+    T_Ignore = 13,
+    T_BackRef = 14,
+    T_Reference = 15,
+    T_Whitespace = 16,
+    T_Recovery = 17,
+    T_Cut = 18,
+    T_PrecedenceClimbing = 19,
+    T_Null = 20,
+  };
+
+  // The bits of the two flag bytes a rule is stored with, which only ever
+  // grow: the first byte is full, so a new one goes in the second.
+  enum Flag : uint8_t {
+    F_IgnoreSemanticValue = 1,
+    F_IsMacro = 2,
+    F_NoAstOpt = 4,
+    F_EoiCheck = 8,
+    F_EnablePackratParsing = 16,
+    F_IsLeftRecursive = 32,
+    F_CanBeEmpty = 64,
+    F_DisableAction = 128,
+  };
+  enum Flag2 : uint8_t {
+    F2_NoWhitespace = 1,
   };
 
   struct Writer {
@@ -5747,112 +5767,127 @@ struct GrammarBlob {
       w.u8(T_Null);
       return;
     }
-    Ope *p = o.get();
-    if (auto x = dynamic_cast<Sequence *>(p)) {
+    OpeWriter vis(w);
+    o->accept(vis);
+  }
+
+  struct OpeWriter : Ope::Visitor {
+    using Ope::Visitor::visit;
+
+    explicit OpeWriter(Writer &w) : w(w) {}
+
+    void visit(Sequence &x) override {
       w.u8(T_Sequence);
-      w.u32((uint32_t)x->opes_.size());
-      for (auto &c : x->opes_)
-        write_ope(w, c);
-    } else if (auto x = dynamic_cast<PrioritizedChoice *>(p)) {
+      list(x.opes_);
+    }
+    void visit(PrioritizedChoice &x) override {
       w.u8(T_Choice);
-      w.u8(x->for_label_ ? 1 : 0);
-      w.u32((uint32_t)x->opes_.size());
-      for (auto &c : x->opes_)
-        write_ope(w, c);
-    } else if (auto x = dynamic_cast<Repetition *>(p)) {
+      w.u8(x.for_label_ ? 1 : 0);
+      list(x.opes_);
+    }
+    void visit(Repetition &x) override {
       w.u8(T_Repetition);
-      w.u64(x->min_);
-      w.u64(x->max_);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<AndPredicate *>(p)) {
-      w.u8(T_And);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<NotPredicate *>(p)) {
-      w.u8(T_Not);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<Dictionary *>(p)) {
+      w.u64(x.min_);
+      w.u64(x.max_);
+      write_ope(w, x.ope_);
+    }
+    void visit(AndPredicate &x) override { unary(T_And, x.ope_); }
+    void visit(NotPredicate &x) override { unary(T_Not, x.ope_); }
+    void visit(Dictionary &x) override {
       w.u8(T_Dictionary);
-      w.u8(x->trie_.ignore_case_ ? 1 : 0);
+      w.u8(x.trie_.ignore_case_ ? 1 : 0);
       // Recover words in their original choice-index order. The Trie stores
       // each full word's id (its index in the constructor vector), which
       // parse_core reports as vs.choice(). Iterating dic_ directly yields
       // sorted key order and would renumber the choices, so place each word at
       // its id.
-      std::vector<std::string> words(x->trie_.items_count());
-      for (auto &kv : x->trie_.dic_)
+      std::vector<std::string> words(x.trie_.items_count());
+      for (auto &kv : x.trie_.dic_)
         if (kv.second.match && kv.second.id < words.size())
           words[kv.second.id] = kv.first;
       w.u32((uint32_t)words.size());
       for (auto &s : words)
         w.str(s);
-    } else if (auto x = dynamic_cast<LiteralString *>(p)) {
+    }
+    void visit(LiteralString &x) override {
       w.u8(T_Literal);
-      w.u8(x->ignore_case_ ? 1 : 0);
-      w.str(x->lit_);
-    } else if (auto x = dynamic_cast<CharacterClass *>(p)) {
+      w.u8(x.ignore_case_ ? 1 : 0);
+      w.str(x.lit_);
+    }
+    void visit(CharacterClass &x) override {
       w.u8(T_CharClass);
-      w.u8(x->negated_ ? 1 : 0);
-      w.u8(x->ignore_case_ ? 1 : 0);
-      w.u32((uint32_t)x->ranges_.size());
-      for (auto &r : x->ranges_) {
+      w.u8(x.negated_ ? 1 : 0);
+      w.u8(x.ignore_case_ ? 1 : 0);
+      w.u32((uint32_t)x.ranges_.size());
+      for (auto &r : x.ranges_) {
         w.u32((uint32_t)r.first);
         w.u32((uint32_t)r.second);
       }
-    } else if (auto x = dynamic_cast<Character *>(p)) {
+    }
+    void visit(Character &x) override {
       w.u8(T_Char);
-      w.u32((uint32_t)x->ch_);
-    } else if (dynamic_cast<AnyCharacter *>(p)) {
-      w.u8(T_AnyChar);
-    } else if (auto x = dynamic_cast<CaptureScope *>(p)) {
-      w.u8(T_CaptureScope);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<Capture *>(p)) {
-      if (x->match_action_) {
+      w.u32((uint32_t)x.ch_);
+    }
+    void visit(AnyCharacter &) override { w.u8(T_AnyChar); }
+    void visit(CaptureScope &x) override { unary(T_CaptureScope, x.ope_); }
+    void visit(Capture &x) override {
+      if (x.match_action_) {
         throw std::runtime_error(
             "GrammarBlob: Capture with a match action is not serializable");
       }
-      w.u8(T_Capture);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<TokenBoundary *>(p)) {
-      w.u8(T_TokenBoundary);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<Ignore *>(p)) {
-      w.u8(T_Ignore);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<BackReference *>(p)) {
+      unary(T_Capture, x.ope_);
+    }
+    void visit(TokenBoundary &x) override { unary(T_TokenBoundary, x.ope_); }
+    void visit(Ignore &x) override { unary(T_Ignore, x.ope_); }
+    void visit(BackReference &x) override {
       w.u8(T_BackRef);
-      w.str(x->name_);
-    } else if (auto x = dynamic_cast<Reference *>(p)) {
+      w.str(x.name_);
+    }
+    void visit(Reference &x) override {
       w.u8(T_Reference);
-      w.u8(x->is_macro_ ? 1 : 0);
-      w.str(x->name_);
-      w.u32((uint32_t)x->args_.size());
-      for (auto &a : x->args_)
-        write_ope(w, a);
-    } else if (auto x = dynamic_cast<Whitespace *>(p)) {
-      w.u8(T_Whitespace);
-      write_ope(w, x->ope_);
-    } else if (auto x = dynamic_cast<Recovery *>(p)) {
-      w.u8(T_Recovery);
-      write_ope(w, x->ope_);
-    } else if (dynamic_cast<Cut *>(p)) {
-      w.u8(T_Cut);
-    } else if (auto x = dynamic_cast<PrecedenceClimbing *>(p)) {
+      w.u8(x.is_macro_ ? 1 : 0);
+      w.str(x.name_);
+      list(x.args_);
+    }
+    void visit(Whitespace &x) override { unary(T_Whitespace, x.ope_); }
+    void visit(Recovery &x) override { unary(T_Recovery, x.ope_); }
+    void visit(Cut &) override { w.u8(T_Cut); }
+    void visit(PrecedenceClimbing &x) override {
       w.u8(T_PrecedenceClimbing);
-      write_ope(w, x->atom_);
-      write_ope(w, x->binop_);
-      w.u32((uint32_t)x->info_.size());
-      for (auto &[key, pri] : x->info_) {
+      write_ope(w, x.atom_);
+      write_ope(w, x.binop_);
+      w.u32((uint32_t)x.info_.size());
+      for (auto &[key, pri] : x.info_) {
         w.str(key);
         w.u64((uint64_t)pri.first);
         w.u8((uint8_t)pri.second);
       }
-    } else {
+    }
+
+    // A rule is written by name, so it never gets here; a User operator holds
+    // code.
+    void visit(Holder &) override { not_serializable(); }
+    void visit(WeakHolder &) override { not_serializable(); }
+    void visit(User &) override { not_serializable(); }
+
+  private:
+    void unary(Tag tag, const std::shared_ptr<Ope> &ope) {
+      w.u8(tag);
+      write_ope(w, ope);
+    }
+    void list(const std::vector<std::shared_ptr<Ope>> &opes) {
+      w.u32((uint32_t)opes.size());
+      for (auto &o : opes)
+        write_ope(w, o);
+    }
+    [[noreturn]] static void not_serializable() {
       throw std::runtime_error(
           "GrammarBlob: operator not serializable (a custom User operator or "
           "a Capture with a match action)");
     }
-  }
+
+    Writer &w;
+  };
 
   struct Reader {
     const uint8_t *p, *end;
@@ -6014,15 +6049,16 @@ struct GrammarBlob {
       const auto &name = kv->first;
       const auto &def = kv->second;
       w.str(name);
-      uint8_t flags =
-          (def.ignoreSemanticValue ? 1 : 0) | (def.is_macro ? 2 : 0) |
-          (def.no_ast_opt ? 4 : 0) | (def.eoi_check ? 8 : 0) |
-          (def.enablePackratParsing ? 16 : 0) |
-          (def.is_left_recursive ? 32 : 0) | (def.can_be_empty ? 64 : 0) |
-          (def.disable_action ? 128 : 0);
+      uint8_t flags = (def.ignoreSemanticValue ? F_IgnoreSemanticValue : 0) |
+                      (def.is_macro ? F_IsMacro : 0) |
+                      (def.no_ast_opt ? F_NoAstOpt : 0) |
+                      (def.eoi_check ? F_EoiCheck : 0) |
+                      (def.enablePackratParsing ? F_EnablePackratParsing : 0) |
+                      (def.is_left_recursive ? F_IsLeftRecursive : 0) |
+                      (def.can_be_empty ? F_CanBeEmpty : 0) |
+                      (def.disable_action ? F_DisableAction : 0);
       w.u8(flags);
-      uint8_t flags2 = (def.no_whitespace ? 1 : 0);
-      w.u8(flags2);
+      w.u8(def.no_whitespace ? F2_NoWhitespace : 0);
       w.u32((uint32_t)def.params.size());
       for (auto &s : def.params)
         w.str(s);
@@ -6059,15 +6095,15 @@ struct GrammarBlob {
 
       auto &def = (*g)[name];
       def.name = name;
-      def.ignoreSemanticValue = flags & 1;
-      def.is_macro = flags & 2;
-      def.no_ast_opt = flags & 4;
-      def.eoi_check = flags & 8;
-      def.enablePackratParsing = flags & 16;
-      def.is_left_recursive = flags & 32;
-      def.can_be_empty = flags & 64;
-      def.disable_action = flags & 128;
-      def.no_whitespace = flags2 & 1;
+      def.ignoreSemanticValue = flags & F_IgnoreSemanticValue;
+      def.is_macro = flags & F_IsMacro;
+      def.no_ast_opt = flags & F_NoAstOpt;
+      def.eoi_check = flags & F_EoiCheck;
+      def.enablePackratParsing = flags & F_EnablePackratParsing;
+      def.is_left_recursive = flags & F_IsLeftRecursive;
+      def.can_be_empty = flags & F_CanBeEmpty;
+      def.disable_action = flags & F_DisableAction;
+      def.no_whitespace = flags2 & F2_NoWhitespace;
       def.params = std::move(params);
       def.ast_name = std::move(ast_name);
       def.error_message = std::move(err);
