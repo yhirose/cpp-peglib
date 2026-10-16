@@ -541,6 +541,24 @@ TEST(EscapeTest, Literal_numeric_escape_takes_only_its_digits) {
   }
 }
 
+TEST(GrammarRejectionTest, Reject_out_of_order_class_range) {
+  parser pg;
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+  EXPECT_FALSE(pg.load_grammar("S <- [b-a]"));
+  EXPECT_EQ("character range is out of order...", message);
+}
+
+TEST(PredefinedClassTest, Posix_class_names) {
+  parser pg("S <- [[:alpha:][:^digit:]]+ !.");
+  ASSERT_TRUE(!!pg);
+  EXPECT_TRUE(pg.parse("ab-"));
+  EXPECT_FALSE(pg.parse("1"));
+
+  parser bad;
+  EXPECT_FALSE(bad.load_grammar("S <- [[:nonesuch:]]"));
+}
+
 TEST(EscapeTest, Trailing_backslash_is_kept) {
   EXPECT_EQ("a\\", resolve_escape_sequence("a\\", 2));
 }

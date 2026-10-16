@@ -160,3 +160,50 @@ TEST(DefinitionApiTest, Moved_definition_takes_over_the_rule) {
   EXPECT_TRUE(s.parse("abc").ret);
   EXPECT_FALSE(s.parse("abd").ret);
 }
+
+// --- Action and Predicate copy ---
+
+TEST(DefinitionApiTest, Action_is_copyable) {
+  Action a = [](const SemanticValues &) { return 42; };
+  Action b(a); // a non-const lvalue
+  const Action &ca = a;
+  Action c(ca);
+  Action d;
+  d = a;
+  Action e;
+  e = std::move(b);
+
+  SemanticValues vs;
+  std::any dt;
+  for (const Action *action : {&a, &c, &d, &e}) {
+    ASSERT_TRUE(*action);
+    EXPECT_EQ(42, std::any_cast<int>((*action)(vs, dt, std::any())));
+  }
+}
+
+TEST(DefinitionApiTest, Action_assignment_chains) {
+  Action a, b;
+  a = b = [](const SemanticValues &) { return 1; };
+  SemanticValues vs;
+  std::any dt;
+  EXPECT_EQ(1, std::any_cast<int>(a(vs, dt, std::any())));
+}
+
+TEST(DefinitionApiTest, Predicate_is_copyable) {
+  Predicate a = [](const SemanticValues &, const std::any &, std::string &) {
+    return true;
+  };
+  Predicate b(a);
+  Predicate c;
+  c = a;
+  Predicate d;
+  d = std::move(b);
+
+  SemanticValues vs;
+  std::string msg;
+  std::any data;
+  for (const Predicate *predicate : {&a, &c, &d}) {
+    ASSERT_TRUE(*predicate);
+    EXPECT_TRUE((*predicate)(vs, std::any(), msg, data));
+  }
+}
