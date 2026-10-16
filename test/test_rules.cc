@@ -1410,7 +1410,7 @@ TEST(UserRuleTest, User_defined_rule_test) {
                           return name.size();
                         }
                       }
-                      return static_cast<size_t>(-1);
+                      return peg::kFail;
                     })},
                    {"~_", zom(cls(" \t\r\n"))}});
 
@@ -1425,7 +1425,7 @@ TEST(UserRuleTest, User_rule_with_state) {
                                       std::any &) -> size_t {
                       call_count++;
                       if (n > 0 && (s[0] >= 'a' && s[0] <= 'z')) { return 1; }
-                      return static_cast<size_t>(-1);
+                      return peg::kFail;
                     })}});
 
   EXPECT_TRUE(g.parse("abc"));
@@ -1439,7 +1439,7 @@ TEST(UserRuleTest, User_rule_failure) {
   )",
                   {{"CUSTOM", usr([](const char *, size_t, SemanticValues &,
                                      std::any &) -> size_t {
-                      return static_cast<size_t>(-1); // always fail
+                      return peg::kFail; // always fail
                     })}});
 
   EXPECT_FALSE(g.parse("anything"));
@@ -1455,7 +1455,7 @@ TEST(UserRuleTest, User_rule_with_semantic_value) {
                  size_t i = 0;
                  while (i < n && s[i] >= '0' && s[i] <= '9')
                    i++;
-                 if (i == 0) return static_cast<size_t>(-1);
+                 if (i == 0) return peg::kFail;
                  return i;
                })}});
 
@@ -1475,7 +1475,7 @@ TEST(UserRuleTest, User_rule_combined_with_peg_rules) {
                       size_t i = 0;
                       while (i < n && s[i] >= 'A' && s[i] <= 'Z')
                         i++;
-                      return i > 0 ? i : static_cast<size_t>(-1);
+                      return i > 0 ? i : peg::kFail;
                     })}});
 
   EXPECT_TRUE(g.parse("Hello WORLD!"));

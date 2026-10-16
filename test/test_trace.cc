@@ -95,7 +95,7 @@ TEST(TraceTest, Trace_on_parse_failure) {
         enter_count++;
       },
       [&](auto &, auto, auto, auto &, auto &, auto &, auto len, auto &) {
-        if (len != static_cast<size_t>(-1)) {
+        if (peg::success(len)) {
           leave_success++;
         } else {
           leave_fail++;

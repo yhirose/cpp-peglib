@@ -2672,6 +2672,8 @@ struct TokenChecker : public TraversalVisitor {
   void visit(NotPredicate &) override {}
   void visit(WeakHolder &) override { has_rule_ = true; }
   void visit(Reference &ope) override;
+  // The operator is a rule of its own, and the atom stands for the match.
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   static bool is_token(Ope &ope) {
     if (IsLiteralToken::check(ope)) { return true; }
@@ -2709,6 +2711,10 @@ struct DetectLeftRecursion : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   DetectLeftRecursion(const std::string &name) : name_(name) {}
+
+  // The operator comes after the atom, which decides alone whether this
+  // matches empty, loops or recurses on the left.
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
@@ -2796,6 +2802,10 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   bool result = false;
+
+  // The operator comes after the atom, which decides alone whether this
+  // matches empty, loops or recurses on the left.
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   void visit(Sequence &ope) override {
     result = std::all_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
@@ -2938,6 +2948,7 @@ struct HasEmptyElement : public TraversalVisitor {
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override;
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(PrioritizedChoice &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
@@ -2985,6 +2996,7 @@ struct DetectInfiniteLoop : public TraversalVisitor {
                      std::unordered_map<std::string, bool> &has_error_cache)
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
+  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
@@ -4339,8 +4351,7 @@ inline size_t PrecedenceClimbing::parse_expression(
       if (!used) { c.rollback(vs, snap); }
     });
 
-    // The operator's scope is popped once it is parsed, and read until the
-    // right operand's scope takes its place.
+    // Popped once parsed, but read until the right operand takes its place.
     auto &chvs = c.push_semantic_values_scope();
     chvs.holds_rule_tokens_ = true;
     size_t op_len;
@@ -5424,6 +5435,10 @@ inline void Definition::select_packrat_rules() const {
       }
 
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
+      // An operator is parsed where the atom ends, if it matches empty.
+      void visit(PrecedenceClimbing &ope) override {
+        collect({ope.atom_, ope.binop_}, 0);
+      }
     };
 
     // The rule IDs leftmost-reachable from the given subtree.
@@ -7652,12 +7667,10 @@ public:
 
 #if defined(__cpp_lib_char8_t)
   parser(std::u8string_view sv, const Rules &rules, std::string_view start = {})
-      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), rules,
-               start) {}
+      : parser(u8(sv.data()), sv.size(), rules, start) {}
 
   parser(std::u8string_view sv, std::string_view start = {})
-      : parser(reinterpret_cast<const char *>(sv.data()), sv.size(), Rules(),
-               start) {}
+      : parser(u8(sv.data()), sv.size(), Rules(), start) {}
 #endif
 
   operator bool() const { return grammar_ != nullptr; }
@@ -7813,8 +7826,7 @@ public:
     with_start_rule([](Definition &rule) { rule.eoi_check = false; });
   }
 
-  // Whether a grammar loaded from now on may be left recursive. A grammar
-  // that is loaded already is not checked again.
+  // Applies to the next load_grammar, not to a grammar already loaded.
   void enable_left_recursion(bool enable = true) {
     enableLeftRecursion_ = enable;
   }
@@ -7914,7 +7926,7 @@ private:
 
 #if defined(__cpp_lib_char8_t)
   static std::string_view as_chars(std::u8string_view sv) {
-    return {reinterpret_cast<const char *>(sv.data()), sv.size()};
+    return {u8(sv.data()), sv.size()};
   }
 #endif
 

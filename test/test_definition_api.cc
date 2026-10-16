@@ -172,21 +172,15 @@ TEST(DefinitionApiTest, Action_is_copyable) {
   d = a;
   Action e;
   e = std::move(b);
+  Action f, g;
+  f = g = [](const SemanticValues &) { return 42; }; // chains
 
   SemanticValues vs;
   std::any dt;
-  for (const Action *action : {&a, &c, &d, &e}) {
+  for (const Action *action : {&a, &c, &d, &e, &f, &g}) {
     ASSERT_TRUE(*action);
     EXPECT_EQ(42, std::any_cast<int>((*action)(vs, dt, std::any())));
   }
-}
-
-TEST(DefinitionApiTest, Action_assignment_chains) {
-  Action a, b;
-  a = b = [](const SemanticValues &) { return 1; };
-  SemanticValues vs;
-  std::any dt;
-  EXPECT_EQ(1, std::any_cast<int>(a(vs, dt, std::any())));
 }
 
 TEST(DefinitionApiTest, Predicate_is_copyable) {
