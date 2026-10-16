@@ -587,3 +587,43 @@ TEST(UnstartableRuleTest, Is_entered_at_whitespace_after_an_empty_match) {
   EXPECT_TRUE(pg.parse("ax"));
   EXPECT_TRUE(pg.parse("a x"));
 }
+
+// =============================================================================
+// Nullability
+// =============================================================================
+
+// Whether a rule can match empty is worked out by ComputeCanBeEmpty, for the
+// rules and the left recursion check, and again by ComputeFirstSet, for the
+// first sets. They must agree.
+TEST(NullabilityTest, Analyses_agree) {
+  const char *grammars[] = {
+      "S <- 'a'? 'b'?",
+      "S <- 'a'? 'b'",
+      "S <- ('a'?){2}",
+      "S <- 'a'+ 'b'*",
+      "S <- 'a'* 'b'+",
+      "S <- ('a'? / 'b')",
+      "S <- ('b' / 'a'?)",
+      "S <- ('a' / 'b')",
+      "S <- &'a' 'b'?",
+      "S <- !'a'",
+      "S <- ''",
+      "S <- A B\nA <- ('a'?){2}\nB <- ('b'? / 'c')",
+      "S <- (A / B) 'x'\nA <- 'a'\nB <- 'b'?",
+  };
+  for (auto grammar : grammars) {
+    parser pg;
+    pg.set_logger([](size_t, size_t, const std::string &) {});
+    ASSERT_TRUE(pg.load_grammar(grammar)) << grammar;
+
+    for (const auto &entry : pg.get_grammar()) {
+      auto &rule = pg[entry.first.c_str()];
+      ComputeFirstSet::FirstSetCache cache;
+      FirstSet none;
+      ComputeFirstSet first_set(cache, none);
+      rule.accept(first_set);
+      EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
+          << entry.first << " in " << grammar;
+    }
+  }
+}

@@ -6081,7 +6081,7 @@ struct GrammarBlob {
         w.str(s);
       w.str(def.ast_name);
       w.str(def.error_message);
-      write_ope(w, const_cast<Definition &>(def).get_core_operator());
+      write_ope(w, def.get_core_operator());
     }
     return std::move(w.b);
   }
