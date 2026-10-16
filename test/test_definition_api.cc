@@ -134,3 +134,29 @@ TEST(DefinitionApiTest, Set_logger_simple_lambda) {
   EXPECT_GT(error_col, 0u);
   EXPECT_FALSE(error_msg.empty());
 }
+
+// --- Definition copy and move ---
+
+TEST(DefinitionApiTest, Definition_is_not_copyable) {
+  // A copy would share the rule's holder and leave it pointing at whichever
+  // of the two went away first.
+  static_assert(!std::is_copy_constructible_v<Definition>);
+  static_assert(!std::is_copy_assignable_v<Definition>);
+  static_assert(std::is_move_constructible_v<Definition>);
+}
+
+TEST(DefinitionApiTest, Moved_definition_takes_over_the_rule) {
+  std::optional<Definition> a(std::in_place);
+  *a <= lit("ab");
+  std::shared_ptr<Ope> ref = *a;
+
+  Definition b(std::move(*a));
+  a.reset();
+  EXPECT_TRUE(b.parse("ab").ret);
+
+  // What referred to the moved-from rule refers to the new one.
+  Definition s;
+  s <= seq(ref, lit("c"));
+  EXPECT_TRUE(s.parse("abc").ret);
+  EXPECT_FALSE(s.parse("abd").ret);
+}

@@ -133,6 +133,33 @@ TEST(LeftRecursionTest, Hidden_left_recursion_with_epsilon_test) {
   EXPECT_FALSE(parser.parse("bb"));
 }
 
+TEST(LeftRecursionTest, Repetition_of_nullable_prefix_test) {
+  // ('x'?){2} must repeat, but what it repeats can match empty, so it can.
+  for (auto grammar :
+       {"A <- ('x'?){2} A 'y' / 'z'", "A <- B A 'y' / 'z'\nB <- ('x'?){2}"}) {
+    parser parser(grammar);
+    ASSERT_TRUE(parser) << grammar;
+
+    EXPECT_TRUE(parser.parse("z")) << grammar;
+    EXPECT_TRUE(parser.parse("zy")) << grammar;
+    EXPECT_TRUE(parser.parse("zyy")) << grammar;
+    EXPECT_FALSE(parser.parse("y")) << grammar;
+  }
+}
+
+TEST(LeftRecursionTest, Choice_with_nullable_first_alternative_test) {
+  // A choice can match empty if any alternative can, whichever comes first.
+  for (auto grammar :
+       {"A <- ('x'? / 'w') A 'y' / 'z'", "A <- ('w' / 'x'?) A 'y' / 'z'"}) {
+    parser parser(grammar);
+    ASSERT_TRUE(parser) << grammar;
+
+    EXPECT_TRUE(parser.parse("z")) << grammar;
+    EXPECT_TRUE(parser.parse("zy")) << grammar;
+    EXPECT_TRUE(parser.parse("zyy")) << grammar;
+  }
+}
+
 TEST(LeftRecursionTest, Deep_indirect_epsilon_test) {
   // LR through a chain of rules with a nullable prefix
   parser parser(R"(

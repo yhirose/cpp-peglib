@@ -395,6 +395,17 @@ TEST(NoWhitespaceTest, Trailing_whitespace_is_skipped_after_rule) {
   EXPECT_FALSE(parser.parse("a b ab")); // but not inside the rule
 }
 
+TEST(NoWhitespaceTest, In_macro) {
+  parser parser(R"(
+        S           <- 'x' P('a') 'y'
+        P(X)        <- X X  { no_whitespace }
+        %whitespace <- [ \t]*
+    )");
+  ASSERT_TRUE(!!parser);
+  EXPECT_TRUE(parser.parse("x aa y"));
+  EXPECT_FALSE(parser.parse("x a a y"));
+}
+
 TEST(NoWhitespaceTest, Combined_with_other_instructions) {
   parser parser(R"(
         S           <- KW

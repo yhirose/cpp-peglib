@@ -945,6 +945,36 @@ TEST(CutTest, Cut_with_repetition) {
   EXPECT_FALSE(pg.parse("ab ac"));
 }
 
+TEST(CutTest, Cut_is_kept_across_a_label) {
+  // `'x'^l` is a choice of its own (`'x' / %recover(l)`), which must not
+  // clear the cut made before it.
+  parser pg(R"(
+    S <- 'a' ↑ 'x'^l 'y' / 'a' 'x' 'z'
+    l <- 'q'
+  )");
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("axy"));
+  EXPECT_FALSE(pg.parse("axz"));
+}
+
+TEST(CutTest, Label_after_cut_still_recovers) {
+  parser pg(R"(
+    S    <- 'a' ↑ ITEM^err 'c' / 'a' 'd'
+    ITEM <- 'b'
+    err  <- '' { error_message "expected 'b'" }
+  )");
+  EXPECT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("abc"));
+
+  std::string error_msg;
+  pg.set_logger(
+      [&](size_t, size_t, const std::string &msg) { error_msg = msg; });
+  EXPECT_FALSE(pg.parse("axc"));
+  EXPECT_EQ("expected 'b'", error_msg);
+}
+
 // =============================================================================
 // Recovery Operator Tests
 // =============================================================================

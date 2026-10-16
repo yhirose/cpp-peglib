@@ -269,6 +269,94 @@ TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
   EXPECT_FALSE(p.load_blob(junk));
 }
 
+// A blob whose start rule is `start` and which defines the one rule `S`, with
+// the body `body` writes.
+static std::vector<uint8_t>
+blob_of(const std::string &start,
+        const std::function<void(GrammarBlob::Writer &)> &body) {
+  GrammarBlob::Writer w;
+  w.u32(GrammarBlob::MAGIC);
+  w.str(start);
+  w.u32(1);
+  w.str("S");
+  w.u8(8); // eoi_check
+  w.u8(0);
+  w.u32(0);  // params
+  w.str(""); // ast_name
+  w.str(""); // error_message
+  body(w);
+  return std::move(w.b);
+}
+
+static void write_literal_a(GrammarBlob::Writer &w) {
+  w.u8(GrammarBlob::T_Literal);
+  w.u8(0);
+  w.str("a");
+}
+
+TEST(GrammarBlobTest, HandMadeBlobIsRead) {
+  std::string start;
+  auto g = GrammarBlob::deserialize(blob_of("S", write_literal_a), start);
+  EXPECT_EQ("S", start);
+  EXPECT_TRUE((*g)["S"].parse("a").ret);
+}
+
+TEST(GrammarBlobTest, RejectsStringPastTheEnd) {
+  GrammarBlob::Writer w;
+  w.u32(GrammarBlob::MAGIC);
+  w.u32(0x0fffffff); // the start rule's name runs past the blob
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(w.b, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsOperatorsNestedTooDeeply) {
+  auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
+    for (auto i = 0; i < 100000; i++) {
+      w.u8(GrammarBlob::T_Not);
+    }
+    w.u8(GrammarBlob::T_AnyChar);
+  });
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsTrailingBytes) {
+  auto blob = blob_of("S", write_literal_a);
+  blob.push_back(0);
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsUndefinedStartRule) {
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob_of("T", write_literal_a), start),
+               std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsUndefinedReference) {
+  auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
+    w.u8(GrammarBlob::T_Reference);
+    w.u8(0); // not a macro call
+    w.str("Undefined");
+    w.u32(0); // arguments
+  });
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, FailedLoadBlobKeepsTheGrammar) {
+  peg::parser p("A <- 'a'");
+  ASSERT_TRUE(p);
+
+  auto blob = peg::parser("T <- 'x'").serialize_grammar();
+  blob.pop_back();
+  EXPECT_FALSE(p.load_blob(blob));
+
+  // Still the old grammar, from its own start rule.
+  EXPECT_TRUE(p.parse("a"));
+  EXPECT_FALSE(p.parse("x"));
+}
+
 TEST(GrammarBlobTest, SerializeWithoutAGrammarIsEmpty) {
   peg::parser p("S <- A"); // A is undefined
   ASSERT_FALSE(p);

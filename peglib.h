@@ -273,22 +273,34 @@ inline bool is_digit(char c, int &v) {
   return false;
 }
 
-inline std::pair<int, size_t> parse_hex_number(const char *s, size_t n,
-                                               size_t i) {
+inline bool is_octal(char c, int &v) {
+  if ('0' <= c && c <= '7') {
+    v = c - '0';
+    return true;
+  }
+  return false;
+}
+
+inline std::pair<int, size_t>
+parse_hex_number(const char *s, size_t n, size_t i,
+                 size_t max_digits = std::numeric_limits<size_t>::max()) {
   int ret = 0;
   int val;
-  while (i < n && is_hex(s[i], val)) {
+  const auto end = i + std::min(max_digits, n - i);
+  while (i < end && is_hex(s[i], val)) {
     ret = static_cast<int>(ret * 16 + val);
     i++;
   }
   return std::pair(ret, i);
 }
 
-inline std::pair<int, size_t> parse_octal_number(const char *s, size_t n,
-                                                 size_t i) {
+inline std::pair<int, size_t>
+parse_octal_number(const char *s, size_t n, size_t i,
+                   size_t max_digits = std::numeric_limits<size_t>::max()) {
   int ret = 0;
   int val;
-  while (i < n && is_digit(s[i], val)) {
+  const auto end = i + std::min(max_digits, n - i);
+  while (i < end && is_octal(s[i], val)) {
     ret = static_cast<int>(ret * 8 + val);
     i++;
   }
@@ -304,8 +316,13 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
     auto ch = s[i];
     if (ch == '\\') {
       i++;
-      assert(i < n);
+      if (i == n) {
+        r += '\\';
+        break;
+      }
 
+      // An escape takes only as many digits as the grammar's Char rule does,
+      // so a digit after it is a character of its own.
       switch (s[i]) {
       case 'f':
         r += '\f';
@@ -355,16 +372,26 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
         r += '\\';
         i++;
         break;
-      case 'x':
-      case 'u': {
+      case 'x': {
         char32_t cp;
-        std::tie(cp, i) = parse_hex_number(s, n, i + 1);
+        std::tie(cp, i) = parse_hex_number(s, n, i + 1, 2);
+        r += encode_codepoint(cp);
+        break;
+      }
+      case 'u': {
+        // Six digits from 0 or 10 (up to U+10FFFF), else four or five.
+        const auto six = i + 2 < n && (s[i + 1] == '0' ||
+                                       (s[i + 1] == '1' && s[i + 2] == '0'));
+        char32_t cp;
+        std::tie(cp, i) = parse_hex_number(s, n, i + 1, six ? 6 : 5);
         r += encode_codepoint(cp);
         break;
       }
       default: {
+        // Three digits up to \377, else two.
+        const auto three = '0' <= s[i] && s[i] <= '3';
         char32_t cp;
-        std::tie(cp, i) = parse_octal_number(s, n, i);
+        std::tie(cp, i) = parse_octal_number(s, n, i, three ? 3 : 2);
         r += encode_codepoint(cp);
         break;
       }
@@ -1664,10 +1691,20 @@ public:
                     std::any &dt) const override {
     size_t len = static_cast<size_t>(-1);
 
+    // A label choice has no flag of its own: a cut in its alternative, or its
+    // recovery, commits the choice around it. It clears that flag to tell a
+    // cut in the alternative from one before it, so it puts back a cut made
+    // before it.
     const auto track_cut = c.has_cut && !for_label_;
+    const auto cut_before =
+        !track_cut && c.has_cut && !c.cut_stack.empty() && c.cut_stack.back();
     if (track_cut) { c.cut_stack.push_back(false); }
     auto se = scope_exit([&]() {
-      if (track_cut) { c.cut_stack.pop_back(); }
+      if (track_cut) {
+        c.cut_stack.pop_back();
+      } else if (cut_before) {
+        c.cut_stack.back() = true;
+      }
     });
 
     const auto reports = c.collects_expected_tokens();
@@ -2645,18 +2682,23 @@ struct DetectLeftRecursion : public TraversalVisitor {
       }
     }
   }
+  // A choice consumes input only if each of its alternatives does, and a
+  // repetition only if it must repeat something that does.
   void visit(PrioritizedChoice &ope) override {
+    auto all_done = true;
     for (const auto &op : ope.opes_) {
       op->accept(*this);
       if (error_s) {
         done_ = true;
-        break;
+        return;
       }
+      all_done = all_done && done_;
     }
+    done_ = all_done;
   }
   void visit(Repetition &ope) override {
     ope.ope_->accept(*this);
-    done_ = ope.min_ > 0;
+    done_ = done_ && ope.min_ > 0;
   }
   void visit(AndPredicate &ope) override {
     ope.ope_->accept(*this);
@@ -2730,7 +2772,10 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
       return vis.result;
     });
   }
-  void visit(Repetition &ope) override { result = ope.min_ == 0; }
+  void visit(Repetition &ope) override {
+    ope.ope_->accept(*this);
+    result = result || ope.min_ == 0;
+  }
   void visit(AndPredicate &) override { result = true; }
   void visit(NotPredicate &) override { result = true; }
   void visit(Dictionary &) override { result = false; }
@@ -3211,7 +3256,15 @@ public:
 
   Definition() : holder_(std::make_shared<Holder>(this)) {}
 
-  Definition(const Definition &rhs) : name(rhs.name), holder_(rhs.holder_) {
+  // A rule is referred to by address, so it cannot be copied: a copy would
+  // share the holder and leave it pointing at whichever of the two goes away
+  // first. Take a reference instead (`auto &rule = parser["A"]`). Moving one
+  // hands the holder over, for a rule built and returned by value.
+  Definition(const Definition &) = delete;
+  Definition &operator=(const Definition &) = delete;
+  Definition &operator=(Definition &&) = delete;
+
+  Definition(Definition &&rhs) : name(rhs.name), holder_(rhs.holder_) {
     holder_->outer_ = this;
   }
 
@@ -3440,9 +3493,6 @@ private:
   friend class Context;
   friend class Reference;
   friend class ParserGenerator;
-
-  Definition &operator=(const Definition &rhs);
-  Definition &operator=(Definition &&rhs);
 
   const StartRuleAnalysis &analysis() const {
     std::call_once(analysis_init_, [&]() { analyze(); });
@@ -3989,10 +4039,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // semantic value scope to memoise. Such a macro forms a scope like a plain
   // rule does.
   if (outer_->is_macro && !outer_->is_left_recursive) {
-    if (c.needs_rule_stack) { c.push_rule(outer_); }
-    auto len = ope_->parse(s, n, vs, c, dt);
-    if (c.needs_rule_stack) { c.pop_rule(); }
-    return len;
+    return parse_ope_body(s, n, vs, c, dt);
   }
 
   auto has_id = c.has_id(*outer_);
@@ -5851,21 +5898,35 @@ struct GrammarBlob {
     }
     std::string str() {
       uint32_t n = u32();
+      if (n > static_cast<size_t>(end - p))
+        throw std::runtime_error("GrammarBlob: unexpected end of blob");
       std::string s((const char *)p, (const char *)p + n);
       p += n;
       return s;
     }
   };
 
-  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g,
-                                       Definition *owner) {
+  // Deeper than a grammar loaded from text can nest its operators (about a
+  // thousand levels), and shallow enough that a corrupt blob cannot exhaust
+  // the stack.
+  static constexpr size_t MAX_OPE_DEPTH = 2048;
+
+  static std::shared_ptr<Ope> read_ope(Reader &r, Grammar &g, Definition *owner,
+                                       size_t depth = 0) {
+    if (depth == MAX_OPE_DEPTH)
+      throw std::runtime_error("GrammarBlob: operators nest too deeply");
+    return read_ope_core(r, g, owner, depth + 1);
+  }
+
+  static std::shared_ptr<Ope> read_ope_core(Reader &r, Grammar &g,
+                                            Definition *owner, size_t depth) {
     switch (r.u8()) {
     case T_Null: return nullptr;
     case T_Sequence: {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g, owner));
+        v.push_back(read_ope(r, g, owner, depth));
       return std::make_shared<Sequence>(std::move(v));
     }
     case T_Choice: {
@@ -5873,16 +5934,18 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
       for (uint32_t i = 0; i < n; i++)
-        v.push_back(read_ope(r, g, owner));
+        v.push_back(read_ope(r, g, owner, depth));
       return std::make_shared<PrioritizedChoice>(std::move(v), fl);
     }
     case T_Repetition: {
       uint64_t mn = r.u64(), mx = r.u64();
-      auto o = read_ope(r, g, owner);
+      auto o = read_ope(r, g, owner, depth);
       return std::make_shared<Repetition>(o, mn, mx);
     }
-    case T_And: return std::make_shared<AndPredicate>(read_ope(r, g, owner));
-    case T_Not: return std::make_shared<NotPredicate>(read_ope(r, g, owner));
+    case T_And:
+      return std::make_shared<AndPredicate>(read_ope(r, g, owner, depth));
+    case T_Not:
+      return std::make_shared<NotPredicate>(read_ope(r, g, owner, depth));
     case T_Dictionary: {
       bool ic = r.u8();
       uint32_t n = r.u32();
@@ -5909,14 +5972,15 @@ struct GrammarBlob {
     case T_Char: return std::make_shared<Character>((char32_t)r.u32());
     case T_AnyChar: return std::make_shared<AnyCharacter>();
     case T_CaptureScope:
-      return std::make_shared<CaptureScope>(read_ope(r, g, owner));
+      return std::make_shared<CaptureScope>(read_ope(r, g, owner, depth));
     case T_Capture: {
-      auto o = read_ope(r, g, owner);
+      auto o = read_ope(r, g, owner, depth);
       return std::make_shared<Capture>(o, nullptr);
     }
     case T_TokenBoundary:
-      return std::make_shared<TokenBoundary>(read_ope(r, g, owner));
-    case T_Ignore: return std::make_shared<Ignore>(read_ope(r, g, owner));
+      return std::make_shared<TokenBoundary>(read_ope(r, g, owner, depth));
+    case T_Ignore:
+      return std::make_shared<Ignore>(read_ope(r, g, owner, depth));
     case T_BackRef: return std::make_shared<BackReference>(r.str());
     case T_Reference: {
       bool im = r.u8();
@@ -5924,20 +5988,21 @@ struct GrammarBlob {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> args;
       for (uint32_t i = 0; i < n; i++)
-        args.push_back(read_ope(r, g, owner));
+        args.push_back(read_ope(r, g, owner, depth));
       return std::make_shared<Reference>(g, nm, nullptr, im, args);
     }
     case T_Whitespace:
-      return std::make_shared<Whitespace>(read_ope(r, g, owner));
-    case T_Recovery: return std::make_shared<Recovery>(read_ope(r, g, owner));
+      return std::make_shared<Whitespace>(read_ope(r, g, owner, depth));
+    case T_Recovery:
+      return std::make_shared<Recovery>(read_ope(r, g, owner, depth));
     case T_Cut: return std::make_shared<Cut>();
     case T_PrecedenceClimbing: {
       if (!owner) {
         throw std::runtime_error(
             "GrammarBlob: 'precedence' operator outside a rule body");
       }
-      auto atom = read_ope(r, g, owner);
-      auto binop = read_ope(r, g, owner);
+      auto atom = read_ope(r, g, owner, depth);
+      auto binop = read_ope(r, g, owner, depth);
       uint32_t n = r.u32();
       auto pc = std::make_shared<PrecedenceClimbing>(
           atom, binop, PrecedenceClimbing::BinOpeInfo{}, *owner);
@@ -6001,7 +6066,9 @@ struct GrammarBlob {
     Reader r{blob.data(), blob.data() + blob.size()};
     if (r.u32() != MAGIC)
       throw std::runtime_error("GrammarBlob: bad magic / not a grammar blob");
-    start_out = r.str();
+    // start_out is written only once the blob has been read in full, so a bad
+    // blob leaves it as it was.
+    auto start = r.str();
     uint32_t ndef = r.u32();
     auto g = std::make_shared<Grammar>();
     // Create each Definition before reading its body: a PrecedenceClimbing node
@@ -6036,36 +6103,52 @@ struct GrammarBlob {
       auto body = read_ope(r, *g, &def);
       def <= body;
     }
+    if (r.p != r.end)
+      throw std::runtime_error("GrammarBlob: trailing bytes after the grammar");
+    if (!g->count(start))
+      throw std::runtime_error("GrammarBlob: start rule '" + start +
+                               "' is not defined");
     for (auto &x : *g) {
+      // TraversalVisitor descends only into a PrecedenceClimbing's atom_. In
+      // the from-source path binop_ is checked and linked while the body is
+      // still a Sequence, before precedence lowering; a deserialized node is
+      // built already lowered so its binop_ must be visited explicitly here.
+      auto core = x.second.get_core_operator();
+      auto pc = std::dynamic_pointer_cast<PrecedenceClimbing>(core);
+
+      // A reference to a rule the blob does not define, or with the wrong
+      // arguments, would be followed when the grammar is analyzed.
+      ReferenceChecker check(*g, x.second.params);
+      x.second.accept(check);
+      if (pc) { pc->binop_->accept(check); }
+      if (!check.error_message.empty()) {
+        throw std::runtime_error("GrammarBlob: rule '" + x.first +
+                                 "': " + check.error_message.begin()->second);
+      }
+
       LinkReferences vis(*g, x.second.params);
       x.second.accept(vis);
-      // TraversalVisitor descends only into a PrecedenceClimbing's atom_. In
-      // the from-source path binop_ is linked while the body is still a
-      // Sequence, before precedence lowering; a deserialized node is built
-      // already lowered so its binop_ reference must be linked explicitly here.
-      auto core = x.second.get_core_operator();
-      if (auto pc = std::dynamic_pointer_cast<PrecedenceClimbing>(core)) {
-        pc->binop_->accept(vis);
-      }
+      if (pc) { pc->binop_->accept(vis); }
     }
     // Re-derive automatic whitespace/word skipping on the start rule from the
     // %whitespace / %word definitions, exactly as ParserGenerator does. Sharing
     // the (already linked) definition operators avoids leaving references
     // inside the skipping ope unlinked, and keeps the blob smaller.
     if (g->count(WHITESPACE_DEFINITION_NAME)) {
-      (*g)[start_out].whitespaceOpe =
+      (*g)[start].whitespaceOpe =
           wsp((*g)[WHITESPACE_DEFINITION_NAME].get_core_operator());
     }
     if (g->count(WORD_DEFINITION_NAME)) {
-      (*g)[start_out].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
+      (*g)[start].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
     }
     // After %whitespace: first sets count the whitespace skipped after an
     // empty match.
     {
-      SetupFirstSets vis((*g)[start_out].whitespaceOpe); // shared -> O(N)
+      SetupFirstSets vis((*g)[start].whitespaceOpe); // shared -> O(N)
       for (auto &x : *g)
         x.second.accept(vis);
     }
+    start_out = std::move(start);
     return g;
   }
 };

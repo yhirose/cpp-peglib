@@ -515,6 +515,36 @@ TEST(EscapeTest, Literal_form_feed) {
   EXPECT_FALSE(pg.parse("afb"));
 }
 
+TEST(EscapeTest, Literal_numeric_escape_takes_only_its_digits) {
+  // An escape takes as many digits as the Char rule allows; a digit after it
+  // is a character of its own.
+  struct Case {
+    const char *grammar;
+    const char *input;
+  };
+  for (const auto &[grammar, input] : {
+           Case{R"(S <- '\x41B')", "AB"},
+           Case{R"(S <- '\x412')", "A2"},
+           Case{R"(S <- '\1014')", "A4"},
+           Case{R"(S <- '\477')", "'7"},
+           Case{R"(S <- '\78')", "\a8"},
+           Case{R"(S <- '\u00004142')", "A42"},
+           Case{R"(S <- '\u10FFFF0')", "\xF4\x8F\xBF\xBF"
+                                       "0"},
+           Case{R"(S <- '\u123456')", "\xF0\x92\x8D\x85"
+                                      "6"},
+           Case{R"(S <- '\u0041B')", "\xD0\x9B"},
+       }) {
+    parser pg(grammar);
+    ASSERT_TRUE(!!pg) << grammar;
+    EXPECT_TRUE(pg.parse(input)) << grammar;
+  }
+}
+
+TEST(EscapeTest, Trailing_backslash_is_kept) {
+  EXPECT_EQ("a\\", resolve_escape_sequence("a\\", 2));
+}
+
 // =============================================================================
 // Grammar Rejection Tests
 // =============================================================================
