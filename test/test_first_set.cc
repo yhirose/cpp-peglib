@@ -337,7 +337,8 @@ TEST(FirstSetTest, Leading_cut_is_not_skipped) {
 // A rule that cannot start with the next byte is not entered, wherever it is
 // used, just as a choice skips an alternative that cannot, where entering it
 // would run no callback, so that skipping it goes unnoticed. A parse that
-// reports errors still enters it, to tell what it expected.
+// reports errors notes what entering it would, and still enters one that must
+// be tried, such as one that gives a message.
 
 // How many times the parses from S so far tried the rule, as packrat
 // statistics count them.
@@ -362,7 +363,8 @@ TEST(UnstartableRuleTest, Is_not_entered) {
   EXPECT_EQ(1u, tries(pg, "A"));
 }
 
-TEST(UnstartableRuleTest, Is_entered_when_errors_are_reported) {
+TEST(UnstartableRuleTest,
+     Is_entered_only_to_give_a_message_when_errors_are_reported) {
   parser pg(R"(
     S <- A? 'x'
     A <- 'y'
@@ -373,9 +375,16 @@ TEST(UnstartableRuleTest, Is_entered_when_errors_are_reported) {
   std::string message;
   pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
 
+  // What A expects is listed all the same.
+  EXPECT_FALSE(pg.parse("z"));
+  EXPECT_EQ(0u, tries(pg, "A"));
+  EXPECT_EQ("syntax error, unexpected 'z', expecting 'y', 'x'.", message);
+
+  // A rule that gives a message is entered for it.
+  pg["A"].error_message = "no y";
   EXPECT_FALSE(pg.parse("z"));
   EXPECT_EQ(1u, tries(pg, "A"));
-  EXPECT_EQ("syntax error, unexpected 'z', expecting 'y', 'x'.", message);
+  EXPECT_EQ("no y", message);
 }
 
 TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
@@ -763,6 +772,15 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
         M <- M 'q' / 'm' { error_message "an m" }
       )",
        "ab?z"},
+      {R"(
+        S <- P 'w' / 'a' N 'k' / 'x' X
+        P <- 'a' E^L / 'n'
+        E <- 'e'
+        L <- (N? [^z])*
+        N <- 'm' { error_message "an m" }
+        X <- N 'q' / N 'r'
+      )",
+       "ab?z", [](parser &pg) { pg.enable_packrat_parsing(); }},
       {R"(
         S <- T / R? 'c'
         T <- < R 'x' >

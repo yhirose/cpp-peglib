@@ -1229,7 +1229,8 @@ struct RuleUse {
   // Whether trying the rule where it cannot start can do more than its
   // first set says: a rule it enters there gives a message, runs a predicate
   // on an empty match or is left-recursive. Where skipping could be noticed,
-  // an alternative that starts with such a rule is tried instead.
+  // such a rule is entered, and an alternative that starts with one is tried,
+  // instead of skipped.
   bool must_be_tried = true;
 };
 
@@ -1440,12 +1441,14 @@ public:
   // By rule id. A rule without an entry is always entered and built.
   const RuleUse *rule_use = nullptr;
 
-  // Whether skipping an alternative that must be tried could be noticed:
-  // errors are reported or nesting is limited, and some alternative starts
-  // with a rule that must be tried. It holds for the whole parse, so that a
+  // Whether skipping what must be tried could be noticed: errors are
+  // reported or nesting is limited. It holds for the whole parse, so that a
   // recovery, which reports nothing, leaves the memos a parse without
   // shortcuts would.
   bool notices_skipping = false;
+  // Whether a choice checks each alternative for one that must be tried:
+  // skipping could be noticed, and some alternative starts with such a rule.
+  bool checks_alternatives = false;
   bool must_be_tried(const FirstSet &fs) const;
 
   // The body of a match that is only recognized parses into this scope.
@@ -1456,8 +1459,8 @@ public:
   bool builds_everything = false;
 
   // Whether a rule that cannot start with the next byte may fail without
-  // being entered. It is entered all the same for an error to report what
-  // it expected, for a tracer to see it and for a nesting limit to count it.
+  // being entered, noting what entering it would. It is entered all the same
+  // for a tracer to see it and for a nesting limit to count it.
   bool skips_rules = false;
 
   // Until the returned guard goes, neither the values nor the tokens of
@@ -1746,9 +1749,10 @@ public:
   std::vector<std::shared_ptr<Ope>> opes_;
 };
 
-// Whether a parse skips the alternatives of a choice by their first sets, and
-// matches a repeated character class in one go. The test suite turns these
-// shortcuts off to check that they go unnoticed.
+// Whether a parse skips the alternatives of a choice and the rules that
+// cannot start with the next byte, and matches a repeated character class in
+// one go. The test suite turns these shortcuts off to check that they go
+// unnoticed.
 #ifdef CPPPEGLIB_TEST
 inline bool &takes_shortcuts() {
   static thread_local bool takes = true;
@@ -1835,9 +1839,7 @@ public:
 
     const auto reports = c.collects_expected_tokens();
     const auto skips = n > 0 && first_sets_ && takes_shortcuts();
-    // Where skipping could be noticed, each alternative is checked, so that
-    // the ones that must be tried are.
-    const auto checks = skips && c.notices_skipping;
+    const auto checks = skips && c.checks_alternatives;
     const auto byte = static_cast<unsigned char>(n > 0 ? *s : 0);
     const auto list = skips && !checks ? 1 + byte : 0;
     size_t skipped_from = 0;
@@ -3753,9 +3755,9 @@ private:
     c.rule_use = uses->by_id.data();
 
     c.max_depth = max_depth;
-    c.skips_rules = !c.needs_rule_stack && !c.limits_depth();
-    c.notices_skipping =
-        (c.reports_errors || c.limits_depth()) && uses->some_must_be_tried;
+    c.skips_rules = !c.has_tracer && !c.limits_depth() && takes_shortcuts();
+    c.notices_skipping = c.reports_errors || c.limits_depth();
+    c.checks_alternatives = c.notices_skipping && uses->some_must_be_tried;
 
     auto result = [&](bool ret, size_t len) {
       c.error_info.resolve_expected_tokens();
@@ -4457,12 +4459,17 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
 
   if (rule_->is_macro) { return c.instance(*this).parse(s, n, vs, c, dt); }
 
-  // A rule that cannot start with the next byte fails without being entered
-  // where that goes unnoticed, as a choice skips an alternative that cannot.
+  // A rule that cannot start with the next byte fails without being entered,
+  // as a choice skips an alternative that cannot. Where that could be
+  // noticed, it notes what entering it would, unless it must be tried.
   if (c.skips_rules && n > 0 &&
       !rule_->start_bytes.test(static_cast<unsigned char>(*s)) &&
       c.has_id(*rule_) && c.rule_use[rule_->id].skippable) {
-    return kFail;
+    if (!c.notices_skipping) { return kFail; }
+    if (!c.rule_use[rule_->id].must_be_tried) {
+      c.note_untried(*rule_, s, n);
+      return kFail;
+    }
   }
   return rule_->holder_->parse(s, n, vs, c, dt);
 }
