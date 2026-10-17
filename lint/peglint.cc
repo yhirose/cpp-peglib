@@ -45,6 +45,7 @@ int main(int argc, const char **argv) {
   auto opt_verbose = false;
   auto opt_profile = false;
   auto opt_blob = false;
+  auto opt_hints = false;
   vector<const char *> path_list;
 
   auto argi = 1;
@@ -79,6 +80,8 @@ int main(int argc, const char **argv) {
       opt_verbose = true;
     } else if (string("--blob") == arg) {
       opt_blob = true;
+    } else if (string("--hints") == arg) {
+      opt_hints = true;
     } else {
       path_list.push_back(arg);
     }
@@ -96,6 +99,7 @@ int main(int argc, const char **argv) {
     --trace: show concise trace messages
     --profile: show profile report
     --verbose: verbose output for trace and profile
+    --hints: show hints to make parsing faster
     --blob: write a serialized grammar blob to stdout (load it later with
             peg::parser::load_blob to skip the meta-parse on startup)
     --version: show version information
@@ -138,124 +142,132 @@ int main(int argc, const char **argv) {
     auto &grammar = parser.get_grammar();
     const char *source_start = syntax.data();
 
-    // Get the first Reference name from an Ope tree
-    struct GetFirstRef : public Ope::Visitor {
-      using Ope::Visitor::visit;
-      string name; // empty if not found
-      void visit(Reference &ope) override {
-        if (name.empty() && ope.rule_ && !ope.is_macro_) { name = ope.name_; }
-      }
-      void visit(Sequence &ope) override {
-        if (name.empty() && !ope.opes_.empty()) { ope.opes_[0]->accept(*this); }
-      }
-      void visit(Repetition &ope) override {
-        if (name.empty()) { ope.ope_->accept(*this); }
-      }
-      void visit(CaptureScope &ope) override {
-        if (name.empty()) { ope.ope_->accept(*this); }
-      }
-      void visit(Capture &ope) override {
-        if (name.empty()) { ope.ope_->accept(*this); }
-      }
-      void visit(TokenBoundary &ope) override {
-        if (name.empty()) { ope.ope_->accept(*this); }
-      }
-      void visit(Ignore &ope) override {
-        if (name.empty()) { ope.ope_->accept(*this); }
-      }
-    };
-
-    // Build first-reference chain: all rules reachable by following
-    // the first Reference of each definition recursively.
-    map<string, set<string>> chain_cache;
-    auto build_chain = [&](const string &start) -> const set<string> & {
-      auto cached = chain_cache.find(start);
-      if (cached != chain_cache.end()) { return cached->second; }
-      auto &chain = chain_cache[start];
-      string cur = start;
-      while (!cur.empty() && !chain.count(cur)) {
-        chain.insert(cur);
-        auto it = grammar.find(cur);
-        if (it == grammar.end()) break;
-        GetFirstRef vis;
-        it->second.get_core_operator()->accept(vis);
-        cur = vis.name;
-      }
-      return chain;
-    };
-
     auto warn = [&](const Definition &def, const string &msg) {
       auto pos = line_info(source_start, def.s_);
       cerr << syntax_path << ":" << pos.first << ":" << pos.second << ": "
            << msg << endl;
     };
 
-    for (auto &[rule_name, def] : grammar) {
-      auto core = def.get_core_operator();
-      auto *choice = dynamic_cast<PrioritizedChoice *>(core.get());
-      if (!choice) continue;
-
-      // Collect first-ref info for each alternative
-      struct AltInfo {
-        string direct_ref;
-        const set<string> *chain = nullptr;
+    if (opt_hints) {
+      auto hint = [&](const Definition &def, const string &subject) {
+        warn(def, subject + ", which can be parsed again at the same "
+                            "position; enable packrat parsing or left-factor "
+                            "them.");
       };
-      vector<AltInfo> alts;
-      for (auto &ope : choice->opes_) {
-        GetFirstRef vis;
-        ope->accept(vis);
-        AltInfo info;
-        if (!vis.name.empty()) {
-          info.direct_ref = vis.name;
-          info.chain = &build_chain(vis.name);
-        }
-        alts.push_back(std::move(info));
-      }
 
-      // Direct common prefix
-      map<string, vector<size_t>> direct;
-      for (size_t i = 0; i < alts.size(); i++) {
-        if (!alts[i].direct_ref.empty()) {
-          direct[alts[i].direct_ref].push_back(i);
+      // Get the first Reference name from an Ope tree
+      struct GetFirstRef : public Ope::Visitor {
+        using Ope::Visitor::visit;
+        string name; // empty if not found
+        void visit(Reference &ope) override {
+          if (name.empty() && ope.rule_ && !ope.is_macro_) { name = ope.name_; }
         }
-      }
-      for (auto &[prefix, idx] : direct) {
-        if (idx.size() < 2) continue;
-
-        warn(def, "'" + rule_name + "' has " + to_string(idx.size()) +
-                      " alternatives starting with '" + prefix +
-                      "'; consider left-factoring.");
-      }
-
-      // Indirect common prefix
-      map<string, vector<size_t>> indirect;
-      for (size_t i = 0; i < alts.size(); i++) {
-        if (!alts[i].chain) continue;
-        for (auto &ref : *alts[i].chain) {
-          indirect[ref].push_back(i);
-        }
-      }
-      for (auto &[ref, idx] : indirect) {
-        if (idx.size() < 2) continue;
-        if (direct.count(ref) && direct[ref].size() >= 2) continue;
-        vector<string> names;
-        for (auto i : idx) {
-          if (!alts[i].direct_ref.empty()) {
-            names.push_back(alts[i].direct_ref);
+        void visit(Sequence &ope) override {
+          if (name.empty() && !ope.opes_.empty()) {
+            ope.opes_[0]->accept(*this);
           }
         }
-        sort(names.begin(), names.end());
-        names.erase(unique(names.begin(), names.end()), names.end());
-        if (names.size() < 2) continue;
-
-        string affected;
-        for (auto &n : names) {
-          if (!affected.empty()) affected += ", ";
-          affected += n;
+        void visit(Repetition &ope) override {
+          if (name.empty()) { ope.ope_->accept(*this); }
         }
-        warn(def, "'" + rule_name + "' alternatives {" + affected +
-                      "} share indirect prefix '" + ref +
-                      "'; consider left-factoring.");
+        void visit(CaptureScope &ope) override {
+          if (name.empty()) { ope.ope_->accept(*this); }
+        }
+        void visit(Capture &ope) override {
+          if (name.empty()) { ope.ope_->accept(*this); }
+        }
+        void visit(TokenBoundary &ope) override {
+          if (name.empty()) { ope.ope_->accept(*this); }
+        }
+        void visit(Ignore &ope) override {
+          if (name.empty()) { ope.ope_->accept(*this); }
+        }
+      };
+
+      // Build first-reference chain: all rules reachable by following
+      // the first Reference of each definition recursively.
+      map<string, set<string>> chain_cache;
+      auto build_chain = [&](const string &start) -> const set<string> & {
+        auto cached = chain_cache.find(start);
+        if (cached != chain_cache.end()) { return cached->second; }
+        auto &chain = chain_cache[start];
+        string cur = start;
+        while (!cur.empty() && !chain.count(cur)) {
+          chain.insert(cur);
+          auto it = grammar.find(cur);
+          if (it == grammar.end()) break;
+          GetFirstRef vis;
+          it->second.get_core_operator()->accept(vis);
+          cur = vis.name;
+        }
+        return chain;
+      };
+
+      for (auto &[rule_name, def] : grammar) {
+        auto core = def.get_core_operator();
+        auto *choice = dynamic_cast<PrioritizedChoice *>(core.get());
+        if (!choice) continue;
+
+        // Collect first-ref info for each alternative
+        struct AltInfo {
+          string direct_ref;
+          const set<string> *chain = nullptr;
+        };
+        vector<AltInfo> alts;
+        for (auto &ope : choice->opes_) {
+          GetFirstRef vis;
+          ope->accept(vis);
+          AltInfo info;
+          if (!vis.name.empty()) {
+            info.direct_ref = vis.name;
+            info.chain = &build_chain(vis.name);
+          }
+          alts.push_back(std::move(info));
+        }
+
+        // Direct common prefix
+        map<string, vector<size_t>> direct;
+        for (size_t i = 0; i < alts.size(); i++) {
+          if (!alts[i].direct_ref.empty()) {
+            direct[alts[i].direct_ref].push_back(i);
+          }
+        }
+        for (auto &[prefix, idx] : direct) {
+          if (idx.size() < 2) continue;
+
+          hint(def, "'" + rule_name + "' has " + to_string(idx.size()) +
+                        " alternatives starting with '" + prefix + "'");
+        }
+
+        // Indirect common prefix
+        map<string, vector<size_t>> indirect;
+        for (size_t i = 0; i < alts.size(); i++) {
+          if (!alts[i].chain) continue;
+          for (auto &ref : *alts[i].chain) {
+            indirect[ref].push_back(i);
+          }
+        }
+        for (auto &[ref, idx] : indirect) {
+          if (idx.size() < 2) continue;
+          if (direct.count(ref) && direct[ref].size() >= 2) continue;
+          vector<string> names;
+          for (auto i : idx) {
+            if (!alts[i].direct_ref.empty()) {
+              names.push_back(alts[i].direct_ref);
+            }
+          }
+          sort(names.begin(), names.end());
+          names.erase(unique(names.begin(), names.end()), names.end());
+          if (names.size() < 2) continue;
+
+          string affected;
+          for (auto &n : names) {
+            if (!affected.empty()) affected += ", ";
+            affected += n;
+          }
+          hint(def, "'" + rule_name + "' alternatives {" + affected +
+                        "} share indirect prefix '" + ref + "'");
+        }
       }
     }
 
