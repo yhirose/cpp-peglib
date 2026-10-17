@@ -42,7 +42,7 @@ IdentRest <-  IdentStart /  [0-9]
 
 Dictionary <-  LiteralD  (PIPE  LiteralD)+
 
-DictionaryI <- LiteralID (PIPE LiteralID)*
+DictionaryI <- LiteralID (PIPE LiteralID)+
 
 lit_ope <-
 	[']  <(![']  Char)*> [']  Spacing
@@ -109,7 +109,7 @@ CUT <-  "↑"  Spacing
 ~LABEL <-  ('^' /  "⇑")  Spacing
 
 ~Spacing <-  (Space /  Comment)*
-Comment <- '#'  (!EndOfLine   . )*
+Comment <- '#'  (!EndOfLine   . )* EndOfLine?
 Space <-  ' ' /  '\t' /  EndOfLine
 EndOfLine <-  "\r\n" /  '\n' /  '\r'
 EndOfFile <-  ! .

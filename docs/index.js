@@ -53,7 +53,7 @@ function generateErrorListHTML(errors) {
     }
   }).join('');
 
-  html += '<ul>';
+  html += '</ul>';
 
   return html;
 }

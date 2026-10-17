@@ -14,7 +14,7 @@ Build
 
 ```
 brew install llvm
-export PATH="$PATH:/usr/local/opt/llvm/bin"
+export PATH="$PATH:$(brew --prefix llvm)/bin"
 make
 ```
 

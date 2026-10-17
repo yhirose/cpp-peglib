@@ -16,7 +16,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `[...]i` (Case-insensitive character class operator, ASCII letters)
 * `[^...]` (Negated character class operator)
 * `[^...]i` (Case-insensitive negated character class operator, ASCII letters)
-* `{2,5}` (Regex-like repetition operator)
+* `{2,5}`, `{2,}`, `{,5}`, `{2}` (Regex-like repetition operator)
 * `<` ... `>` (Token boundary operator)
 * `~` (Ignore operator)
 * `\x20` (Hex number char)
@@ -25,7 +25,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `[[:alpha:]]`, `[[:^alpha:]]` (POSIX character classes in a character class, ASCII semantics: `alnum`, `alpha`, `ascii`, `blank`, `cntrl`, `digit`, `graph`, `lower`, `print`, `punct`, `space`, `upper`, `word`, `xdigit`)
 * `%whitespace` (Automatic whitespace skipping)
 * `%word` (Word expression)
-* `$name(` ... `)` (Capture scope operator)
+* `$(` ... `)` (Capture scope operator)
 * `$name<` ... `>` (Named capture operator)
 * `$name` (Backreference operator)
 * `|` (Dictionary operator)
@@ -33,12 +33,13 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `MACRO_NAME(` ... `)` (Parameterized rule or Macro)
 * `{ precedence L - + L / * }` (Parsing infix expression)
 * Left recursive rules (direct, indirect, and mutual left recursion)
-* `%recovery(` ... `)` (Error recovery operator)
+* `%recover(` ... `)` (Error recovery operator)
 * `exp⇑label` or `exp^label` (Syntax sugar for `(exp / %recover(label))`)
 * `label { error_message "..." }` (Error message instruction)
 * `{ no_ast_opt }` (No AST node optimization instruction)
 * `{ no_whitespace }` (Disable `%whitespace` skipping inside the rule)
 * `{ ast_name: NodeTag }` (AST node name override instruction)
+* `←` (Same as `<-`)
 
 'End of Input' check will be done as default. To disable the check, please call `disable_eoi_check`.
 
@@ -122,7 +123,7 @@ auto grammar = R"(
   %whitespace <- [ \t]*
 )";
 
-parser parser;
+peg::parser parser;
 
 parser.set_logger([](size_t line, size_t col, const string& msg, const string &rule) {
   cerr << line << ":" << col << ": " << msg << "\n";
@@ -132,13 +133,13 @@ auto ok = parser.load_grammar(grammar);
 assert(ok);
 ```
 
-There are four semantic actions available:
+A semantic action takes one of these forms, and can take `vs` as `SemanticValues&` instead, to move values out of it:
 
+<!-- not compiled -->
 ```cpp
-[](const SemanticValues& vs, any& dt)
 [](const SemanticValues& vs)
-[](SemanticValues& vs, any& dt)
-[](SemanticValues& vs)
+[](const SemanticValues& vs, any& dt)
+[](const SemanticValues& vs, any& dt, const any& predicate_data)
 ```
 
 `SemanticValues` value contains the following information:
@@ -148,12 +149,13 @@ There are four semantic actions available:
 * Token information if the rule is literal or uses a token boundary operator
 * Choice number when the rule is 'prioritized choice'
 
-`any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method.
+`any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method. `predicate_data` is what the rule's predicate passed on (see below).
 
-A semantic action can return a value of arbitrary data type, which will be wrapped by `peg::any`. If a user returns nothing in a semantic action, the first semantic value in the `const SemanticValues& vs` argument will be returned. (Yacc parser has the same behavior.)
+A semantic action can return a value of arbitrary data type, which will be wrapped by `std::any`. An action that returns nothing gives an empty value. A rule without an action gives the first semantic value in `vs`. (Yacc parser has the same behavior.)
 
 Here shows the `SemanticValues` structure:
 
+<!-- not compiled -->
 ```cpp
 struct SemanticValues : protected std::vector<any>
 {
@@ -162,7 +164,13 @@ struct SemanticValues : protected std::vector<any>
   const char* ss;
 
   // Matched string
-  std::string_view sv() const { return sv_; }
+  std::string_view sv() const;
+
+  // Name of the rule
+  const std::string &name() const;
+
+  // Tags (str2tag) of the rules the semantic values came from
+  std::vector<unsigned int> tags;
 
   // Line number and column (in bytes) at which the matched string is
   std::pair<size_t, size_t> line_info() const;
@@ -175,7 +183,8 @@ struct SemanticValues : protected std::vector<any>
   std::string token_to_string(size_t id = 0) const;
   template <typename T> T token_to_number() const;
 
-  // Choice number (0 based index)
+  // Number of alternatives and choice number (0 based index)
+  size_t choice_count() const;
   size_t choice() const;
 
   // Transform the semantic value vector to another vector
@@ -304,11 +313,11 @@ You can receive error information via a logger:
 
 ```cpp
 parser.set_logger([](size_t line, size_t col, const string& msg) {
-  ...
+  // ...
 });
 
 parser.set_logger([](size_t line, size_t col, const string& msg, const string &rule) {
-  ...
+  // ...
 });
 ```
 
@@ -317,19 +326,15 @@ Ignoring Whitespaces
 
 As you can see in the first example, we can ignore whitespaces between tokens automatically with `%whitespace` rule.
 
-`%whitespace` rule can be applied to the following three conditions:
-
-* trailing spaces on tokens
-* leading spaces on text
-* trailing spaces on literal strings in rules
+`%whitespace` rule skips leading spaces on text, and trailing spaces on tokens and on literal strings in rules (see the exact points below).
 
 These are valid tokens:
 
 ```
 KEYWORD   <- 'keyword'
-KEYWORDI  <- 'case_insensitive_keyword'
+KEYWORDI  <- 'case_insensitive_keyword'i
 WORD      <-  < [a-zA-Z0-9] [a-zA-Z0-9-_]* >    # token boundary operator is used.
-IDNET     <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
+IDENT     <-  < IDENT_START_CHAR IDENT_CHAR* >  # token boundary operator is used.
 ```
 
 The following grammar accepts ` one, "two three", four `.
@@ -345,15 +350,15 @@ PHRASE       <- < '"' (!'"' .)* '"' >
 
 ### How `%whitespace` works exactly
 
-Whitespace is skipped at exactly three points, and nowhere else:
+Whitespace is skipped at exactly these points, and nowhere else:
 
 1. once at the beginning of the input text
-2. right after every matched literal string (`'...'`, `"..."`)
-3. right after every closed token boundary (`<` ... `>`)
+2. right after every matched literal string (`'...'`, `"..."`), dictionary (`'...' | '...'`) and back reference (`$name`)
+3. right after every closed token boundary (`<` ... `>`) and every match of a `{ no_whitespace }` rule
 
 Inside a token boundary, whitespace skipping is completely disabled. Character classes (`[...]`) and `.` never skip whitespace by themselves. Knowing these rules explains most surprises with `%whitespace`:
 
-**A rule made only of character classes doesn't skip trailing whitespace.** ([#327](https://github.com/yhirose/cpp-peglib/issues/327)) With the grammar below, `main()` parses but `main ()` doesn't, because `NAME` is not a token — nothing skips the space after it. Wrap lexical rules in a token boundary.
+**A rule made only of character classes doesn't skip trailing whitespace.** ([#327](https://github.com/yhirose/cpp-peglib/issues/327)) With the grammar below, `main()` parses but `main ()` doesn't, because `NAME` is not a token, so nothing skips the space after it. Wrap lexical rules in a token boundary.
 
 ```
 DECL    <- NAME ARGS?    # `main ()` fails: whitespace after NAME is not skipped
@@ -380,7 +385,7 @@ StrEscape <- '\\' .
 StrChars  <- (!'"' !'\\' .)+
 ```
 
-The same can be written with nested token boundaries — the outer `<` ... `>` disables whitespace skipping for everything inside, and the inner one selects the text for `token()`:
+The same can be written with nested token boundaries: the outer `<` ... `>` disables whitespace skipping for everything inside, and the inner one selects the text for `token()`:
 
 ```
 StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
@@ -497,7 +502,7 @@ Parsing infix expression by Precedence climbing
 Regarding the *precedence climbing algorithm*, please see [this article](https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing).
 
 ```cpp
-parser parser(R"(
+peg::parser parser(R"(
   EXPRESSION             <-  INFIX_EXPRESSION(ATOM, OPERATOR)
   ATOM                   <-  NUMBER / '(' EXPRESSION ')'
   OPERATOR               <-  < [-+/*] >
@@ -526,7 +531,7 @@ parser["INFIX_EXPRESSION"] = [](const SemanticValues& vs) -> long {
   }
   return result;
 };
-parser["OPERATOR"] = [](const SemanticValues& vs) { return *vs.sv(); };
+parser["OPERATOR"] = [](const SemanticValues& vs) { return *vs.sv().data(); };
 parser["NUMBER"] = [](const SemanticValues& vs) { return vs.token_to_number<long>(); };
 
 long val;
@@ -545,7 +550,7 @@ Rule <- Atom (Operator Atom)* {
 }
 ```
 
-*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator *literal* tokens follow. The first entry has the highest order level.
+*precedence* instruction contains precedence info entries. Each entry starts with *associativity* which is 'L' (left) or 'R' (right), then operator *literal* tokens follow. The first entry binds the loosest, and each entry after it binds more tightly. An operator that contains `L`, `R` or `}`, such as `OR`, is quoted as `'...'` or `"..."`.
 
 Left Recursive Grammars
 -----------------------
@@ -553,7 +558,7 @@ Left Recursive Grammars
 cpp-peglib supports left recursive rules, which are commonly used in expression grammars to achieve left-associative operators naturally. Left recursion is automatically detected at grammar compile time and handled via a seed-growing algorithm at parse time.
 
 ```cpp
-parser parser(R"(
+peg::parser parser(R"(
   Expr   <- Expr '+' Term / Expr '-' Term / Term
   Term   <- Term '*' Factor / Term '/' Factor / Factor
   Factor <- '(' Expr ')' / Number
@@ -607,9 +612,9 @@ Letter <- [a-z]
 
 A plain macro is transparent to semantic values, but a left-recursive one forms its own scope: an action attached to it fires and its node appears in the AST, exactly as for the equivalent non-macro rule.
 
-Detection follows macro instantiations 32 levels deep before it stops descending. This bounds the case that has no finite depth to begin with — a macro that instantiates itself with a growing argument, such as `M(s) <- M(s / 'x') / s` — but the same counter also caps any other chain of nested macro calls, so 32 macros wrapping one another the way `Sum` wraps `Digit` above would hit it too. That is intentionally generous for real grammars; when it is hit, detection silently treats the rule as not left recursive, which is the pre-fix behavior of recursing until the stack overflows.
+Detection follows a chain of macros whose bodies call the next one 32 levels deep. Macros nested in arguments, as in `Sum(Sum(Digit))`, do not count toward it. Past that depth a rule is silently taken to be not left recursive, and its left-recursive alternative then fails instead of growing a seed.
 
-The growing-argument shape has a second limit, at parse time this one: a *left-recursive* macro whose own recursive call wraps its parameter in a larger expression, as in `Sum(A) <- Sum(A / 'x') '+' A / A`, builds a new argument at every level, so no two levels share an instantiation and the seed memo never recognises the recursion. Pass the parameter through unchanged (`Sum(A)`) in the recursive call; wrapping it is fine for a call to some *other*, non-left-recursive macro.
+A *left-recursive* macro whose own recursive call wraps its parameter in a larger expression, as in `Sum(A) <- Sum(A / 'x') '+' A / A`, has a limit at parse time: it builds a new argument at every level, so no two levels share an instantiation and the seed memo never recognises the recursion. Pass the parameter through unchanged (`Sum(A)`) in the recursive call; wrapping it is fine for a call to some *other*, non-left-recursive macro.
 
 Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 
@@ -624,7 +629,7 @@ AST generation
 
 *cpp-peglib* is able to generate an AST (Abstract Syntax Tree) when parsing. `enable_ast` method on `peg::parser` class enables the feature.
 
-NOTE: An AST node holds a corresponding token as `std::string_vew` for performance and less memory usage. It is users' responsibility to keep the original source text along with the generated AST tree.
+NOTE: An AST node holds a corresponding token as `std::string_view` for performance and less memory usage. It is users' responsibility to keep the original source text along with the generated AST tree.
 
 ```
 peg::parser parser(R"(
@@ -661,7 +666,7 @@ parser.enable_ast(true, true, {"ARGUMENTS", "BLOCK"});
 
 A node's `parent` is guaranteed only once `parser::parse` has returned: until then, a node that packrat parsing or left recursion reuses can still point to a parent built for an alternative that was abandoned. Where packrat parsing reuses a node of an empty match under two parents, each gets a copy of its own, so such a node in the returned tree can be another object than the one an action or a `leave` handler saw.
 
-A left-associative `precedence` operator or left recursion turns a long chain such as `1+2+3+...` into a tree as deep as the chain is long. Parsing it and building and releasing its tree take no recursion that deep, but `optimize_ast` and `ast_to_s` walk the tree recursively, as your own code may, and can overflow the stack on a tree a few tens of thousands of levels deep with an 8MB stack, and on a much shallower one in a thread with a smaller stack. For such input, use `enable_ast(true)` rather than `optimize_ast`, and `set_max_depth` to make a parse fail on a tree deeper than the code that walks it can take (see [Limit nesting depth](#limit-nesting-depth)). `ast_to_s` indents each node by its depth, so on such a chain its output grows with the square of the chain's length: around a gigabyte for 20,000 operators.
+A left-associative `precedence` operator or left recursion turns a long chain such as `1+2+3+...` into a tree as deep as the chain is long. Parsing it and building and releasing its tree take no recursion that deep, but `optimize_ast` and `ast_to_s` walk the tree recursively, as your own code may, and can overflow the stack on a deep enough tree, sooner in a thread with a smaller stack. For such input, use `enable_ast(true)` rather than `optimize_ast`, and `set_max_depth` to make a parse fail on a tree deeper than the code that walks it can take (see [Limit nesting depth](#limit-nesting-depth)). `ast_to_s` indents each node by its depth, so on such a chain its output grows with the square of the chain's length.
 
 By default an AST node carries the name of the rule that produced it. A rule can override that tag with the `{ ast_name: NodeTag }` instruction, so several rules can emit nodes under a shared tag.
 
@@ -671,15 +676,24 @@ It internally calls `peg::AstOptimizer` to do the job. You can make your own AST
 
 Each AST node exposes the following fields:
 
+<!-- not compiled -->
 ```cpp
+const std::string      path;     // the path given to parse
+const size_t           line, column; // column in bytes
+size_t                 position, length; // in bytes
 const std::string      name;     // rule (or ast_name) that produced the node
-const unsigned int     tag;      // str2tag(name) — for fast switch dispatch
-std::string_view       token;    // matched text (valid when is_token is true)
-bool                   is_token;
-size_t                 choice;   // which alternative of a prioritized choice matched
-size_t                 line, column, position, length; // column and position in bytes
+const unsigned int     tag;      // str2tag(name), for fast switch dispatch
+const size_t           choice_count, choice; // which alternative of a prioritized choice matched
+std::string            original_name; // the node's name before AST optimization
+unsigned int           original_tag;
+size_t                 original_choice_count, original_choice;
+const bool             is_token;
+const std::string_view token;    // matched text (valid when is_token is true)
 std::vector<std::shared_ptr<Ast>> nodes;  // child nodes
 std::weak_ptr<Ast>     parent;
+
+std::string token_to_string() const;
+template <typename T> T token_to_number() const;
 ```
 
 To walk the tree, switching on `tag` avoids string comparison. The `_` literal
@@ -736,8 +750,9 @@ The following are available operators:
 | ign      | Ignore semantic value           | csc      | Capture scope       |
 | cap      | Capture                         | bkr      | Back reference      |
 | dic      | Dictionary                      | pre      | Infix expression    |
-| rec      | Infix expression                | usr      | User defined parser |
-| rep      | Repetition                      |          |                     |
+| rec      | Error recovery                  | usr      | User defined parser |
+| rep      | Repetition                      | ref      | Rule reference      |
+| wsp      | Whitespace                      | cut      | Cut                 |
 
 Adjust definitions
 ------------------
@@ -766,7 +781,7 @@ Rules additional_rules = {
   }
 };
 
-auto g = parser(syntax, additional_rules);
+peg::parser g(syntax, additional_rules);
 
 assert(g.parse(" Hello BNF! "));
 ```
@@ -774,7 +789,7 @@ assert(g.parse(" Hello BNF! "));
 Unicode support
 ---------------
 
-cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u????`. Bytes that are not well-formed UTF-8 match neither `.` nor a character class, negated or not, and errors count each such byte as one column.
+cpp-peglib accepts UTF8 text. `.` matches a Unicode codepoint. Also, it supports `\u` followed by four to six hex digits, up to `\u10FFFF`. Bytes that are not well-formed UTF-8 match neither `.` nor a character class, negated or not, and errors count each such byte as one column.
 
 Columns are counted in two ways. Errors, the ones passed to the logger and to the error reporter, count `col` in Unicode codepoints from the start of the line, as a text editor does. Matches count it in bytes: the column of `SemanticValues::line_info()` and the `column` of an AST node. The `position` of an `ErrorReport` and of an AST node is a byte offset in the input in both cases.
 
@@ -804,7 +819,7 @@ Stmt        ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStm
 IfStmt      ← 'if' '(' Exp ')' Stmt ('else' Stmt)?
 WhileStmt   ← 'while' '(' Exp^condw ')' Stmt # Annotated with `condw`
 DecStmt     ← 'int' NAME ('=' Exp)? ';'
-AssignStmt  ← NAME '=' Exp ';'^semia # Annotated with `semi`
+AssignStmt  ← NAME '=' Exp ';'^semia # Annotated with `semia`
 PrintStmt   ← 'System.out.println' '(' Exp ')' ';'
 Exp         ← RelExp ('==' RelExp)*
 RelExp      ← AddExp ('<' AddExp)*
@@ -824,7 +839,7 @@ stmtb       ← (!(Stmt / 'else' / '}') .)* { error_message "invalid statement" 
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
 ```
 
-For instance, `';'^semi` is a syntactic sugar for `(';' / %recovery(semi))`. `%recover` operator tries to recover the error at ';' by skipping input text with the recovery expression `semi`. Also `semi` is associated with a custom message "missing semicolon in assignment."
+For instance, `';'^semia` is a syntactic sugar for `(';' / %recover(semia))`. Where ';' fails, `%recover` reports the custom message of `semia`, "missing semicolon in assignment.", and then recovers by skipping input text with the recovery expression `semia`. `semia` skips nothing, while `stmtb` skips up to the next statement, `else` or `}`.
 
 Here is the result:
 
@@ -873,7 +888,7 @@ NOTE: If there is more than one element with an error message instruction in a p
 
 ### Structured error reports
 
-`set_logger` receives errors as formatted strings. To build tooling on top of the parser — error codes, localized messages, IDE diagnostics — use `set_error_reporter` instead, which receives the same errors as structured data before they are flattened into a display string:
+`set_logger` receives errors as formatted strings. To build tooling on top of the parser (error codes, localized messages, IDE diagnostics), use `set_error_reporter` instead, which receives the same errors as structured data before they are flattened into a display string:
 
 ```cpp
 parser.set_error_reporter([](const peg::ErrorReport &r) {
@@ -897,15 +912,16 @@ The parser descends one level of C++ recursion for each rule it enters, and for 
 ```cpp
 parser.set_max_depth(1000);
 
+std::string deeply_nested_input(5000, '(');
 parser.parse(deeply_nested_input); // false
 // exceeded the maximum nesting depth of 1000
 ```
 
-The depth counts the rule matches in progress at once, including macros and the rules `%whitespace` refers to, and the right operands a `precedence` rule is parsing: a chain of right-associative operators, such as `1^2^3` with `R ^`, nests one level per operator. One level of nesting in the input usually passes through several rules, so the limit is in rules, not in brackets. How deep is safe depends on the grammar and on the stack size of the thread that parses.
+The depth counts the rule matches in progress at once, including macros and the rules `%whitespace` refers to, and the right operands a `precedence` rule is parsing: a chain of right-associative operators, such as `1^2^3` with `R ^`, nests one level per operator. One level of nesting in the input usually passes through several rules, so the limit is in rules, not in brackets. Only the rules the parser enters count: an alternative skipped because the next byte cannot start it enters none, and the rules entered are the same whether or not errors are reported. How deep is safe depends on the grammar and on the stack size of the thread that parses.
 
 Reaching the limit abandons the whole parse. The parser does not backtrack to try another alternative, no more actions, predicates or `leave` handlers run, and the error is reported at the position where the limit was reached, with the rule entered there (or the `precedence` rule, for a right operand) as its label. There is no limit by default.
 
-An AST can be deeper than the parse nested: a left-associative `precedence` operator and left recursion fold a chain such as `1+2+3` in a loop into a tree as deep as the chain is long, and packrat parsing reuses a subtree wherever it matches again. So when `parse` returns an AST, the tree is held to the limit too. A tree that goes past it is not returned: the parse fails with the same error, reported at the first node past the limit, with that node's name as its label. Checking the tree takes one more walk over it after the parse, whose cost grows with the number of nodes: on a C grammar, nothing measurable with `enable_ast(true)`, and about 15% more time with `enable_ast()`, which keeps many more nodes.
+An AST can be deeper than the parse nested: a left-associative `precedence` operator and left recursion fold a chain such as `1+2+3` in a loop into a tree as deep as the chain is long, and packrat parsing reuses a subtree wherever it matches again. So when `parse` returns an AST, the tree is held to the limit too. A tree that goes past it is not returned: the parse fails with the same error, reported at the first node past the limit, with that node's name as its label. Checking the tree takes one more walk over it after the parse, whose cost grows with the number of nodes, so it costs more with `enable_ast()` than with `enable_ast(true)`, which keeps fewer nodes.
 
 Change the Start Definition Rule
 --------------------------------
@@ -921,9 +937,11 @@ auto grammar = R"(
 )";
 
 peg::parser parser(grammar, "A"); // Start Rule is "A"
+```
 
-  or
+or
 
+```cpp
 peg::parser parser;
 parser.load_grammar(grammar, "A"); // Start Rule is "A"
 
@@ -933,8 +951,8 @@ parser.parse(" [one] , [two] "); // OK
 Tracing the parser
 ------------------
 
-To see how the parser proceeds, `peg::enable_tracing` prints a trace of every
-rule the parser enters and leaves to the given output stream.
+To see how the parser proceeds, `peg::enable_tracing` prints a trace of the
+rules and operators the parser tries to the given output stream.
 
 ```cpp
 peg::parser parser(grammar);
@@ -946,11 +964,13 @@ parser.parse(" [one] , [two] ");
 
 This is what `peglint --trace` uses internally. For full control over the trace
 output, call `parser.enable_trace(enter, leave)` with your own callbacks, and
-`parser.set_verbose_trace(true)` to trace the intermediate operators inside each
-rule rather than just the rule boundaries.
+`parser.set_verbose_trace(true)` to also trace what is left out by default:
+skipping whitespace, the inside of a token boundary, `%word` checks and the
+rules defined with `~`, such as `~_ <- ...`.
 
-Similarly, `peg::enable_profiling(parser, std::cout)` reports how often each rule
-is invoked and how much time it takes — the counterpart of `peglint --profile`.
+Similarly, `peg::enable_profiling(parser, std::cout)` reports how many times each
+rule that the trace shows succeeds and fails, and how long the parse takes, as
+`peglint --profile` does.
 
 peglint - PEG syntax lint utility
 ---------------------------------
@@ -975,6 +995,10 @@ usage: grammar_file_path [source_file_path]
     --trace: show concise trace messages
     --profile: show profile report
     --verbose: verbose output for trace and profile
+    --hints: show hints to make parsing faster
+    --blob: write a serialized grammar blob to stdout (load it later with
+            peg::parser::load_blob to skip the meta-parse on startup)
+    --version: show version information
 ```
 
 ### Grammar check
@@ -987,8 +1011,10 @@ Primary     <- '(' Additive ')' / Number
 %whitespace <- [ \t\r\n]*
 
 > peglint a.peg
-[commandline]:3:35: 'Number' is not defined.
+a.peg:3:35: 'Number' is not defined.
 ```
+
+`--hints` also shows what can make parsing slow, such as alternatives that start with the same rule, which without packrat parsing can be parsed again at the same position.
 
 ### Source check
 
@@ -1001,14 +1027,14 @@ Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --source "1 + a * 3" a.peg
-[commandline]:1:3: syntax error
+[commandline]:1:5: syntax error, unexpected 'a', expecting '(', <Number>.
 ```
 
 ### Serialize a grammar for fast startup
 
 A compiled grammar can be serialized to a portable byte blob and later restored
-without re-running the meta-parse. Deserializing a blob is roughly 40x faster
-than `load_grammar`, so an application can embed a prebuilt blob and skip the
+without re-running the meta-parse. Deserializing a blob is much faster than
+`load_grammar`, so an application can embed a prebuilt blob and skip the
 grammar parsing on startup.
 
 ```cpp
@@ -1035,7 +1061,7 @@ Notes:
   and other callbacks are **not** included and must be re-applied after
   `load_blob`.
 - First-sets are recomputed on load, and references are resolved by name.
-- Grammars that use a capture / back-reference or a User operator are not
+- Grammars that use a named capture (`$name<...>`) or a User operator are not
   serializable (`serialize_grammar()` throws;
   `load_blob()` returns `false` on a bad or incompatible blob).
 
@@ -1052,16 +1078,16 @@ Notes:
 1 + 2 * 3
 
 > peglint --ast a.peg a.txt
-+ Additive
-  + Multiplicative
-    + Primary
++ Additive/0
+  + Multiplicative/1
+    + Primary/1
       - Number (1)
-  + Additive
-    + Multiplicative
-      + Primary
+  + Additive/1
+    + Multiplicative/0
+      + Primary/1
         - Number (2)
-      + Multiplicative
-        + Primary
+      + Multiplicative/1
+        + Primary/1
           - Number (3)
 ```
 
@@ -1069,12 +1095,14 @@ Notes:
 
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
-+ Additive
-  - Multiplicative[Number] (1)
-  + Additive[Multiplicative]
-    - Primary[Number] (2)
-    - Multiplicative[Number] (3)
++ Additive/0
+  - Multiplicative/1[Number] (1)
+  + Additive/1[Multiplicative]
+    - Primary/1[Number] (2)
+    - Multiplicative/1[Number] (3)
 ```
+
+`Rule/1` tells which alternative of the rule's choice matched, counting from 0, and `Rule[Other]` that the optimization put a node of `Other` in place of the node of `Rule`.
 
 ### Adjust AST optimization with `no_ast_opt` instruction
 
@@ -1131,7 +1159,7 @@ String      <- '"' < [^"]* > '"'   { ast_name: Literal }
 ```
 
 The override also works on parameterized rules (macros): each instantiation
-emits the same tag. `ast_name` composes with `no_ast_opt` — the AST optimizer's
+emits the same tag. `ast_name` composes with `no_ast_opt`: the AST optimizer's
 keep-list honors the overridden name.
 
 Sample codes

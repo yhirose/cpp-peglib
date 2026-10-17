@@ -4,17 +4,21 @@ peglint
 The lint utility for PEG.
 
 ```
+> peglint --help
 usage: grammar_file_path [source_file_path]
 
   options:
-    --ast: show AST tree
+    --source: source text
     --packrat: enable packrat memoise
+    --ast: show AST tree
     --opt, --opt-all: optimize all AST nodes except nodes selected with `no_ast_opt` instruction
     --opt-only: optimize only AST nodes selected with `no_ast_opt` instruction
-    --source: source text
     --trace: show concise trace messages
     --profile: show profile report
     --verbose: verbose output for trace and profile
+    --hints: show hints to make parsing faster
+    --blob: write a serialized grammar blob to stdout (load it later with
+            peg::parser::load_blob to skip the meta-parse on startup)
     --version: show version information
 ```
 
@@ -48,13 +52,10 @@ a.peg:1:6: 'B' is not defined.
 
 ```
 > cat a.peg
-A <- B / C
-B <- 'b'
-C <- A
+A <- ('a'?)*
 
 > peglint a.peg
-a.peg:1:10: 'C' is left recursive.
-a.peg:3:6: 'A' is left recursive.
+a.peg:1:1: infinite loop is detected in 'A'.
 ```
 
 ### Lint source text
@@ -68,7 +69,7 @@ Number      <- < [0-9]+ >
 %whitespace <- [ \t\r\n]*
 
 > peglint --source "1 + a * 3" a.peg
-[commandline]:1:3: syntax error
+[commandline]:1:5: syntax error, unexpected 'a', expecting '(', <Number>.
 ```
 
 ### AST
@@ -78,16 +79,16 @@ Number      <- < [0-9]+ >
 1 + 2 * 3
 
 > peglint --ast a.peg a.txt
-+ Additive
-  + Multiplicative
-    + Primary
++ Additive/0
+  + Multiplicative/1
+    + Primary/1
       - Number (1)
-  + Additive
-    + Multiplicative
-      + Primary
+  + Additive/1
+    + Multiplicative/0
+      + Primary/1
         - Number (2)
-      + Multiplicative
-        + Primary
+      + Multiplicative/1
+        + Primary/1
           - Number (3)
 ```
 
@@ -95,12 +96,14 @@ Number      <- < [0-9]+ >
 
 ```
 > peglint --ast --opt --source "1 + 2 * 3" a.peg
-+ Additive
-  - Multiplicative[Number] (1)
-  + Additive[Multiplicative]
-    - Primary[Number] (2)
-    - Multiplicative[Number] (3)
++ Additive/0
+  - Multiplicative/1[Number] (1)
+  + Additive/1[Multiplicative]
+    - Primary/1[Number] (2)
+    - Multiplicative/1[Number] (3)
 ```
+
+`Rule/1` tells which alternative of the rule's choice matched, counting from 0, and `Rule[Other]` that the optimization put a node of `Other` in place of the node of `Rule`.
 
 ### Adjust AST optimization with `no_ast_opt` instruction
 

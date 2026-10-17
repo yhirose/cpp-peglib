@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
 
   cout << "cpp-peglib SQL benchmark (" << iterations << " iterations)";
 #ifdef HAS_PG_QUERY
-  cout << "(with libpg_query YACC comparison)";
+  cout << " (with libpg_query YACC comparison)";
 #endif
   cout << endl;
   cout << string(80, '=') << endl;
