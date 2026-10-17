@@ -51,3 +51,23 @@ jobs:
     - name: Test
       working-directory: ${{github.workspace}}/build_assert
       run: ctest --output-on-failure
+
+  # The examples in README.md and lint/README.md, checked against the code,
+  # with peglint built the way lint/README.md says.
+  docs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build peglint
+      working-directory: ${{github.workspace}}/lint
+      run: mkdir build && cd build && cmake .. && make
+
+    - name: Build the examples
+      run: |
+        cmake -B ${{github.workspace}}/build_examples -DBUILD_TESTS=OFF -DPEGLIB_BUILD_BENCHMARK=OFF -DPEGLIB_BUILD_EXAMPLES=ON
+        cmake --build ${{github.workspace}}/build_examples --parallel 4
+
+    - name: Check the examples in the READMEs
+      run: python3 scripts/check_docs.py --peglint lint/build/peglint
