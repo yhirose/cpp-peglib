@@ -510,11 +510,15 @@ public:
         std::string_view sv(s.data(), len);
         auto it = dic_.find(sv);
         if (it == dic_.end()) {
-          dic_.emplace(sv, Info{last, last, id});
-        } else if (last) {
-          it->second.match = true;
-        } else {
-          it->second.done = false;
+          it = dic_.emplace(sv, Info{true, false, 0}).first;
+        }
+        auto &info = it->second;
+        // A word listed twice keeps its first id, as in a choice.
+        if (!last) {
+          info.done = false;
+        } else if (!info.match) {
+          info.match = true;
+          info.id = id;
         }
       }
       id++;
@@ -5832,7 +5836,8 @@ struct GrammarBlob {
       // each full word's id (its index in the constructor vector), which
       // parse_core reports as vs.choice(). Iterating dic_ directly yields
       // sorted key order and would renumber the choices, so place each word at
-      // its id.
+      // its id. A word listed twice leaves an empty word, which matches
+      // nothing, at its later ids.
       std::vector<std::string> words(x.trie_.items_count());
       for (auto &kv : x.trie_.dic_)
         if (kv.second.match && kv.second.id < words.size())

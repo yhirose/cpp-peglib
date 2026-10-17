@@ -1288,6 +1288,21 @@ TEST(DictionaryTest, Dictionary_choice_index) {
   EXPECT_TRUE(pg.parse("blue"));
 }
 
+TEST(DictionaryTest, Dictionary_choice_index_is_where_a_word_is_first_listed) {
+  parser pg(R"(
+    MONTH <- 'January' | 'Jan' | 'Jan'
+  )");
+  EXPECT_TRUE(pg);
+
+  size_t choice = 99;
+  pg["MONTH"] = [&](const SemanticValues &vs) { choice = vs.choice(); };
+
+  EXPECT_TRUE(pg.parse("Jan"));
+  EXPECT_EQ(1, choice);
+  EXPECT_TRUE(pg.parse("January"));
+  EXPECT_EQ(0, choice);
+}
+
 // =============================================================================
 // Backreference Edge Cases
 
