@@ -33,7 +33,7 @@
 #include <charconv>
 #endif
 #include <cstdint>
-#ifdef CPPPEGLIB_TEST_BLOB_ROUNDTRIP
+#ifdef CPPPEGLIB_TEST
 #include <cstdlib>
 #endif
 #include <cstring>
@@ -903,6 +903,17 @@ class Definition;
 class Holder;
 class Reference;
 class PrioritizedChoice;
+struct FirstSet;
+
+// What fails where an expression cannot start: a failure of its own, of
+// `literal` if it is a literal, or what fails where `rule`, which it refers
+// to, cannot start. What fails in whitespace is not noted; it is listed for
+// the rules whitespace enters there.
+struct StartFailure {
+  const char *literal = nullptr;
+  const Definition *rule = nullptr;
+  bool in_whitespace = false;
+};
 
 // Thrown when a parse nests more rule matches than its start rule's
 // max_depth allows; that parse catches it (see Definition::parse_core).
@@ -949,26 +960,20 @@ struct ErrorInfo {
   // all of it is noted at a position the parse then moves past, and is never
   // read.
   //
-  // `literal` points at text the grammar owns, unless `copy_literal` is set:
+  // A literal points at text the grammar owns, unless `copy_literal` is set:
   // a back reference's literal is captured text, which is dropped when the
   // parse backtracks past its capture, and when the parse ends.
-  void add(const char *literal, const Definition *rule,
+  void add(StartFailure failure, const Definition *rule,
            const Definition *token_rule, bool copy_literal) {
-    if (copy_literal) { literal = copy_of(literal); }
-    note({literal, rule, token_rule, nullptr, 0, 0});
+    if (copy_literal) { failure.literal = copy_of(failure.literal); }
+    note({failure, rule, token_rule, nullptr, 0, 0});
   }
 
-  // Alternative `id` of `choice` was skipped by its first set. A run of
-  // skipped alternatives shares one event.
-  void add_skipped(const PrioritizedChoice *choice, size_t id) {
-    if (!events_.empty()) {
-      auto &e = events_.back();
-      if (e.choice == choice && e.end == id) {
-        e.end++;
-        return;
-      }
-    }
-    note({nullptr, nullptr, nullptr, choice, id, id + 1});
+  // The alternatives `begin` to `end` of `choice`, in `rule`, were skipped by
+  // their first sets.
+  void add_skipped(const PrioritizedChoice *choice, size_t begin, size_t end,
+                   const Definition *rule, const Definition *token_rule) {
+    note({{}, rule, token_rule, choice, begin, end});
   }
 
   void resolve_expected_tokens();
@@ -999,11 +1004,13 @@ struct ErrorInfo {
                   size_t n);
 
 private:
+  // What failed in `rule`: `failure`, or the alternatives `begin` to `end`
+  // that `choice` skipped.
   struct ExpectedEvent {
-    const char *literal;
+    StartFailure failure;
     const Definition *rule;
-    const Definition *token_rule;    // the outermost token rule around `rule`
-    const PrioritizedChoice *choice; // non-null: skipped alternatives
+    const Definition *token_rule; // the outermost token rule around `rule`
+    const PrioritizedChoice *choice;
     size_t begin;
     size_t end;
   };
@@ -1020,6 +1027,12 @@ private:
 
   void insert_failure(const char *literal, const Definition *rule,
                       const Definition *token_rule);
+  // The rules whose start failures have been inserted, with the token rule
+  // around them: what they insert depends on nothing else.
+  using Expanded =
+      std::vector<std::pair<const Definition *, const Definition *>>;
+  void insert_start_failure(const StartFailure &failure, const Definition *rule,
+                            const Definition *token_rule, Expanded &expanded);
 
   void insert_expected(const char *error_literal,
                        const Definition *error_rule) {
@@ -1183,13 +1196,16 @@ struct StartRuleAnalysis {
   bool has_user = false;
   std::vector<int32_t> packrat_index; // def_id -> cache slot or -1
   size_t packrat_cached_count = 0;
+  // The rules that the alternatives of choices start with.
+  std::vector<const Definition *> alternative_starts;
 
   bool indexes(const Definition &rule) const;
 };
 
 // What a rule match goes by to leave out what goes unnoticed: building a
-// value that nothing reads (Holder::parse_core), and entering a rule that
-// cannot start (Reference::parse_dispatch).
+// value that nothing reads (Holder::parse_core), entering a rule that cannot
+// start (Reference::parse_dispatch), and trying an alternative that cannot
+// start (PrioritizedChoice::parse_core).
 struct RuleUse {
   // Whether a match is only recognized: it runs no callback, forms no scope
   // and builds no value.
@@ -1210,6 +1226,18 @@ struct RuleUse {
   // Whether entering the rule on a byte it cannot start with would run no
   // callback.
   bool skippable = false;
+  // Whether trying the rule where it cannot start can do more than its
+  // first set says: a rule it enters there gives a message, runs a predicate
+  // on an empty match or is left-recursive. Where skipping could be noticed,
+  // an alternative that starts with such a rule is tried instead.
+  bool must_be_tried = true;
+};
+
+// The RuleUse of each rule, by id, and whether some alternative starts with
+// a rule that must be tried.
+struct RuleUses {
+  std::vector<RuleUse> by_id;
+  bool some_must_be_tried = true;
 };
 
 class Context {
@@ -1236,6 +1264,11 @@ public:
     return outer_token_rule < rule_stack.size() ? rule_stack[outer_token_rule]
                                                 : nullptr;
   }
+
+  // `rule` is not tried at `a_s`, as where its memoized match or failure is
+  // reused: where the rule cannot start, this notes the failures trying it
+  // would.
+  void note_untried(const Definition &rule, const char *a_s, size_t n);
 
   void push_rule(Definition *rule);
   void pop_rule() {
@@ -1407,6 +1440,14 @@ public:
   // By rule id. A rule without an entry is always entered and built.
   const RuleUse *rule_use = nullptr;
 
+  // Whether skipping an alternative that must be tried could be noticed:
+  // errors are reported or nesting is limited, and some alternative starts
+  // with a rule that must be tried. It holds for the whole parse, so that a
+  // recovery, which reports nothing, leaves the memos a parse without
+  // shortcuts would.
+  bool notices_skipping = false;
+  bool must_be_tried(const FirstSet &fs) const;
+
   // The body of a match that is only recognized parses into this scope.
   SemanticValues unread_scope;
 
@@ -1519,8 +1560,9 @@ public:
   // memoized match is reused, and otherwise `parse` makes the match. The
   // packrat memo holds no token, so a match whose token is needed is parsed.
   template <typename T>
-  void reuse_or_parse(const char *a_s, const Definition &rule, bool rule_has_id,
-                      bool needs_token, RuleMatch &match, T parse);
+  void reuse_or_parse(const char *a_s, size_t n, const Definition &rule,
+                      bool rule_has_id, bool needs_token, RuleMatch &match,
+                      T parse);
 
   // What a left-recursive rule matches at a position. Entered again where it
   // is being parsed, it gets the match found so far, its seed, and it is
@@ -1603,11 +1645,13 @@ public:
   }
   void set_error_pos(const char *a_s, const char *literal = nullptr,
                      bool copy_literal = false) {
-    if (collects_expected_tokens() && error_info.advance_to(a_s)) {
-      error_info.add(literal, current_rule(), token_rule(),
-                     literal && copy_literal);
+    if (collects_expected_tokens()) {
+      note_failure(a_s, {literal, nullptr}, literal && copy_literal);
     }
   }
+  // Out of line, so that set_error_pos is small enough to be inlined into
+  // the failures of a parse that collects nothing.
+  void note_failure(const char *a_s, StartFailure failure, bool copy_literal);
 
   // Trace
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
@@ -1702,25 +1746,40 @@ public:
   std::vector<std::shared_ptr<Ope>> opes_;
 };
 
+// Whether a parse skips the alternatives of a choice by their first sets, and
+// matches a repeated character class in one go. The test suite turns these
+// shortcuts off to check that they go unnoticed.
+#ifdef CPPPEGLIB_TEST
+inline bool &takes_shortcuts() {
+  static thread_local bool takes = true;
+  return takes;
+}
+#else
+constexpr bool takes_shortcuts() { return true; }
+#endif
+
+// The bytes a match of an expression can start with. On any other byte, the
+// expression does the same: it matches empty if it can be empty, and fails
+// if not, and either way notes `failures`, as a parse that tried it would.
+// An expression for which that cannot be said can start with any byte. What
+// trying a rule there does that depends on the parse, such as giving a
+// message, is left to RuleUse::must_be_tried. Used to skip what cannot match
+// without trying it.
 struct FirstSet {
-  // First-Set: set of possible first bytes for an expression.
-  // Used by PrioritizedChoice to skip alternatives that cannot match.
-  std::bitset<256> chars;    // byte values that can appear as the first byte
-  bool can_be_empty = false; // true if the expression can match empty string
-  bool any_char = false;     // true if any character can appear (cannot filter)
-  const char *first_literal = nullptr; // first literal for error reporting
-  const Definition *first_rule =
-      nullptr; // first token rule for error reporting
+  std::bitset<256> chars;
+  bool can_be_empty = false;
+  bool any_char = false;
+  std::vector<StartFailure> failures;
 
   bool can_start_with(unsigned char byte) const {
     return any_char || can_be_empty || chars.test(byte);
   }
 
+  // Merges where `other` can start, not what it notes.
   void merge(const FirstSet &other) {
     chars |= other.chars;
     if (other.can_be_empty) { can_be_empty = true; }
     if (other.any_char) { any_char = true; }
-    // Note: first_literal/first_rule are NOT merged — per-alternative
   }
 };
 
@@ -1775,13 +1834,19 @@ public:
     });
 
     const auto reports = c.collects_expected_tokens();
-    const auto list = list_at(s, n);
+    const auto skips = n > 0 && first_sets_ && takes_shortcuts();
+    // Where skipping could be noticed, each alternative is checked, so that
+    // the ones that must be tried are.
+    const auto checks = skips && c.notices_skipping;
+    const auto byte = static_cast<unsigned char>(n > 0 ? *s : 0);
+    const auto list = skips && !checks ? 1 + byte : 0;
     size_t skipped_from = 0;
 
     const auto *ids = lists_.data();
     const auto end = list_begin_[list + 1];
     for (auto i = list_begin_[list]; i < end; i++) {
       const size_t id = ids[i];
+      if (checks && !is_tried(id, byte, c)) { continue; }
 
       if (reports) { note_skipped(skipped_from, id, s, c); }
       skipped_from = id + 1;
@@ -1809,7 +1874,10 @@ public:
     return len;
   }
 
-  const std::vector<FirstSet> &first_sets() const { return first_sets_; }
+  const std::vector<FirstSet> &first_sets() const {
+    static const std::vector<FirstSet> none;
+    return first_sets_ ? *first_sets_ : none;
+  }
 
   void accept(Visitor &v) override;
 
@@ -1822,7 +1890,8 @@ private:
   friend struct SetupFirstSets;
 
   void set_first_sets(std::vector<FirstSet> first_sets) {
-    first_sets_ = std::move(first_sets);
+    first_sets_ =
+        std::make_shared<const std::vector<FirstSet>>(std::move(first_sets));
     list_alternatives();
   }
 
@@ -1833,7 +1902,7 @@ private:
     lists_.clear();
     list_begin_.clear();
     lists_.reserve(opes_.size());
-    const size_t list_count = first_sets_.empty() ? 1 : 1 + 256;
+    const size_t list_count = first_sets_ ? 1 + 256 : 1;
     list_begin_.reserve(list_count + 1);
 
     auto add_list = [&](auto is_listed) {
@@ -1844,10 +1913,10 @@ private:
     };
 
     add_list([](size_t) { return true; });
-    if (!first_sets_.empty()) {
+    if (first_sets_) {
       for (size_t byte = 0; byte < 256; byte++) {
         add_list([&](size_t id) {
-          return first_sets_[id].can_start_with(
+          return (*first_sets_)[id].can_start_with(
               static_cast<unsigned char>(byte));
         });
       }
@@ -1856,22 +1925,23 @@ private:
     lists_.shrink_to_fit();
   }
 
-  size_t list_at(const char *s, size_t n) const {
-    if (n == 0 || first_sets_.empty()) { return 0; }
-    return 1 + static_cast<unsigned char>(*s);
+  bool is_tried(size_t id, unsigned char byte, const Context &c) const {
+    const auto &fs = (*first_sets_)[id];
+    return fs.can_start_with(byte) || c.must_be_tried(fs);
   }
 
-  // An error report names what the skipped alternatives expected.
+  // An error report names what the skipped alternatives expected. Trying
+  // any of them would have noted a failure here: what cannot match empty
+  // fails at a literal, a class or a dictionary.
   void note_skipped(size_t begin, size_t end, const char *s, Context &c) const {
-    for (auto id = begin; id < end; id++) {
-      const auto &fs = first_sets_[id];
-      if ((fs.first_literal || fs.first_rule) && c.error_info.advance_to(s)) {
-        c.error_info.add_skipped(this, id);
-      }
+    if (begin < end && c.error_info.advance_to(s)) {
+      c.error_info.add_skipped(this, begin, end, c.current_rule(),
+                               c.token_rule());
     }
   }
 
-  std::vector<FirstSet> first_sets_;
+  // Shared with the choices made like this one.
+  std::shared_ptr<const std::vector<FirstSet>> first_sets_;
   std::vector<uint32_t> lists_;
   // Where each list starts in lists_, then where the last one ends.
   std::vector<uint32_t> list_begin_;
@@ -1887,7 +1957,7 @@ public:
     // ISpan fast path: tight loop for ASCII CharacterClass repetition.
     // Safe because each ASCII match is exactly 1 byte, so byte count == match
     // count.
-    if (span_bitset_) {
+    if (span_bitset_ && takes_shortcuts()) {
       const auto &bitset = *span_bitset_;
       size_t i = 0;
       if (max_ == std::numeric_limits<size_t>::max()) {
@@ -1901,10 +1971,10 @@ public:
           i++;
         }
       }
-      if (i < min_) {
-        c.set_error_pos(s + i);
-        return kFail;
-      }
+      // As matching the class once more would, unless the repetition stopped
+      // at its maximum.
+      if (i < max_) { c.set_error_pos(s + i); }
+      if (i < min_) { return kFail; }
       return i;
     }
 
@@ -2659,10 +2729,19 @@ struct AssignIDToDefinition : public TraversalVisitor {
     TraversalVisitor::visit(ope);
   }
   void visit(User &) override { has_user = true; }
+  void visit(PrioritizedChoice &ope) override {
+    for (const auto &fs : ope.first_sets()) {
+      for (const auto &f : fs.failures) {
+        if (f.rule) { alternative_starts.insert(f.rule); }
+      }
+    }
+    TraversalVisitor::visit(ope);
+  }
 
   std::unordered_map<void *, size_t> ids;
   bool has_cut = false; // grammar contains a Cut or Recovery ope
   bool has_user = false;
+  std::unordered_set<const Definition *> alternative_starts;
 };
 
 struct IsLiteralToken : public Ope::Visitor {
@@ -3159,38 +3238,41 @@ struct ComputeFirstSet : public TraversalVisitor {
 
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
-      FirstSet element_fs;
-      auto save = result_;
-      result_ = FirstSet{};
-      op->accept(*this);
-      element_fs = result_;
-      result_ = save;
-      result_.chars |= element_fs.chars;
-      if (element_fs.any_char) { result_.any_char = true; }
-      if (!result_.first_literal) {
-        result_.first_literal = element_fs.first_literal;
-      }
-      if (!result_.first_rule) { result_.first_rule = element_fs.first_rule; }
-      if (!element_fs.can_be_empty) { return; }
-      // This element can be empty, continue to next
+      if (!add_start_of(*op)) { return; }
     }
     result_.can_be_empty = true;
   }
+  // Where no alternative can start, the first one that can be empty matches,
+  // and the ones after it are not tried. Their bytes are kept all the same:
+  // an alternative that is empty only through left recursion fails while its
+  // seed is grown.
   void visit(PrioritizedChoice &ope) override {
-    auto save = result_;
+    std::optional<size_t> noted;
     for (const auto &op : ope.opes_) {
-      result_ = FirstSet{};
-      op->accept(*this);
-      save.merge(result_);
+      if (add_start_of(*op) && !noted) {
+        result_.can_be_empty = true;
+        noted = result_.failures.size();
+      }
     }
-    result_ = save;
+    if (noted) { result_.failures.resize(*noted); }
   }
+  // A repetition up to no times does not try its operand.
   void visit(Repetition &ope) override {
-    ope.ope_->accept(*this);
+    if (ope.max_ > 0) { ope.ope_->accept(*this); }
     if (ope.min_ == 0) { result_.can_be_empty = true; }
   }
-  void visit(AndPredicate &) override { result_.can_be_empty = true; }
-  void visit(NotPredicate &) override { result_.can_be_empty = true; }
+  // Where its operand cannot start, the operand fails, and so does this,
+  // though it can match empty where the operand matches.
+  void visit(AndPredicate &) override {
+    result_.can_be_empty = true;
+    result_.any_char = true;
+  }
+  // Where its operand cannot start, the operand fails and this matches
+  // empty. An operand that can match empty makes this fail there instead.
+  void visit(NotPredicate &ope) override {
+    if (add_start_of(*ope.ope_)) { result_.any_char = true; }
+    result_.can_be_empty = true;
+  }
   void visit(Dictionary &ope) override {
     for (const auto &[key, info] : ope.trie_.dic_) {
       if (!key.empty()) {
@@ -3199,6 +3281,7 @@ struct ComputeFirstSet : public TraversalVisitor {
         if (ope.trie_.ignore_case_) { result_.chars.set(other_case(ch)); }
       }
     }
+    result_.failures.emplace_back();
   }
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) {
@@ -3208,12 +3291,13 @@ struct ComputeFirstSet : public TraversalVisitor {
       auto ch = static_cast<unsigned char>(ope.lit_[0]);
       result_.chars.set(ch);
       if (ope.ignore_case_) { result_.chars.set(other_case(ch)); }
-      if (!result_.first_literal) { result_.first_literal = ope.lit_.c_str(); }
+      result_.failures.push_back({ope.lit_.c_str(), nullptr});
     }
   }
   void visit(CharacterClass &ope) override {
     if (ope.is_ascii_only()) {
       result_.chars |= ope.ascii_bitset();
+      result_.failures.emplace_back();
     } else {
       result_.any_char = true;
     }
@@ -3223,6 +3307,7 @@ struct ComputeFirstSet : public TraversalVisitor {
       result_.any_char = true;
     } else {
       result_.chars.set(static_cast<unsigned char>(ope.ch_));
+      result_.failures.emplace_back();
     }
   }
   void visit(AnyCharacter &) override { result_.any_char = true; }
@@ -3233,6 +3318,8 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result_.any_char = true; }
+  // A recovery gives its label's message wherever it is tried.
+  void visit(Recovery &) override { result_.any_char = true; }
   // An operator follows an atom that matches empty at the same position.
   void visit(PrecedenceClimbing &ope) override {
     ope.atom_->accept(*this);
@@ -3250,21 +3337,42 @@ struct ComputeFirstSet : public TraversalVisitor {
   // a different call context.
   using FirstSetCache = std::unordered_map<const Definition *, FirstSet>;
 
-  // `whitespace` is the first set of %whitespace, empty without one.
-  ComputeFirstSet(FirstSetCache &cache, const FirstSet &whitespace)
+  // `whitespace` is the first set of %whitespace, null where no whitespace
+  // is skipped.
+  ComputeFirstSet(FirstSetCache &cache, const FirstSet *whitespace)
       : cache_(cache), whitespace_(whitespace) {}
 
   FirstSet result_;
 
 private:
+  // Adds where `ope` can start, and what it notes where it cannot. Returns
+  // whether it can be empty.
+  bool add_start_of(Ope &ope) {
+    auto can_be_empty = std::exchange(result_.can_be_empty, false);
+    ope.accept(*this);
+    return std::exchange(result_.can_be_empty, can_be_empty);
+  }
+
   // A literal, a token boundary and a no_whitespace rule skip whitespace
-  // after their match. When the match is empty, the whitespace comes first.
-  // (The match can be empty wherever this is called, so merging can_be_empty
-  // changes nothing.)
-  void add_whitespace() { result_.merge(whitespace_); }
+  // after their match. When the match is empty, the whitespace comes first,
+  // and the rules it enters there are listed. Whitespace that cannot be empty
+  // makes what follows depend on whether it is skipped there, which it is not
+  // inside a token. (The match can be empty wherever this is called, so
+  // merging can_be_empty changes nothing.)
+  void add_whitespace() {
+    if (!whitespace_) { return; }
+    result_.merge(*whitespace_);
+    for (auto failure : whitespace_->failures) {
+      if (failure.rule) {
+        failure.in_whitespace = true;
+        result_.failures.push_back(failure);
+      }
+    }
+    if (!whitespace_->can_be_empty) { result_.any_char = true; }
+  }
 
   FirstSetCache &cache_;
-  const FirstSet &whitespace_;
+  const FirstSet *whitespace_;
   std::unordered_set<const Definition *> refs_;
   size_t cycle_count_ = 0;
 };
@@ -3277,10 +3385,9 @@ struct SetupFirstSets : public TraversalVisitor {
     if (whitespace) {
       // Whitespace skips no whitespace inside itself.
       ComputeFirstSet::FirstSetCache cache;
-      FirstSet none;
-      ComputeFirstSet cfs(cache, none);
+      ComputeFirstSet cfs(cache, nullptr);
       whitespace->accept(cfs);
-      whitespace_ = cfs.result_;
+      whitespace_ = std::move(cfs.result_);
     }
   }
 
@@ -3288,9 +3395,9 @@ struct SetupFirstSets : public TraversalVisitor {
     std::vector<FirstSet> first_sets;
     first_sets.reserve(ope.opes_.size());
     for (const auto &op : ope.opes_) {
-      ComputeFirstSet cfs(first_set_cache_, whitespace_);
+      ComputeFirstSet cfs(first_set_cache_, whitespace());
       op->accept(cfs);
-      first_sets.push_back(cfs.result_);
+      first_sets.push_back(std::move(cfs.result_));
     }
     ope.set_first_sets(std::move(first_sets));
     for (const auto &op : ope.opes_) {
@@ -3307,7 +3414,11 @@ struct SetupFirstSets : public TraversalVisitor {
   void visit(Holder &ope) override;
 
 private:
-  FirstSet whitespace_; // empty without %whitespace, so it adds nothing
+  const FirstSet *whitespace() const {
+    return whitespace_ ? &*whitespace_ : nullptr;
+  }
+
+  std::optional<FirstSet> whitespace_;
   ComputeFirstSet::FirstSetCache first_set_cache_;
   std::unordered_set<const Definition *> visited_rules_;
 };
@@ -3538,6 +3649,8 @@ public:
   // The bytes a match of this rule can start with: any, unless it cannot
   // match empty and they are known (set up with the first sets).
   std::bitset<256> start_bytes = std::bitset<256>().set();
+  // The first set of the rule's operator.
+  FirstSet first_set;
 
   TracerEnter tracer_enter;
   TracerLeave tracer_leave;
@@ -3578,8 +3691,7 @@ private:
   void analyze() const;
   void number_new_rules() const;
   void select_packrat_rules() const;
-  std::shared_ptr<const std::vector<RuleUse>>
-  rule_uses(bool builds_everything) const;
+  std::shared_ptr<const RuleUses> rule_uses(bool builds_everything) const;
   bool update_rule_use_inputs(bool builds_everything) const;
   std::vector<RuleUse> analyze_rule_uses() const;
   void decide_value_use(const std::vector<CollectRuleRefs> &refs,
@@ -3587,6 +3699,29 @@ private:
                         std::vector<RuleUse> &uses) const;
   void decide_skippable(const std::vector<CollectRuleRefs> &refs,
                         std::vector<RuleUse> &uses) const;
+  void decide_must_be_tried(RuleUses &uses) const;
+
+  // Whether a rule in `rules` is flagged. One that this start rule does not
+  // index is taken to be.
+  template <typename Rules>
+  bool any_flagged(const std::vector<bool> &flag, const Rules &rules) const {
+    return std::any_of(rules.begin(), rules.end(), [&](const auto *r) {
+      return !analysis_.indexes(*r) || flag[r->id];
+    });
+  }
+
+  // A flag spreads to the rules that refer to a flagged rule.
+  template <typename RulesOf>
+  void spread(std::vector<bool> &flag, RulesOf rules_of) const {
+    for (auto again = true; again;) {
+      again = false;
+      for (auto *rule : analysis_.rules_by_id) {
+        if (rule && !flag[rule->id] && any_flagged(flag, rules_of(rule->id))) {
+          flag[rule->id] = again = true;
+        }
+      }
+    }
+  }
 
   Result parse_core(const char *s, size_t n, SemanticValues &vs, std::any &dt,
                     const char *path, Log log,
@@ -3614,10 +3749,12 @@ private:
 
     c.builds_everything = c.has_tracer || analysis.has_user;
     auto uses = rule_uses(c.builds_everything);
-    c.rule_use = uses->data();
+    c.rule_use = uses->by_id.data();
 
     c.max_depth = max_depth;
     c.skips_rules = !c.needs_rule_stack && !c.limits_depth();
+    c.notices_skipping =
+        (c.reports_errors || c.limits_depth()) && uses->some_must_be_tried;
 
     auto result = [&](bool ret, size_t len) {
       c.error_info.resolve_expected_tokens();
@@ -3675,7 +3812,7 @@ private:
   };
   mutable std::mutex rule_uses_mutex_;
   mutable RuleUseInputs rule_use_inputs_;
-  mutable std::shared_ptr<const std::vector<RuleUse>> rule_uses_;
+  mutable std::shared_ptr<const RuleUses> rule_uses_;
 };
 
 inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
@@ -3758,18 +3895,39 @@ inline void ErrorInfo::insert_failure(const char *literal,
   if (literal || error_rule) { insert_expected(literal, error_rule); }
 }
 
+// Trying a rule notes its own start failures inside it, under itself if it is
+// the outermost token rule.
+inline void ErrorInfo::insert_start_failure(const StartFailure &failure,
+                                            const Definition *rule,
+                                            const Definition *token_rule,
+                                            Expanded &expanded) {
+  if (failure.in_whitespace) { return; }
+  if (!failure.rule) {
+    insert_failure(failure.literal, rule, token_rule);
+    return;
+  }
+  const auto *inner = failure.rule;
+  auto inner_token_rule = !token_rule && inner->is_token() ? inner : token_rule;
+  auto key = std::pair(inner, inner_token_rule);
+  if (std::find(expanded.begin(), expanded.end(), key) != expanded.end()) {
+    return;
+  }
+  expanded.push_back(key);
+  for (const auto &f : inner->first_set.failures) {
+    insert_start_failure(f, inner, inner_token_rule, expanded);
+  }
+}
+
 inline void ErrorInfo::resolve_expected_tokens() {
+  Expanded expanded;
   for (const auto &e : events_) {
     if (!e.choice) {
-      insert_failure(e.literal, e.rule, e.token_rule);
+      insert_start_failure(e.failure, e.rule, e.token_rule, expanded);
       continue;
     }
     for (auto id = e.begin; id < e.end; id++) {
-      const auto &fs = e.choice->first_sets()[id];
-      if (fs.first_literal) {
-        insert_expected(fs.first_literal, nullptr);
-      } else {
-        insert_expected(nullptr, fs.first_rule);
+      for (const auto &f : e.choice->first_sets()[id].failures) {
+        insert_start_failure(f, e.rule, e.token_rule, expanded);
       }
     }
   }
@@ -4070,6 +4228,31 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
   return len;
 }
 
+CPPPEGLIB_NOINLINE inline void Context::note_failure(const char *a_s,
+                                                     StartFailure failure,
+                                                     bool copy_literal) {
+  if (error_info.advance_to(a_s)) {
+    error_info.add(failure, current_rule(), token_rule(), copy_literal);
+  }
+}
+
+inline void Context::note_untried(const Definition &rule, const char *a_s,
+                                  size_t n) {
+  const auto &fs = rule.first_set;
+  if (collects_expected_tokens() && !fs.any_char &&
+      (n == 0 || !fs.chars.test(static_cast<unsigned char>(*a_s)))) {
+    note_failure(a_s, {nullptr, &rule}, false);
+  }
+}
+
+inline bool Context::must_be_tried(const FirstSet &fs) const {
+  return std::any_of(
+      fs.failures.begin(), fs.failures.end(), [&](const auto &f) {
+        return f.rule &&
+               (!has_id(*f.rule) || rule_use[f.rule->id].must_be_tried);
+      });
+}
+
 inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
                                  Context &c, std::any &dt) const {
   if (!ope_) {
@@ -4097,7 +4280,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       (use.recognized == RuleUse::Recognized::always ||
        (use.recognized == RuleUse::Recognized::where_unread &&
         !vs.holds_rule_values_))) {
-    c.reuse_or_parse(s, *outer_, has_id, false, match,
+    c.reuse_or_parse(s, n, *outer_, has_id, false, match,
                      [&](Context::RuleMatch &m) {
                        m.len = parse_ope_body(s, n, c.unread_scope, c, dt);
                      });
@@ -4170,7 +4353,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   if (outer_->is_left_recursive) {
     c.reuse_or_grow(s, *this, match, do_parse);
   } else {
-    c.reuse_or_parse(s, *outer_, has_id, vs.holds_rule_tokens_, match,
+    c.reuse_or_parse(s, n, *outer_, has_id, vs.holds_rule_tokens_, match,
                      do_parse);
   }
 
@@ -4741,6 +4924,7 @@ inline void ComputeFirstSet::visit(Reference &ope) {
     result_.any_char = true;
     return;
   }
+  result_.failures.push_back({nullptr, ope.rule_});
 
   auto it = cache_.find(ope.rule_);
   FirstSet computed;
@@ -4778,14 +4962,6 @@ inline void ComputeFirstSet::visit(Reference &ope) {
 
   result_.merge(*rule_fs);
   if (ope.rule_->no_whitespace && rule_fs->can_be_empty) { add_whitespace(); }
-  if (!result_.first_literal) {
-    result_.first_literal = rule_fs->first_literal;
-  }
-  if (!result_.first_rule) {
-    result_.first_rule = rule_fs->first_rule
-                             ? rule_fs->first_rule
-                             : (ope.rule_->is_token() ? ope.rule_ : nullptr);
-  }
 }
 
 inline void SetupFirstSets::visit(Reference &ope) {
@@ -4801,9 +4977,10 @@ inline void SetupFirstSets::visit(Holder &ope) {
   if (!visited_rules_.insert(ope.outer_).second) { return; }
 
   auto &rule = *ope.outer_;
-  ComputeFirstSet cfs(first_set_cache_, whitespace_);
+  ComputeFirstSet cfs(first_set_cache_, whitespace());
   ope.ope_->accept(cfs);
-  const auto &fs = cfs.result_;
+  rule.first_set = std::move(cfs.result_);
+  const auto &fs = rule.first_set;
   auto known = !fs.any_char && !fs.can_be_empty && !rule.is_macro &&
                !rule.is_left_recursive;
   rule.start_bytes = known ? fs.chars : std::bitset<256>().set();
@@ -4818,6 +4995,8 @@ inline void Definition::analyze() const {
   if (wordOpe) { wordOpe->accept(vis); }
   analysis_.has_cut = vis.has_cut;
   analysis_.has_user = vis.has_user;
+  analysis_.alternative_starts.assign(vis.alternative_starts.begin(),
+                                      vis.alternative_starts.end());
   analysis_.rules.resize(vis.ids.size());
   for (const auto &[ptr, order] : vis.ids) {
     analysis_.rules[order] = static_cast<Definition *>(ptr);
@@ -4965,13 +5144,16 @@ private:
 // rule and of the rules below it, which can be set between parses. So it is
 // decided again when one of them has changed. A parse keeps the outcome it
 // started with.
-inline std::shared_ptr<const std::vector<RuleUse>>
+inline std::shared_ptr<const RuleUses>
 Definition::rule_uses(bool builds_everything) const {
   std::lock_guard lock(rule_uses_mutex_);
   if (update_rule_use_inputs(builds_everything) || !rule_uses_) {
-    rule_uses_ = std::make_shared<const std::vector<RuleUse>>(
-        builds_everything ? std::vector<RuleUse>(analysis_.rules_by_id.size())
-                          : analyze_rule_uses());
+    RuleUses uses;
+    uses.by_id = builds_everything
+                     ? std::vector<RuleUse>(analysis_.rules_by_id.size())
+                     : analyze_rule_uses();
+    decide_must_be_tried(uses);
+    rule_uses_ = std::make_shared<const RuleUses>(std::move(uses));
   }
   return rule_uses_;
 }
@@ -5199,24 +5381,6 @@ Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
     rule->get_core_operator()->accept(cut);
     below[id] = on_enter[id] || on_match[id] || cut.result;
   }
-  auto any_flagged = [&](const std::vector<bool> &flag,
-                         const std::vector<Definition *> &rules) {
-    return std::any_of(rules.begin(), rules.end(), [&](const auto *r) {
-      return !a.indexes(*r) || flag[r->id];
-    });
-  };
-  // A flag spreads to the rules that refer to a flagged rule.
-  auto spread = [&](std::vector<bool> &flag, auto rules_of) {
-    for (auto again = true; again;) {
-      again = false;
-      for (auto *rule : a.rules_by_id) {
-        if (rule && !flag[rule->id] && any_flagged(flag, rules_of(rule->id))) {
-          flag[rule->id] = again = true;
-        }
-      }
-    }
-  };
-
   // Anything below a rule may run.
   spread(below, [&](size_t id) -> const auto & { return refs[id].rules; });
   for (const auto &ope : {whitespaceOpe, wordOpe}) {
@@ -5248,6 +5412,33 @@ Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
   }
 }
 
+// What a rule gives can be set between parses, as callbacks can.
+inline void Definition::decide_must_be_tried(RuleUses &uses) const {
+  const auto &a = analysis_;
+  std::vector<bool> must(a.rules_by_id.size());
+  std::vector<std::vector<const Definition *>> at_start(a.rules_by_id.size());
+  for (auto *rule : a.rules_by_id) {
+    if (!rule) { continue; }
+    const auto &fs = rule->first_set;
+    // Where it cannot start, a rule that cannot be empty fails, and one that
+    // can runs its predicate on the empty match. A macro that is not
+    // left-recursive gives no message (see Holder::parse_core).
+    auto gives_message =
+        !rule->is_macro &&
+        (fs.can_be_empty ? !!rule->predicate : !rule->error_message.empty());
+    must[rule->id] = gives_message || rule->is_left_recursive;
+    for (const auto &f : fs.failures) {
+      if (f.rule) { at_start[rule->id].push_back(f.rule); }
+    }
+  }
+  spread(must, [&](size_t id) -> const auto & { return at_start[id]; });
+
+  uses.some_must_be_tried = any_flagged(must, a.alternative_starts);
+  for (auto *rule : a.rules_by_id) {
+    if (rule) { uses.by_id[rule->id].must_be_tried = must[rule->id]; }
+  }
+}
+
 // Ids are never renumbered: other parses' packrat tables are indexed by them.
 inline void Definition::number_new_rules() const {
   const auto &rules = analysis_.rules;
@@ -5271,9 +5462,10 @@ inline void Definition::number_new_rules() const {
 }
 
 template <typename T>
-inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
-                                    bool rule_has_id, bool needs_token,
-                                    RuleMatch &match, T parse) {
+inline void Context::reuse_or_parse(const char *a_s, size_t n,
+                                    const Definition &rule, bool rule_has_id,
+                                    bool needs_token, RuleMatch &match,
+                                    T parse) {
   if (!rule_has_id) {
     auto key = LRKey(rule.holder_.get(), a_s);
     if (!in_progress.emplace(key, RuleMatch()).second) {
@@ -5305,6 +5497,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
       } else {
         match.len = kFail;
       }
+      note_untried(rule, a_s, n);
       return;
     }
   }
@@ -7684,7 +7877,7 @@ public:
     grammar_ = cxt.grammar;
     start_ = cxt.start;
     enablePackratParsing_ = cxt.enablePackratParsing;
-#ifdef CPPPEGLIB_TEST_BLOB_ROUNDTRIP
+#ifdef CPPPEGLIB_TEST
     // For the test suite: replace the grammar with the one its blob loads, so
     // every test also checks GrammarBlob. A grammar that a blob cannot hold
     // stays as parsed. The environment variable lets one test binary run both

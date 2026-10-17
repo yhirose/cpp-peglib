@@ -2,6 +2,8 @@
 #include <peglib.h>
 #include <sstream>
 
+#include "grammar_file.h"
+
 using namespace peg;
 
 // Basic: alternatives with disjoint first bytes are correctly filtered
@@ -389,6 +391,21 @@ TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
   EXPECT_FALSE(pg.parse("x"));
 }
 
+TEST(FirstSetTest, Left_recursive_alternative_is_tried_with_a_nesting_limit) {
+  parser pg(R"(
+    S <- A / 'b'
+    A <- A 'a' / 'a'
+  )");
+  ASSERT_TRUE(!!pg);
+
+  // A logger has A tried where it cannot start, and so does a nesting limit
+  // without one: trying A goes one level past the limit either way.
+  pg.set_max_depth(1);
+  EXPECT_FALSE(pg.parse("b"));
+  pg.set_logger([](size_t, size_t, const std::string &) {});
+  EXPECT_FALSE(pg.parse("b"));
+}
+
 TEST(UnstartableRuleTest, Is_entered_to_run_its_enter_and_leave) {
   parser pg(R"(
     S <- A? 'x'
@@ -619,11 +636,165 @@ TEST(NullabilityTest, Analyses_agree) {
     for (const auto &entry : pg.get_grammar()) {
       auto &rule = pg[entry.first.c_str()];
       ComputeFirstSet::FirstSetCache cache;
-      FirstSet none;
-      ComputeFirstSet first_set(cache, none);
+      ComputeFirstSet first_set(cache, nullptr);
       rule.accept(first_set);
       EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
           << entry.first << " in " << grammar;
+    }
+  }
+}
+
+// What a parse reports: whether it matched, and every error the logger and
+// the error reporter are given.
+static std::string outcome(parser &pg, const std::string &input) {
+  std::string out;
+  pg.set_logger([&](size_t line, size_t col, const std::string &msg,
+                    const std::string &rule) {
+    out += std::to_string(line) + ":" + std::to_string(col) + " [" + rule +
+           "] " + msg + "\n";
+  });
+  pg.set_error_reporter([&](const ErrorReport &r) {
+    out += std::to_string(r.position) + " [" + r.label + "] " + r.message;
+    for (const auto &l : r.expected_literals) {
+      out += " '" + l + "'";
+    }
+    for (const auto &rule : r.expected_rules) {
+      out += " <" + rule + ">";
+    }
+    out += "\n";
+  });
+  out += pg.parse(input) ? "matched\n" : "failed\n";
+  return out;
+}
+
+// Each input, and each input with a byte left out or a `?` put in, is
+// reported as a parse that takes no shortcut reports it.
+TEST(FirstSetTest, Shortcuts_go_unnoticed) {
+  const std::string calc = R"(
+    Additive       <- Multiplicative '+' Additive / Multiplicative
+    Multiplicative <- Primary '*' Multiplicative / Primary
+    Primary        <- '(' Additive ')' / Number
+    Number         <- < [0-9]+ >
+    %whitespace    <- [ \t]*
+  )";
+  struct Case {
+    std::string grammar;
+    std::string input;
+    std::function<void(parser &)> set_up = [](parser &) {};
+  };
+  const Case cases[] = {
+      {calc, "1 + 2 * (3 + 4)"},
+      {calc, "(1 + 2) * 3",
+       [](parser &pg) { pg["Number"].error_message = "a number, please"; }},
+      {R"(
+        List   <- '[' Item (',' Item)* ']'^close
+        Item   <- Number / Word / List
+        Number <- < [0-9]+ >
+        Word   <- < [a-z]+ > { error_message "a word" }
+        close  <- (!']' .)* { error_message "missing ']'" }
+        %whitespace <- [ \t]*
+      )",
+       "[1, ab, [2, c], 3]"},
+      {read_grammar("json.peg"),
+       R"({"a": [1, -2.5e3, true, null], "b": {"c": "d\n"}})"},
+      {read_grammar("pl0_left_recursive.peg"),
+       "VAR x; BEGIN x := 1; WHILE x < 10 DO x := x * 2; ! x END."},
+      {read_grammar("monkey.peg"),
+       "let f = fn(a, b) { if (a < b) { a + b } else { [a][0] } }; f(1, 2);"},
+      {read_grammar("cpp-peglib.peg"),
+       "S <- A (',' A)* / 'x'\nA <- < [a-z]+ > { no_ast_opt }\n"},
+      {R"(
+        S <- (N / [a]^L) 'z' / (N / [a]) 'y'
+        N <- [0-9] { error_message "a number, please" }
+        L <- [^z]?
+      )",
+       "1z", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(S <- ('a'? / 'b') 'c' / 'f'{0} 'd' / 'e')", "acd"},
+      {R"(
+        S <- [q] (T 'x' / 'y')
+        T <- < 'a'* >
+        %whitespace <- (C / [ ])*
+        C <- '#' [a-z]* { error_message "a comment" }
+      )",
+       "q a #b x"},
+      {R"(
+        S <- R 'x' / 'y'
+        R <- 'a'*
+      )",
+       "aax",
+       [](parser &pg) {
+         pg["R"].predicate = [](const SemanticValues &vs, const std::any &,
+                                std::string &msg) {
+           msg = "no a";
+           return !vs.sv().empty();
+         };
+       }},
+      {R"(
+        S <- A ';'
+        A <- B 'x' / 'y'
+        B <- A 'z' / 'w'
+      )",
+       "wxzx;"},
+      {R"(
+        S <- E ';'
+        E <- E '+' T / T
+        T <- T '*' F / F
+        F <- '(' E ')' / N
+        N <- < [0-9]+ > { error_message "a number" }
+        %whitespace <- [ ]*
+      )",
+       "1 + 2 * (3);"},
+      {R"(
+        S       <- LIST(ITEM) / '!' ITEM
+        LIST(X) <- '[' (X (',' X)*)? ']' { error_message "a list" }
+        ITEM    <- NUM / WORD / LIST(NUM)
+        NUM     <- < [0-9]+ > { error_message "a number" }
+        WORD    <- < [a-z]+ >
+        %whitespace <- [ ]*
+      )",
+       "[1, a, [2]]"},
+      {R"(
+        S <- P 'w' / 'a' M 'k'
+        P <- 'a' E^L / 'n'
+        E <- 'e'
+        L <- (M 'k' / M / [^z])*
+        M <- M 'q' / 'm' { error_message "an m" }
+      )",
+       "ab?z"},
+      {R"(
+        S <- T / R? 'c'
+        T <- < R 'x' >
+        R <- [r]
+      )",
+       "d", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S <- T1 / T2
+        T1 <- < R 'x' >
+        T2 <- < R 'y' >
+        R <- [a]*
+      )",
+       "q", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S <- $x<[a-z]> (R / 'y')
+        R <- $x<'k'?> 'b' { error_message "got [%{x}]" }
+      )",
+       "qkb"},
+  };
+  for (const auto &c : cases) {
+    parser pg(c.grammar);
+    ASSERT_TRUE(!!pg) << c.grammar;
+    c.set_up(pg);
+    auto check = [&](const std::string &input) {
+      auto taken = outcome(pg, input);
+      takes_shortcuts() = false;
+      auto untaken = outcome(pg, input);
+      takes_shortcuts() = true;
+      EXPECT_EQ(untaken, taken) << input;
+    };
+    check(c.input);
+    for (size_t i = 0; i <= c.input.size(); i++) {
+      if (i < c.input.size()) { check(std::string(c.input).erase(i, 1)); }
+      check(std::string(c.input).insert(i, "?"));
     }
   }
 }

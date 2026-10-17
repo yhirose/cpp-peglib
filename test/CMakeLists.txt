@@ -36,12 +36,13 @@ include(GoogleTest)
 
 add_executable(peglib-test-main ${PEGLIB_TEST_SOURCES})
 target_include_directories(peglib-test-main PRIVATE ..)
-# Pass the absolute source path of the mini-js grammar so the test can locate
-# it regardless of the working directory it is run from (e.g. nested build
-# trees or package builds).
+# Pass the absolute source path of the grammars so the tests can locate them
+# regardless of the working directory they are run from (e.g. nested build
+# trees or package builds). CPPPEGLIB_TEST turns on the hooks peglib.h has for
+# the test suite.
 target_compile_definitions(peglib-test-main PRIVATE
-  MINI_JS_GRAMMAR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../grammar/mini_js.peg"
-  CPPPEGLIB_TEST_BLOB_ROUNDTRIP)
+  GRAMMAR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../grammar/"
+  CPPPEGLIB_TEST)
 target_link_libraries(peglib-test-main PRIVATE gtest_main)
 
 gtest_discover_tests(peglib-test-main)

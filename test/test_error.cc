@@ -510,10 +510,10 @@ TEST(ErrorTest, Error_recovery_2) {
   std::vector<std::string> errors{
       R"(1:6: syntax error, unexpected ']', expecting ','.)",
       R"(1:18: syntax error, unexpected 'z', expecting <NUM>.)",
-      R"(1:24: syntax error, unexpected ',', expecting '"'.)",
+      R"(1:24: syntax error, unexpected ',', expecting <WORD>, '"'.)",
       R"(1:31: syntax error, unexpected 'ccc', expecting '"', <NUM>.)",
       R"(1:38: syntax error, unexpected 'ddd', expecting '"', <NUM>.)",
-      R"(1:55: syntax error, unexpected ']', expecting '"'.)",
+      R"(1:55: syntax error, unexpected ']', expecting <WORD>, '"'.)",
       R"(1:58: syntax error, unexpected '\n', expecting '"', <NUM>.)",
       R"(2:3: syntax error, expecting ',', ']'.)",
   };
@@ -1485,7 +1485,7 @@ TEST(ErrorPositionTest, Deeper_error_past_match_wins) {
   errors.clear();
   EXPECT_FALSE(pg.parse("ab\nde"));
   ASSERT_FALSE(errors.empty());
-  EXPECT_EQ("2:3: syntax error, expecting '\n'.", errors[0]);
+  EXPECT_EQ("2:3: syntax error, expecting <Line>, '\n'.", errors[0]);
 }
 
 TEST(ErrorPositionTest, Not_predicate_failure_names_rule) {

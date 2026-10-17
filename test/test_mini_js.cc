@@ -1,31 +1,11 @@
 #include <gtest/gtest.h>
 #include <peglib.h>
 
-#include <fstream>
 #include <string>
 
+#include "grammar_file.h"
+
 using namespace peg;
-
-static std::string read_file(const std::string &path) {
-  std::ifstream ifs(path, std::ios::in | std::ios::binary);
-  if (!ifs) { throw std::runtime_error("cannot open " + path); }
-  return std::string((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-}
-
-static std::string find_grammar() {
-#ifdef MINI_JS_GRAMMAR_PATH
-  if (std::ifstream(MINI_JS_GRAMMAR_PATH).good()) {
-    return MINI_JS_GRAMMAR_PATH;
-  }
-#endif
-  for (auto prefix : {"", "../", "../../"}) {
-    auto path = std::string(prefix) + "grammar/mini_js.peg";
-    std::ifstream ifs(path);
-    if (ifs.good()) return path;
-  }
-  return "grammar/mini_js.peg";
-}
 
 class MiniJsTest : public ::testing::Test {
 protected:
@@ -37,7 +17,7 @@ protected:
     // here: a fatal failure in SetUpTestSuite makes GoogleTest skip the whole
     // suite, which ctest then reports as passing (#341).
     try {
-      auto grammar = read_file(find_grammar());
+      auto grammar = read_grammar("mini_js.peg");
       pg = new parser(grammar);
       if (!*pg) {
         delete pg;

@@ -294,7 +294,7 @@ parser["RULE"].leave = [](const Context &c, const char* s, size_t n, size_t matc
 };
 ```
 
-Where the next byte cannot start a match of an alternative of a choice, the parser skips the alternative instead of trying it, so the *enter* and *leave* actions of the rules it would try there do not run, and nothing inside it does.
+Where the next byte cannot start a match of an alternative of a choice, the parser can skip the alternative instead of trying it, and then the *enter* and *leave* actions of the rules it would try there do not run, and nothing inside it does.
 
 More generally, whether and how many times callbacks run in an attempt that is later abandoned is not fixed. This skipping leaves them out; packrat parsing can reuse a rule's earlier result at the same position, a match or a failure, instead of trying the rule again, so none of its callbacks run; and a left-recursive rule reuses its results even without packrat parsing, and tries its body once more after its match stops growing. So do not rely on what callbacks do in attempts that may be abandoned: undo in *leave* what *enter* did (such as opening a scope), or build the state from the value or the AST that the parse returns.
 
@@ -783,7 +783,7 @@ Error report and recovery
 
 cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
 
-The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Packrat parsing reuses a rule's earlier failure at the same position instead of trying the rule again, and a reused failure lists nothing more. So when a rule that a token rule uses has already failed there outside that token rule, the name of the token rule is not listed.
+The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Packrat parsing reuses a rule's earlier match or failure at the same position instead of trying the rule again. Where the next byte cannot begin a match of the rule, or at the end of the input, the reused result lists what trying the rule would; elsewhere it lists nothing more, so when a rule that a token rule uses has already failed there outside that token rule, the name of the token rule can be left out.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
