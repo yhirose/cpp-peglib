@@ -1162,6 +1162,44 @@ TEST(ErrorReporterTest, Multiple_reports_with_recovery) {
   EXPECT_EQ(14, reports[1].col);
 }
 
+TEST(ErrorReporterTest, Label_is_not_carried_over_after_recovery) {
+  parser pg(R"(
+    START <- ENTRY+
+    ENTRY <- '[' NUM^num ']'
+    NUM   <- < [0-9]+ >
+    %whitespace <- [ \t\r\n]*
+    num   <- (!']' .)* { error_message "bad number" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<ErrorReport> reports;
+  pg.set_error_reporter([&](const ErrorReport &r) { reports.push_back(r); });
+  std::vector<std::string> rules;
+  pg.set_logger([&](size_t, size_t, const std::string &,
+                    const std::string &rule) { rules.push_back(rule); });
+  EXPECT_FALSE(pg.parse("[x] y"));
+
+  ASSERT_EQ(2, reports.size());
+  EXPECT_EQ("num", reports[0].label);
+  EXPECT_EQ("", reports[1].label);
+  EXPECT_EQ((std::vector<std::string>{"num", ""}), rules);
+}
+
+TEST(ErrorReporterTest, End_of_input_error_has_no_label) {
+  parser pg(R"(
+    S <- A / 'ab'
+    A <- 'a' 'x' { error_message "bad A" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  ErrorReport report;
+  pg.set_error_reporter([&](const ErrorReport &r) { report = r; });
+  EXPECT_FALSE(pg.parse("abc"));
+
+  EXPECT_EQ("expected end of input", report.message);
+  EXPECT_EQ("", report.label);
+}
+
 TEST(ErrorReporterTest, Named_capture_in_error_message) {
   parser pg(R"(
     Enums <- Enum*

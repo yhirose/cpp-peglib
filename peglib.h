@@ -924,6 +924,7 @@ struct ErrorInfo {
     clear_expected_tokens();
     message_pos = nullptr;
     message.clear();
+    label.clear();
   }
 
   void clear_expected_tokens() {
@@ -972,7 +973,8 @@ struct ErrorInfo {
 
   void resolve_expected_tokens();
 
-  void set_message(const char *pos, std::string msg, const std::string &lbl) {
+  void set_message(const char *pos, std::string msg,
+                   const std::string &lbl = "") {
     message_pos = pos;
     message = std::move(msg);
     label = lbl;
@@ -983,10 +985,10 @@ struct ErrorInfo {
   // before a position a recovered error already was.
   void set_nesting_too_deep(const char *pos, const std::string &label,
                             size_t max_depth) {
-    message_pos = pos;
-    message =
-        "exceeded the maximum nesting depth of " + std::to_string(max_depth);
-    this->label = label;
+    set_message(pos,
+                "exceeded the maximum nesting depth of " +
+                    std::to_string(max_depth),
+                label);
     last_output_pos = nullptr;
   }
 
@@ -3623,8 +3625,7 @@ private:
         if (eoi_check) {
           if (i < n) {
             if (c.error_info.error_pos - c.s < s + i - c.s) {
-              c.error_info.message_pos = s + i;
-              c.error_info.message = "expected end of input";
+              c.error_info.set_message(s + i, "expected end of input");
             }
             ret = false;
           }
@@ -3819,7 +3820,6 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
               report.expected_literals.emplace_back(error_literal);
             } else {
               msg += "<" + error_rule->name + ">";
-              if (label.empty()) { label = error_rule->name; }
               report.expected_rules.emplace_back(error_rule->name);
             }
             first_item = false;
@@ -3828,12 +3828,12 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
           i++;
         }
         msg += ".";
+        if (!report.expected_rules.empty()) {
+          report.label = report.expected_rules.front();
+        }
       }
-      if (reporter) {
-        report.label = label;
-        reporter(report);
-      }
-      if (log) { log(line.first, line.second, msg, label); }
+      if (reporter) { reporter(report); }
+      if (log) { log(line.first, line.second, msg, report.label); }
     }
   }
 }
@@ -4298,8 +4298,7 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     }
   }
 
-  c.error_info.message_pos = s;
-  c.error_info.message = "undefined back reference '$" + name_ + "'...";
+  c.error_info.set_message(s, "undefined back reference '$" + name_ + "'...");
   return kFail;
 }
 
@@ -7038,8 +7037,7 @@ private:
           log_at(log, s, r.error_info.message_pos, r.error_info.message,
                  r.error_info.label);
         } else {
-          log_at(log, s, r.error_info.error_pos, "syntax error",
-                 r.error_info.label);
+          log_at(log, s, r.error_info.error_pos, "syntax error");
         }
         return {};
       }
