@@ -949,13 +949,13 @@ struct ErrorInfo {
   // all of it is noted at a position the parse then moves past, and is never
   // read.
   //
-  // `error_literal` points at text the grammar owns, unless `copy_literal` is
-  // set: a back reference's literal is captured text, which is dropped when
-  // the parse backtracks past its capture, and when the parse ends.
-  void add(const char *error_literal, const Definition *error_rule,
-           bool copy_literal = false) {
-    if (copy_literal) { error_literal = copy_of(error_literal); }
-    note({error_literal, error_rule, nullptr, 0, 0});
+  // `literal` points at text the grammar owns, unless `copy_literal` is set:
+  // a back reference's literal is captured text, which is dropped when the
+  // parse backtracks past its capture, and when the parse ends.
+  void add(const char *literal, const Definition *rule,
+           const Definition *token_rule, bool copy_literal) {
+    if (copy_literal) { literal = copy_of(literal); }
+    note({literal, rule, token_rule, nullptr, 0, 0});
   }
 
   // Alternative `id` of `choice` was skipped by its first set. A run of
@@ -968,7 +968,7 @@ struct ErrorInfo {
         return;
       }
     }
-    note({nullptr, nullptr, choice, id, id + 1});
+    note({nullptr, nullptr, nullptr, choice, id, id + 1});
   }
 
   void resolve_expected_tokens();
@@ -1002,6 +1002,7 @@ private:
   struct ExpectedEvent {
     const char *literal;
     const Definition *rule;
+    const Definition *token_rule;    // the outermost token rule around `rule`
     const PrioritizedChoice *choice; // non-null: skipped alternatives
     size_t begin;
     size_t end;
@@ -1016,6 +1017,9 @@ private:
     if (events_.size() == max_events_) { resolve_expected_tokens(); }
     events_.push_back(event);
   }
+
+  void insert_failure(const char *literal, const Definition *rule,
+                      const Definition *token_rule);
 
   void insert_expected(const char *error_literal,
                        const Definition *error_rule) {
@@ -1225,6 +1229,14 @@ public:
   // failure inside it is reported under its name.
   size_t outer_token_rule = static_cast<size_t>(-1);
 
+  const Definition *current_rule() const {
+    return rule_stack.empty() ? nullptr : rule_stack.back();
+  }
+  const Definition *token_rule() const {
+    return outer_token_rule < rule_stack.size() ? rule_stack[outer_token_rule]
+                                                : nullptr;
+  }
+
   void push_rule(Definition *rule);
   void pop_rule() {
     rule_stack.pop_back();
@@ -1382,12 +1394,15 @@ public:
     });
   }
 
+  Log log;
+  ErrorReporter error_reporter;
+  // Whether this part of the parse reports errors: someone listens, and no
+  // recovery is skipping input.
+  bool reports_errors;
+
   // True when error reporting or tracing is active, the only readers of
   // rule_stack.
   const bool needs_rule_stack;
-
-  Log log;
-  ErrorReporter error_reporter;
 
   // By rule id. A rule without an entry is always entered and built.
   const RuleUse *rule_use = nullptr;
@@ -1443,12 +1458,10 @@ public:
                                           : 0),
         active_pos(def_count, nullptr), tracer_enter(tracer_enter),
         tracer_leave(tracer_leave), has_tracer(tracer_enter && tracer_leave),
-        trace_data(trace_data), verbose_trace(verbose_trace),
-        needs_rule_stack(static_cast<bool>(tracer_enter) ||
-                         static_cast<bool>(tracer_leave) ||
-                         static_cast<bool>(log) ||
-                         static_cast<bool>(error_reporter)),
-        log(log), error_reporter(error_reporter), unread_scope(this) {
+        trace_data(trace_data), verbose_trace(verbose_trace), log(log),
+        error_reporter(error_reporter), reports_errors(log || error_reporter),
+        needs_rule_stack(tracer_enter || tracer_leave || reports_errors),
+        unread_scope(this) {
     unread_scope.path = path;
     unread_scope.ss = s;
     unread_scope.holds_rule_values_ = false;
@@ -1491,7 +1504,7 @@ public:
   // Whether a message at `pos` is reported: someone listens, and no message
   // lies further on.
   bool reports_message_at(const char *pos) const {
-    return (log || error_reporter) && error_info.message_pos < pos;
+    return reports_errors && error_info.message_pos < pos;
   }
 
   // Per-rule packrat stats (populated when packrat_stats is non-null)
@@ -1586,10 +1599,15 @@ public:
   // Error
   // What skipping whitespace fails to match is not what the input lacks.
   bool collects_expected_tokens() const {
-    return (log || error_reporter) && !in_whitespace;
+    return reports_errors && !in_whitespace;
   }
   void set_error_pos(const char *a_s, const char *literal = nullptr,
-                     bool copy_literal = false);
+                     bool copy_literal = false) {
+    if (collects_expected_tokens() && error_info.advance_to(a_s)) {
+      error_info.add(literal, current_rule(), token_rule(),
+                     literal && copy_literal);
+    }
+  }
 
   // Trace
   void trace_enter(const Ope &ope, const char *a_s, size_t n,
@@ -3724,10 +3742,26 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
   return c_->line_info(sv_.data());
 }
 
+// A failure is listed under the outermost token rule it is in, or else its
+// own rule. One with no literal of its own takes its rule's, if that rule is
+// a literal.
+inline void ErrorInfo::insert_failure(const char *literal,
+                                      const Definition *rule,
+                                      const Definition *token_rule) {
+  if (!literal && rule) {
+    if (auto token = FindLiteralToken::token(*rule->get_core_operator());
+        token && token[0] != '\0') {
+      literal = token;
+    }
+  }
+  const auto *error_rule = token_rule ? token_rule : rule;
+  if (literal || error_rule) { insert_expected(literal, error_rule); }
+}
+
 inline void ErrorInfo::resolve_expected_tokens() {
   for (const auto &e : events_) {
     if (!e.choice) {
-      insert_expected(e.literal, e.rule);
+      insert_failure(e.literal, e.rule, e.token_rule);
       continue;
     }
     for (auto id = e.begin; id < e.end; id++) {
@@ -3852,35 +3886,6 @@ inline void Context::push_rule(Definition *rule) {
     outer_token_rule = rule_stack.size();
   }
   rule_stack.push_back(rule);
-}
-
-inline void Context::set_error_pos(const char *a_s, const char *literal,
-                                   bool copy_literal) {
-  if (collects_expected_tokens() && error_info.advance_to(a_s)) {
-    const char *error_literal = nullptr;
-    const Definition *error_rule = nullptr;
-
-    if (literal) {
-      error_literal = literal;
-    } else if (!rule_stack.empty()) {
-      auto rule = rule_stack.back();
-      auto ope = rule->get_core_operator();
-      if (auto token = FindLiteralToken::token(*ope);
-          token && token[0] != '\0') {
-        error_literal = token;
-      }
-    }
-
-    if (outer_token_rule < rule_stack.size()) {
-      error_rule = rule_stack[outer_token_rule];
-    } else if (!rule_stack.empty()) {
-      error_rule = rule_stack.back();
-    }
-
-    if (error_literal || error_rule) {
-      error_info.add(error_literal, error_rule, literal && copy_literal);
-    }
-  }
 }
 
 inline void Context::trace_enter(const Ope &ope, const char *a_s, size_t n,
@@ -4435,7 +4440,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   const auto &rule = dynamic_cast<Reference &>(*ope_);
 
   // Custom error message
-  if (c.log || c.error_reporter) {
+  if (c.reports_errors) {
     auto label = dynamic_cast<Reference *>(rule.args_[0].get());
     if (label && !label->rule_->error_message.empty()) {
       c.error_info.set_message(
@@ -4447,14 +4452,8 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   // Recovery
   auto len = kFail;
   {
-    auto save_log = c.log;
-    auto save_reporter = c.error_reporter;
-    c.log = nullptr;
-    c.error_reporter = nullptr;
-    auto se = scope_exit([&]() {
-      c.log = save_log;
-      c.error_reporter = save_reporter;
-    });
+    auto save = std::exchange(c.reports_errors, false);
+    auto se = scope_exit([&]() { c.reports_errors = save; });
 
     SemanticValues dummy_vs;
     std::any dummy_dt;
@@ -4465,7 +4464,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   if (success(len)) {
     c.recovered = true;
 
-    if (c.log || c.error_reporter) {
+    if (c.reports_errors) {
       c.error_info.output_log(c.log, c.error_reporter, c.s, c.l);
       c.error_info.clear();
     }
