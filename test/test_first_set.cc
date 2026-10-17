@@ -710,6 +710,8 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       )",
        "1z", [](parser &pg) { pg.enable_packrat_parsing(); }},
       {R"(S <- ('a'? / 'b') 'c' / 'f'{0} 'd' / 'e')", "acd"},
+      {R"(S <- [0-9]{2,1})", "12"},
+      {R"(S <- 'a'{1,0} / 'b')", "a"},
       {R"(
         S <- [q] (T 'x' / 'y')
         T <- < 'a'* >

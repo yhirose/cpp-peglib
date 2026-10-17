@@ -1949,8 +1949,9 @@ private:
 
 class Repetition : public Ope {
 public:
+  // `{n,m}` with m below n is taken as `{n}`.
   Repetition(const std::shared_ptr<Ope> &ope, size_t min, size_t max)
-      : ope_(ope), min_(min), max_(max) {}
+      : ope_(ope), min_(min), max_(std::max(min, max)) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override {

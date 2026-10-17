@@ -1341,6 +1341,13 @@ TEST(RepetitionTest, Repetition_2_1) {
   EXPECT_FALSE(parser.parse("1"));
   EXPECT_TRUE(parser.parse("12"));
   EXPECT_FALSE(parser.parse("123"));
+
+  // The same in a rule that a reference skips where it cannot start.
+  peg::parser by_reference(R"(
+        START <- A
+        A     <- 'a'{1,0}
+    )");
+  EXPECT_TRUE(by_reference.parse("a"));
 }
 
 TEST(RepetitionTest, Repetition_2) {
