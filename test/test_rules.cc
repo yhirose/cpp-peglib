@@ -1062,6 +1062,55 @@ TEST(BackreferenceTest, Undefined_backreference_test) {
   EXPECT_FALSE(parser);
 }
 
+// A back reference whose capture the parse did not make fails with a message,
+// which is reported like any other: the first at the furthest position.
+TEST(BackreferenceTest, Uncaptured_backreference_message) {
+  parser pg(R"(
+    S <- ($x<'a'> / 'b') (C / $x)
+    C <- 'c' D
+    D <- 'd' 'e' { error_message "D msg" }
+  )");
+  ASSERT_TRUE(!!pg);
+  std::string error;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+  });
+
+  EXPECT_FALSE(pg.parse("bq"));
+  EXPECT_EQ("1:2 undefined back reference '$x'...", error);
+
+  EXPECT_FALSE(pg.parse("bcdq"));
+  EXPECT_EQ("1:3 D msg", error);
+
+  parser same_pos(R"(
+    S <- ($x<'a'> / 'b') (C / $x)
+    C <- 'c' 'd' { error_message "C msg" }
+  )");
+  ASSERT_TRUE(!!same_pos);
+  same_pos.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+  });
+
+  EXPECT_FALSE(same_pos.parse("bq"));
+  EXPECT_EQ("1:2 C msg", error);
+}
+
+// Parsed in a recovery, it leaves the recovery's message, its label's, alone.
+TEST(BackreferenceTest, Uncaptured_backreference_in_recovery) {
+  parser pg(R"(
+    S    <- ($x<'a'> / 'b') (';' / %recover(Skip)) .*
+    Skip <- (. $x / [^;]*) { error_message "Skip msg" }
+  )");
+  ASSERT_TRUE(!!pg);
+  std::string error;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+  });
+
+  EXPECT_FALSE(pg.parse("bq;"));
+  EXPECT_EQ("1:2 Skip msg", error);
+}
+
 TEST(BackreferenceTest, Invalid_backreference_test) {
   parser parser(R"(
         START  <- _ LQUOTE (!RQUOTE .)* RQUOTE _

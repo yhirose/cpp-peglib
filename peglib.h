@@ -4475,7 +4475,9 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     }
   }
 
-  c.error_info.set_message(s, "undefined back reference '$" + name_ + "'...");
+  if (c.reports_message_at(s)) {
+    c.error_info.set_message(s, "undefined back reference '$" + name_ + "'...");
+  }
   return kFail;
 }
 
