@@ -920,6 +920,16 @@ struct NestingTooDeep {
   const Definition *rule;
 };
 
+// More macro calls than this nested at one position abandon the parse: a
+// macro that calls itself with a growing argument, `M(s) <- M(s / 'x')`,
+// makes a new instance at every level and never stops.
+inline constexpr size_t max_macro_nesting = 32;
+
+struct MacroNestingTooDeep {
+  const char *pos;
+  const Definition *macro;
+};
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
@@ -991,6 +1001,15 @@ struct ErrorInfo {
     set_message(pos,
                 "exceeded the maximum nesting depth of " +
                     std::to_string(max_depth),
+                label);
+    last_output_pos = nullptr;
+  }
+
+  void set_macro_nesting_too_deep(const char *pos, const std::string &label) {
+    set_message(pos,
+                "exceeded the maximum nesting of " +
+                    std::to_string(max_macro_nesting) +
+                    " macro calls at one position",
                 label);
     last_output_pos = nullptr;
   }
@@ -1358,13 +1377,17 @@ public:
   // arguments (`M(s) <- M(s / 'x')`) to be freed recursively at once.
   struct Instance {
     const Holder *body = nullptr;
-    // Where it is being parsed, unless it is left-recursive.
+    // Where it is being parsed.
     const char *active_pos = nullptr;
   };
   Instance &instance(const Reference &call);
   std::vector<std::shared_ptr<Holder>> instances;
   std::map<std::vector<const void *>, Instance> instance_by_key;
   std::unordered_map<const Reference *, Instance *> instance_of_call;
+  // Where the innermost macro call being parsed started, and how many are
+  // nested there.
+  const char *macro_pos = nullptr;
+  size_t macro_nesting = 0;
 
   bool has_id(const Definition &rule) const {
     return analysis && analysis->indexes(rule);
@@ -2888,15 +2911,6 @@ struct DetectLeftRecursion : public TraversalVisitor {
   // resolved arguments, the same way as at parse time.
   size_t intern_macro_inst(const Reference &ope);
 
-  // A macro that instantiates itself with a growing argument
-  // (`M(s) <- M(s / 'x')`) has no finite set of instantiations. Stop
-  // descending instead of looping forever; the rule is then reported as
-  // non-left-recursive, which is what this analysis did for every macro
-  // before it became instantiation-aware. The bound is on nesting depth in
-  // general, not self-recursion specifically, so it also caps any other
-  // chain of nested macro calls -- generously, for real grammars.
-  static const size_t max_macro_inst_depth = 32;
-
 private:
   const Definition *rule_;
   std::set<std::pair<const Definition *, size_t>> refs_;
@@ -3765,6 +3779,9 @@ private:
     } catch (const NestingTooDeep &e) {
       c.error_info.set_nesting_too_deep(e.pos, e.rule->name, max_depth);
       return result(false, 0);
+    } catch (const MacroNestingTooDeep &e) {
+      c.error_info.set_macro_nesting_too_deep(e.pos, e.macro->name);
+      return result(false, 0);
     }
   }
 
@@ -4429,14 +4446,19 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
 
   if (rule_->is_macro) {
     auto &inst = c.instance(*this);
-    if (rule_->is_left_recursive) { return inst.body->parse(s, n, vs, c, dt); }
     // Left recursion that detection missed enters it again where it is being
     // parsed. It fails there, as a rule does (Context::reuse_or_parse).
-    if (inst.active_pos == s) { return kFail; }
+    if (!rule_->is_left_recursive && inst.active_pos == s) { return kFail; }
+    auto nesting = c.macro_pos == s ? c.macro_nesting + 1 : 1;
+    if (nesting > max_macro_nesting) { throw MacroNestingTooDeep{s, rule_}; }
     // No scope_exit: an exception abandons the Context.
-    auto save = std::exchange(inst.active_pos, s);
+    auto save_active = std::exchange(inst.active_pos, s);
+    auto save_pos = std::exchange(c.macro_pos, s);
+    auto save_nesting = std::exchange(c.macro_nesting, nesting);
     auto len = inst.body->parse(s, n, vs, c, dt);
-    inst.active_pos = save;
+    inst.active_pos = save_active;
+    c.macro_pos = save_pos;
+    c.macro_nesting = save_nesting;
     return len;
   }
 
@@ -4718,9 +4740,8 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   } else if (param.ope) {
     visit_in_defining_scope(param);
     if (done_ == false) { return; }
-  } else if (ope.is_macro_ &&
-             macro_args_stack_.size() >= max_macro_inst_depth) {
-    // Unbounded instantiation chain; stop descending.
+  } else if (ope.is_macro_ && macro_args_stack_.size() >= max_macro_nesting) {
+    // A parse goes no deeper.
   } else if (ope.rule_ &&
              refs_
                  .emplace(ope.rule_, ope.is_macro_ ? intern_macro_inst(ope) : 0)
