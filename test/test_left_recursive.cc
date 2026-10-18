@@ -1200,3 +1200,27 @@ TEST(LeftRecursionTest, Match_from_a_seed_grown_outside_a_token_is_not_kept) {
     EXPECT_EQ("x", token) << first;
   }
 }
+
+// The whitespace after 'k' grows E first. Its failure there is not noted, so
+// that match must not stand in for E in T, whose failure is the error.
+TEST(LeftRecursionTest, Reports_a_failure_the_whitespace_met_first) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- 'k' (T / U)
+      T <- < E 'y' >
+      U <- < E 'z' >
+      E <- E 'b' / 'a' 'c'
+      %whitespace <- (E / ' ')*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    std::string error;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+
+    EXPECT_FALSE(pg.parse("kaq")) << packrat;
+    EXPECT_EQ("1:3 syntax error, unexpected 'q', expecting 'c'.", error)
+        << packrat;
+  }
+}

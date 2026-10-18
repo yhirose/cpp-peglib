@@ -729,5 +729,29 @@ TEST(PackratTest, Packrat_reentry_through_the_whitespace_fails) {
   }
 }
 
+// The whitespace after 'k' tries R first. Its failure there is not noted, so
+// it must not stand in for R's failure in T, which is the error.
+TEST(PackratTest, Packrat_reports_a_failure_the_whitespace_met_first) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- 'k' (T / U)
+      T <- < R 'y' >
+      U <- < R 'z' >
+      R <- 'a' 'b'
+      %whitespace <- (R / ' ')*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    std::string error;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+
+    EXPECT_FALSE(pg.parse("kaq")) << packrat;
+    EXPECT_EQ("1:3 syntax error, unexpected 'q', expecting 'b'.", error)
+        << packrat;
+  }
+}
+
 // =============================================================================
 // Lookahead Predicate Tests

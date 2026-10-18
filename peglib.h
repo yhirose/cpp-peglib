@@ -1334,6 +1334,11 @@ public:
     return whitespaceOpe && (in_token_boundary_count || in_whitespace);
   }
 
+  // A memo stands in for parsing the rule again, the failures it notes
+  // included. The whitespace notes no failure, so a parse in it makes no
+  // memo, though it reuses those of the tokens.
+  bool makes_memo() const { return !in_whitespace; }
+
   // Confirmed matches of left-recursive rules, by skips_no_whitespace().
   std::map<LRKey, RuleMatch> lr_memo[2];
 
@@ -5503,7 +5508,7 @@ inline void Context::reuse_or_parse(const char *a_s, size_t n,
     parse(match);
   }
 
-  if (slot < 0) { return; }
+  if (slot < 0 || !makes_memo()) { return; }
   if (success(match.len)) {
     write_packrat_cache(idx, match.len, match.val);
   } else {
@@ -5583,7 +5588,9 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
   forget_cycle(lr_memo[!skips_no_whitespace()]);
 
   // Confirmed, a failure too, so the rule is not seeded here again
-  lr_memo[skips_no_whitespace()][lr_key] = std::move(seed);
+  if (makes_memo()) {
+    lr_memo[skips_no_whitespace()][lr_key] = std::move(seed);
+  }
 }
 
 // Compute which rules benefit from packrat memoization.
@@ -5793,10 +5800,10 @@ inline void Definition::select_packrat_rules() const {
       }
     };
 
+    // Neither the whitespace nor the word check makes a memo
+    // (Context::makes_memo, Context::detached), so they are not walked.
     FindBacktrackRules finder(benefits, def_count);
     holder_->accept(finder);
-    if (whitespaceOpe) { whitespaceOpe->accept(finder); }
-    if (wordOpe) { wordOpe->accept(finder); }
 
     // The cache keeps a match's length and value, not the captures it
     // recorded, and a back reference's match depends on the captures made
