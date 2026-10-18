@@ -417,6 +417,8 @@ parser.parse("hello world"); // OK
 parser.parse("helloworld");  // NG
 ```
 
+A `%word` that can match the empty string, such as `[a-z]*`, is rejected.
+
 Capture/Backreference
 ---------------------
 

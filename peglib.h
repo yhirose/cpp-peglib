@@ -3994,6 +3994,13 @@ inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
  * Implementations
  */
 
+inline bool starts_word(const Context &c, const char *s, size_t n) {
+  SemanticValues dummy_vs;
+  auto dummy_c = Context::detached(c);
+  std::any dummy_dt;
+  return success(c.wordOpe->parse(s, n, dummy_vs, dummy_c, dummy_dt));
+}
+
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
                             std::once_flag &init_is_word, bool &is_word,
@@ -4010,30 +4017,12 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
   // Word check
   if (c.wordOpe) {
-    Context::TraceMute mute(c);
+    std::call_once(init_is_word,
+                   [&]() { is_word = starts_word(c, lit.data(), lit.size()); });
 
-    std::call_once(init_is_word, [&]() {
-      SemanticValues dummy_vs;
-      auto dummy_c = Context::detached(c);
-      std::any dummy_dt;
-
-      auto len =
-          c.wordOpe->parse(lit.data(), lit.size(), dummy_vs, dummy_c, dummy_dt);
-      is_word = success(len);
-    });
-
-    if (is_word) {
-      SemanticValues dummy_vs;
-      auto dummy_c = Context::detached(c);
-      std::any dummy_dt;
-
-      NotPredicate ope(c.wordOpe);
-      auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
-      if (fail(len)) {
-        c.set_error_pos(s, lit.data(), copy_lit);
-        return len;
-      }
-      i += len;
+    if (is_word && starts_word(c, s + i, n - i)) {
+      c.set_error_pos(s, lit.data(), copy_lit);
+      return kFail;
     }
   }
 
@@ -4344,22 +4333,9 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   vs.choice_ = id;
 
   // Word check
-  if (c.wordOpe) {
-    Context::TraceMute mute(c);
-
-    {
-      SemanticValues dummy_vs;
-      auto dummy_c = Context::detached(c);
-      std::any dummy_dt;
-
-      NotPredicate ope(c.wordOpe);
-      auto len = ope.parse(s + i, n - i, dummy_vs, dummy_c, dummy_dt);
-      if (fail(len)) {
-        c.set_error_pos(s);
-        return len;
-      }
-      i += len;
-    }
+  if (c.wordOpe && starts_word(c, s + i, n - i)) {
+    c.set_error_pos(s);
+    return kFail;
   }
 
   // Skip whitespace
@@ -7649,6 +7625,12 @@ private:
       start_rule.wordOpe = rule.get_core_operator();
 
       if (detect_infiniteLoop(data, rule, log, s)) { return {}; }
+
+      if (rule.can_be_empty) {
+        log_at(log, s, rule.s_,
+               "'" + rule.name + "' can match the empty string.");
+        return {};
+      }
     }
 
     // Apply instructions

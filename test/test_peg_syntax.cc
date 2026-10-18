@@ -614,6 +614,18 @@ TEST(GrammarRejectionTest, Reject_duplicate_word) {
   )"));
 }
 
+TEST(GrammarRejectionTest, Reject_word_that_can_match_empty) {
+  // A %word that can match the empty string is rejected.
+  for (std::string word : {"[a-z]*", "&[a-z]", "W\nW <- [a-z]*"}) {
+    parser pg;
+    std::string message;
+    pg.set_logger(
+        [&](size_t, size_t, const std::string &msg) { message = msg; });
+    EXPECT_FALSE(pg.load_grammar("S <- 'if'\n%word <- " + word)) << word;
+    EXPECT_EQ("'%word' can match the empty string.", message) << word;
+  }
+}
+
 TEST(GrammarRejectionTest, Accept_all_defined_escapes) {
   // All defined escapes remain valid.
   parser pg(R"(S <- '\n\t\f\v\-\^\[\]\\')");
