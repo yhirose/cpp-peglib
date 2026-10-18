@@ -1356,10 +1356,15 @@ public:
   // last made first: a later one may take an argument that an earlier one
   // made, and releasing the earlier ones first would leave a chain of such
   // arguments (`M(s) <- M(s / 'x')`) to be freed recursively at once.
-  const Holder &instance(const Reference &call);
+  struct Instance {
+    const Holder *body = nullptr;
+    // Where it is being parsed, unless it is left-recursive.
+    const char *active_pos = nullptr;
+  };
+  Instance &instance(const Reference &call);
   std::vector<std::shared_ptr<Holder>> instances;
-  std::map<std::vector<const void *>, const Holder *> instance_by_key;
-  std::unordered_map<const Reference *, const Holder *> instance_of_call;
+  std::map<std::vector<const void *>, Instance> instance_by_key;
+  std::unordered_map<const Reference *, Instance *> instance_of_call;
 
   bool has_id(const Definition &rule) const {
     return analysis && analysis->indexes(rule);
@@ -4383,18 +4388,17 @@ macro_inst_key(const Definition *def,
 
 // A parameter passes its caller's argument on as it is, so a call that
 // passes a parameter on finds its own instance again.
-inline const Holder &Context::instance(const Reference &call) {
+inline Context::Instance &Context::instance(const Reference &call) {
   auto &inst = instance_of_call[&call];
   if (!inst) {
-    auto &by_key = instance_by_key[macro_inst_key(call.rule_, call.args_)];
-    if (!by_key) {
+    inst = &instance_by_key[macro_inst_key(call.rule_, call.args_)];
+    if (!inst->body) {
       auto made = std::make_shared<Holder>(call.rule_);
       made->ope_ = ReplaceParameters(call.args_)
                        .resolve(call.rule_->get_core_operator());
       instances.push_back(made);
-      by_key = made.get();
+      inst->body = made.get();
     }
-    inst = by_key;
   }
   return *inst;
 }
@@ -4423,7 +4427,18 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
     throw std::logic_error("A macro parameter was parsed outside its macro...");
   }
 
-  if (rule_->is_macro) { return c.instance(*this).parse(s, n, vs, c, dt); }
+  if (rule_->is_macro) {
+    auto &inst = c.instance(*this);
+    if (rule_->is_left_recursive) { return inst.body->parse(s, n, vs, c, dt); }
+    // Left recursion that detection missed enters it again where it is being
+    // parsed. It fails there, as a rule does (Context::reuse_or_parse).
+    if (inst.active_pos == s) { return kFail; }
+    // No scope_exit: an exception abandons the Context.
+    auto save = std::exchange(inst.active_pos, s);
+    auto len = inst.body->parse(s, n, vs, c, dt);
+    inst.active_pos = save;
+    return len;
+  }
 
   // A rule that cannot start with the next byte fails without being entered,
   // as a choice skips an alternative that cannot. Where that could be

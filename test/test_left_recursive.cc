@@ -894,6 +894,19 @@ TEST(LeftRecursionMacroTest, Detection_sees_every_instantiation) {
   EXPECT_FALSE(!!off);
 }
 
+TEST(LeftRecursionMacroTest, Instantiation_entered_again_fails) {
+  // M('b'*) is left recursive only through its argument, which detection
+  // does not see. Entered again where it is being parsed, it fails there, as
+  // a rule does; it used to recurse until the stack overflowed.
+  parser p(R"(
+        S    <- M('a')
+        M(x) <- x M('b'*) / 'c'
+    )");
+
+  EXPECT_TRUE(!!p);
+  EXPECT_TRUE(p.parse("abbc"));
+}
+
 TEST(LeftRecursionMacroTest, Macro_call_arguments_are_told_apart) {
   // N('a') and N(R) are different arguments, though both call N.
   parser p(R"(
