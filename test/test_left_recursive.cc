@@ -930,6 +930,18 @@ TEST(LeftRecursionMacroTest, Left_recursive_macro_is_rejected_when_disabled) {
   EXPECT_FALSE(!!p);
 }
 
+TEST(LeftRecursionMacroTest, Parameter_named_like_a_rule_is_not_that_rule) {
+  parser p;
+  p.enable_left_recursion(false);
+  p.load_grammar(R"(
+        S    <- x
+        x    <- M('a')
+        M(x) <- x 'b'
+    )");
+
+  EXPECT_TRUE(!!p);
+}
+
 TEST(LeftRecursionMacroTest, Semantic_values_match_the_plain_rule) {
   auto sum = [](const SemanticValues &vs) -> long {
     if (vs.choice() == 0) {

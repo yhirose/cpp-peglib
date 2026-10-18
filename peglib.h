@@ -2814,7 +2814,7 @@ private:
 struct DetectLeftRecursion : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  DetectLeftRecursion(const std::string &name) : name_(name) {}
+  explicit DetectLeftRecursion(const Definition &rule) : rule_(&rule) {}
 
   // Only the atom matters here; see ComputeCanBeEmpty.
   void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
@@ -2878,7 +2878,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
   void visit_in_defining_scope(const ResolvedArg &arg);
 
   // A macro's body depends on its arguments, so "already visited" has to be
-  // per instantiation, not per name: in `A <- W('z') / W(A)`, visiting W with
+  // per instantiation, not per rule: in `A <- W('z') / W(A)`, visiting W with
   // 'z' says nothing about W with A. Instantiations are identified by their
   // resolved arguments, the same way as at parse time.
   size_t intern_macro_inst(const Reference &ope);
@@ -2893,7 +2893,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
   static const size_t max_macro_inst_depth = 32;
 
 private:
-  std::string name_;
+  const Definition *rule_;
   std::set<std::pair<const Definition *, size_t>> refs_;
   std::map<std::vector<const void *>, size_t> macro_inst_ids_;
   size_t next_macro_inst_ = 1;
@@ -4698,7 +4698,7 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
                    ? resolve_macro_arg(ope.iarg_)
                    : ResolvedArg{};
 
-  if (ope.name_ == name_) {
+  if (ope.rule_ == rule_) {
     error_s = ope.s_;
   } else if (param.ope) {
     visit_in_defining_scope(param);
@@ -7345,7 +7345,7 @@ private:
 
     // Check left recursion
     for (auto &[name, rule] : grammar) {
-      DetectLeftRecursion vis(name);
+      DetectLeftRecursion vis(rule);
       rule.accept(vis);
       if (vis.error_s && enable_left_recursion) {
         rule.is_left_recursive = true;
