@@ -1322,10 +1322,10 @@ public:
   using LRKey = std::pair<LRRule, const char *>;
 
   // Rules being parsed. A rule with an id only needs its innermost start,
-  // since a nested call never starts before its caller. The map holds the
-  // seeds of left-recursive rules, and a failure for rules without an id.
+  // since a nested call never starts before its caller. A rule without one
+  // is kept by its body and start.
   std::vector<const char *> active_pos;
-  std::map<LRKey, RuleMatch> in_progress;
+  std::set<LRKey> in_progress;
 
   // No whitespace is skipped after a match in a token or in the whitespace,
   // so a rule may match differently there than at the same position
@@ -1339,22 +1339,54 @@ public:
   // memo, though it reuses those of the tokens.
   bool makes_memo() const { return !in_whitespace; }
 
-  // Confirmed matches of left-recursive rules, by skips_no_whitespace().
-  std::map<LRKey, RuleMatch> lr_memo[2];
+  static constexpr size_t no_growth = static_cast<size_t>(-1);
 
-  // The seed being grown, or else the confirmed match.
-  const RuleMatch *find_lr_match(const LRKey &key) const {
-    if (auto it = in_progress.find(key); it != in_progress.end()) {
-      return &it->second;
+  // Confirmed matches of left-recursive rules, by skips_no_whitespace(). One
+  // built from the seed of a rule growing around it, growing[built_from],
+  // goes when that seed changes or stops growing.
+  struct LRMemo {
+    RuleMatch match;
+    size_t built_from;
+  };
+  std::map<LRKey, LRMemo> lr_memo[2];
+
+  // The left-recursive rules growing their seeds, innermost last. A rule
+  // parsed inside another starts at or after it, so the ones growing where
+  // the parse is are on top. A rule that reaches a seed at its own start is
+  // in its cycle, which left recursion detection marks, so only the matches
+  // of left-recursive rules are taken to be built from a seed.
+  struct Growth {
+    LRKey key;
+    RuleMatch seed;
+    // The innermost growth around this one whose seed its parse used.
+    size_t built_from;
+    // The confirmed matches built from this seed, by skips_no_whitespace().
+    std::vector<std::pair<LRKey, bool>> built;
+  };
+  std::vector<Growth> growing;
+
+  size_t growth_of(const LRKey &key) const {
+    for (auto i = growing.size();
+         i-- > 0 && growing[i].key.second == key.second;) {
+      if (growing[i].key.first == key.first) { return i; }
     }
-    auto &memo = lr_memo[skips_no_whitespace()];
-    if (auto it = memo.find(key); it != memo.end()) { return &it->second; }
-    return nullptr;
+    return no_growth;
   }
 
-  // Rules whose seed or lr_memo was hit during the current parse scope.
-  // Used to track LR cycle membership.
-  std::set<LRRule> lr_refs_hit;
+  // What the rules growing inside growing[i] match is built from its seed.
+  void use_seed(size_t i) {
+    for (auto j = i + 1; j < growing.size(); j++) {
+      auto &built_from = growing[j].built_from;
+      if (built_from == no_growth || built_from < i) { built_from = i; }
+    }
+  }
+
+  void forget_built(size_t i) {
+    for (const auto &[key, skips_none] : growing[i].built) {
+      lr_memo[skips_none].erase(key);
+    }
+    growing[i].built.clear();
+  }
 
   // The instances of the macros this parse calls: their bodies with the
   // parameters replaced by the arguments, keyed by macro_inst_key. Released
@@ -1578,7 +1610,8 @@ public:
   // What a left-recursive rule matches at a position. Entered again where it
   // is being parsed, it gets the match found so far, its seed, and it is
   // parsed again for as long as that makes the seed grow. Its confirmed match
-  // is reused.
+  // is reused, but one built from the seed of a rule growing around it only
+  // while that rule grows the same seed.
   template <typename T>
   void reuse_or_grow(const char *a_s, const Holder &rule, RuleMatch &match,
                      T parse);
@@ -5464,7 +5497,7 @@ inline void Context::reuse_or_parse(const char *a_s, size_t n,
                                     T parse) {
   if (!rule_has_id) {
     auto key = LRKey(rule.holder_.get(), a_s);
-    if (!in_progress.emplace(key, RuleMatch()).second) {
+    if (!in_progress.insert(key).second) {
       match.len = kFail;
       return;
     }
@@ -5520,76 +5553,47 @@ inline void Context::reuse_or_parse(const char *a_s, size_t n,
 template <typename T>
 inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
                                    RuleMatch &match, T parse) {
-  auto lr_rule = LRRule(&rule);
-  auto lr_key = LRKey(lr_rule, a_s);
+  auto lr_key = LRKey(&rule, a_s);
 
-  if (auto memo = find_lr_match(lr_key)) {
-    match = *memo;
-    // Record that this rule's seed or lr_memo was hit.
-    // Any LR rule currently seeding will know we're in its cycle.
-    lr_refs_hit.insert(lr_rule);
+  if (auto i = growth_of(lr_key); i != no_growth) {
+    match = growing[i].seed;
+    use_seed(i);
+    return;
+  }
+  auto skips_none = skips_no_whitespace();
+  auto &memo = lr_memo[skips_none];
+  if (auto it = memo.find(lr_key); it != memo.end()) {
+    match = it->second.match;
+    if (it->second.built_from != no_growth) { use_seed(it->second.built_from); }
     return;
   }
 
-  // Seed with FAIL
-  auto &seed = in_progress[lr_key];
-  auto seed_guard = scope_exit([&]() { in_progress.erase(lr_key); });
+  // The seed starts as a failure. Held by index: growing grows in the parse.
+  growing.push_back({lr_key, RuleMatch(), no_growth, {}});
+  auto pop = scope_exit([&]() { growing.pop_back(); });
+  auto i = growing.size() - 1;
 
-  // Track which LR rules are referenced during our parse
-  // to identify cycle members
-  auto saved_refs = std::move(lr_refs_hit);
-  lr_refs_hit.clear();
-
-  // Initial parse (self-references will hit the FAIL seed)
   parse(match);
-
-  // Rules whose seed or lr_memo was hit during our parse are in our cycle.
-  // If we detected cycle members, we ourselves are also part of
-  // the cycle, so add self — this lets parent seeders see us as
-  // a transitive cycle member.
-  auto cycle_rules = lr_refs_hit;
-  if (!cycle_rules.empty()) { cycle_rules.insert(lr_rule); }
-
-  // Restore parent's refs and propagate cycle info upward
-  lr_refs_hit = std::move(saved_refs);
-  lr_refs_hit.insert(cycle_rules.begin(), cycle_rules.end());
-
-  // Forgets what the rules of the cycle matched at this position. Outer
-  // growers are not there: their seeds are in progress.
-  auto forget_cycle = [&](auto &memo) {
-    for (const auto &cycle_rule : cycle_rules) {
-      memo.erase(LRKey(cycle_rule, a_s));
-    }
-  };
-
   if (success(match.len)) {
-    // Got initial seed, now grow
-    seed = std::move(match);
-
+    growing[i].seed = std::move(match);
     while (true) {
-      for (auto &memo : lr_memo) {
-        forget_cycle(memo);
-      }
-
+      forget_built(i);
       RuleMatch grown;
       parse(grown);
-
-      if (!success(grown.len) || grown.len <= seed.len) {
-        break; // No improvement, done growing
-      }
-
-      seed = std::move(grown);
+      if (!success(grown.len) || grown.len <= growing[i].seed.len) { break; }
+      growing[i].seed = std::move(grown);
     }
-    match = seed;
+    match = growing[i].seed;
   }
-
-  // What the cycle matched in the other whitespace context was built from
-  // this seed too, which a parse in that context would not have grown.
-  forget_cycle(lr_memo[!skips_no_whitespace()]);
+  forget_built(i);
 
   // Confirmed, a failure too, so the rule is not seeded here again
   if (makes_memo()) {
-    lr_memo[skips_no_whitespace()][lr_key] = std::move(seed);
+    auto built_from = growing[i].built_from;
+    memo[lr_key] = {std::move(growing[i].seed), built_from};
+    if (built_from != no_growth) {
+      growing[built_from].built.emplace_back(lr_key, skips_none);
+    }
   }
 }
 

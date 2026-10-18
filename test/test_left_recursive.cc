@@ -1224,3 +1224,56 @@ TEST(LeftRecursionTest, Reports_a_failure_the_whitespace_met_first) {
         << packrat;
   }
 }
+
+// G is first reached when S grows, and its match is built from S's seed.
+// Each growth of S changes that seed, so G is parsed again, not reused.
+TEST(LeftRecursionTest, Match_built_from_an_earlier_seed_is_not_reused) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- &S G / 'a'
+      G <- S 'z' / 'q'
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("azz")) << packrat;
+    EXPECT_TRUE(pg.parse("azzz")) << packrat;
+  }
+}
+
+// A match built from a seed goes when the rule stops growing too, not only
+// when the seed changes.
+TEST(LeftRecursionTest, Match_built_from_a_seed_goes_when_it_stops_growing) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- N / 'b' / 'a'
+      L <- S / N
+      M <- L L
+      N <- M
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("ab")) << packrat;
+  }
+}
+
+// E2 does not use E1's seed, so each growth of E1 reuses E2's match instead
+// of growing it again, and so on down to E3.
+TEST(LeftRecursionTest, Rule_growing_inside_another_is_not_grown_again) {
+  parser pg(R"(
+    E1 <- E1 '+' E2 / E2
+    E2 <- E2 '*' E3 / E3
+    E3 <- E3 '^' P / P
+    P  <- [0-9]
+  )");
+  ASSERT_TRUE(!!pg);
+  size_t entered = 0;
+  pg["P"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    entered++;
+  };
+
+  EXPECT_TRUE(pg.parse("1"));
+  // E3 parses its body to grow its seed, and once more to see it not grow.
+  EXPECT_EQ(2u, entered);
+}
