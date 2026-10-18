@@ -906,7 +906,7 @@ parser.set_error_reporter([](const peg::ErrorReport &r) {
 });
 ```
 
-Both callbacks can be set at the same time; each error is delivered to both. With error recovery, the reporter is called once per recovered error, so a single parse can produce multiple reports. Mapping `r.label` to an application-defined error enum is the intended way to get typed errors.
+Both callbacks can be set at the same time; each error is delivered to both. With error recovery, the reporter is called once per recovered error, so a single parse can produce multiple reports. Mapping `r.label` to an application-defined error enum is the intended way to get typed errors. An error that a recovery reports is labeled with its recovery label, whether or not the label has an `error_message`.
 
 Limit nesting depth
 -------------------

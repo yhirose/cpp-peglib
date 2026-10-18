@@ -1206,6 +1206,38 @@ TEST(ErrorReporterTest, Label_is_not_carried_over_after_recovery) {
   EXPECT_EQ((std::vector<std::string>{"num", ""}), rules);
 }
 
+TEST(ErrorReporterTest, Recovered_error_has_its_recovery_label) {
+  parser pg(R"(
+    S  <- 'a' N^na 'b' ':'^nb 'c' M^nc
+    N  <- < [0-9]+ >
+    M  <- < [0-9]+ > { error_message "bad M" }
+    na <- (!'b' .)*
+    nb <- (!'c' .)*
+    nc <- .*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  std::vector<ErrorReport> reports;
+  pg.set_error_reporter([&](const ErrorReport &r) { reports.push_back(r); });
+  std::vector<std::string> rules;
+  pg.set_logger([&](size_t, size_t, const std::string &,
+                    const std::string &rule) { rules.push_back(rule); });
+  EXPECT_FALSE(pg.parse("axbcy"));
+
+  ASSERT_EQ(3, reports.size());
+  ASSERT_EQ(3, rules.size());
+  // A syntax error expecting a rule
+  EXPECT_EQ("na", reports[0].label);
+  EXPECT_EQ("na", rules[0]);
+  // A syntax error expecting only literals
+  EXPECT_EQ("nb", reports[1].label);
+  EXPECT_EQ("nb", rules[1]);
+  // The error_message of another rule
+  EXPECT_EQ("bad M", reports[2].message);
+  EXPECT_EQ("nc", reports[2].label);
+  EXPECT_EQ("nc", rules[2]);
+}
+
 TEST(ErrorReporterTest, End_of_input_error_has_no_label) {
   parser pg(R"(
     S <- A / 'ab'

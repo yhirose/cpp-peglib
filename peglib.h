@@ -1053,8 +1053,9 @@ struct ErrorInfo {
   void output_log(const Log &log, const char *s, size_t n) {
     output_log(log, nullptr, s, n);
   }
+  // An error that a recovery reports is labeled with `recovery_label`.
   void output_log(const Log &log, const ErrorReporter &reporter, const char *s,
-                  size_t n);
+                  size_t n, const std::string &recovery_label = "");
 
 private:
   // What failed in `rule`: `failure`, or the alternatives `begin` to `end`
@@ -4167,99 +4168,84 @@ inline void ErrorInfo::resolve_expected_tokens() {
 }
 
 inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
-                                  const char *s, size_t n) {
+                                  const char *s, size_t n,
+                                  const std::string &recovery_label) {
   resolve_expected_tokens();
+  auto pos = message_pos ? message_pos : error_pos;
+  if (!pos || pos <= last_output_pos) { return; }
+  last_output_pos = pos;
+
+  auto line = line_info(s, pos);
+  ErrorReport report;
+  report.line = line.first;
+  report.col = line.second;
+  report.position = static_cast<size_t>(pos - s);
+
+  auto unexpected_token = heuristic_error_token(s, n, pos);
+  std::string msg;
   if (message_pos) {
-    if (message_pos > last_output_pos) {
-      last_output_pos = message_pos;
-      auto line = line_info(s, message_pos);
-      std::string msg;
-      auto unexpected_token = heuristic_error_token(s, n, message_pos);
-      if (!unexpected_token.empty()) {
-        msg = replace_all(message, "%t", unexpected_token);
+    if (!unexpected_token.empty()) {
+      msg = replace_all(message, "%t", unexpected_token);
 
-        auto unexpected_char = unexpected_token.substr(
-            0, codepoint_or_byte_length(unexpected_token.data(),
-                                        unexpected_token.size()));
+      auto unexpected_char = unexpected_token.substr(
+          0, codepoint_or_byte_length(unexpected_token.data(),
+                                      unexpected_token.size()));
 
-        msg = replace_all(msg, "%c", unexpected_char);
-      } else {
-        msg = message;
-      }
-      if (reporter) {
-        ErrorReport report;
-        report.line = line.first;
-        report.col = line.second;
-        report.position = static_cast<size_t>(message_pos - s);
-        report.unexpected_token = unexpected_token;
-        report.message = msg;
-        report.label = label;
-        reporter(report);
-      }
-      if (log) { log(line.first, line.second, msg, label); }
+      msg = replace_all(msg, "%c", unexpected_char);
+    } else {
+      msg = message;
     }
-  } else if (error_pos) {
-    if (error_pos > last_output_pos) {
-      last_output_pos = error_pos;
-      auto line = line_info(s, error_pos);
+    report.unexpected_token = unexpected_token;
+    report.message = msg;
+    report.label = label;
+  } else if (expected_tokens.empty()) {
+    msg = "syntax error.";
+  } else {
+    msg = "syntax error";
 
-      ErrorReport report;
-      report.line = line.first;
-      report.col = line.second;
-      report.position = static_cast<size_t>(error_pos - s);
+    if (!unexpected_token.empty()) {
+      msg += ", unexpected '";
+      msg += unexpected_token;
+      msg += "'";
+      report.unexpected_token = unexpected_token;
+    }
 
-      std::string msg;
-      if (expected_tokens.empty()) {
-        msg = "syntax error.";
-      } else {
-        msg = "syntax error";
+    auto first_item = true;
+    size_t i = 0;
+    while (i < expected_tokens.size()) {
+      auto [error_literal, error_rule] = expected_tokens[i];
 
-        // unexpected token
-        if (auto unexpected_token = heuristic_error_token(s, n, error_pos);
-            !unexpected_token.empty()) {
-          msg += ", unexpected '";
-          msg += unexpected_token;
+      // The same text can come from more than one place in the grammar.
+      const auto &literals = report.expected_literals;
+      auto listed = error_literal && std::find(literals.begin(), literals.end(),
+                                               error_literal) != literals.end();
+
+      // Skip rules start with '_'
+      if (!(error_rule && error_rule->name[0] == '_') && !listed) {
+        msg += (first_item ? ", expecting " : ", ");
+        if (error_literal) {
           msg += "'";
-          report.unexpected_token = unexpected_token;
+          msg += error_literal;
+          msg += "'";
+          report.expected_literals.emplace_back(error_literal);
+        } else {
+          msg += "<" + error_rule->name + ">";
+          report.expected_rules.emplace_back(error_rule->name);
         }
-
-        auto first_item = true;
-        size_t i = 0;
-        while (i < expected_tokens.size()) {
-          auto [error_literal, error_rule] = expected_tokens[i];
-
-          // The same text can come from more than one place in the grammar.
-          const auto &literals = report.expected_literals;
-          auto listed =
-              error_literal && std::find(literals.begin(), literals.end(),
-                                         error_literal) != literals.end();
-
-          // Skip rules start with '_'
-          if (!(error_rule && error_rule->name[0] == '_') && !listed) {
-            msg += (first_item ? ", expecting " : ", ");
-            if (error_literal) {
-              msg += "'";
-              msg += error_literal;
-              msg += "'";
-              report.expected_literals.emplace_back(error_literal);
-            } else {
-              msg += "<" + error_rule->name + ">";
-              report.expected_rules.emplace_back(error_rule->name);
-            }
-            first_item = false;
-          }
-
-          i++;
-        }
-        msg += ".";
-        if (!report.expected_rules.empty()) {
-          report.label = report.expected_rules.front();
-        }
+        first_item = false;
       }
-      if (reporter) { reporter(report); }
-      if (log) { log(line.first, line.second, msg, report.label); }
+
+      i++;
+    }
+    msg += ".";
+    if (!report.expected_rules.empty()) {
+      report.label = report.expected_rules.front();
     }
   }
+
+  if (!recovery_label.empty()) { report.label = recovery_label; }
+  if (reporter) { reporter(report); }
+  if (log) { log(line.first, line.second, msg, report.label); }
 }
 
 inline size_t Context::skip_whitespace(const char *a_s, size_t n,
@@ -4857,10 +4843,10 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
                                    SemanticValues & /*vs*/, Context &c,
                                    std::any & /*dt*/) const {
   const auto &rule = dynamic_cast<Reference &>(*ope_);
+  const auto *label = dynamic_cast<Reference *>(rule.args_[0].get());
 
   // Custom error message
   if (c.reports_errors) {
-    auto label = dynamic_cast<Reference *>(rule.args_[0].get());
     if (label && !label->rule_->error_message.empty()) {
       c.error_info.set_message(
           s, resolve_capture_placeholders(label->rule_->error_message, c),
@@ -4884,7 +4870,8 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     c.recovered = true;
 
     if (c.reports_errors) {
-      c.error_info.output_log(c.log, c.error_reporter, c.s, c.l);
+      c.error_info.output_log(c.log, c.error_reporter, c.s, c.l,
+                              label ? label->rule_->name : std::string());
       c.error_info.clear();
     }
   }
