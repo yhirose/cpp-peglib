@@ -1277,3 +1277,74 @@ TEST(LeftRecursionTest, Rule_growing_inside_another_is_not_grown_again) {
   // E3 parses its body to grow its seed, and once more to see it not grow.
   EXPECT_EQ(2u, entered);
 }
+
+// E grows outside T first, then is reused inside it, where the error is named
+// after T.
+TEST(LeftRecursionTest, Reused_match_notes_its_failures_again) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S <- E 'x' / T
+      T <- < E 'y' >
+      E <- E '+' N / N
+      N <- [0-9]
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    std::string error;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+
+    EXPECT_FALSE(pg.parse("1+q")) << packrat;
+    EXPECT_EQ("1:3 syntax error, unexpected 'q', expecting <N>, <T>.", error)
+        << packrat;
+  }
+}
+
+// R4 first grows inside R5's growth, from R5's seed, and notes nothing of it.
+// Reused after R5 has grown, R4 notes what R5's match does, as parsing it
+// again would.
+TEST(LeftRecursionTest, Match_from_a_seed_notes_what_the_grown_seed_does) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      R0 <- R5
+      R1 <- [xy]*
+      R4 <- < < < R5 > > >
+      R5 <- R1 R5 / R1 (R4 &R0)+
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    std::string error;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+
+    EXPECT_FALSE(pg.parse("yb ba")) << packrat;
+    EXPECT_EQ("1:2 syntax error, unexpected 'b', expecting <R1>, <R4>.", error)
+        << packrat;
+  }
+}
+
+// A match built from a seed is forgotten and made again, and the second parse
+// notes nothing where the first did. What the first noted goes with it.
+TEST(LeftRecursionTest, Match_made_again_drops_what_it_noted_before) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      R0 <- (R3 / 'a')* R4 / R1
+      R1 <- (R5 / R5 R4)
+      R3 <- R5 < > / 'b'
+      R4 <- / R0
+      R5 <- < R4 R3 >
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    std::string error;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+
+    EXPECT_FALSE(pg.parse("bb")) << packrat;
+    EXPECT_EQ("1:3 syntax error, expecting <R3>, 'a', 'b', <R4>.", error)
+        << packrat;
+  }
+}

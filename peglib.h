@@ -920,6 +920,13 @@ struct NestingTooDeep {
   const Definition *rule;
 };
 
+// Mixes the bits of a key for open addressing. In 64 bits so that `h >> 32`
+// stays well-defined where size_t is 32-bit (wasm32).
+inline size_t mix_index(size_t key) {
+  auto h = static_cast<uint64_t>(key) * 0x9E3779B97F4A7C15ull;
+  return static_cast<size_t>(h ^ (h >> 32));
+}
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
@@ -937,7 +944,7 @@ struct ErrorInfo {
   }
 
   void clear_expected_tokens() {
-    events_.clear();
+    next_generation();
     expected_tokens.clear();
     literal_copies_.clear();
   }
@@ -964,14 +971,62 @@ struct ErrorInfo {
   void add(StartFailure failure, const Definition *rule,
            const Definition *token_rule, bool copy_literal) {
     if (copy_literal) { failure.literal = copy_of(failure.literal); }
-    note({failure, rule, token_rule, nullptr, 0, 0});
+    note({Kind::failure, failure, rule, token_rule, nullptr, 0, 0, 0});
   }
 
   // The alternatives `begin` to `end` of `choice`, in `rule`, were skipped by
   // their first sets.
   void add_skipped(const PrioritizedChoice *choice, size_t begin, size_t end,
                    const Definition *rule, const Definition *token_rule) {
-    note({{}, rule, token_rule, choice, begin, end});
+    note({Kind::skipped, {}, rule, token_rule, choice, begin, end, 0});
+  }
+
+  // A memo: the body of the rule it holds a match of, where the match starts,
+  // and whether whitespace is skipped after a match there.
+  struct MemoKey {
+    const Holder *rule;
+    const char *pos;
+    bool skips_no_whitespace;
+
+    bool operator==(const MemoKey &k) const {
+      return rule == k.rule && pos == k.pos &&
+             skips_no_whitespace == k.skips_no_whitespace;
+    }
+  };
+
+  // What a parse whose match is memoized notes is kept with the memo, so
+  // that reusing the memo notes it again, as parsing the rule again would.
+  // It is kept from where the parse began, as a record of this generation:
+  // the events at one error position. The parse around it names what it
+  // notes by `token_rule`, if there is one.
+  void open_frame(const Definition *token_rule) {
+    frames_.push_back({events_.size(), generation_, token_rule});
+    boundary_ = events_.size();
+  }
+
+  // What the innermost memoized parse noted is kept for its memo, `key`,
+  // in place of what a parse of a memo made before with the same key kept.
+  void close_frame(const MemoKey &key) {
+    auto span = span_of(frames_.back());
+    frames_.pop_back();
+    boundary_ = events_.size();
+    if (span.begin < span.end) {
+      records_.push_back(span);
+      keep_record(key, records_.size() - 1);
+    } else if (!record_slots_.empty()) {
+      auto &slot = record_slots_[slot_of(key)];
+      if (slot.generation == generation_) { slot.record = no_record; }
+    }
+  }
+
+  // Notes again what was kept for the memo `key`, under `token_rule` if
+  // there is one.
+  void replay(const MemoKey &key, const Definition *token_rule) {
+    if (record_slots_.empty()) { return; }
+    const auto &slot = record_slots_[slot_of(key)];
+    if (slot.generation == generation_ && slot.record != no_record) {
+      note({Kind::replay, {}, nullptr, token_rule, nullptr, 0, 0, slot.record});
+    }
   }
 
   void resolve_expected_tokens();
@@ -1003,24 +1058,114 @@ struct ErrorInfo {
 
 private:
   // What failed in `rule`: `failure`, or the alternatives `begin` to `end`
-  // that `choice` skipped.
+  // that `choice` skipped. Or `record`, noted again.
+  enum class Kind : uint8_t { failure, skipped, replay };
   struct ExpectedEvent {
+    Kind kind;
     StartFailure failure;
     const Definition *rule;
-    const Definition *token_rule; // the outermost token rule around `rule`
+    const Definition *token_rule; // the outermost token rule around it
     const PrioritizedChoice *choice;
     size_t begin;
     size_t end;
+    size_t record;
+
+    bool operator==(const ExpectedEvent &e) const {
+      return kind == e.kind && failure.literal == e.failure.literal &&
+             failure.rule == e.failure.rule && rule == e.rule &&
+             token_rule == e.token_rule && choice == e.choice &&
+             begin == e.begin && end == e.end && record == e.record;
+    }
   };
   std::vector<ExpectedEvent> events_;
 
+  // The memoized parses in progress, innermost last, and the records of
+  // those done: spans of events_, nested or apart. A record noted again, a
+  // replay event, comes after its span.
+  struct Frame {
+    size_t begin;
+    size_t generation;
+    const Definition *token_rule;
+  };
+  std::vector<Frame> frames_;
+  struct Record {
+    size_t begin;
+    size_t end;
+    const Definition *token_rule;
+  };
+  std::vector<Record> records_;
+  size_t generation_ = 0;
+
+  // What a memoized parse has noted so far: from its start, or from the
+  // start of the generation if it began in an earlier one.
+  Record span_of(const Frame &frame) const {
+    return {frame.generation == generation_ ? frame.begin : 0, events_.size(),
+            frame.token_rule};
+  }
+
+  // The records by memo, in open addressing. A slot of an earlier
+  // generation is free: its record has gone.
+  static constexpr size_t no_record = static_cast<size_t>(-1);
+  struct RecordSlot {
+    MemoKey key;
+    size_t record;
+    size_t generation;
+  };
+  std::vector<RecordSlot> record_slots_;
+  size_t indexed_ = 0; // slots of this generation
+
+  // The slot of `key` in this generation, or the free one it would take.
+  size_t slot_of(const MemoKey &key) const {
+    auto mask = record_slots_.size() - 1;
+    auto i = mix_index(reinterpret_cast<uintptr_t>(key.pos) * 31 +
+                       reinterpret_cast<uintptr_t>(key.rule) +
+                       key.skips_no_whitespace) &
+             mask;
+    while (record_slots_[i].generation == generation_ &&
+           !(record_slots_[i].key == key)) {
+      i = (i + 1) & mask;
+    }
+    return i;
+  }
+
+  void keep_record(const MemoKey &key, size_t record) {
+    if ((indexed_ + 1) * 2 > record_slots_.size()) {
+      auto old = std::move(record_slots_);
+      record_slots_.assign(old.empty() ? 16 : old.size() * 2,
+                           {{}, no_record, no_record});
+      indexed_ = 0;
+      for (const auto &slot : old) {
+        if (slot.generation == generation_) {
+          keep_record(slot.key, slot.record);
+        }
+      }
+    }
+    auto &slot = record_slots_[slot_of(key)];
+    if (slot.generation != generation_) { indexed_++; }
+    slot = {key, record, generation_};
+  }
+
   // A parse that keeps failing at one position notes the same few events
-  // over and over, so they are resolved once this many have piled up.
+  // over and over. Once this many, or twice what the last removal left, have
+  // piled up since a memoized parse last began or ended, their repeats go:
+  // each span holds all of them or none.
   static constexpr size_t max_events_ = 256;
+  size_t boundary_ = 0;
+  size_t remove_repeats_at_ = max_events_;
 
   void note(const ExpectedEvent &event) {
-    if (events_.size() == max_events_) { resolve_expected_tokens(); }
+    if (events_.size() - boundary_ == remove_repeats_at_) { remove_repeats(); }
     events_.push_back(event);
+  }
+  void remove_repeats();
+
+  void next_generation() {
+    events_.clear();
+    records_.clear();
+    indexed_ = 0;
+    boundary_ = 0;
+    remove_repeats_at_ = max_events_;
+    generation_++;
   }
 
   void insert_failure(const char *literal, const Definition *rule,
@@ -1123,7 +1268,7 @@ public:
   bool find(size_t key, std::any &val) const {
     if (keys_.empty()) { return false; }
     auto mask = keys_.size() - 1;
-    auto i = mix(key) & mask;
+    auto i = mix_index(key) & mask;
     while (true) {
       if (keys_[i] == key) {
         val = vals_[i];
@@ -1137,7 +1282,7 @@ public:
   void insert_or_assign(size_t key, const std::any &val) {
     if (keys_.empty() || (used_ + 1) * 4 > keys_.size() * 3) { grow(); }
     auto mask = keys_.size() - 1;
-    auto i = mix(key) & mask;
+    auto i = mix_index(key) & mask;
     while (keys_[i] != key && keys_[i] != kEmpty) {
       i = (i + 1) & mask;
     }
@@ -1149,13 +1294,6 @@ public:
 private:
   static constexpr size_t kEmpty = static_cast<size_t>(-1);
 
-  static size_t mix(size_t key) {
-    // Mix in 64 bits so `h >> 32` stays well-defined where size_t is 32-bit
-    // (wasm32); on 64-bit targets this is bit-identical to the size_t mix.
-    auto h = static_cast<uint64_t>(key) * 0x9E3779B97F4A7C15ull;
-    return static_cast<size_t>(h ^ (h >> 32));
-  }
-
   void grow() {
     auto new_cap = keys_.empty() ? initial_capacity_ : keys_.size() * 2;
     std::vector<size_t> old_keys = std::move(keys_);
@@ -1166,7 +1304,7 @@ private:
     auto mask = new_cap - 1;
     for (size_t j = 0; j < old_keys.size(); j++) {
       if (old_keys[j] == kEmpty) { continue; }
-      auto i = mix(old_keys[j]) & mask;
+      auto i = mix_index(old_keys[j]) & mask;
       while (keys_[i] != kEmpty) {
         i = (i + 1) & mask;
       }
@@ -1264,9 +1402,8 @@ public:
                                                 : nullptr;
   }
 
-  // `rule` is not tried at `a_s`, as where its memoized match or failure is
-  // reused: where the rule cannot start, this notes the failures trying it
-  // would.
+  // `rule` is not entered at `a_s`, where it cannot start: this notes the
+  // failures trying it would.
   void note_untried(const Definition &rule, const char *a_s, size_t n);
 
   void push_rule(Definition *rule);
@@ -1338,6 +1475,28 @@ public:
   // included. The whitespace notes no failure, so a parse in it makes no
   // memo, though it reuses those of the tokens.
   bool makes_memo() const { return !in_whitespace; }
+
+  ErrorInfo::MemoKey memo_key(const Holder &rule, const char *a_s) const {
+    return {&rule, a_s, skips_no_whitespace()};
+  }
+
+  // Parses what the memo of `rule` at `a_s` will hold, and keeps what the
+  // parse notes with the memo (ErrorInfo::open_frame) if it makes one. In
+  // the parse, a failure is named by the outermost token rule in it.
+  template <typename T>
+  void parse_memoized(const Holder &rule, const char *a_s, T parse) {
+    auto keeps = reports_errors && makes_memo();
+    auto outer = outer_token_rule;
+    if (keeps) {
+      error_info.open_frame(token_rule());
+      outer_token_rule = static_cast<size_t>(-1);
+    }
+    parse();
+    if (keeps) {
+      outer_token_rule = outer;
+      error_info.close_frame(memo_key(rule, a_s));
+    }
+  }
 
   static constexpr size_t no_growth = static_cast<size_t>(-1);
 
@@ -1603,9 +1762,8 @@ public:
   // memoized match is reused, and otherwise `parse` makes the match. The
   // packrat memo holds no token, so a match whose token is needed is parsed.
   template <typename T>
-  void reuse_or_parse(const char *a_s, size_t n, const Definition &rule,
-                      bool rule_has_id, bool needs_token, RuleMatch &match,
-                      T parse);
+  void reuse_or_parse(const char *a_s, const Definition &rule, bool rule_has_id,
+                      bool needs_token, RuleMatch &match, T parse);
 
   // What a left-recursive rule matches at a position. Entered again where it
   // is being parsed, it gets the match found so far, its seed, and it is
@@ -3930,20 +4088,93 @@ inline void ErrorInfo::insert_start_failure(const StartFailure &failure,
   }
 }
 
+// Out of line, so that note() is small enough to be inlined.
+CPPPEGLIB_NOINLINE inline void ErrorInfo::remove_repeats() {
+  auto first = events_.begin() + static_cast<std::ptrdiff_t>(boundary_);
+  auto kept = first;
+  for (auto it = first; it != events_.end(); ++it) {
+    if (std::find(first, kept, *it) == kept) { *kept++ = *it; }
+  }
+  events_.erase(kept, events_.end());
+  remove_repeats_at_ = std::max(max_events_, 2 * (events_.size() - boundary_));
+}
+
+// The events of a memoized parse are named by the outermost token rule in
+// it, and the parse around it names them by its own, if it has one: they are
+// read under the outermost name given from outside.
 inline void ErrorInfo::resolve_expected_tokens() {
-  Expanded expanded;
-  for (const auto &e : events_) {
-    if (!e.choice) {
-      insert_start_failure(e.failure, e.rule, e.token_rule, expanded);
-      continue;
-    }
-    for (auto id = e.begin; id < e.end; id++) {
-      for (const auto &f : e.choice->first_sets()[id].failures) {
-        insert_start_failure(f, e.rule, e.token_rule, expanded);
-      }
+  // The spans of the memoized parses, nested. One still in progress spans to
+  // the end, and of two with the same span the one done later is around.
+  struct Span : Record {
+    std::vector<size_t> inner;
+  };
+  std::vector<Span> spans;
+  for (const auto &f : frames_) {
+    if (auto span = span_of(f); span.begin < span.end) {
+      spans.push_back({span, {}});
     }
   }
-  events_.clear();
+  std::vector<size_t> span_of_record(records_.size());
+  for (auto i = records_.size(); i-- > 0;) {
+    span_of_record[i] = spans.size();
+    spans.push_back({records_[i], {}});
+  }
+  std::vector<size_t> order;
+  for (size_t i = 0; i < spans.size(); i++) {
+    order.push_back(i);
+  }
+  std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+    return spans[a].begin != spans[b].begin ? spans[a].begin < spans[b].begin
+                                            : spans[a].end > spans[b].end;
+  });
+  std::vector<size_t> outermost, around;
+  for (auto i : order) {
+    while (!around.empty() && spans[around.back()].end <= spans[i].begin) {
+      around.pop_back();
+    }
+    (around.empty() ? outermost : spans[around.back()].inner).push_back(i);
+    around.push_back(i);
+  }
+
+  Expanded expanded;
+  // A span read again under the same token rule adds nothing.
+  std::vector<std::vector<const Definition *>> read_under(spans.size());
+  auto read = [&](auto &self, const std::vector<size_t> &inner, size_t begin,
+                  size_t end, const Definition *token_rule) -> void {
+    auto read_span = [&](size_t i, const Definition *t) {
+      auto &done = read_under[i];
+      if (std::find(done.begin(), done.end(), t) != done.end()) { return; }
+      done.push_back(t);
+      self(self, spans[i].inner, spans[i].begin, spans[i].end, t);
+    };
+    auto next = inner.begin();
+    for (auto i = begin; i < end;) {
+      if (next != inner.end() && spans[*next].begin == i) {
+        auto inner_span = *next++;
+        read_span(inner_span,
+                  token_rule ? token_rule : spans[inner_span].token_rule);
+        i = spans[inner_span].end;
+        continue;
+      }
+      const auto &e = events_[i++];
+      auto t = token_rule ? token_rule : e.token_rule;
+      switch (e.kind) {
+      case Kind::failure:
+        insert_start_failure(e.failure, e.rule, t, expanded);
+        break;
+      case Kind::skipped:
+        for (auto id = e.begin; id < e.end; id++) {
+          for (const auto &f : e.choice->first_sets()[id].failures) {
+            insert_start_failure(f, e.rule, t, expanded);
+          }
+        }
+        break;
+      case Kind::replay: read_span(span_of_record[e.record], t); break;
+      }
+    }
+  };
+  read(read, outermost, 0, events_.size(), nullptr);
+  next_generation();
 }
 
 inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
@@ -4292,7 +4523,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       (use.recognized == RuleUse::Recognized::always ||
        (use.recognized == RuleUse::Recognized::where_unread &&
         !vs.holds_rule_values_))) {
-    c.reuse_or_parse(s, n, *outer_, has_id, false, match,
+    c.reuse_or_parse(s, *outer_, has_id, false, match,
                      [&](Context::RuleMatch &m) {
                        m.len = parse_ope_body(s, n, c.unread_scope, c, dt);
                      });
@@ -4365,7 +4596,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   if (outer_->is_left_recursive) {
     c.reuse_or_grow(s, *this, match, do_parse);
   } else {
-    c.reuse_or_parse(s, n, *outer_, has_id, vs.holds_rule_tokens_, match,
+    c.reuse_or_parse(s, *outer_, has_id, vs.holds_rule_tokens_, match,
                      do_parse);
   }
 
@@ -5491,10 +5722,9 @@ inline void Definition::number_new_rules() const {
 }
 
 template <typename T>
-inline void Context::reuse_or_parse(const char *a_s, size_t n,
-                                    const Definition &rule, bool rule_has_id,
-                                    bool needs_token, RuleMatch &match,
-                                    T parse) {
+inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
+                                    bool rule_has_id, bool needs_token,
+                                    RuleMatch &match, T parse) {
   if (!rule_has_id) {
     auto key = LRKey(rule.holder_.get(), a_s);
     if (!in_progress.insert(key).second) {
@@ -5526,7 +5756,9 @@ inline void Context::reuse_or_parse(const char *a_s, size_t n,
       } else {
         match.len = kFail;
       }
-      note_untried(rule, a_s, n);
+      if (collects_expected_tokens()) {
+        error_info.replay(memo_key(*rule.holder_, a_s), token_rule());
+      }
       return;
     }
   }
@@ -5538,7 +5770,11 @@ inline void Context::reuse_or_parse(const char *a_s, size_t n,
     auto save = active_pos[def_id];
     active_pos[def_id] = a_s;
     auto se = scope_exit([&]() { active_pos[def_id] = save; });
-    parse(match);
+    if (slot >= 0) {
+      parse_memoized(*rule.holder_, a_s, [&]() { parse(match); });
+    } else {
+      parse(match);
+    }
   }
 
   if (slot < 0 || !makes_memo()) { return; }
@@ -5563,8 +5799,12 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
   auto skips_none = skips_no_whitespace();
   auto &memo = lr_memo[skips_none];
   if (auto it = memo.find(lr_key); it != memo.end()) {
-    match = it->second.match;
-    if (it->second.built_from != no_growth) { use_seed(it->second.built_from); }
+    const auto &m = it->second;
+    match = m.match;
+    if (m.built_from != no_growth) { use_seed(m.built_from); }
+    if (collects_expected_tokens()) {
+      error_info.replay(memo_key(rule, a_s), token_rule());
+    }
     return;
   }
 
@@ -5573,27 +5813,28 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
   auto pop = scope_exit([&]() { growing.pop_back(); });
   auto i = growing.size() - 1;
 
-  parse(match);
-  if (success(match.len)) {
-    growing[i].seed = std::move(match);
-    while (true) {
-      forget_built(i);
-      RuleMatch grown;
-      parse(grown);
-      if (!success(grown.len) || grown.len <= growing[i].seed.len) { break; }
-      growing[i].seed = std::move(grown);
+  parse_memoized(rule, a_s, [&]() {
+    parse(match);
+    if (success(match.len)) {
+      growing[i].seed = std::move(match);
+      while (true) {
+        forget_built(i);
+        RuleMatch grown;
+        parse(grown);
+        if (!success(grown.len) || grown.len <= growing[i].seed.len) { break; }
+        growing[i].seed = std::move(grown);
+      }
+      match = growing[i].seed;
     }
-    match = growing[i].seed;
-  }
-  forget_built(i);
+    forget_built(i);
+  });
+  if (!makes_memo()) { return; }
 
   // Confirmed, a failure too, so the rule is not seeded here again
-  if (makes_memo()) {
-    auto built_from = growing[i].built_from;
-    memo[lr_key] = {std::move(growing[i].seed), built_from};
-    if (built_from != no_growth) {
-      growing[built_from].built.emplace_back(lr_key, skips_none);
-    }
+  auto built_from = growing[i].built_from;
+  memo[lr_key] = {std::move(growing[i].seed), built_from};
+  if (built_from != no_growth) {
+    growing[built_from].built.emplace_back(lr_key, skips_none);
   }
 }
 

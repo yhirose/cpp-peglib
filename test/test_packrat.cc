@@ -753,5 +753,62 @@ TEST(PackratTest, Packrat_reports_a_failure_the_whitespace_met_first) {
   }
 }
 
+// Reports the error of parsing `input` with and without packrat parsing.
+static std::pair<std::string, std::string>
+errors_with_and_without_packrat(const std::string &grammar, const char *input) {
+  std::string errors[2];
+  for (auto packrat : {false, true}) {
+    parser pg(grammar);
+    EXPECT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      errors[packrat] =
+          std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+    EXPECT_FALSE(pg.parse(input));
+  }
+  return {errors[false], errors[true]};
+}
+
+// R fails first outside T, then inside it, where the error is named after T.
+// Reusing R's memo in T notes what parsing R again there would.
+TEST(PackratTest, Reused_memo_notes_its_failures_again) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S <- R 'x' / T
+    T <- < R 'y' >
+    R <- 'a' [b]
+  )",
+                                                          "ac");
+  EXPECT_EQ("1:2 syntax error, unexpected 'c', expecting <R>, <T>.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
+// A recovery reports the error with T's parse still in progress; R's failure
+// in it is named after T.
+TEST(PackratTest, Report_in_a_memoized_parse_names_its_token_rule) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S   <- T 'x' / T 'y'
+    T   <- < R 'a' / R 'b' >
+    R   <- 'c' [de]^Lbl
+    Lbl <- (!'a' .)*
+  )",
+                                                          "czax");
+  EXPECT_EQ("1:2 syntax error, unexpected 'zax', expecting <T>.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
+// A's parse fails at one position 300 times over, more than its notes are
+// kept without dropping repeats. J's failure among them is no repeat.
+TEST(PackratTest, Many_failures_at_one_position_in_a_memoized_parse) {
+  std::string grammar = "S <- A 'x' / A 'y'\nA <- 'a' (K '0' / J";
+  for (int i = 1; i < 300; i++) {
+    grammar += " / K '" + std::to_string(i) + "'";
+  }
+  grammar += ")\nJ <- 'b' 'd'\nK <- 'b' 'c'";
+  auto [plain, packrat] = errors_with_and_without_packrat(grammar, "abq");
+  EXPECT_EQ("1:3 syntax error, unexpected 'q', expecting 'c', 'd'.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
 // =============================================================================
 // Lookahead Predicate Tests

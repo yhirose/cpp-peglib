@@ -800,7 +800,7 @@ Error report and recovery
 
 cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
 
-The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Packrat parsing reuses a rule's earlier match or failure at the same position instead of trying the rule again. Where the next byte cannot begin a match of the rule, or at the end of the input, the reused result lists what trying the rule would; elsewhere it lists nothing more, so when a rule that a token rule uses has already failed there outside that token rule, the name of the token rule can be left out.
+The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Where packrat parsing or left recursion reuses a rule's earlier match or failure at the same position instead of trying the rule again, the reused result lists what trying the rule there would.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 
