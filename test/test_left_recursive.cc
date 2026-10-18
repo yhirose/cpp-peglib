@@ -1026,6 +1026,30 @@ TEST(LeftRecursionMacroTest, Nested_macro_in_the_cycle) {
   EXPECT_TRUE(p.parse("1+2+3"));
 }
 
+// Each macro in the chain grows inside the one that calls it, and is not grown
+// again at every level, so the work does not double with each macro.
+TEST(LeftRecursionMacroTest, Chain_of_macros_in_the_cycle_is_not_grown_again) {
+  auto last_entered = [](int length) {
+    std::string grammar = "S <- M1('x') / 'a'\n";
+    for (int i = 1; i < length; i++) {
+      grammar += "M" + std::to_string(i) + "(X) <- M" + std::to_string(i + 1) +
+                 "(X)\n";
+    }
+    auto last = "M" + std::to_string(length);
+    grammar += last + "(X) <- S X\n";
+
+    parser pg(grammar);
+    EXPECT_TRUE(!!pg) << length;
+    size_t entered = 0;
+    pg[last.c_str()].enter = [&](const Context &, const char *, size_t,
+                                 std::any &) { entered++; };
+    EXPECT_TRUE(pg.parse("axx")) << length;
+    return entered;
+  };
+
+  EXPECT_EQ(last_entered(4), last_entered(12));
+}
+
 TEST(LeftRecursionMacroTest, Packrat_parsing_agrees_with_plain_parsing) {
   auto grammar = R"(
         S      <- Sum(D) / Sum(L)
