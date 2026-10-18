@@ -907,12 +907,10 @@ struct FirstSet;
 
 // What fails where an expression cannot start: a failure of its own, of
 // `literal` if it is a literal, or what fails where `rule`, which it refers
-// to, cannot start. What fails in whitespace is not noted; it is listed for
-// the rules whitespace enters there.
+// to, cannot start.
 struct StartFailure {
   const char *literal = nullptr;
   const Definition *rule = nullptr;
-  bool in_whitespace = false;
 };
 
 // Thrown when a parse nests more rule matches than its start rule's
@@ -3340,10 +3338,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   // a different call context.
   using FirstSetCache = std::unordered_map<const Definition *, FirstSet>;
 
-  // `whitespace` is the first set of %whitespace, null where no whitespace
-  // is skipped.
-  ComputeFirstSet(FirstSetCache &cache, const FirstSet *whitespace)
-      : cache_(cache), whitespace_(whitespace) {}
+  explicit ComputeFirstSet(FirstSetCache &cache) : cache_(cache) {}
 
   FirstSet result_;
 
@@ -3357,25 +3352,12 @@ private:
   }
 
   // A literal, a token boundary and a no_whitespace rule skip whitespace
-  // after their match. When the match is empty, the whitespace comes first,
-  // and the rules it enters there are listed. Whitespace that cannot be empty
-  // makes what follows depend on whether it is skipped there, which it is not
-  // inside a token. (The match can be empty wherever this is called, so
-  // merging can_be_empty changes nothing.)
-  void add_whitespace() {
-    if (!whitespace_) { return; }
-    result_.merge(*whitespace_);
-    for (auto failure : whitespace_->failures) {
-      if (failure.rule) {
-        failure.in_whitespace = true;
-        result_.failures.push_back(failure);
-      }
-    }
-    if (!whitespace_->can_be_empty) { result_.any_char = true; }
-  }
+  // after their match. After an empty one, the whitespace can come first,
+  // and it is that of the rule the parse starts from, which need not be the
+  // grammar's.
+  void add_whitespace() { result_.any_char = true; }
 
   FirstSetCache &cache_;
-  const FirstSet *whitespace_;
   std::unordered_set<const Definition *> refs_;
   size_t cycle_count_ = 0;
 };
@@ -3383,22 +3365,11 @@ private:
 struct SetupFirstSets : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  // `whitespace` is the grammar's %whitespace operator, if any.
-  explicit SetupFirstSets(const std::shared_ptr<Ope> &whitespace = nullptr) {
-    if (whitespace) {
-      // Whitespace skips no whitespace inside itself.
-      ComputeFirstSet::FirstSetCache cache;
-      ComputeFirstSet cfs(cache, nullptr);
-      whitespace->accept(cfs);
-      whitespace_ = std::move(cfs.result_);
-    }
-  }
-
   void visit(PrioritizedChoice &ope) override {
     std::vector<FirstSet> first_sets;
     first_sets.reserve(ope.opes_.size());
     for (const auto &op : ope.opes_) {
-      ComputeFirstSet cfs(first_set_cache_, whitespace());
+      ComputeFirstSet cfs(first_set_cache_);
       op->accept(cfs);
       first_sets.push_back(std::move(cfs.result_));
     }
@@ -3417,11 +3388,6 @@ struct SetupFirstSets : public TraversalVisitor {
   void visit(Holder &ope) override;
 
 private:
-  const FirstSet *whitespace() const {
-    return whitespace_ ? &*whitespace_ : nullptr;
-  }
-
-  std::optional<FirstSet> whitespace_;
   ComputeFirstSet::FirstSetCache first_set_cache_;
   std::unordered_set<const Definition *> visited_rules_;
 };
@@ -3904,7 +3870,6 @@ inline void ErrorInfo::insert_start_failure(const StartFailure &failure,
                                             const Definition *rule,
                                             const Definition *token_rule,
                                             Expanded &expanded) {
-  if (failure.in_whitespace) { return; }
   if (!failure.rule) {
     insert_failure(failure.literal, rule, token_rule);
     return;
@@ -4985,7 +4950,7 @@ inline void SetupFirstSets::visit(Holder &ope) {
   if (!visited_rules_.insert(ope.outer_).second) { return; }
 
   auto &rule = *ope.outer_;
-  ComputeFirstSet cfs(first_set_cache_, whitespace());
+  ComputeFirstSet cfs(first_set_cache_);
   ope.ope_->accept(cfs);
   rule.first_set = std::move(cfs.result_);
   const auto &fs = rule.first_set;
@@ -6376,10 +6341,8 @@ struct GrammarBlob {
     if (g->count(WORD_DEFINITION_NAME)) {
       (*g)[start].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
     }
-    // After %whitespace: first sets count the whitespace skipped after an
-    // empty match.
     {
-      SetupFirstSets vis((*g)[start].whitespaceOpe); // shared -> O(N)
+      SetupFirstSets vis; // shared -> O(N)
       for (auto &x : *g)
         x.second.accept(vis);
     }
@@ -7445,7 +7408,7 @@ private:
     // each rule's first-sets are computed once (O(N)) instead of re-walking
     // every reachable rule once per referencing rule (O(N^2)).
     {
-      SetupFirstSets vis(start_rule.whitespaceOpe);
+      SetupFirstSets vis;
       for (auto &x : grammar) {
         x.second.accept(vis);
       }

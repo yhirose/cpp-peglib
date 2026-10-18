@@ -530,7 +530,7 @@ TEST(UnstartableRuleTest, Is_not_entered_for_an_ast_action_below_it) {
   parser pg(R"(
     S <- R? 'y'
     R <- E 'x'
-    E <- ''
+    E <- 'e'?
   )");
   ASSERT_TRUE(!!pg);
   pg.enable_ast(true);
@@ -645,7 +645,7 @@ TEST(NullabilityTest, Analyses_agree) {
     for (const auto &entry : pg.get_grammar()) {
       auto &rule = pg[entry.first.c_str()];
       ComputeFirstSet::FirstSetCache cache;
-      ComputeFirstSet first_set(cache, nullptr);
+      ComputeFirstSet first_set(cache);
       rule.accept(first_set);
       EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
           << entry.first << " in " << grammar;
@@ -799,6 +799,22 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
         R <- $x<'k'?> 'b' { error_message "got [%{x}]" }
       )",
        "qkb"},
+      {R"(
+        S <- [q] B [y] (B / 'z') 'w'
+        B <- '' 'x'
+        %whitespace <- [ ]*
+      )",
+       "q\txy\txw",
+       [](parser &pg) { pg["S"].whitespaceOpe = wsp(zom(cls("\t"))); }},
+      {R"(
+        S <- [q] B [y] (B / 'z') 'w'
+        B <- '' 'x'
+      )",
+       "q\txy\txw",
+       [](parser &pg) {
+         pg["S"].whitespaceOpe = wsp(zom(cls("\t")));
+         pg.enable_packrat_parsing();
+       }},
   };
   for (const auto &c : cases) {
     parser pg(c.grammar);
@@ -816,5 +832,22 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       if (i < c.input.size()) { check(std::string(c.input).erase(i, 1)); }
       check(std::string(c.input).insert(i, "?"));
     }
+  }
+}
+
+// A start rule made with combinators can skip whitespace other than the
+// grammar's.
+TEST(FirstSetTest, Whitespace_of_a_combinator_start_rule) {
+  for (auto whitespace : {"\n%whitespace <- [ ]*", ""}) {
+    auto grammar =
+        std::string("A <- [q] B [y] (B / 'z')\nB <- '' 'x'") + whitespace;
+    parser pg(grammar);
+    ASSERT_TRUE(!!pg) << grammar;
+    Definition S;
+    S <= pg["A"];
+    S.whitespaceOpe = wsp(zom(cls("\t")));
+    Log log = [](size_t, size_t, const std::string &, const std::string &) {};
+    EXPECT_TRUE(S.parse("q\txy\tx").ret) << grammar;
+    EXPECT_TRUE(S.parse("q\txy\tx", nullptr, log).ret) << grammar;
   }
 }
