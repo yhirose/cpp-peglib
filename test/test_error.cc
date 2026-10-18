@@ -975,6 +975,27 @@ TEST(CutTest, Label_after_cut_still_recovers) {
   EXPECT_EQ("expected 'b'", error_msg);
 }
 
+// A cut matches empty, so what follows it starts where the cut is.
+TEST(CutTest, Matches_empty) {
+  parser direct("R <- ↑ R / 'x'");
+  ASSERT_TRUE(direct);
+  EXPECT_TRUE(direct["R"].is_left_recursive);
+
+  // C is walked into once. The second C is judged by whether it can match
+  // empty.
+  parser through_a_rule("A <- C 'y' / C A / 'x'\nC <- ↑");
+  ASSERT_TRUE(through_a_rule);
+  EXPECT_TRUE(through_a_rule["A"].is_left_recursive);
+
+  // Used to recurse until the stack overflowed.
+  parser macro("S <- M('x')\nM(x) <- 'a' / ↑ !M('b')");
+  ASSERT_TRUE(macro);
+  EXPECT_FALSE(macro.parse("b"));
+
+  parser loop;
+  EXPECT_FALSE(loop.load_grammar("S <- (↑ / 'a')*"));
+}
+
 // =============================================================================
 // Recovery Operator Tests
 // =============================================================================

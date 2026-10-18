@@ -2864,7 +2864,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
   void visit(User &) override { done_ = true; }
   void visit(Reference &ope) override;
   void visit(BackReference &) override { done_ = true; }
-  void visit(Cut &) override { done_ = true; }
+  void visit(Cut &) override { done_ = false; }
 
   const char *error_s = nullptr;
 
@@ -2942,7 +2942,7 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result = false; }
-  void visit(Cut &) override { result = false; }
+  void visit(Cut &) override { result = true; }
 };
 
 // Structural signature of an Ope. Two alternatives whose first k elements
@@ -3068,6 +3068,7 @@ struct HasEmptyElement : public TraversalVisitor {
   }
   void visit(AndPredicate &) override { set_error(); }
   void visit(NotPredicate &) override { set_error(); }
+  void visit(Cut &) override { set_error(); }
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) { set_error(); }
   }
