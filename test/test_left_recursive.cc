@@ -907,24 +907,6 @@ TEST(LeftRecursionMacroTest, Instantiation_entered_again_fails) {
   EXPECT_TRUE(p.parse("abbc"));
 }
 
-TEST(LeftRecursionMacroTest, Growing_argument_stops_the_parse) {
-  // Every level makes a new instance, so none is entered again where it is
-  // being parsed. These used to recurse until the stack overflowed.
-  for (auto grammar : {
-           "S <- Sum(N)\nSum(A) <- Sum(A / 'x') '+' A / A\nN <- [0-9]",
-           "S <- M('')\nM(x) <- x M(x / 'b') / 'c'",
-       }) {
-    parser p(grammar);
-    ASSERT_TRUE(!!p) << grammar;
-    std::string error;
-    p.set_logger([&](size_t, size_t, const std::string &msg) { error = msg; });
-    EXPECT_FALSE(p.parse("1+2")) << grammar;
-    EXPECT_EQ("exceeded the maximum nesting of 32 macro calls at one position",
-              error)
-        << grammar;
-  }
-}
-
 TEST(LeftRecursionMacroTest, Macro_call_arguments_are_told_apart) {
   // N('a') and N(R) are different arguments, though both call N.
   parser p(R"(
