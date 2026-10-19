@@ -1697,7 +1697,7 @@ public:
 
   // Whether a rule that cannot start with the next byte may fail without
   // being entered, noting what entering it would. It is entered all the same
-  // for a tracer to see it and for a nesting limit to count it.
+  // for a tracer to see it.
   bool skips_rules = false;
 
   // Until the returned guard goes, neither the values nor the tokens of
@@ -4002,7 +4002,7 @@ private:
     c.rule_use = uses->by_id.data();
 
     c.max_depth = max_depth;
-    c.skips_rules = !c.has_tracer && !c.limits_depth() && takes_shortcuts();
+    c.skips_rules = !c.has_tracer && takes_shortcuts();
     c.notices_skipping = c.reports_errors || c.limits_depth();
     c.checks_alternatives = c.notices_skipping && uses->some_must_be_tried;
 

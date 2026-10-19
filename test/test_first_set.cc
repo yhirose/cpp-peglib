@@ -387,7 +387,9 @@ TEST(UnstartableRuleTest,
   EXPECT_EQ("no y", message);
 }
 
-TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
+// A is not entered where it cannot start, so it counts no level, with or
+// without a logger.
+TEST(UnstartableRuleTest, Is_not_entered_with_a_nesting_limit) {
   parser pg(R"(
     S <- B
     B <- A? 'x'
@@ -395,9 +397,10 @@ TEST(UnstartableRuleTest, Is_entered_with_a_nesting_limit) {
   )");
   ASSERT_TRUE(!!pg);
 
-  // Trying A goes one level past the limit, with or without a logger.
   pg.set_max_depth(2);
-  EXPECT_FALSE(pg.parse("x"));
+  EXPECT_TRUE(pg.parse("x"));
+  pg.set_logger([](size_t, size_t, const std::string &) {});
+  EXPECT_TRUE(pg.parse("x"));
 }
 
 TEST(FirstSetTest, Left_recursive_alternative_is_tried_with_a_nesting_limit) {
