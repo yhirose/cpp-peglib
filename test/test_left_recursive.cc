@@ -1184,28 +1184,50 @@ TEST(LeftRecursionTest, Seed_grown_in_a_token_is_not_reused_outside) {
   }
 }
 
-// Q recurses into itself inside its own token, and grows the seed of the
-// match outside it.
-TEST(LeftRecursionTest, Recursion_into_a_token_grows_the_outer_seed) {
+// Q calls itself inside its own token, where no whitespace is skipped. That
+// call grows on its own there, not Q's match outside, whose recursive
+// alternative is then one more growth step, which fails. A rule of its own
+// for the recursion parses what it means. Without whitespace, Q grows.
+TEST(LeftRecursionTest, Recursion_into_its_own_token_grows_only_inside) {
   for (auto packrat : {false, true}) {
-    parser pg(R"(
+    parser q(R"(
       S <- Q ';'
       Q <- < Q '.' I / I >
       I <- [a-z]+
       %whitespace <- [ ]*
     )");
-    ASSERT_TRUE(!!pg);
-    if (packrat) { pg.enable_packrat_parsing(); }
+    parser body(R"(
+      S     <- Q ';'
+      Q     <- < QBody >
+      QBody <- QBody '.' I / I
+      I     <- [a-z]+
+      %whitespace <- [ ]*
+    )");
+    parser no_whitespace(R"(
+      S <- Q ';'
+      Q <- < Q '.' I / I >
+      I <- [a-z]+
+    )");
+    ASSERT_TRUE(q && body && no_whitespace);
+    if (packrat) {
+      q.enable_packrat_parsing();
+      body.enable_packrat_parsing();
+      no_whitespace.enable_packrat_parsing();
+    }
 
-    EXPECT_TRUE(pg.parse("a.b.c;")) << packrat;
-    EXPECT_TRUE(pg.parse("a.b.c ;")) << packrat;
+    EXPECT_FALSE(q.parse("a.b.c;")) << packrat;
+    EXPECT_FALSE(q.parse("a .b;")) << packrat;
+    EXPECT_TRUE(body.parse("a.b.c;")) << packrat;
+    EXPECT_TRUE(body.parse("a.b.c ;")) << packrat;
+    EXPECT_FALSE(body.parse("a .b;")) << packrat;
+    EXPECT_TRUE(no_whitespace.parse("a.b.c;")) << packrat;
   }
 }
 
-// While A grows outside a token, T and B match inside one from A's seed.
-// Those matches belong to no parse inside a token, where A skips no
-// whitespace, so they must be gone when U parses A there: whether A was
-// parsed outside first does not change U's token.
+// A grows outside a token and, through T, inside one at the same position,
+// where no whitespace is skipped. What T and B match there belongs to the
+// parse inside the token, so whether A was parsed outside first does not
+// change U's token.
 TEST(LeftRecursionTest, Match_from_a_seed_grown_outside_a_token_is_not_kept) {
   for (std::string first : {"", "A 'q' / "}) {
     parser pg("S <- (" + first + R"(U) .*

@@ -730,22 +730,131 @@ TEST(PackratTest, Packrat_agrees_where_an_instance_is_entered_again) {
   }
 }
 
-// R enters itself at the same position through the whitespace its empty
-// literal skips, where no whitespace is skipped. That fails, with packrat as
-// without it, however the memo keeps the two places apart.
-TEST(PackratTest, Packrat_reentry_through_the_whitespace_fails) {
-  for (auto packrat : {false, true}) {
-    parser pg(R"(
-      S <- [c] T
-      T <- R 'z' / R
-      R <- '' 'a' / 'b'
-      %whitespace <- R?
-    )");
-    ASSERT_TRUE(!!pg);
-    if (packrat) { pg.enable_packrat_parsing(); }
+// Z calls itself through M(X)'s token, which left recursion detection does
+// not see. Its call inside the token, where no whitespace is skipped, is
+// apart from the one outside, for the reentry guard as for the memos, so
+// packrat parsing agrees.
+TEST(PackratTest, Packrat_agrees_where_a_rule_calls_itself_in_a_token) {
+  auto grammar = R"(
+    S    <- [a] (< X > 'q' / < X > 'r' / Z)
+    X    <- Z
+    Z    <- M(Q) 'y' / !('' ' ') M(X) / ' ' 'k'
+    Q    <- 'q'
+    M(x) <- N(x 'a') / 'm'
+    N(y) <- < y >
+    %whitespace <- [ ]*
+  )";
+  parser off(grammar), on(grammar);
+  ASSERT_TRUE(off && on);
+  on.enable_packrat_parsing();
 
-    EXPECT_TRUE(pg.parse("ca")) << packrat;
-    EXPECT_TRUE(pg.parse("caz")) << packrat;
+  EXPECT_EQ(off.parse("a ka"), on.parse("a ka"));
+  EXPECT_TRUE(off.parse("a ka"));
+}
+
+// A rule may match differently where no whitespace is skipped, in a token, a
+// no_whitespace rule or the whitespace, so a call of it there is a call of
+// its own. Each grammar parses as the one written out per context without
+// %whitespace, where a rule used there has a copy, R_n, that skips none.
+TEST(PackratTest, Whitespace_contexts_parse_as_written_out_per_context) {
+  struct {
+    const char *grammar;
+    const char *written_out;
+    std::string prefix;
+    std::string alphabet;
+    size_t max_len;
+  } cases[] = {
+      {R"(S <- 'p' L !.
+          L <- L 'a' / N 'b' / 'k'
+          N <- '' 'x'
+          %whitespace <- (' ' / W)*
+          W <- L '!')",
+       R"(S0  <- WS S
+          S   <- 'p' WS L !.
+          L   <- L 'a' WS / N 'b' WS / 'k' WS
+          N   <- '' WS 'x' WS
+          WS  <- (' ' / W_n)*
+          W_n <- L_n '!'
+          L_n <- L_n 'a' / N_n 'b' / 'k'
+          N_n <- '' 'x')",
+       "pk", " !xb", 4},
+      {R"(S <- [c] (< Y > 'q' / < Y > 'r' / X)
+          X <- '' 'x' / 'b'
+          Y <- X 'y'?
+          %whitespace <- Y?)",
+       R"(S0  <- WS S
+          S   <- [c] (< Y_n > WS 'q' WS / < Y_n > WS 'r' WS / X)
+          X   <- '' WS 'x' WS / 'b' WS
+          X_n <- '' 'x' / 'b'
+          Y_n <- X_n 'y'?
+          WS  <- Y_n?)",
+       "c", "xbyqr ", 3},
+      {R"(S <- Q ';'
+          Q <- < Q '.' I / I >
+          I <- [a-b]+
+          %whitespace <- [ ]*)",
+       R"(S0  <- WS S
+          S   <- Q ';' WS
+          Q   <- < Q_n '.' I / I > WS
+          Q_n <- < Q_n '.' I / I >
+          I   <- [a-b]+
+          WS  <- [ ]*)",
+       "", "a. ;", 4},
+      {R"(S <- Path ';'
+          Path <- Path '.' Name / Name { no_whitespace }
+          Name <- [a-b]+
+          %whitespace <- [ ]*)",
+       R"(S0     <- WS S
+          S      <- Path ';' WS
+          Path   <- (Path_n '.' Name / Name) WS
+          Path_n <- Path_n '.' Name / Name
+          Name   <- [a-b]+
+          WS     <- [ ]*)",
+       "", "a. ;", 4},
+      // R calls itself through the whitespace at the same position.
+      {R"(S <- [c] T
+          T <- R 'z' / R
+          R <- '' 'a' / 'b'
+          %whitespace <- R?)",
+       R"(S0  <- WS S
+          S   <- [c] T
+          T   <- R 'z' WS / R
+          R   <- '' WS 'a' WS / 'b' WS
+          R_n <- '' 'a' / 'b'
+          WS  <- R_n?)",
+       "c", "abz", 4},
+      // A macro instance, as a rule.
+      {R"(S <- [c] M(A)
+          M(x) <- '' x / 'b'
+          A <- 'a'
+          %whitespace <- M(A)?)",
+       R"(S0   <- WS S
+          S    <- [c] MA
+          MA   <- '' WS 'a' WS / 'b' WS
+          MA_n <- '' 'a' / 'b'
+          WS   <- MA_n?)",
+       "c", "ab", 4},
+  };
+  for (const auto &c : cases) {
+    std::vector<std::string> inputs{c.prefix};
+    for (size_t i = 0; i < inputs.size(); i++) {
+      if (inputs[i].size() < c.prefix.size() + c.max_len) {
+        for (auto ch : c.alphabet) {
+          inputs.push_back(inputs[i] + ch);
+        }
+      }
+    }
+    parser off(c.grammar), on(c.grammar), ref(c.written_out);
+    ASSERT_TRUE(off && on && ref) << c.grammar;
+    on.enable_packrat_parsing();
+
+    std::string differs;
+    for (const auto &in : inputs) {
+      auto expected = ref.parse(in);
+      if (off.parse(in) != expected) { differs += "[" + in + "]"; }
+      if (on.parse(in) != expected) { differs += "[" + in + " packrat]"; }
+    }
+    EXPECT_EQ("", differs) << c.grammar;
   }
 }
 

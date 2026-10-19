@@ -356,7 +356,7 @@ Whitespace is skipped at exactly these points, and nowhere else:
 2. right after every matched literal string (`'...'`, `"..."`), dictionary (`'...' | '...'`) and back reference (`$name`)
 3. right after every closed token boundary (`<` ... `>`) and every match of a `{ no_whitespace }` rule
 
-Inside a token boundary, whitespace skipping is completely disabled. Character classes (`[...]`) and `.` never skip whitespace by themselves. Knowing these rules explains most surprises with `%whitespace`:
+Inside a token boundary, whitespace skipping is completely disabled. A rule used where no whitespace is skipped, in a token boundary, a `{ no_whitespace }` rule or the whitespace itself, is parsed there apart from its uses elsewhere. Character classes (`[...]`) and `.` never skip whitespace by themselves. Knowing these rules explains most surprises with `%whitespace`:
 
 **A rule made only of character classes doesn't skip trailing whitespace.** ([#327](https://github.com/yhirose/cpp-peglib/issues/327)) With the grammar below, `main()` parses but `main ()` doesn't, because `NAME` is not a token, so nothing skips the space after it. Wrap lexical rules in a token boundary.
 
@@ -619,6 +619,8 @@ Whether a macro is left recursive is decided from its body alone, taking its par
 Detection follows a chain of macros whose bodies call the next one 32 levels deep. Macros nested in arguments, as in `Sum(Sum(Digit))`, do not count toward it. Past that depth a rule is silently taken to be not left recursive, and its left-recursive alternative then fails instead of growing a seed.
 
 A *left-recursive* macro whose own recursive call wraps its parameter in a larger expression, as in `Sum(A) <- Sum(A / 'x') '+' A / A`, has a limit at parse time: it builds a new argument at every level, so no two levels share an instantiation and the seed memo never recognises the recursion. Pass the parameter through unchanged (`Sum(A)`) in the recursive call; wrapping it is fine for a call to some *other*, non-left-recursive macro.
+
+With `%whitespace`, a rule that calls itself inside its own token boundary, as `Q <- < Q '.' I / I >` does, grows only inside it, apart from its match outside (see [How `%whitespace` works exactly](#how-whitespace-works-exactly)), so `Q` matches a single `I`. Put the recursion in a rule of its own: `Q <- < QBody >` with `QBody <- QBody '.' I / I`. The same holds for a `{ no_whitespace }` rule.
 
 Left recursion support is enabled by default and adds zero overhead to non-left-recursive grammars. To disable it (reverting to the traditional error on left-recursive rules), call `enable_left_recursion(false)` before loading the grammar:
 

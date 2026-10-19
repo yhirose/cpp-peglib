@@ -48,6 +48,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -927,6 +928,25 @@ inline size_t mix_index(size_t key) {
   return static_cast<size_t>(h ^ (h >> 32));
 }
 
+// A call of a rule: the body it parses (a macro has one per instance), where
+// it starts, and whether whitespace is skipped there. A rule may match
+// differently where none is, so whatever stands for a call, a memo, a seed
+// or a rule being parsed, is kept by all three.
+struct RuleCall {
+  const Holder *rule = nullptr;
+  const char *pos = nullptr;
+  bool skips_no_whitespace = false;
+
+  bool operator==(const RuleCall &c) const {
+    return pos == c.pos && rule == c.rule &&
+           skips_no_whitespace == c.skips_no_whitespace;
+  }
+  bool operator<(const RuleCall &c) const {
+    return std::tie(pos, rule, skips_no_whitespace) <
+           std::tie(c.pos, c.rule, c.skips_no_whitespace);
+  }
+};
+
 struct ErrorInfo {
   const char *error_pos = nullptr;
   std::vector<std::pair<const char *, const Definition *>> expected_tokens;
@@ -981,19 +1001,6 @@ struct ErrorInfo {
     note({Kind::skipped, {}, rule, token_rule, choice, begin, end, 0});
   }
 
-  // A memo: the body of the rule it holds a match of, where the match starts,
-  // and whether whitespace is skipped after a match there.
-  struct MemoKey {
-    const Holder *rule;
-    const char *pos;
-    bool skips_no_whitespace;
-
-    bool operator==(const MemoKey &k) const {
-      return rule == k.rule && pos == k.pos &&
-             skips_no_whitespace == k.skips_no_whitespace;
-    }
-  };
-
   // What a parse whose match is memoized notes is kept with the memo, so
   // that reusing the memo notes it again, as parsing the rule again would.
   // It is kept from where the parse began, as a record of this generation:
@@ -1006,7 +1013,7 @@ struct ErrorInfo {
 
   // What the innermost memoized parse noted is kept for its memo, `key`,
   // in place of what a parse of a memo made before with the same key kept.
-  void close_frame(const MemoKey &key) {
+  void close_frame(const RuleCall &key) {
     auto span = span_of(frames_.back());
     frames_.pop_back();
     boundary_ = events_.size();
@@ -1021,7 +1028,7 @@ struct ErrorInfo {
 
   // Notes again what was kept for the memo `key`, under `token_rule` if
   // there is one.
-  void replay(const MemoKey &key, const Definition *token_rule) {
+  void replay(const RuleCall &key, const Definition *token_rule) {
     if (record_slots_.empty()) { return; }
     const auto &slot = record_slots_[slot_of(key)];
     if (slot.generation == generation_ && slot.record != no_record) {
@@ -1108,7 +1115,7 @@ private:
   // generation is free: its record has gone.
   static constexpr size_t no_record = static_cast<size_t>(-1);
   struct RecordSlot {
-    MemoKey key;
+    RuleCall key;
     size_t record;
     size_t generation;
   };
@@ -1116,7 +1123,7 @@ private:
   size_t indexed_ = 0; // slots of this generation
 
   // The slot of `key` in this generation, or the free one it would take.
-  size_t slot_of(const MemoKey &key) const {
+  size_t slot_of(const RuleCall &key) const {
     auto mask = record_slots_.size() - 1;
     auto i = mix_index(reinterpret_cast<uintptr_t>(key.pos) * 31 +
                        reinterpret_cast<uintptr_t>(key.rule) +
@@ -1129,7 +1136,7 @@ private:
     return i;
   }
 
-  void keep_record(const MemoKey &key, size_t record) {
+  void keep_record(const RuleCall &key, size_t record) {
     if ((indexed_ + 1) * 2 > record_slots_.size()) {
       auto old = std::move(record_slots_);
       record_slots_.assign(old.empty() ? 16 : old.size() * 2,
@@ -1420,8 +1427,8 @@ public:
 
   // No whitespace is skipped after a match in a token, a no_whitespace rule
   // or the whitespace, so a rule may match differently there than at the
-  // same position elsewhere. The memos keep matches from the two places
-  // apart. Only a parse with whitespace has the two.
+  // same position elsewhere, and a call of it there is one of its own
+  // (RuleCall). Only a parse with whitespace sets this.
   bool skips_no_whitespace = false;
 
   std::shared_ptr<Ope> wordOpe;
@@ -1458,31 +1465,25 @@ public:
   };
 
   // Left recursion support
-  // A rule by the body it parses: a macro has one per instance, and two
-  // instances of the same macro grow independent seeds.
-  using LRRule = const Holder *;
-  using LRKey = std::pair<LRRule, const char *>;
-
-  // Rules being parsed. A rule with an id only needs its innermost start,
-  // since a nested call never starts before its caller. A rule without one
-  // is kept by its body and start.
-  std::vector<const char *> active_pos;
-  std::set<LRKey> in_progress;
+  // Rules being parsed, by skips_no_whitespace. A rule with an id only needs
+  // its innermost start there, since a nested call never starts before its
+  // caller. A rule without one is kept by its calls.
+  std::vector<const char *> active_pos[2];
+  std::set<RuleCall> in_progress;
 
   // A memo stands in for parsing the rule again, the failures it notes
   // included. The whitespace notes no failure, so a parse in it makes no
   // memo, though it reuses those of the tokens.
   bool makes_memo() const { return !in_whitespace; }
 
-  ErrorInfo::MemoKey memo_key(const Holder &rule, const char *a_s) const {
+  RuleCall call_of(const Holder &rule, const char *a_s) const {
     return {&rule, a_s, skips_no_whitespace};
   }
 
-  // Parses what the memo of `rule` at `a_s` will hold, and keeps what the
-  // parse notes with the memo (ErrorInfo::open_frame) if it makes one. In
-  // the parse, a failure is named by the outermost token rule in it.
-  template <typename T>
-  void parse_memoized(const Holder &rule, const char *a_s, T parse) {
+  // Parses what the memo of `call` will hold, and keeps what the parse notes
+  // with the memo (ErrorInfo::open_frame) if it makes one. In the parse, a
+  // failure is named by the outermost token rule in it.
+  template <typename T> void parse_memoized(const RuleCall &call, T parse) {
     auto keeps = reports_errors && makes_memo();
     auto outer = outer_token_rule;
     if (keeps) {
@@ -1492,20 +1493,20 @@ public:
     parse();
     if (keeps) {
       outer_token_rule = outer;
-      error_info.close_frame(memo_key(rule, a_s));
+      error_info.close_frame(call);
     }
   }
 
   static constexpr size_t no_growth = static_cast<size_t>(-1);
 
-  // Confirmed matches of left-recursive rules, by skips_no_whitespace. One
-  // built from the seed of a rule growing around it, growing[built_from],
-  // goes when that seed changes or stops growing.
+  // Confirmed matches of left-recursive rules. One built from the seed of a
+  // rule growing around it, growing[built_from], goes when that seed changes
+  // or stops growing.
   struct LRMemo {
     RuleMatch match;
     size_t built_from;
   };
-  std::map<LRKey, LRMemo> lr_memo[2];
+  std::map<RuleCall, LRMemo> lr_memo;
 
   // The left-recursive rules growing their seeds, innermost last. A rule
   // parsed inside another starts at or after it, so the ones growing where
@@ -1513,19 +1514,18 @@ public:
   // in its cycle, which left recursion detection marks, so only the matches
   // of left-recursive rules are taken to be built from a seed.
   struct Growth {
-    LRKey key;
+    RuleCall call;
     RuleMatch seed;
     // The innermost growth around this one whose seed its parse used.
     size_t built_from;
-    // The confirmed matches built from this seed, by skips_no_whitespace.
-    std::vector<std::pair<LRKey, bool>> built;
+    // The confirmed matches built from this seed.
+    std::vector<RuleCall> built;
   };
   std::vector<Growth> growing;
 
-  size_t growth_of(const LRKey &key) const {
-    for (auto i = growing.size();
-         i-- > 0 && growing[i].key.second == key.second;) {
-      if (growing[i].key.first == key.first) { return i; }
+  size_t growth_of(const RuleCall &call) const {
+    for (auto i = growing.size(); i-- > 0 && growing[i].call.pos == call.pos;) {
+      if (growing[i].call == call) { return i; }
     }
     return no_growth;
   }
@@ -1539,8 +1539,8 @@ public:
   }
 
   void forget_built(size_t i) {
-    for (const auto &[key, skips_none] : growing[i].built) {
-      lr_memo[skips_none].erase(key);
+    for (const auto &call : growing[i].built) {
+      lr_memo.erase(call);
     }
     growing[i].built.clear();
   }
@@ -1552,8 +1552,9 @@ public:
   // arguments (`M(s) <- M(s / 'x')`) to be freed recursively at once.
   struct Instance {
     const Holder *body = nullptr;
-    // Where it is being parsed, unless it is left-recursive.
-    const char *active_pos = nullptr;
+    // Where it is being parsed, by skips_no_whitespace, unless it is
+    // left-recursive.
+    const char *active_pos[2] = {};
   };
   Instance &instance(const Reference &call);
   std::vector<std::shared_ptr<Holder>> instances;
@@ -1704,10 +1705,12 @@ public:
                       : nullptr),
         cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
                                           : 0),
-        active_pos(def_count, nullptr), tracer_enter(tracer_enter),
-        tracer_leave(tracer_leave), has_tracer(tracer_enter && tracer_leave),
-        trace_data(trace_data), verbose_trace(verbose_trace), log(log),
-        error_reporter(error_reporter), reports_errors(log || error_reporter),
+        active_pos{std::vector<const char *>(def_count),
+                   std::vector<const char *>(def_count)},
+        tracer_enter(tracer_enter), tracer_leave(tracer_leave),
+        has_tracer(tracer_enter && tracer_leave), trace_data(trace_data),
+        verbose_trace(verbose_trace), log(log), error_reporter(error_reporter),
+        reports_errors(log || error_reporter),
         needs_rule_stack(tracer_enter || tracer_leave || reports_errors),
         unread_scope(this) {
     unread_scope.path = path;
@@ -4670,14 +4673,15 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
     if (rule_->is_left_recursive) { return inst.body->parse(s, n, vs, c, dt); }
     // Left recursion that detection missed enters it again where it is being
     // parsed. It fails there, as a rule does (Context::reuse_or_parse).
-    if (inst.active_pos == s) {
+    auto &active = inst.active_pos[c.skips_no_whitespace];
+    if (active == s) {
       c.stop_packrat_parsing();
       return kFail;
     }
     // No scope_exit: an exception abandons the Context.
-    auto save = std::exchange(inst.active_pos, s);
+    auto save = std::exchange(active, s);
     auto len = inst.body->parse(s, n, vs, c, dt);
-    inst.active_pos = save;
+    active = save;
     return len;
   }
 
@@ -5698,20 +5702,21 @@ template <typename T>
 inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
                                     bool rule_has_id, bool needs_token,
                                     RuleMatch &match, T parse) {
+  auto call = call_of(*rule.holder_, a_s);
   if (!rule_has_id) {
-    auto key = LRKey(rule.holder_.get(), a_s);
-    if (!in_progress.insert(key).second) {
+    if (!in_progress.insert(call).second) {
       stop_packrat_parsing();
       match.len = kFail;
       return;
     }
-    auto se = scope_exit([&]() { in_progress.erase(key); });
+    auto se = scope_exit([&]() { in_progress.erase(call); });
     parse(match);
     return;
   }
 
   auto def_id = rule.id;
-  if (active_pos[def_id] == a_s) {
+  auto &active = active_pos[skips_no_whitespace][def_id];
+  if (active == a_s) {
     stop_packrat_parsing();
     match.len = kFail;
     return;
@@ -5731,9 +5736,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
       } else {
         match.len = kFail;
       }
-      if (collects_expected_tokens()) {
-        error_info.replay(memo_key(*rule.holder_, a_s), token_rule());
-      }
+      if (collects_expected_tokens()) { error_info.replay(call, token_rule()); }
       return;
     }
   }
@@ -5742,11 +5745,10 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
   }
 
   {
-    auto save = active_pos[def_id];
-    active_pos[def_id] = a_s;
-    auto se = scope_exit([&]() { active_pos[def_id] = save; });
+    auto save = std::exchange(active, a_s);
+    auto se = scope_exit([&]() { active = save; });
     if (slot >= 0) {
-      parse_memoized(*rule.holder_, a_s, [&]() { parse(match); });
+      parse_memoized(call, [&]() { parse(match); });
     } else {
       parse(match);
     }
@@ -5764,31 +5766,27 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 template <typename T>
 inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
                                    RuleMatch &match, T parse) {
-  auto lr_key = LRKey(&rule, a_s);
+  auto call = call_of(rule, a_s);
 
-  if (auto i = growth_of(lr_key); i != no_growth) {
+  if (auto i = growth_of(call); i != no_growth) {
     match = growing[i].seed;
     use_seed(i);
     return;
   }
-  auto skips_none = skips_no_whitespace;
-  auto &memo = lr_memo[skips_none];
-  if (auto it = memo.find(lr_key); it != memo.end()) {
+  if (auto it = lr_memo.find(call); it != lr_memo.end()) {
     const auto &m = it->second;
     match = m.match;
     if (m.built_from != no_growth) { use_seed(m.built_from); }
-    if (collects_expected_tokens()) {
-      error_info.replay(memo_key(rule, a_s), token_rule());
-    }
+    if (collects_expected_tokens()) { error_info.replay(call, token_rule()); }
     return;
   }
 
   // The seed starts as a failure. Held by index: growing grows in the parse.
-  growing.push_back({lr_key, RuleMatch(), no_growth, {}});
+  growing.push_back({call, RuleMatch(), no_growth, {}});
   auto pop = scope_exit([&]() { growing.pop_back(); });
   auto i = growing.size() - 1;
 
-  parse_memoized(rule, a_s, [&]() {
+  parse_memoized(call, [&]() {
     parse(match);
     if (success(match.len)) {
       growing[i].seed = std::move(match);
@@ -5807,10 +5805,8 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
 
   // Confirmed, a failure too, so the rule is not seeded here again
   auto built_from = growing[i].built_from;
-  memo[lr_key] = {std::move(growing[i].seed), built_from};
-  if (built_from != no_growth) {
-    growing[built_from].built.emplace_back(lr_key, skips_none);
-  }
+  lr_memo[call] = {std::move(growing[i].seed), built_from};
+  if (built_from != no_growth) { growing[built_from].built.push_back(call); }
 }
 
 // Compute which rules benefit from packrat memoization.
