@@ -1065,6 +1065,30 @@ TEST(RecoveryTest, Recovery_with_AST) {
   EXPECT_GT(error_count, 0);
 }
 
+// %recover takes one expression. A slip in what was meant as that expression
+// is a syntax error where the slip is, as in a macro call, not a complaint
+// about the count.
+TEST(RecoveryTest, Recover_takes_one_expression) {
+  struct Case {
+    const char *grammar;
+    const char *error;
+  };
+  for (const auto &[grammar, error] : std::initializer_list<Case>{
+           {"S <- 'x' / %recover\n", "1:12 incorrect number of arguments."},
+           {"S <- 'x' / %recover('a', 'b')\n",
+            "1:12 incorrect number of arguments."},
+           {"S <- 'x' / %recover(T})\nT <- 'y'\n", "1:22 syntax error"},
+       }) {
+    parser pg;
+    std::string message;
+    pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+      message = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
+    });
+    EXPECT_FALSE(pg.load_grammar(grammar)) << grammar;
+    EXPECT_EQ(error, message) << grammar;
+  }
+}
+
 // =============================================================================
 // Structured Error Report Tests (ErrorReporter / %{name} placeholder)
 // =============================================================================

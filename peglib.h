@@ -2696,16 +2696,27 @@ private:
   }
 };
 
+// `%recover(ope)`, and `^label` for `%recover(label)`: where the expression
+// it follows fails, it reports the error, with the message of the rule `ope`
+// refers to if any, and skips what `ope` matches.
 class Recovery : public Ope {
 public:
-  Recovery(const std::shared_ptr<Ope> &ope) : ope_(ope) {}
+  Recovery(const std::shared_ptr<Ope> &ope)
+      : ope_(ope), label_(dynamic_cast<const Reference *>(ope.get())) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
 
   void accept(Visitor &v) override;
 
+  // The rule a `^label` names, which gives the message, if `ope_` refers to
+  // one.
+  const Definition *label() const { return label_ ? label_->rule_ : nullptr; }
+
   std::shared_ptr<Ope> ope_;
+
+private:
+  const Reference *label_;
 };
 
 class Cut : public Ope {
@@ -3086,6 +3097,11 @@ struct DetectLeftRecursion : public TraversalVisitor {
   void visit(WeakHolder &ope) override;
   void visit(BackReference &) override { done_ = true; }
   void visit(Cut &) override { done_ = false; }
+  // See ComputeCanBeEmpty.
+  void visit(Recovery &ope) override {
+    ope.ope_->accept(*this);
+    if (!error_s) { done_ = true; }
+  }
 
   const char *error_s = nullptr;
 
@@ -3165,6 +3181,10 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   void visit(Reference &ope) override;
   void visit(BackReference &) override { result = false; }
   void visit(Cut &) override { result = true; }
+  // A recovery only matches after an error, and a repetition ends on an
+  // empty match, so the checks made when a grammar is loaded take it to
+  // consume input.
+  void visit(Recovery &) override { result = false; }
 };
 
 // Structural signature of an Ope. Two alternatives whose first k elements
@@ -3293,6 +3313,8 @@ struct HasEmptyElement : public TraversalVisitor {
     if (ope.lit_.empty()) { set_error(); }
   }
   void visit(Reference &ope) override;
+  // See ComputeCanBeEmpty.
+  void visit(Recovery &) override {}
 
   bool is_empty = false;
   const char *error_s = nullptr;
@@ -4843,16 +4865,12 @@ inline size_t PrecedenceClimbing::parse_expression(
 inline size_t Recovery::parse_core(const char *s, size_t n,
                                    SemanticValues & /*vs*/, Context &c,
                                    std::any & /*dt*/) const {
-  const auto &rule = dynamic_cast<Reference &>(*ope_);
-  const auto *label = dynamic_cast<Reference *>(rule.args_[0].get());
+  const auto *label = this->label();
 
   // Custom error message
-  if (c.reports_errors) {
-    if (label && !label->rule_->error_message.empty()) {
-      c.error_info.set_message(
-          s, resolve_capture_placeholders(label->rule_->error_message, c),
-          label->rule_->name);
-    }
+  if (c.reports_errors && label && !label->error_message.empty()) {
+    c.error_info.set_message(
+        s, resolve_capture_placeholders(label->error_message, c), label->name);
   }
 
   // Recovery
@@ -4864,7 +4882,9 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     SemanticValues dummy_vs;
     std::any dummy_dt;
 
-    len = rule.parse(s, n, dummy_vs, c, dummy_dt);
+    Context::TraceMute mute(c);
+    auto unread = c.unread_in(dummy_vs);
+    len = ope_->parse(s, n, dummy_vs, c, dummy_dt);
   }
 
   if (success(len)) {
@@ -4872,7 +4892,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
 
     if (c.reports_errors) {
       c.error_info.output_log(c.log, c.error_reporter, c.s, c.l,
-                              label ? label->rule_->name : std::string());
+                              label ? label->name : std::string());
       c.error_info.clear();
     }
   }
@@ -5277,6 +5297,7 @@ struct CollectRuleRefs : public TraversalVisitor {
   void visit(AndPredicate &ope) override { thrown_away(*ope.ope_); }
   void visit(NotPredicate &ope) override { thrown_away(*ope.ope_); }
   void visit(Ignore &ope) override { thrown_away(*ope.ope_); }
+  void visit(Recovery &ope) override { thrown_away(*ope.ope_); }
   void visit(Holder &ope) override { add(ope.outer_); }
   void visit(Reference &ope) override {
     if (ope.rule_) {
@@ -5814,6 +5835,10 @@ inline void Definition::select_packrat_rules() const {
       }
 
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
+      // A recovery's expression runs only after an error, so the tries it
+      // makes are no reason to memoize a rule. FindBacktrackRules skips it
+      // too.
+      void visit(Recovery &) override {}
     };
 
     // The rule IDs leftmost-reachable from the given subtree.
@@ -5980,6 +6005,7 @@ inline void Definition::select_packrat_rules() const {
       void visit(Reference &ope) override {
         if (ope.rule_) { ope.rule_->accept(*this); }
       }
+      void visit(Recovery &) override {} // as LeftmostWalker does
     };
 
     // Neither the whitespace nor the word check makes a memo
@@ -6496,7 +6522,7 @@ struct GrammarBlob {
     }
   }
 
-  static const uint32_t MAGIC = 0x50454733; // "PEG3"
+  static const uint32_t MAGIC = 0x50454734; // "PEG4"
 
   static std::vector<uint8_t> serialize(const Grammar &g,
                                         const std::string &start) {
@@ -6685,6 +6711,7 @@ private:
     std::map<std::string, std::vector<Instruction>> instructions;
 
     std::vector<std::pair<std::string, const char *>> undefined_back_references;
+    std::vector<const char *> recovers_without_one_argument;
     std::vector<std::set<std::string_view>> captures_stack{{}};
 
     std::set<std::string_view> captures_in_current_definition;
@@ -7026,9 +7053,7 @@ private:
         auto &data = *std::any_cast<Data *>(dt);
         const auto &ident = std::any_cast<std::string>(vs[1]);
         auto label = ref(*data.grammar, ident, vs.sv().data(), false, {});
-        auto recovery = rec(ref(*data.grammar, RECOVER_DEFINITION_NAME,
-                                vs.sv().data(), true, {label}));
-        return cho4label_(ope, recovery);
+        return cho4label_(ope, rec(label));
       }
     };
 
@@ -7084,8 +7109,19 @@ private:
           args = std::any_cast<std::vector<std::shared_ptr<Ope>>>(vs[2]);
         }
 
-        auto ope = ref(*data.grammar, ident, vs.sv().data(), is_macro, args);
-        if (ident == RECOVER_DEFINITION_NAME) { ope = rec(ope); }
+        std::shared_ptr<Ope> ope;
+        if (ident == RECOVER_DEFINITION_NAME) {
+          // Reported once the grammar has parsed, as for a macro, so that a
+          // syntax error in what was meant as its argument comes first.
+          if (args.size() != 1) {
+            data.recovers_without_one_argument.push_back(vs.sv().data());
+            ope = lit("");
+          } else {
+            ope = rec(args[0]);
+          }
+        } else {
+          ope = ref(*data.grammar, ident, vs.sv().data(), is_macro, args);
+        }
 
         if (ignore) {
           return ign(ope);
@@ -7434,20 +7470,6 @@ private:
     Data data;
     auto &grammar = *data.grammar;
 
-    // Built-in macros
-    {
-      // `%recover`
-      {
-        auto &rule = grammar[RECOVER_DEFINITION_NAME];
-        rule <= ref(grammar, "x", "", false, {});
-        rule.name = RECOVER_DEFINITION_NAME;
-        rule.s_ = "[native]";
-        rule.ignoreSemanticValue = true;
-        rule.is_macro = true;
-        rule.params = {"x"};
-      }
-    }
-
     try {
       std::any dt = &data;
       auto r = g["Grammar"].parse(s, n, dt, nullptr, log);
@@ -7513,6 +7535,11 @@ private:
       ret = false;
     }
 
+    for (auto ptr : data.recovers_without_one_argument) {
+      log_at(log, s, ptr, "incorrect number of arguments.");
+      ret = false;
+    }
+
     // Set root definition
     auto start = data.start;
 
@@ -7540,7 +7567,6 @@ private:
     auto referenced = std::unordered_set<std::string>{
         WHITESPACE_DEFINITION_NAME,
         WORD_DEFINITION_NAME,
-        RECOVER_DEFINITION_NAME,
         start_rule.name,
     };
 

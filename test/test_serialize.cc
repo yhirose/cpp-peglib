@@ -171,16 +171,25 @@ TEST(GrammarBlobTest, RejectsBadMagic) {
   EXPECT_THROW(GrammarBlob::deserialize(junk, start), std::runtime_error);
 }
 
-// v1.20.0 stored `[[:^lower:]]i` as ranges that now match every character,
-// so its blobs are not read.
-TEST(GrammarBlobTest, RejectsBlobsOfV1_20) {
-  parser pg("S <- [[:^lower:]]i");
-  auto blob = pg.serialize_grammar();
-  const uint8_t peg2[] = {0x32, 0x47, 0x45, 0x50};
-  std::copy(std::begin(peg2), std::end(peg2), blob.begin());
+// Blobs of earlier versions are not read: v1.20.0 stored `[[:^lower:]]i` as
+// ranges that now match every character, and v1.22.0 a recovery as a call
+// of a built-in `%recover` macro.
+TEST(GrammarBlobTest, RejectsBlobsOfEarlierVersions) {
+  struct Case {
+    const char *grammar;
+    uint8_t magic[4];
+  };
+  for (const auto &[grammar, magic] : std::initializer_list<Case>{
+           {"S <- [[:^lower:]]i", {0x32, 0x47, 0x45, 0x50}},
+           {"S <- 'a' 'b'^skip\nskip <- (!'b' .)*", {0x33, 0x47, 0x45, 0x50}},
+       }) {
+    parser pg(grammar);
+    auto blob = pg.serialize_grammar();
+    std::copy(std::begin(magic), std::end(magic), blob.begin());
 
-  parser restored;
-  EXPECT_FALSE(restored.load_blob(blob));
+    parser restored;
+    EXPECT_FALSE(restored.load_blob(blob)) << grammar;
+  }
 }
 
 // parser-level API: serialize_grammar() -> load_blob(), then parse with AST and
@@ -384,6 +393,17 @@ TEST(GrammarBlobTest, RejectsAClassWithoutARange) {
   });
   std::string start;
   EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+// A recovery skips with whatever expression it holds, a label or not.
+TEST(GrammarBlobTest, RecoveryOfAnyExpressionIsRead) {
+  auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
+    w.u8(GrammarBlob::T_Recovery);
+    write_literal_a(w);
+  });
+  std::string start;
+  auto g = GrammarBlob::deserialize(blob, start);
+  EXPECT_NO_THROW((*g)["S"].parse("a"));
 }
 
 TEST(GrammarBlobTest, RejectsAnIgnoredStartRule) {

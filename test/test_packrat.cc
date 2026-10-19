@@ -573,6 +573,22 @@ TEST(PackratTest,
   EXPECT_TRUE(has_value);
 }
 
+// A recovery's expression is parsed for nothing to read, as `~e` is, also
+// where its label is memoized for its other uses.
+TEST(PackratTest, Packrat_builds_no_value_of_a_recovery_with_the_AST) {
+  parser pg(R"(
+    S <- !L 'a' ~R / !L 'b' ~R
+    R <- 'x' 'y'^L
+    L <- '#' [a-z]*
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg.enable_ast();
+
+  std::shared_ptr<Ast> ast;
+  EXPECT_FALSE(pg.parse("ax#z", ast));
+}
+
 // Whether a value is read depends on the start rule. A parse from another
 // start rule nested in an action must not change what the enclosing parse
 // builds: S2 reads R only in a lookahead, S1 reads its value.
