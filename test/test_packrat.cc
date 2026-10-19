@@ -772,6 +772,36 @@ TEST(PackratTest, Reused_memo_notes_its_failures_again) {
   EXPECT_EQ(plain, packrat);
 }
 
+// Name's parse in the first alternative fails further on than anything
+// before it, which drops what was noted until then. The record kept with
+// Name's memo starts there, so the second alternative, reusing the memo,
+// lists the failure under Word, as trying Name again would.
+TEST(PackratTest, Memo_of_a_parse_that_fails_further_on_notes_from_there) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S    <- 'x' / Word
+    Word <- < Name ':' / Name '=' >
+    Name <- [a-z]+ [0-9]
+  )",
+                                                          "ab;");
+  EXPECT_EQ("1:3 syntax error, unexpected ';', expecting <Word>.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
+// B's failure is inside two token rules, Outer and Inner, and inside the
+// memos of A and Inner. Reused, it is listed under the outermost one.
+TEST(PackratTest, Reused_memo_is_named_by_the_outermost_token_rule) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S     <- Outer
+    Outer <- < A ';' / A ',' >
+    A     <- Inner '.' / Inner '!'
+    Inner <- < B 'z' / B 'w' >
+    B     <- [a-z]+ [0-9]
+  )",
+                                                          "ab;");
+  EXPECT_EQ("1:3 syntax error, unexpected ';', expecting <Outer>.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
 // A recovery reports the error with T's parse still in progress; R's failure
 // in it is named after T.
 TEST(PackratTest, Report_in_a_memoized_parse_names_its_token_rule) {
