@@ -78,6 +78,16 @@ TEST(MacroTest, Macro_cannot_be_the_start_rule) {
   EXPECT_FALSE(ret);
 }
 
+// A parse skips whitespace and checks a word's end with nothing to fill a
+// macro's parameters with.
+TEST(MacroTest, Whitespace_and_word_cannot_be_macros) {
+  for (auto grammar :
+       {"S <- 'a'\n%whitespace(x) <- x", "S <- 'a'\n%word(x) <- x"}) {
+    parser pg;
+    EXPECT_FALSE(pg.load_grammar(grammar)) << grammar;
+  }
+}
+
 TEST(MacroTest, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(

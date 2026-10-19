@@ -270,18 +270,23 @@ TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
 }
 
 // A blob whose start rule is `start` and which defines the one rule `S`, with
-// the body `body` writes.
+// `flags`, `params` and the body `body` writes.
 static std::vector<uint8_t>
 blob_of(const std::string &start,
-        const std::function<void(GrammarBlob::Writer &)> &body) {
+        const std::function<void(GrammarBlob::Writer &)> &body,
+        uint8_t flags = GrammarBlob::F_EoiCheck,
+        const std::vector<std::string> &params = {}) {
   GrammarBlob::Writer w;
   w.u32(GrammarBlob::MAGIC);
   w.str(start);
   w.u32(1);
   w.str("S");
-  w.u8(8); // eoi_check
+  w.u8(flags);
   w.u8(0);
-  w.u32(0);  // params
+  w.u32(static_cast<uint32_t>(params.size()));
+  for (const auto &param : params) {
+    w.str(param);
+  }
   w.str(""); // ast_name
   w.str(""); // error_message
   body(w);
@@ -342,6 +347,76 @@ TEST(GrammarBlobTest, RejectsUndefinedReference) {
   });
   std::string start;
   EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+// operator[] makes a rule for a name the grammar does not define, here by a
+// typo. Such a rule has no body to write.
+TEST(GrammarBlobTest, RuleWithoutABodyIsLeftOut) {
+  peg::parser p("S <- 'a'");
+  ASSERT_TRUE(p);
+  p["Typo"] = [](const SemanticValues &) { return 1; };
+
+  auto blob = p.serialize_grammar();
+  std::string start;
+  EXPECT_FALSE(GrammarBlob::deserialize(blob, start)->count("Typo"));
+  peg::parser q;
+  ASSERT_TRUE(q.load_blob(blob));
+  EXPECT_TRUE(q.parse("a"));
+}
+
+TEST(GrammarBlobTest, RejectsAMissingOperator) {
+  auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
+    w.u8(GrammarBlob::T_Sequence);
+    w.u32(2);
+    write_literal_a(w);
+    w.u8(20); // what marked a missing operator
+  });
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsAClassWithoutARange) {
+  auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
+    w.u8(GrammarBlob::T_CharClass);
+    w.u8(0);  // not negated
+    w.u8(0);  // not ignoring case
+    w.u32(0); // ranges
+  });
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsAnIgnoredStartRule) {
+  auto blob =
+      blob_of("S", write_literal_a,
+              GrammarBlob::F_EoiCheck | GrammarBlob::F_IgnoreSemanticValue);
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+}
+
+// A blob defining the one rule `S(x) <- x`, as a macro or not.
+static std::vector<uint8_t> blob_with_a_parameter(bool is_macro) {
+  return blob_of(
+      "S",
+      [](GrammarBlob::Writer &w) {
+        w.u8(GrammarBlob::T_Reference);
+        w.u8(0); // not a macro call
+        w.str("x");
+        w.u32(0); // arguments
+      },
+      GrammarBlob::F_EoiCheck | (is_macro ? GrammarBlob::F_IsMacro : 0), {"x"});
+}
+
+TEST(GrammarBlobTest, RejectsAMacroStartRule) {
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob_with_a_parameter(true), start),
+               std::runtime_error);
+}
+
+TEST(GrammarBlobTest, RejectsParametersOfARuleThatIsNoMacro) {
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob_with_a_parameter(false), start),
+               std::runtime_error);
 }
 
 TEST(GrammarBlobTest, FailedLoadBlobKeepsTheGrammar) {

@@ -6213,6 +6213,26 @@ inline void ReplaceParameters::visit(PrecedenceClimbing &ope) {
   }
 }
 
+// A parse enters the start rule, %whitespace and %word with nothing to fill
+// a macro's parameters with, and the start rule cannot be ignored. Returns
+// the rule that breaks this and why, if one does.
+inline std::pair<const Definition *, std::string>
+entry_rule_error(const Grammar &g, const Definition &start) {
+  if (start.ignoreSemanticValue) {
+    return {&start,
+            "ignore operator cannot be applied to '" + start.name + "'."};
+  }
+  if (start.is_macro) {
+    return {&start, "the macro '" + start.name + "' cannot be the start rule."};
+  }
+  for (auto name : {WHITESPACE_DEFINITION_NAME, WORD_DEFINITION_NAME}) {
+    if (auto it = g.find(name); it != g.end() && it->second.is_macro) {
+      return {&it->second, "'" + it->first + "' cannot be a macro."};
+    }
+  }
+  return {};
+}
+
 /*-----------------------------------------------------------------------------
  *  Grammar serialization
  *
@@ -6250,7 +6270,7 @@ struct GrammarBlob {
     T_Recovery = 17,
     T_Cut = 18,
     T_PrecedenceClimbing = 19,
-    T_Null = 20,
+    // 20 marked a missing operator, which no blob may hold any more.
   };
 
   // The bits of the two flag bytes a rule is stored with, which only ever
@@ -6287,10 +6307,7 @@ struct GrammarBlob {
   };
 
   static void write_ope(Writer &w, const std::shared_ptr<Ope> &o) {
-    if (!o) {
-      w.u8(T_Null);
-      return;
-    }
+    assert(o);
     OpeWriter vis(w);
     o->accept(vis);
   }
@@ -6457,7 +6474,6 @@ struct GrammarBlob {
     auto se = scope_exit([&]() { r.depth--; });
 
     switch (r.u8()) {
-    case T_Null: return nullptr;
     case T_Sequence: {
       uint32_t n = r.u32();
       std::vector<std::shared_ptr<Ope>> v;
@@ -6496,6 +6512,8 @@ struct GrammarBlob {
     case T_CharClass: {
       bool neg = r.u8(), ic = r.u8();
       uint32_t n = r.u32();
+      if (n == 0)
+        throw std::runtime_error("GrammarBlob: a character class has no range");
       std::vector<std::pair<char32_t, char32_t>> ranges;
       for (uint32_t i = 0; i < n; i++) {
         auto lo = r.u32(), hi = r.u32();
@@ -6557,19 +6575,21 @@ struct GrammarBlob {
     Writer w;
     w.u32(MAGIC);
     w.str(start);
-    w.u32((uint32_t)g.size());
     // Grammar is an unordered_map, whose iteration order is implementation
     // defined: walking it directly yields different bytes for the same grammar
     // on different standard libraries, so a blob generated on one platform
     // cannot be byte-compared on another. Emit the definitions by name.
     // deserialize() rebuilds the map from the names, so the order carries no
     // meaning of its own.
+    // A rule without a body is one that operator[] made for a name the
+    // grammar does not define.
     std::vector<const Grammar::value_type *> defs;
     defs.reserve(g.size());
     for (auto &kv : g)
-      defs.push_back(&kv);
+      if (kv.second.get_core_operator()) defs.push_back(&kv);
     std::sort(defs.begin(), defs.end(),
               [](const auto *a, const auto *b) { return a->first < b->first; });
+    w.u32((uint32_t)defs.size());
     for (auto *kv : defs) {
       const auto &name = kv->first;
       const auto &def = kv->second;
@@ -6618,6 +6638,9 @@ struct GrammarBlob {
       std::string ast_name = r.str();
       std::string err = r.str();
 
+      if (np && !(flags & F_IsMacro))
+        throw std::runtime_error("GrammarBlob: rule '" + name +
+                                 "' has parameters but is no macro");
       auto &def = (*g)[name];
       def.name = name;
       def.ignoreSemanticValue = flags & F_IgnoreSemanticValue;
@@ -6641,6 +6664,8 @@ struct GrammarBlob {
     if (!g->count(start))
       throw std::runtime_error("GrammarBlob: start rule '" + start +
                                "' is not defined");
+    if (auto [rule, msg] = entry_rule_error(*g, (*g)[start]); rule)
+      throw std::runtime_error("GrammarBlob: " + msg);
     for (auto &x : *g) {
       // A reference to a rule the blob does not define, or with the wrong
       // arguments, would be followed when the grammar is analyzed.
@@ -7598,24 +7623,10 @@ private:
 
     auto &start_rule = grammar[start];
 
-    // Check if the start rule has ignore operator
-    {
-      if (start_rule.ignoreSemanticValue) {
-        log_at(log, s, start_rule.s_,
-               "ignore operator cannot be applied to '" + start_rule.name +
-                   "'.");
-        ret = false;
-      }
+    if (auto [rule, msg] = entry_rule_error(grammar, start_rule); rule) {
+      log_at(log, s, rule->s_, msg);
+      return {};
     }
-
-    // A macro has nothing to fill its parameters with as the start rule
-    if (start_rule.is_macro) {
-      log_at(log, s, start_rule.s_,
-             "the macro '" + start_rule.name + "' cannot be the start rule.");
-      ret = false;
-    }
-
-    if (!ret) { return {}; }
 
     // Check missing definitions
     auto referenced = std::unordered_set<std::string>{
