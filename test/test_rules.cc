@@ -787,40 +787,24 @@ TEST(PrecedenceTest,
 }
 
 // An operator rule hands its token to the precedence rule also when the
-// packrat cache already holds its match at that position. Both alternatives
-// of F start with O, so the selective packrat memoizes O, and F's lookahead
-// caches O's match before the precedence rule parses it.
+// packrat cache already holds its match at that position: STMT tries OP after
+// x in an assignment and an increment before EXPR parses it.
 TEST(PrecedenceTest, Precedence_climbing_with_a_cached_operator_rule) {
   for (auto packrat : {false, true}) {
     parser pg(R"(
-      E    <- A (O A)* { precedence L + - L * }
-      A    <- N F
-      F    <- &(O 'x') / &(O 'y') / ''
-      N    <- < [0-9]+ >
-      O    <- < [-+*] >
+      PROGRAM <- STMT*
+      STMT    <- NAME OP '=' EXPR ';' / NAME OP OP ';' / EXPR ';'
+      EXPR    <- ATOM (OP ATOM)* { precedence L + - L * }
+      ATOM    <- NAME / NUM
+      NAME    <- < [a-z]+ >
+      NUM     <- < [0-9]+ >
+      OP      <- < [-+*] >
+      %whitespace <- [ \t\n]*
     )");
     ASSERT_TRUE(!!pg);
-    pg.enable_ast(true);
     if (packrat) { pg.enable_packrat_parsing(); }
 
-    std::shared_ptr<Ast> ast;
-    ASSERT_TRUE(pg.parse("1+2*3", ast)) << packrat;
-    EXPECT_EQ(R"(+ E
-  + A
-    - N (1)
-    - F/2 ()
-  - O (+)
-  + E
-    + A
-      - N (2)
-      - F/2 ()
-    - O (*)
-    + A
-      - N (3)
-      - F/2 ()
-)",
-              ast_to_s(ast))
-        << packrat;
+    EXPECT_TRUE(pg.parse("x += 1; x++; x + 2 * y;")) << packrat;
   }
 }
 

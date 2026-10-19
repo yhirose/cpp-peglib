@@ -628,7 +628,7 @@ TEST(PackratTest, Packrat_keeps_matches_that_skip_no_whitespace_apart) {
         DECL <- TYPE NAME
         TYPE <- NAME { no_whitespace }
         EXPR <- NAME '/' NAME
-        NAME <- [a-z]+ ''
+        NAME <- < [a-z]+ >
         %whitespace <- [ ]*
       )",
        {"x / y", "int x"}},

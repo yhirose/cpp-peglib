@@ -97,7 +97,6 @@ TEST(TokenBoundaryInteractionTest, Token_boundary_with_backtracking) {
     S           <- A / B
     A           <- < 'hello' > ' world'
     B           <- < 'hello' > ' there'
-    %whitespace <- ''
   )");
   EXPECT_TRUE(pg);
 

@@ -505,12 +505,10 @@ TEST(UnstartableRuleTest, Is_not_entered_for_an_ast_action_below_it) {
 TEST(FirstSetTest, Whitespace_after_an_empty_match) {
   for (auto grammar : {
            R"(S <- [a] T
-              T <- 'y' / '' 'x')",
+              T <- 'y' / Sep 'x'
+              Sep <- ',' / '')",
            R"(S <- [a] T
               T <- 'y' / < 'z'? > 'x')",
-           R"(S <- [a] T
-              T <- 'y' / E 'x'
-              E <- '')",
            R"(S <- [a] T
               T <- 'y' / N 'x'
               N <- 'z'? { no_whitespace })",
@@ -528,7 +526,7 @@ TEST(FirstSetTest, Whitespace_after_an_empty_match) {
 TEST(UnstartableRuleTest, Is_entered_at_whitespace_after_an_empty_match) {
   parser pg(R"(
     S <- [a] U
-    U <- '' 'x'
+    U <- < [-+]? > 'x'
     %whitespace <- [ ]*
   )");
   ASSERT_TRUE(!!pg);

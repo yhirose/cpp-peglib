@@ -1849,20 +1849,26 @@ TEST(GeneralTest, Value_of_a_left_recursive_rule_first_matched_in_a_lookahead) {
   EXPECT_EQ(1, got);
 }
 
-TEST(GeneralTest, User_operator_in_a_lookahead_sees_the_values_before_it) {
-  Definition R, A;
-  size_t seen = 0;
-  A <= chr('a');
-  A = [](const SemanticValues &) { return 1; };
-  R <= seq(apd(seq(A, usr([&](const char *, size_t, SemanticValues &vs,
-                              std::any &) -> size_t {
-                     seen = vs.size();
-                     return 0;
-                   }))),
-           A);
+// A user operator reads the values parsed before it, also in a rule whose
+// match is ignored: Blob's length comes from Count.
+TEST(GeneralTest, User_operator_sees_the_values_before_it_under_an_ignore) {
+  Definition Record, Blob, Count, Name;
+  Count <= oom(cls("0-9"));
+  Count = [](const SemanticValues &vs) { return vs.token_to_number<size_t>(); };
+  Blob <= seq(Count, chr(':'),
+              usr([](const char *, size_t n, SemanticValues &vs,
+                     std::any &) -> size_t {
+                if (vs.empty()) { return static_cast<size_t>(-1); }
+                auto len = std::any_cast<size_t>(vs.back());
+                return len <= n ? len : static_cast<size_t>(-1);
+              }));
+  std::string name;
+  Name <= oom(cls("a-z"));
+  Name = [&](const SemanticValues &vs) { name = vs.token_to_string(); };
+  Record <= seq(ign(Blob), Name);
 
-  EXPECT_TRUE(R.parse("a").ret);
-  EXPECT_EQ(1u, seen);
+  EXPECT_TRUE(Record.parse("3:a1bname").ret);
+  EXPECT_EQ("name", name);
 }
 
 TEST(GeneralTest, RecognizerPathIsUnobservable) {
