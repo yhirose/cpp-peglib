@@ -1715,6 +1715,15 @@ public:
     return se;
   }
 
+  // Parses with `parse` into a scope of its own, thrown away with what it
+  // holds.
+  template <typename T> size_t parse_thrown_away(T parse) {
+    auto &vs = push_semantic_values_scope();
+    auto se = scope_exit([&]() { pop_semantic_values_scope(); });
+    auto unread = unread_in(vs);
+    return parse(vs);
+  }
+
   Context(const char *path, const char *s, size_t l,
           const StartRuleAnalysis *analysis, std::shared_ptr<Ope> whitespaceOpe,
           std::shared_ptr<Ope> wordOpe, bool enablePackratParsing,
@@ -2551,10 +2560,8 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any &dt) const override {
-    auto &chvs = c.push_semantic_values_scope();
-    auto se = scope_exit([&]() { c.pop_semantic_values_scope(); });
-    auto unread = c.unread_in(chvs);
-    return ope_->parse(s, n, chvs, c, dt);
+    return c.parse_thrown_away(
+        [&](SemanticValues &vs) { return ope_->parse(s, n, vs, c, dt); });
   }
 
   void accept(Visitor &v) override;
@@ -4532,8 +4539,14 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   // its seed grown (Context::reuse_or_grow), which in turn needs its own
   // semantic value scope to memoise. Such a macro forms a scope like a plain
   // rule does.
+  // An ignored one is parsed into a scope that is thrown away, as `~` does.
   if (outer_->is_macro && !outer_->is_left_recursive) {
-    return parse_ope_body(s, n, vs, c, dt);
+    if (!outer_->ignoreSemanticValue) {
+      return parse_ope_body(s, n, vs, c, dt);
+    }
+    return c.parse_thrown_away([&](SemanticValues &chvs) {
+      return parse_ope_body(s, n, chvs, c, dt);
+    });
   }
 
   auto has_id = c.has_id(*outer_);
@@ -4916,13 +4929,11 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   auto len = kFail;
   {
     auto muted = c.mute_errors();
-
-    SemanticValues dummy_vs;
-    std::any dummy_dt;
-
     Context::TraceMute mute(c);
-    auto unread = c.unread_in(dummy_vs);
-    len = ope_->parse(s, n, dummy_vs, c, dummy_dt);
+
+    std::any dummy_dt;
+    len = c.parse_thrown_away(
+        [&](SemanticValues &vs) { return ope_->parse(s, n, vs, c, dummy_dt); });
   }
 
   // Where errors are muted, nothing was reported to recover from.

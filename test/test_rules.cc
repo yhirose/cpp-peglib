@@ -88,6 +88,22 @@ TEST(MacroTest, Whitespace_and_word_cannot_be_macros) {
   }
 }
 
+// `~` on a macro throws its values away, whether the macro is left-recursive
+// or not.
+TEST(MacroTest, Ignored_macro_gives_no_value) {
+  for (auto macro : {"~M(x) <- x", "~M(x) <- M(x) 'z' / x"}) {
+    parser pg(std::string("S <- A M(B)\nA <- 'a'\nB <- 'b'\n") + macro);
+    ASSERT_TRUE(!!pg) << macro;
+    size_t values = 0;
+    pg["S"] = [&](const SemanticValues &vs) { values = vs.size(); };
+    pg["A"] = [](const SemanticValues &) { return 1; };
+    pg["B"] = [](const SemanticValues &) { return 2; };
+
+    EXPECT_TRUE(pg.parse("ab")) << macro;
+    EXPECT_EQ(1u, values) << macro;
+  }
+}
+
 TEST(MacroTest, Macro_calculator) {
   // Create a PEG parser
   parser parser(R"(
