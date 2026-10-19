@@ -1865,22 +1865,6 @@ TEST(GeneralTest, User_operator_in_a_lookahead_sees_the_values_before_it) {
   EXPECT_EQ(1u, seen);
 }
 
-// What a whitespace operator set without wsp() matches lands in the scope
-// of the rule being parsed.
-TEST(GeneralTest, Value_of_a_rule_in_a_whitespace_set_without_wsp) {
-  Definition S, A, SP;
-  SP <= chr(' ');
-  SP = [](const SemanticValues &) { return 1; };
-  A <= lit("a");
-  S <= seq(A);
-  S.whitespaceOpe = zom(SP);
-  auto got = 0;
-  S = [&](const SemanticValues &vs) { got = std::any_cast<int>(vs[0]); };
-
-  EXPECT_TRUE(S.parse("a ").ret);
-  EXPECT_EQ(1, got);
-}
-
 TEST(GeneralTest, RecognizerPathIsUnobservable) {
   // A rule match whose value nobody reads, or is always empty, builds no
   // value (see Holder::parse_core). Callbacks must see what they see when

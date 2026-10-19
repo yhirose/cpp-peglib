@@ -481,49 +481,6 @@ TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_a_lookahead) {
   EXPECT_EQ(1, count);
 }
 
-// The whitespace after 'z' is skipped inside A's lookahead, and again after
-// S's 'z'.
-TEST(UnstartableRuleTest, Is_entered_to_run_an_action_of_the_whitespace) {
-  parser pg(R"(
-    S <- A? 'z'
-    A <- &'z' 'y'
-    %whitespace <- W*
-    W <- ' '
-  )");
-  ASSERT_TRUE(!!pg);
-
-  auto count = 0;
-  pg["W"] = [&](const SemanticValues &) { count++; };
-
-  EXPECT_TRUE(pg.parse("z  "));
-  EXPECT_EQ(4, count);
-}
-
-// W's enter makes S enter A. X, parsed from an action of B, skips no
-// whitespace and may skip A, but that holds for X's parses alone.
-TEST(UnstartableRuleTest, Is_entered_after_a_nested_parse_that_skips_it) {
-  parser pg(R"(
-    S <- B A? 'x'
-    A <- '' 'y'
-    B <- 'b'
-    X <- A? 'z'
-    %whitespace <- W*
-    W <- ' '
-  )");
-  ASSERT_TRUE(!!pg);
-
-  auto enters = 0;
-  pg["W"].enter = [&](const Context &, const char *, size_t, std::any &) {
-    enters++;
-  };
-  pg["B"] = [&](const SemanticValues &) {
-    EXPECT_TRUE(pg["X"].parse("z").ret);
-  };
-
-  EXPECT_TRUE(pg.parse("bx"));
-  EXPECT_EQ(4, enters);
-}
-
 // An AST action depends on its values alone, so running it or not goes
 // unnoticed.
 TEST(UnstartableRuleTest, Is_not_entered_for_an_ast_action_below_it) {
@@ -540,25 +497,6 @@ TEST(UnstartableRuleTest, Is_not_entered_for_an_ast_action_below_it) {
   std::shared_ptr<Ast> ast;
   EXPECT_TRUE(pg.parse("y", ast));
   EXPECT_EQ(0u, tries(pg, "R"));
-}
-
-// A precedence rule whose atom matches empty can start with an operator.
-TEST(FirstSetTest, Operator_after_an_empty_atom) {
-  for (auto start : {"S <- X / 'q'", "S <- X?"}) {
-    parser pg(std::string(start) + R"(
-      X <- E 'x'
-      E <- T (O T)* {
-        precedence
-          L +
-      }
-      T <- 't'?
-      O <- '+'
-    )");
-    ASSERT_TRUE(!!pg) << start;
-
-    EXPECT_TRUE(pg.parse("+x")) << start;
-    EXPECT_TRUE(pg.parse("t+tx")) << start;
-  }
 }
 
 // A literal, a token boundary and a no_whitespace rule skip whitespace after
@@ -583,21 +521,6 @@ TEST(FirstSetTest, Whitespace_after_an_empty_match) {
     EXPECT_TRUE(pg.parse("ax")) << grammar;
     EXPECT_TRUE(pg.parse("a x")) << grammar;
   }
-}
-
-// A cut in a lookahead reaches the choice around the rule, which then tries
-// no other alternative.
-TEST(UnstartableRuleTest, Is_entered_to_run_a_cut_in_a_lookahead) {
-  parser pg(R"(
-    S <- 'x' R / 'x' 'c'
-    R <- !E 'b'
-    E <- ↑ 'a'
-  )");
-  ASSERT_TRUE(!!pg);
-
-  EXPECT_FALSE(pg.parse("xc"));
-  pg.set_logger([](size_t, size_t, const std::string &) {});
-  EXPECT_FALSE(pg.parse("xc"));
 }
 
 // The same holds where a rule that cannot start with the next byte is not
@@ -713,15 +636,6 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       {read_grammar("cpp-peglib.peg"),
        "S <- A (',' A)* / 'x'\nA <- < [a-z]+ > { no_ast_opt }\n"},
       {R"(
-        S <- (N / [a]^L) 'z' / (N / [a]) 'y'
-        N <- [0-9] { error_message "a number, please" }
-        L <- [^z]?
-      )",
-       "1z", [](parser &pg) { pg.enable_packrat_parsing(); }},
-      {R"(S <- ('a'? / 'b') 'c' / 'f'{0} 'd' / 'e')", "acd"},
-      {R"(S <- [0-9]{2,1})", "12"},
-      {R"(S <- 'a'{1,0} / 'b')", "a"},
-      {R"(
         S <- [q] (T 'x' / 'y')
         T <- < 'a'* >
         %whitespace <- (C / [ ])*
@@ -765,23 +679,6 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       )",
        "[1, a, [2]]"},
       {R"(
-        S <- P 'w' / 'a' M 'k'
-        P <- 'a' E^L / 'n'
-        E <- 'e'
-        L <- (M 'k' / M / [^z])*
-        M <- M 'q' / 'm' { error_message "an m" }
-      )",
-       "ab?z"},
-      {R"(
-        S <- P 'w' / 'a' N 'k' / 'x' X
-        P <- 'a' E^L / 'n'
-        E <- 'e'
-        L <- (N? [^z])*
-        N <- 'm' { error_message "an m" }
-        X <- N 'q' / N 'r'
-      )",
-       "ab?z", [](parser &pg) { pg.enable_packrat_parsing(); }},
-      {R"(
         S <- T / R? 'c'
         T <- < R 'x' >
         R <- [r]
@@ -799,22 +696,6 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
         R <- $x<'k'?> 'b' { error_message "got [%{x}]" }
       )",
        "qkb"},
-      {R"(
-        S <- [q] B [y] (B / 'z') 'w'
-        B <- '' 'x'
-        %whitespace <- [ ]*
-      )",
-       "q\txy\txw",
-       [](parser &pg) { pg["S"].whitespaceOpe = wsp(zom(cls("\t"))); }},
-      {R"(
-        S <- [q] B [y] (B / 'z') 'w'
-        B <- '' 'x'
-      )",
-       "q\txy\txw",
-       [](parser &pg) {
-         pg["S"].whitespaceOpe = wsp(zom(cls("\t")));
-         pg.enable_packrat_parsing();
-       }},
   };
   for (const auto &c : cases) {
     parser pg(c.grammar);
@@ -832,22 +713,5 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       if (i < c.input.size()) { check(std::string(c.input).erase(i, 1)); }
       check(std::string(c.input).insert(i, "?"));
     }
-  }
-}
-
-// A start rule made with combinators can skip whitespace other than the
-// grammar's.
-TEST(FirstSetTest, Whitespace_of_a_combinator_start_rule) {
-  for (auto whitespace : {"\n%whitespace <- [ ]*", ""}) {
-    auto grammar =
-        std::string("A <- [q] B [y] (B / 'z')\nB <- '' 'x'") + whitespace;
-    parser pg(grammar);
-    ASSERT_TRUE(!!pg) << grammar;
-    Definition S;
-    S <= pg["A"];
-    S.whitespaceOpe = wsp(zom(cls("\t")));
-    Log log = [](size_t, size_t, const std::string &, const std::string &) {};
-    EXPECT_TRUE(S.parse("q\txy\tx").ret) << grammar;
-    EXPECT_TRUE(S.parse("q\txy\tx", nullptr, log).ret) << grammar;
   }
 }

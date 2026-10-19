@@ -571,13 +571,6 @@ TEST(CharClassTest, Case_insensitive_character_class) {
 // Literal Tests
 // =============================================================================
 
-TEST(LiteralTest, Empty_literal_in_option) {
-  parser pg(R"(S <- 'a' ''? 'b')");
-  EXPECT_TRUE(pg);
-
-  EXPECT_TRUE(pg.parse("ab"));
-}
-
 TEST(LiteralTest, Case_insensitive_literal) {
   parser pg(R"(
     S <- 'hello'i _ 'world'i

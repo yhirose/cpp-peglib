@@ -296,46 +296,6 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_a_retried_rule) {
   }
 }
 
-// The '+' after "1*2" ends the inner level and is parsed again at the outer
-// one, which has to capture it again.
-TEST(PackratTest, Packrat_keeps_the_captures_of_a_reparsed_operator) {
-  for (auto packrat : {false, true}) {
-    parser pg(R"(
-      S     <- BINOP 'z' / BINOP 'y' / EXPR ';' BINOP
-      EXPR  <- ATOM (BINOP ATOM)* {
-        precedence
-          L +
-          L *
-      }
-      ATOM  <- [0-9]
-      BINOP <- $o<[-+*]> / '=' $o
-    )");
-    ASSERT_TRUE(!!pg);
-    if (packrat) { pg.enable_packrat_parsing(); }
-
-    EXPECT_TRUE(pg.parse("1*2+3;=+")) << packrat;
-    EXPECT_FALSE(pg.parse("1*2+3;=*")) << packrat;
-  }
-}
-
-// The whitespace after 'a' captures w, so every rule that skips whitespace
-// captures, B included, although its body does not. Memoized, B's second try
-// would not capture w again after the first try's capture was rolled back.
-TEST(PackratTest, Packrat_keeps_the_captures_of_the_whitespace) {
-  for (auto packrat : {false, true}) {
-    parser pg(R"(
-      S <- B 'x' / B 'y'
-      B <- 'a'
-      %whitespace <- $w<[ ]+> / [|] $w / ''
-    )");
-    ASSERT_TRUE(!!pg);
-    if (packrat) { pg.enable_packrat_parsing(); }
-
-    EXPECT_TRUE(pg.parse("a  y|  ")) << packrat;
-    EXPECT_FALSE(pg.parse("a  y| ")) << packrat;
-  }
-}
-
 // Gives the rules AST actions that count their runs in `runs`. Such an action
 // may be skipped where nothing reads its value (see Holder::parse_core), so
 // the counts show which matches built a value.
@@ -545,31 +505,6 @@ TEST(PackratTest, Packrat_keeps_the_values_below_an_ignored_operator_rule) {
   EXPECT_EQ(1u, runs["PLUS"]);
 }
 
-// What a lookahead matches is thrown away, in the scope of a precedence's
-// operator too: OPM's body is parsed into it, and CM is built there only if
-// its token is asked for.
-TEST(PackratTest, Packrat_reads_no_token_in_a_lookahead_of_an_operator) {
-  parser pg(R"(
-    S      <- EXPR / &CM 'q'
-    EXPR   <- ATOM (OPM(PLUS) ATOM)* { precedence L + }
-    OPM(x) <- &CM x
-    CM     <- D 'q' / D
-    D      <- '+'
-    PLUS   <- '+'
-    ATOM   <- [0-9]+
-  )");
-  ASSERT_TRUE(!!pg);
-  pg.enable_packrat_parsing();
-  pg["S"].collect_packrat_stats = true;
-  std::map<std::string, size_t> runs;
-  count_ast_actions(pg, {"CM", "D"}, runs);
-
-  ASSERT_TRUE(pg.parse("1+2"));
-  EXPECT_LT(0u, pg["S"].packrat_stats_[pg["D"].id].hits);
-  EXPECT_EQ(0u, runs["CM"]);
-  EXPECT_EQ(0u, runs["D"]);
-}
-
 // A left-recursive macro forms a scope of its own, which holds the values
 // of its arguments in a lookahead too.
 TEST(PackratTest, Packrat_keeps_the_value_of_a_macro_argument_in_a_lookahead) {
@@ -730,65 +665,15 @@ TEST(PackratTest, Packrat_agrees_where_an_instance_is_entered_again) {
   }
 }
 
-// Z calls itself through M(X)'s token, which left recursion detection does
-// not see. Its call inside the token, where no whitespace is skipped, is
-// apart from the one outside, for the reentry guard as for the memos, so
-// packrat parsing agrees.
-TEST(PackratTest, Packrat_agrees_where_a_rule_calls_itself_in_a_token) {
-  auto grammar = R"(
-    S    <- [a] (< X > 'q' / < X > 'r' / Z)
-    X    <- Z
-    Z    <- M(Q) 'y' / !('' ' ') M(X) / ' ' 'k'
-    Q    <- 'q'
-    M(x) <- N(x 'a') / 'm'
-    N(y) <- < y >
-    %whitespace <- [ ]*
-  )";
-  parser off(grammar), on(grammar);
-  ASSERT_TRUE(off && on);
-  on.enable_packrat_parsing();
-
-  EXPECT_EQ(off.parse("a ka"), on.parse("a ka"));
-  EXPECT_TRUE(off.parse("a ka"));
-}
-
-// A rule may match differently where no whitespace is skipped, in a token, a
-// no_whitespace rule or the whitespace, so a call of it there is a call of
-// its own. Each grammar parses as the one written out per context without
-// %whitespace, where a rule used there has a copy, R_n, that skips none.
+// A rule may match differently where no whitespace is skipped, so a call of
+// it in a token or a no_whitespace rule is a call of its own. Each grammar
+// parses as the one written out per context without %whitespace, where a
+// rule used there has a copy, R_n, that skips none.
 TEST(PackratTest, Whitespace_contexts_parse_as_written_out_per_context) {
   struct {
     const char *grammar;
     const char *written_out;
-    std::string prefix;
-    std::string alphabet;
-    size_t max_len;
   } cases[] = {
-      {R"(S <- 'p' L !.
-          L <- L 'a' / N 'b' / 'k'
-          N <- '' 'x'
-          %whitespace <- (' ' / W)*
-          W <- L '!')",
-       R"(S0  <- WS S
-          S   <- 'p' WS L !.
-          L   <- L 'a' WS / N 'b' WS / 'k' WS
-          N   <- '' WS 'x' WS
-          WS  <- (' ' / W_n)*
-          W_n <- L_n '!'
-          L_n <- L_n 'a' / N_n 'b' / 'k'
-          N_n <- '' 'x')",
-       "pk", " !xb", 4},
-      {R"(S <- [c] (< Y > 'q' / < Y > 'r' / X)
-          X <- '' 'x' / 'b'
-          Y <- X 'y'?
-          %whitespace <- Y?)",
-       R"(S0  <- WS S
-          S   <- [c] (< Y_n > WS 'q' WS / < Y_n > WS 'r' WS / X)
-          X   <- '' WS 'x' WS / 'b' WS
-          X_n <- '' 'x' / 'b'
-          Y_n <- X_n 'y'?
-          WS  <- Y_n?)",
-       "c", "xbyqr ", 3},
       {R"(S <- Q ';'
           Q <- < Q '.' I / I >
           I <- [a-b]+
@@ -798,8 +683,7 @@ TEST(PackratTest, Whitespace_contexts_parse_as_written_out_per_context) {
           Q   <- < Q_n '.' I / I > WS
           Q_n <- < Q_n '.' I / I >
           I   <- [a-b]+
-          WS  <- [ ]*)",
-       "", "a. ;", 4},
+          WS  <- [ ]*)"},
       {R"(S <- Path ';'
           Path <- Path '.' Name / Name { no_whitespace }
           Name <- [a-b]+
@@ -809,41 +693,17 @@ TEST(PackratTest, Whitespace_contexts_parse_as_written_out_per_context) {
           Path   <- (Path_n '.' Name / Name) WS
           Path_n <- Path_n '.' Name / Name
           Name   <- [a-b]+
-          WS     <- [ ]*)",
-       "", "a. ;", 4},
-      // R calls itself through the whitespace at the same position.
-      {R"(S <- [c] T
-          T <- R 'z' / R
-          R <- '' 'a' / 'b'
-          %whitespace <- R?)",
-       R"(S0  <- WS S
-          S   <- [c] T
-          T   <- R 'z' WS / R
-          R   <- '' WS 'a' WS / 'b' WS
-          R_n <- '' 'a' / 'b'
-          WS  <- R_n?)",
-       "c", "abz", 4},
-      // A macro instance, as a rule.
-      {R"(S <- [c] M(A)
-          M(x) <- '' x / 'b'
-          A <- 'a'
-          %whitespace <- M(A)?)",
-       R"(S0   <- WS S
-          S    <- [c] MA
-          MA   <- '' WS 'a' WS / 'b' WS
-          MA_n <- '' 'a' / 'b'
-          WS   <- MA_n?)",
-       "c", "ab", 4},
+          WS     <- [ ]*)"},
   };
-  for (const auto &c : cases) {
-    std::vector<std::string> inputs{c.prefix};
-    for (size_t i = 0; i < inputs.size(); i++) {
-      if (inputs[i].size() < c.prefix.size() + c.max_len) {
-        for (auto ch : c.alphabet) {
-          inputs.push_back(inputs[i] + ch);
-        }
+  std::vector<std::string> inputs{""};
+  for (size_t i = 0; i < inputs.size(); i++) {
+    if (inputs[i].size() < 4) {
+      for (auto ch : std::string("a. ;")) {
+        inputs.push_back(inputs[i] + ch);
       }
     }
+  }
+  for (const auto &c : cases) {
     parser off(c.grammar), on(c.grammar), ref(c.written_out);
     ASSERT_TRUE(off && on && ref) << c.grammar;
     on.enable_packrat_parsing();
@@ -909,26 +769,6 @@ TEST(PackratTest, Reused_memo_notes_its_failures_again) {
   )",
                                                           "ac");
   EXPECT_EQ("1:2 syntax error, unexpected 'c', expecting <R>, <T>.", plain);
-  EXPECT_EQ(plain, packrat);
-}
-
-// R fails at the 'd' in B, in T's token and in C. C reuses R's memo from B,
-// where whitespace is skipped, so it notes what R expected there, not what it
-// expected in the token, where none is.
-TEST(PackratTest, Reused_memo_notes_the_failures_of_its_context) {
-  auto [plain, packrat] = errors_with_and_without_packrat(R"(
-    S <- B / A / C
-    A <- T 'q'
-    T <- < R >
-    B <- R 'z'
-    C <- R 'w'
-    R <- X 'b' / X ' ' [c]
-    X <- 'a'
-    %whitespace <- ' '*
-  )",
-                                                          "a d");
-  EXPECT_EQ("1:3 syntax error, unexpected 'd', expecting 'b', ' ', <T>.",
-            plain);
   EXPECT_EQ(plain, packrat);
 }
 

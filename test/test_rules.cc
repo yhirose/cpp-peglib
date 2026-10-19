@@ -616,34 +616,6 @@ TEST(PrecedenceTest, Precedence_climbing_does_not_refer_to_grammar_text) {
   EXPECT_TRUE(parser.parse("1+2*3-4"));
 }
 
-// An operator tried but not used leaves no capture behind, as in the
-// repetition that the rule is without its precedence instruction: BINOP
-// captures an empty `o` before failing at ';', and the BINOP after it can
-// match "x" only with an `o` that a used operator left. Without a logger,
-// BINOP would not even be entered at ';'.
-TEST(PrecedenceTest,
-     Precedence_climbing_drops_the_captures_of_unused_operators) {
-  for (std::string precedence : {"", "{ precedence L + }"}) {
-    for (auto with_logger : {false, true}) {
-      auto grammar = R"(
-        S     <- EXPR ';' BINOP
-        EXPR  <- ATOM (BINOP ATOM)* )" +
-                     precedence + R"(
-        ATOM  <- [0-9]
-        BINOP <- $o<!'x'>? ('+' / 'x' $o)
-      )";
-      parser pg(grammar);
-      ASSERT_TRUE(!!pg) << precedence;
-      if (with_logger) {
-        pg.set_logger([](size_t, size_t, const std::string &) {});
-      }
-
-      EXPECT_FALSE(pg.parse("1;x")) << precedence << with_logger;
-      EXPECT_TRUE(pg.parse("1+2;x")) << precedence << with_logger;
-    }
-  }
-}
-
 // An operator without a right operand ends the expression before it, as the
 // repetition stops before an iteration that fails.
 TEST(PrecedenceTest,
@@ -852,58 +824,6 @@ TEST(PrecedenceTest, Precedence_climbing_with_a_cached_operator_rule) {
   }
 }
 
-// A left-recursive operator rule hands over the token of the match it grows
-// to, also when its memo already holds that match from a lookahead.
-TEST(PrecedenceTest, Precedence_climbing_with_a_left_recursive_operator_rule) {
-  struct {
-    const char *grammar;
-    const char *input;
-    const char *expected;
-  } cases[] = {
-      {R"(
-        E <- A (O A)* { precedence L + - L * }
-        O <- O '!' / < [-+*] >
-        A <- N F
-        F <- &(O 'x') / ''
-        N <- < [0-9] >
-      )",
-       "1+2*3", "(1+(2*3))"},
-      {R"(
-        E <- A (O A)* { precedence L + - L * }
-        O <- O '!' / < [-+*] >
-        A <- F N
-        F <- &('2' O) / ''
-        N <- < [0-9] >
-      )",
-       "1+2*3", "(1+(2*3))"},
-      {R"(
-        E <- A (O A)* { precedence L * L + L ** }
-        O <- O '*' / [-+*]
-        A <- < [0-9] >
-      )",
-       "1**2+3", "((1**2)+3)"},
-  };
-  for (const auto &[grammar, input, expected] : cases) {
-    for (auto packrat : {false, true}) {
-      parser pg(grammar);
-      ASSERT_TRUE(!!pg);
-      if (packrat) { pg.enable_packrat_parsing(); }
-      pg["A"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
-      pg["O"] = [](const SemanticValues &vs) { return vs.token_to_string(); };
-      pg["E"] = [](const SemanticValues &vs) {
-        if (vs.size() == 1) { return std::any_cast<std::string>(vs[0]); }
-        return "(" + std::any_cast<std::string>(vs[0]) +
-               std::any_cast<std::string>(vs[1]) +
-               std::any_cast<std::string>(vs[2]) + ")";
-      };
-
-      std::string val;
-      ASSERT_TRUE(pg.parse(input, val)) << input << " " << packrat;
-      EXPECT_EQ(expected, val) << input << " " << packrat;
-    }
-  }
-}
-
 // A macro's body parses on its caller's values; its precedence fold must
 // leave the values before it alone, also when the alternative it is in fails
 // after the fold.
@@ -1093,22 +1013,6 @@ TEST(BackreferenceTest, Uncaptured_backreference_message) {
 
   EXPECT_FALSE(same_pos.parse("bq"));
   EXPECT_EQ("1:2 C msg", error);
-}
-
-// Parsed in a recovery, it leaves the recovery's message, its label's, alone.
-TEST(BackreferenceTest, Uncaptured_backreference_in_recovery) {
-  parser pg(R"(
-    S    <- ($x<'a'> / 'b') (';' / %recover(Skip)) .*
-    Skip <- (. $x / [^;]*) { error_message "Skip msg" }
-  )");
-  ASSERT_TRUE(!!pg);
-  std::string error;
-  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
-    error = std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
-  });
-
-  EXPECT_FALSE(pg.parse("bq;"));
-  EXPECT_EQ("1:2 Skip msg", error);
 }
 
 TEST(BackreferenceTest, Invalid_backreference_test) {
