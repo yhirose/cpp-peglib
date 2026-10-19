@@ -1488,7 +1488,7 @@ public:
   // with the memo (ErrorInfo::open_frame) if it makes one. In the parse, a
   // failure is named by the outermost token rule in it.
   template <typename T> void parse_memoized(const RuleCall &call, T parse) {
-    auto keeps = reports_errors && makes_memo();
+    auto keeps = collects_expected_tokens();
     auto outer = outer_token_rule;
     if (keeps) {
       error_info.open_frame(token_rule());
@@ -1573,7 +1573,8 @@ public:
   // not memoized.
   int32_t cache_slot(size_t def_id) const {
     if (!packrat_index) { return -1; }
-    return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
+    assert(def_id < packrat_index->size());
+    return (*packrat_index)[def_id];
   }
 
   // A rule or a macro instance entered again where it is being parsed is on
@@ -1710,14 +1711,11 @@ public:
                           ? &analysis->packrat_index
                           : nullptr),
         packrat_cached_count(packrat_index ? analysis->packrat_cached_count
-                                           : def_count),
-        cache_registered(enablePackratParsing ? cache_size() : 0),
-        cache_success(enablePackratParsing ? cache_size() : 0),
-        cache_len(enablePackratParsing && this->packrat_cached_count
-                      ? new uint32_t[cache_size()]
-                      : nullptr),
-        cache_values(enablePackratParsing ? (packrat_index ? l / 8 + 16 : l / 2)
-                                          : 0),
+                                           : 0),
+        cache_registered(cache_size()), cache_success(cache_size()),
+        cache_len(this->packrat_cached_count ? new uint32_t[cache_size()]
+                                             : nullptr),
+        cache_values(packrat_index ? l / 8 + 16 : 0),
         active_pos{std::vector<const char *>(def_count),
                    std::vector<const char *>(def_count)},
         tracer_enter(tracer_enter), tracer_leave(tracer_leave),
@@ -2310,7 +2308,7 @@ public:
   std::shared_ptr<Ope> ope_;
 };
 
-class Dictionary : public Ope, public std::enable_shared_from_this<Dictionary> {
+class Dictionary : public Ope {
 public:
   Dictionary(const std::vector<std::string> &v, bool ignore_case)
       : trie_(v, ignore_case) {
@@ -2325,8 +2323,7 @@ public:
   Trie trie_;
 };
 
-class LiteralString : public Ope,
-                      public std::enable_shared_from_this<LiteralString> {
+class LiteralString : public Ope {
 public:
   LiteralString(std::string &&s, bool ignore_case)
       : lit_(std::move(s)), ignore_case_(ignore_case),
@@ -2350,8 +2347,7 @@ public:
   mutable bool is_word_;
 };
 
-class CharacterClass : public Ope,
-                       public std::enable_shared_from_this<CharacterClass> {
+class CharacterClass : public Ope {
 public:
   CharacterClass(const std::string &s, bool negated, bool ignore_case)
       : negated_(negated), ignore_case_(ignore_case) {
@@ -2429,7 +2425,7 @@ private:
   bool is_ascii_only_ = false;
 };
 
-class Character : public Ope, public std::enable_shared_from_this<Character> {
+class Character : public Ope {
 public:
   Character(char32_t ch) : ch_(ch) {}
 
@@ -2450,8 +2446,7 @@ public:
   char32_t ch_;
 };
 
-class AnyCharacter : public Ope,
-                     public std::enable_shared_from_this<AnyCharacter> {
+class AnyCharacter : public Ope {
 public:
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
@@ -2596,7 +2591,7 @@ private:
 
 using Grammar = std::unordered_map<std::string, Definition>;
 
-class Reference : public Ope, public std::enable_shared_from_this<Reference> {
+class Reference : public Ope {
 public:
   Reference(const Grammar &grammar, const std::string &name, const char *s,
             bool is_macro, const std::vector<std::shared_ptr<Ope>> &args)
@@ -2607,8 +2602,6 @@ public:
                     std::any &dt) const override;
 
   void accept(Visitor &v) override;
-
-  std::shared_ptr<Ope> get_core_operator() const;
 
   const Grammar &grammar_;
   const std::string name_;
@@ -2715,7 +2708,7 @@ public:
   std::shared_ptr<Ope> ope_;
 };
 
-class Cut : public Ope, public std::enable_shared_from_this<Cut> {
+class Cut : public Ope {
 public:
   size_t parse_core(const char * /*s*/, size_t /*n*/, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
@@ -3041,25 +3034,6 @@ private:
   bool has_rule_ = false;
 };
 
-struct FindLiteralToken : public Ope::Visitor {
-  using Ope::Visitor::visit;
-
-  void visit(LiteralString &ope) override { token_ = ope.lit_.data(); }
-  void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
-  void visit(Ignore &ope) override { ope.ope_->accept(*this); }
-  void visit(Reference &ope) override;
-  void visit(Recovery &ope) override { ope.ope_->accept(*this); }
-
-  static const char *token(Ope &ope) {
-    FindLiteralToken vis;
-    ope.accept(vis);
-    return vis.token_;
-  }
-
-private:
-  const char *token_ = nullptr;
-};
-
 struct DetectLeftRecursion : public TraversalVisitor {
   using TraversalVisitor::visit;
 
@@ -3127,17 +3101,20 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   // A macro's body depends on its arguments, so "already visited" has to be
   // per instantiation, not per rule: in `A <- W('z') / W(A)`, visiting W with
-  // 'z' says nothing about W with A. Instantiations are identified by their
-  // resolved arguments, the same way as at parse time.
+  // 'z' says nothing about W with A. An instantiation is identified by its
+  // arguments, a bare parameter resolved to what it was given. An argument
+  // that wraps a parameter, as `x 'a'` in `M(x) <- N(x 'a')`, stands as
+  // written, so calls the parse tells apart can share one here: told apart,
+  // instantiations could grow without bound.
   size_t intern_macro_inst(const Reference &ope);
 
   // A macro that instantiates itself with a growing argument
-  // (`M(s) <- M(s / 'x')`) has no finite set of instantiations. Stop
-  // descending instead of looping forever; the rule is then reported as
-  // non-left-recursive, which is what this analysis did for every macro
-  // before it became instantiation-aware. The bound is on nesting depth in
-  // general, not self-recursion specifically, so it also caps any other
-  // chain of nested macro calls -- generously, for real grammars.
+  // (`M(s) <- M(s / 'x')`) has no finite set of instantiations. Past this
+  // depth the walk stops descending, and a cycle it then misses fails where
+  // the parse enters it again. (A parse of such a growing macro makes
+  // instantiations without end, the limit the README states.) The bound is
+  // on nesting depth in general, so it caps any chain of nested macro calls,
+  // generously for real grammars.
   static const size_t max_macro_inst_depth = 32;
 
 private:
@@ -3567,7 +3544,10 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(Recovery &) override { result_.any_char = true; }
   // A cut before the first byte stops the enclosing choice even when the
   // expression then fails, so the next byte cannot tell to skip it.
-  void visit(Cut &) override { result_.any_char = true; }
+  void visit(Cut &) override {
+    result_.can_be_empty = true;
+    result_.any_char = true;
+  }
 
   // Per-rule cache shared across a SetupFirstSets traversal. Without it,
   // every alternative of every PrioritizedChoice re-walks referenced
@@ -4079,17 +4059,10 @@ inline std::pair<size_t, size_t> SemanticValues::line_info() const {
 }
 
 // A failure is listed under the outermost token rule it is in, or else its
-// own rule. One with no literal of its own takes its rule's, if that rule is
-// a literal.
+// own rule.
 inline void ErrorInfo::insert_failure(const char *literal,
                                       const Definition *rule,
                                       const Definition *token_rule) {
-  if (!literal && rule) {
-    if (auto token = FindLiteralToken::token(*rule->get_core_operator());
-        token && token[0] != '\0') {
-      literal = token;
-    }
-  }
   const auto *error_rule = token_rule ? token_rule : rule;
   if (literal || error_rule) { insert_expected(literal, error_rule); }
 }
@@ -4718,10 +4691,6 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
   return rule_->holder_->parse(s, n, vs, c, dt);
 }
 
-inline std::shared_ptr<Ope> Reference::get_core_operator() const {
-  return rule_->holder_;
-}
-
 inline size_t BackReference::parse_core(const char *s, size_t n,
                                         SemanticValues &vs, Context &c,
                                         std::any &dt) const {
@@ -4909,13 +4878,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   }
 
   // Cut
-  if (!c.cut_stack.empty()) {
-    c.cut_stack.back() = true;
-
-    if (c.cut_stack.size() == 1) {
-      // TODO: Remove unneeded entries in packrat memoise table
-    }
-  }
+  if (!c.cut_stack.empty()) { c.cut_stack.back() = true; }
 
   return len;
 }
@@ -4950,15 +4913,6 @@ inline void TokenChecker::visit(Reference &ope) {
     }
   } else {
     has_rule_ = true;
-  }
-}
-
-inline void FindLiteralToken::visit(Reference &ope) {
-  if (ope.is_macro_) {
-    ope.rule_->accept(*this);
-    for (const auto &arg : ope.args_) {
-      arg->accept(*this);
-    }
   }
 }
 
@@ -5292,8 +5246,7 @@ inline void SetupFirstSets::visit(Holder &ope) {
   ope.ope_->accept(cfs);
   rule.first_set = std::move(cfs.result_);
   const auto &fs = rule.first_set;
-  auto known = !fs.any_char && !fs.can_be_empty && !rule.is_macro &&
-               !rule.is_left_recursive;
+  auto known = !fs.any_char && !fs.can_be_empty;
   rule.start_bytes = known ? fs.chars : std::bitset<256>().set();
 
   ope.ope_->accept(*this);
@@ -6726,10 +6679,9 @@ private:
   void make_grammar() {
     // Setup PEG syntax parser
     g["Grammar"] <= seq(g["Spacing"], oom(g["Definition"]), g["EndOfFile"]);
-    // Left-factored: parse the rule name (IdentCont) once, then optionally the
-    // macro parameter list. `opt(Parameters)` pushes a value only for a macro
-    // (so the value layout matches the old two-alternative form), and Spacing
-    // (~, no value) consumes the gap before LEFTARROW that Identifier used to.
+    // Left-factored: parse the rule name (IdentCont) once, then the macro
+    // parameter list if any. `opt(Parameters)` pushes a value only for a
+    // macro, and Spacing (~, no value) consumes the gap before LEFTARROW.
     g["Definition"] <= seq(g["Ignore"], g["IdentCont"], opt(g["Parameters"]),
                            g["Spacing"], g["LEFTARROW"], g["Expression"],
                            opt(g["Instruction"]));
