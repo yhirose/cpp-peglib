@@ -1580,7 +1580,16 @@ public:
   // left recursion that detection missed, and fails there, so a result then
   // depends on what is being parsed around it. No match is reused from then
   // on.
-  void stop_packrat_parsing() { packrat_index = nullptr; }
+  bool enters_again(bool again) {
+    if (again) { packrat_index = nullptr; }
+    return again;
+  }
+  // `active` is where the innermost call in progress started, which a nested
+  // call never starts before.
+  bool enters_again(const char *active, const char *a_s) {
+    assert(!active || active <= a_s);
+    return enters_again(active == a_s);
+  }
 
   // The cache tables have a run of entries per memoized rule, one for each
   // position, and with whitespace a second run for the matches where none is
@@ -4504,6 +4513,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       (use.recognized == RuleUse::Recognized::always ||
        (use.recognized == RuleUse::Recognized::where_unread &&
         !vs.holds_rule_values_))) {
+    // A left-recursive rule is observed (Definition::decide_value_use): its
+    // seed is grown in reuse_or_grow.
+    assert(!outer_->is_left_recursive);
     c.reuse_or_parse(s, *outer_, has_id, false, match,
                      [&](Context::RuleMatch &m) {
                        m.len = parse_ope_body(s, n, c.unread_scope, c, dt);
@@ -4683,10 +4695,7 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
     // Left recursion that detection missed enters it again where it is being
     // parsed. It fails there, as a rule does (Context::reuse_or_parse).
     auto &active = inst.active_pos[c.skips_no_whitespace];
-    if (active == s) {
-      c.stop_packrat_parsing();
-      return kFail;
-    }
+    if (c.enters_again(active, s)) { return kFail; }
     // No scope_exit: an exception abandons the Context.
     auto save = std::exchange(active, s);
     auto len = inst.body->parse(s, n, vs, c, dt);
@@ -5716,8 +5725,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
                                     RuleMatch &match, T parse) {
   auto call = call_of(*rule.holder_, a_s);
   if (!rule_has_id) {
-    if (!in_progress.insert(call).second) {
-      stop_packrat_parsing();
+    if (enters_again(!in_progress.insert(call).second)) {
       match.len = kFail;
       return;
     }
@@ -5728,8 +5736,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
   auto def_id = rule.id;
   auto &active = active_pos[skips_no_whitespace][def_id];
-  if (active == a_s) {
-    stop_packrat_parsing();
+  if (enters_again(active, a_s)) {
     match.len = kFail;
     return;
   }
@@ -5793,6 +5800,7 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
     return;
   }
 
+  assert(growing.empty() || growing.back().call.pos <= a_s);
   // The seed starts as a failure. Held by index: growing grows in the parse.
   growing.push_back({call, RuleMatch(), no_growth, {}});
   auto pop = scope_exit([&]() { growing.pop_back(); });
