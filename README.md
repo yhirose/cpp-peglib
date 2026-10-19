@@ -391,7 +391,7 @@ The same can be written with nested token boundaries: the outer `<` ... `>` disa
 StrQuot   <- < '"' < (StrEscape / StrChars)* > '"' >
 ```
 
-**Rules whose name starts with `_` are hidden from error messages.** If you skip whitespace with rules of your own instead of `%whitespace` (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. What `%whitespace` fails to match while it is skipped is not listed among the expected tokens. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
+**Rules whose name starts with `_` are hidden from error messages.** If you skip whitespace with rules of your own instead of `%whitespace` (e.g. to support comments), name them with a leading `_`, otherwise syntax errors report `expecting <SPACE>` instead of what the user actually needs to fix. What `%whitespace` fails to match while it is skipped is not listed among the expected tokens. Nothing in the operand of `!` is reported either: `Ident <- !Keyword < [a-z]+ >` does not list the keywords, and a message or a recovery in it gives no error. ([#292](https://github.com/yhirose/cpp-peglib/issues/292))
 
 ```
 ~_       <- (_SPACE / _COMMENT)*
@@ -804,7 +804,7 @@ Error report and recovery
 
 cpp-peglib supports the furthest failure error position report as described in the Bryan Ford original document.
 
-The message lists what every failure at that position expected, each once, in the order the parser first tried them. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Where packrat parsing or left recursion reuses a rule's earlier match or failure at the same position instead of trying the rule again, the reused result lists what trying the rule there would.
+The message lists what every failure at that position expected, each once, in the order the parser first tried them. What `%whitespace` fails to match while it is skipped, and what the operand of `!` fails to match, count as failures for neither the position nor the list. A literal is listed as its text. Any other failure is listed under the name of the outermost token rule it is in, or else of its own rule. Where packrat parsing or left recursion reuses a rule's earlier match or failure at the same position instead of trying the rule again, the reused result lists what trying the rule there would.
 
 For better error report and recovery, cpp-peglib supports 'recovery' operator with label which can be associated with a recovery expression and a custom error message. This idea comes from the fantastic ["Syntax Error Recovery in Parsing Expression Grammars"](https://arxiv.org/pdf/1806.11150.pdf) paper by Sergio Medeiros and Fabio Mascarenhas.
 

@@ -912,6 +912,7 @@ struct FirstSet;
 struct StartFailure {
   const char *literal = nullptr;
   const Definition *rule = nullptr;
+  bool listed = true;
 };
 
 // Thrown when a parse nests more rule matches than its start rule's
@@ -1348,8 +1349,9 @@ struct StartRuleAnalysis {
 
 // What a rule match goes by to leave out what goes unnoticed: building a
 // value that nothing reads (Holder::parse_core), entering a rule that cannot
-// start (Reference::parse_dispatch), and trying an alternative that cannot
-// start (PrioritizedChoice::parse_core).
+// start (Reference::parse_dispatch), trying an alternative that cannot start
+// (PrioritizedChoice::parse_core), and parsing a rule again where errors are
+// muted (Context::makes_memo).
 struct RuleUse {
   // Whether a match is only recognized: it runs no callback, forms no scope
   // and builds no value.
@@ -1376,6 +1378,10 @@ struct RuleUse {
   // such a rule is entered, and an alternative that starts with one is tried,
   // instead of skipped.
   bool must_be_tried = true;
+  // Whether the rule is parsed only where errors are muted, so that a memo
+  // that notes nothing is reused only where nothing is noted either
+  // (Context::makes_memo).
+  bool parsed_only_where_muted = false;
 };
 
 // The RuleUse of each rule, by id, and whether some alternative starts with
@@ -1477,8 +1483,11 @@ public:
 
   // A memo stands in for parsing the rule again, the failures it notes
   // included. The whitespace notes no failure, so a parse in it makes no
-  // memo, though it reuses those of the tokens.
-  bool makes_memo() const { return !in_whitespace; }
+  // memo, though it reuses those of the tokens. Nor does a parse where errors
+  // are muted, unless the rule is parsed only where they are.
+  bool makes_memo(const RuleUse &use) const {
+    return !in_whitespace && (!mutes_errors || use.parsed_only_where_muted);
+  }
 
   RuleCall call_of(const Holder &rule, const char *a_s) const {
     return {&rule, a_s, skips_no_whitespace};
@@ -1649,9 +1658,17 @@ public:
 
   Log log;
   ErrorReporter error_reporter;
-  // Whether this part of the parse reports errors: someone listens, and no
-  // recovery is skipping input.
-  bool reports_errors;
+  // Whether someone listens to errors.
+  const bool reports_errors;
+  // Nothing is reported from the operand of `!` or the expression of a
+  // recovery: what they fail to match is not what the input lacks.
+  bool mutes_errors = false;
+  bool reports_here() const { return reports_errors && !mutes_errors; }
+  auto mute_errors() {
+    return scope_exit([this, was = std::exchange(mutes_errors, true)]() {
+      mutes_errors = was;
+    });
+  }
 
   // True when error reporting or tracing is active, the only readers of
   // rule_stack.
@@ -1763,10 +1780,10 @@ public:
     bool save_;
   };
 
-  // Whether a message at `pos` is reported: someone listens, and no message
-  // lies further on.
+  // Whether a message at `pos` is reported: errors are reported here, and no
+  // message lies further on.
   bool reports_message_at(const char *pos) const {
-    return reports_errors && error_info.message_pos < pos;
+    return reports_here() && error_info.message_pos < pos;
   }
 
   // Per-rule packrat stats (populated when packrat_stats is non-null)
@@ -1790,8 +1807,8 @@ public:
   // is reused, but one built from the seed of a rule growing around it only
   // while that rule grows the same seed.
   template <typename T>
-  void reuse_or_grow(const char *a_s, const Holder &rule, RuleMatch &match,
-                     T parse);
+  void reuse_or_grow(const char *a_s, const Holder &rule, const RuleUse &use,
+                     RuleMatch &match, T parse);
 
   // Semantic values
   SemanticValues &push_semantic_values_scope() {
@@ -1866,7 +1883,7 @@ public:
   // Error
   // What skipping whitespace fails to match is not what the input lacks.
   bool collects_expected_tokens() const {
-    return reports_errors && !in_whitespace;
+    return reports_here() && !in_whitespace;
   }
   void set_error_pos(const char *a_s, const char *literal = nullptr,
                      bool copy_literal = false) {
@@ -2292,6 +2309,7 @@ public:
     size_t len;
     {
       auto unread = c.unread_in(vs);
+      auto muted = c.mute_errors();
       len = ope_->parse(s, n, vs, c, dt);
     }
     c.rollback(vs, snap); // Always rollback — predicates consume nothing
@@ -3513,7 +3531,11 @@ struct ComputeFirstSet : public TraversalVisitor {
   // Where its operand cannot start, the operand fails and this matches
   // empty. An operand that can match empty makes this fail there instead.
   void visit(NotPredicate &ope) override {
+    auto first = result_.failures.size();
     if (add_start_of(*ope.ope_)) { result_.any_char = true; }
+    for (auto i = first; i < result_.failures.size(); i++) {
+      result_.failures[i].listed = false;
+    }
     result_.can_be_empty = true;
   }
   void visit(Dictionary &ope) override {
@@ -3903,6 +3925,7 @@ private:
 
   void analyze() const;
   void number_new_rules() const;
+  void decide_parsed_only_where_muted(std::vector<RuleUse> &uses) const;
   void select_packrat_rules() const;
   std::shared_ptr<const RuleUses> rule_uses(bool builds_everything) const;
   bool update_rule_use_inputs(bool builds_everything) const;
@@ -4095,6 +4118,7 @@ inline void ErrorInfo::insert_start_failure(const StartFailure &failure,
                                             const Definition *rule,
                                             const Definition *token_rule,
                                             Expanded &expanded) {
+  if (!failure.listed) { return; }
   if (!failure.rule) {
     insert_failure(failure.literal, rule, token_rule);
     return;
@@ -4582,7 +4606,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   };
 
   if (outer_->is_left_recursive) {
-    c.reuse_or_grow(s, *this, match, do_parse);
+    c.reuse_or_grow(s, *this, use, match, do_parse);
   } else {
     c.reuse_or_parse(s, *outer_, has_id, vs.holds_rule_tokens_, match,
                      do_parse);
@@ -4868,7 +4892,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   const auto *label = this->label();
 
   // Custom error message
-  if (c.reports_errors && label && !label->error_message.empty()) {
+  if (c.reports_here() && label && !label->error_message.empty()) {
     c.error_info.set_message(
         s, resolve_capture_placeholders(label->error_message, c), label->name);
   }
@@ -4876,8 +4900,7 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   // Recovery
   auto len = kFail;
   {
-    auto save = std::exchange(c.reports_errors, false);
-    auto se = scope_exit([&]() { c.reports_errors = save; });
+    auto muted = c.mute_errors();
 
     SemanticValues dummy_vs;
     std::any dummy_dt;
@@ -4887,7 +4910,8 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     len = ope_->parse(s, n, dummy_vs, c, dummy_dt);
   }
 
-  if (success(len)) {
+  // Where errors are muted, nothing was reported to recover from.
+  if (success(len) && !c.mutes_errors) {
     c.recovered = true;
 
     if (c.reports_errors) {
@@ -5289,6 +5313,57 @@ inline void Definition::analyze() const {
   number_new_rules();
 }
 
+// The rules an operator refers to where it does not mute errors: outside
+// the operand of `!` and the expression of a recovery. A rule in a macro
+// argument counts as referred to there, wherever the macro puts it.
+struct CollectUnmutedRefs : public TraversalVisitor {
+  using TraversalVisitor::visit;
+  std::vector<const Definition *> rules;
+
+  void visit(NotPredicate &) override {}
+  void visit(Recovery &) override {}
+  void visit(Holder &ope) override { rules.push_back(ope.outer_); }
+  void visit(Reference &ope) override {
+    if (ope.rule_) { rules.push_back(ope.rule_); }
+    for (const auto &arg : ope.args_) {
+      arg->accept(*this);
+    }
+  }
+};
+
+inline void
+Definition::decide_parsed_only_where_muted(std::vector<RuleUse> &uses) const {
+  const auto &a = analysis_;
+  std::vector<bool> unmuted(a.rules_by_id.size(), false);
+  std::vector<const Definition *> todo;
+  auto reach_from = [&](Ope &ope) {
+    CollectUnmutedRefs refs;
+    ope.accept(refs);
+    for (const auto *rule : refs.rules) {
+      if (a.indexes(*rule) && !unmuted[rule->id]) {
+        unmuted[rule->id] = true;
+        todo.push_back(rule);
+      }
+    }
+  };
+  reach_from(*holder_);
+  if (whitespaceOpe) { reach_from(*whitespaceOpe); }
+  if (wordOpe) { reach_from(*wordOpe); }
+  // A rule that this start rule does not index is taken to be parsed where
+  // errors are not muted.
+  for (const auto *rule : a.rules) {
+    if (!a.indexes(*rule)) { reach_from(*rule->get_core_operator()); }
+  }
+  while (!todo.empty()) {
+    const auto *rule = todo.back();
+    todo.pop_back();
+    reach_from(*rule->get_core_operator());
+  }
+  for (const auto *rule : a.rules_by_id) {
+    if (rule) { uses[rule->id].parsed_only_where_muted = !unmuted[rule->id]; }
+  }
+}
+
 // The rules an operator refers to, without walking into them, macros and
 // the rules in their arguments included.
 struct CollectRuleRefs : public TraversalVisitor {
@@ -5400,6 +5475,7 @@ Definition::rule_uses(bool builds_everything) const {
                      ? std::vector<RuleUse>(analysis_.rules_by_id.size())
                      : analyze_rule_uses();
     decide_must_be_tried(uses);
+    decide_parsed_only_where_muted(uses.by_id);
     rule_uses_ = std::make_shared<const RuleUses>(std::move(uses));
   }
   return rule_uses_;
@@ -5709,6 +5785,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
   }
 
   auto def_id = rule.id;
+  assert(mutes_errors || !rule_use[def_id].parsed_only_where_muted);
   auto &active = active_pos[skips_no_whitespace][def_id];
   if (enters_again(active, a_s)) {
     match.len = kFail;
@@ -5747,7 +5824,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
     }
   }
 
-  if (slot < 0 || !makes_memo()) { return; }
+  if (slot < 0 || !makes_memo(rule_use[def_id])) { return; }
   if (success(match.len)) {
     write_packrat_cache(idx, match.len, match.val);
   } else {
@@ -5758,8 +5835,10 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
 template <typename T>
 inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
-                                   RuleMatch &match, T parse) {
+                                   const RuleUse &use, RuleMatch &match,
+                                   T parse) {
   auto call = call_of(rule, a_s);
+  assert(mutes_errors || !use.parsed_only_where_muted);
 
   if (auto i = growth_of(call); i != no_growth) {
     match = growing[i].seed;
@@ -5795,7 +5874,7 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
     }
     forget_built(i);
   });
-  if (!makes_memo()) { return; }
+  if (!makes_memo(use)) { return; }
 
   // Confirmed, a failure too, so the rule is not seeded here again
   auto built_from = growing[i].built_from;

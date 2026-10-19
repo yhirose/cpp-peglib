@@ -351,12 +351,121 @@ TEST(ErrorTest, Expected_tokens_follow_the_order_of_the_alternatives) {
       syntax_error(pg, "b9"));
 }
 
+// What the operand of `!` fails to match is not what the input lacks: the
+// keywords are not expected where an identifier is, and a keyword is the
+// error where it stands, not past it, where the `[a-z]` of its `![a-z]`
+// failed.
+TEST(ErrorTest, Failures_inside_a_negation_are_not_expected) {
+  parser pg(R"(
+    S       <- 'let' Ident '=' Num
+    Ident   <- !Keyword < [a-z]+ >
+    Keyword <- ('if' / 'else' / 'select') ![a-z]
+    Num     <- < [0-9]+ >
+    %whitespace <- [ ]*
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected '1', expecting <Ident>.",
+            syntax_error(pg, "let 1 = 1"));
+  EXPECT_EQ("syntax error, unexpected 'select', expecting <Ident>.",
+            syntax_error(pg, "let select = 1"));
+}
+
+// Nor is a message given in the operand of `!` the error: End's message is
+// not what "/*a*/x" lacks.
+TEST(ErrorTest, Messages_inside_a_negation_are_not_reported) {
+  parser pg(R"(
+    S   <- Cmt 'x' ';'
+    Cmt <- '/*' (!End .)* End
+    End <- '*/' { error_message "unterminated comment" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, expecting ';'.", syntax_error(pg, "/*a*/x"));
+  EXPECT_EQ("unterminated comment", syntax_error(pg, "/*a"));
+}
+
+// A recovery in the operand of `!` reports nothing, and the parse has not
+// recovered from anything: Pair recovers there, so `!` fails, and "ac"
+// matches the other way.
+TEST(ErrorTest, Recovery_inside_a_negation_reports_nothing) {
+  parser pg(R"(
+    S    <- !(Pair / 'x') 'q' / 'a' 'c'
+    Pair <- 'a' 'b'^b 'c'
+    b    <- ''
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_TRUE(pg.parse("ac"));
+  size_t errors = 0;
+  pg.set_logger([&](size_t, size_t, const std::string &) { errors++; });
+  EXPECT_TRUE(pg.parse("ac"));
+  EXPECT_EQ(0u, errors);
+}
+
+// A memo made in the operand of `!` notes nothing, so a rule parsed outside
+// it too makes none there: reused outside, E's seed and K's memo would list
+// none of what trying them again expects.
+TEST(ErrorTest, Memo_made_inside_a_negation_is_not_reused_outside) {
+  parser lr(R"(
+    S <- !(E 'x') 'y' / E ';'
+    E <- E '+' N / N
+    N <- [0-9]
+  )");
+  ASSERT_TRUE(!!lr);
+  EXPECT_EQ("syntax error, expecting <N>.", syntax_error(lr, "1+"));
+
+  parser pk(R"(
+    S <- !K 'x' / K
+    K <- 'a' 'b'
+  )");
+  ASSERT_TRUE(!!pk);
+  pk.enable_packrat_parsing();
+  EXPECT_EQ("syntax error, unexpected 'c', expecting 'b'.",
+            syntax_error(pk, "ac"));
+}
+
+// After other start rules, C's analysis does not index every rule it
+// reaches. One it does not index is taken to be parsed outside `!` too, and
+// so are the rules reached through it, X here, which then make no memo in
+// the operand of `!` either.
+TEST(ErrorTest, Memo_made_inside_a_negation_after_other_start_rules) {
+  for (auto others_first : {false, true}) {
+    parser pg(R"(
+      S <- 's'
+      C <- P (!(Q 'x') 'y' / Q ';')
+      A <- P
+      B <- Q
+      P <- 'p'
+      Q <- X
+      X <- X '+' N / N
+      N <- [0-9]
+    )");
+    ASSERT_TRUE(!!pg);
+    if (others_first) {
+      EXPECT_TRUE(pg["A"].parse("p").ret);
+      EXPECT_TRUE(pg["B"].parse("1").ret);
+    }
+
+    std::string message;
+    Log log = [&](size_t, size_t, const std::string &msg, const std::string &) {
+      message = msg;
+    };
+    const char *input = "p1+;";
+    auto r = pg["C"].parse(input, nullptr, log);
+    EXPECT_FALSE(r.ret);
+    r.error_info.output_log(log, input, strlen(input));
+    EXPECT_EQ("syntax error, unexpected ';', expecting <N>.", message)
+        << others_first;
+  }
+}
+
 // A parse that keeps failing at one position expects the same few tokens
 // over and over.
 TEST(ErrorTest, Expected_tokens_of_many_failures_at_one_position) {
   parser pg(R"(
     S <- N{1000} 'z'
-    N <- !'p' !'q'
+    N <- 'p'? 'q'?
   )");
   ASSERT_TRUE(!!pg);
 
@@ -1361,6 +1470,24 @@ TEST(MaxDepthTest, Parse_is_abandoned_not_backtracked) {
   EXPECT_FALSE(pg.parse("((((x))))"));
   EXPECT_EQ(0, actions);
   EXPECT_EQ(0, leaves);
+}
+
+// Without a logger as with one, Expr makes no memo in the operand of `!`, so
+// the same rules are entered and the limit is reached either way.
+TEST(MaxDepthTest, Logger_does_not_change_what_a_negation_enters) {
+  parser pg(R"(
+    Stmt     <- !(Expr '=') ExprStmt / Assign
+    ExprStmt <- Expr ';'
+    Assign   <- Expr '=' Expr ';'
+    Expr     <- Expr '+' Term / Term
+    Term     <- '(' Expr ')' / [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.set_max_depth(7);
+
+  EXPECT_FALSE(pg.parse("((1));"));
+  pg.set_logger([](size_t, size_t, const std::string &) {});
+  EXPECT_FALSE(pg.parse("((1));"));
 }
 
 TEST(MaxDepthTest, Limit_is_reported_after_a_recovered_error) {
