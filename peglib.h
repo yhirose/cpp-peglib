@@ -6163,6 +6163,23 @@ entry_rule_error(const Grammar &g, const Definition &start) {
   return {};
 }
 
+// What a loaded grammar is finished with: the start rule skips the
+// %whitespace and checks the %word the grammar defines, and every rule gets
+// its first sets and fast loops (SetupFirstSets). One visitor walks all
+// rules, so that each rule's first sets are worked out once.
+inline void finish_grammar(Grammar &g, Definition &start_rule) {
+  if (auto it = g.find(WHITESPACE_DEFINITION_NAME); it != g.end()) {
+    start_rule.whitespaceOpe = wsp(it->second.get_core_operator());
+  }
+  if (auto it = g.find(WORD_DEFINITION_NAME); it != g.end()) {
+    start_rule.wordOpe = it->second.get_core_operator();
+  }
+  SetupFirstSets vis;
+  for (auto &x : g) {
+    x.second.accept(vis);
+  }
+}
+
 /*-----------------------------------------------------------------------------
  *  Grammar serialization
  *
@@ -6609,22 +6626,8 @@ struct GrammarBlob {
       LinkReferences vis(*g, x.second.params);
       x.second.accept(vis);
     }
-    // Re-derive automatic whitespace/word skipping on the start rule from the
-    // %whitespace / %word definitions, exactly as ParserGenerator does. Sharing
-    // the (already linked) definition operators avoids leaving references
-    // inside the skipping ope unlinked, and keeps the blob smaller.
-    if (g->count(WHITESPACE_DEFINITION_NAME)) {
-      (*g)[start].whitespaceOpe =
-          wsp((*g)[WHITESPACE_DEFINITION_NAME].get_core_operator());
-    }
-    if (g->count(WORD_DEFINITION_NAME)) {
-      (*g)[start].wordOpe = (*g)[WORD_DEFINITION_NAME].get_core_operator();
-    }
-    {
-      SetupFirstSets vis; // shared -> O(N)
-      for (auto &x : *g)
-        x.second.accept(vis);
-    }
+    // The skipping is not stored: it is made again from the definitions.
+    finish_grammar(*g, (*g)[start]);
     start_out = std::move(start);
     return g;
   }
@@ -6681,12 +6684,7 @@ private:
     // next byte cannot match. This is safe -- First-Set filtering only skips
     // alternatives that would have failed anyway, so no semantic action that
     // would have committed is skipped (unlike packrat, which is unsound here).
-    {
-      SetupFirstSets vis;
-      for (auto &x : g) {
-        x.second.accept(vis);
-      }
-    }
+    finish_grammar(g, g["Grammar"]);
   }
 
   struct Instruction {
@@ -7633,16 +7631,12 @@ private:
       }
 
       auto &rule = grammar[WHITESPACE_DEFINITION_NAME];
-      start_rule.whitespaceOpe = wsp(rule.get_core_operator());
-
       if (detect_infiniteLoop(data, rule, log, s)) { return {}; }
     }
 
     // Word expression
     if (grammar.count(WORD_DEFINITION_NAME)) {
       auto &rule = grammar[WORD_DEFINITION_NAME];
-      start_rule.wordOpe = rule.get_core_operator();
-
       if (detect_infiniteLoop(data, rule, log, s)) { return {}; }
 
       if (rule.can_be_empty) {
@@ -7674,17 +7668,7 @@ private:
       }
     }
 
-    // Setup First-Set and ISpan optimizations. A single visitor is shared
-    // across all rules so its first-set cache and visited-rule set persist:
-    // each rule's first-sets are computed once (O(N)) instead of re-walking
-    // every reachable rule once per referencing rule (O(N^2)).
-    {
-      SetupFirstSets vis;
-      for (auto &x : grammar) {
-        x.second.accept(vis);
-      }
-    }
-
+    finish_grammar(grammar, start_rule);
     return {data.grammar, start, data.enablePackratParsing};
   }
 
