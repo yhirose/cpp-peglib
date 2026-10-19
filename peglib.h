@@ -2657,17 +2657,22 @@ public:
   PrecedenceClimbing(const std::shared_ptr<Ope> &atom,
                      const std::shared_ptr<Ope> &binop, const BinOpeInfo &info,
                      const Definition &rule)
-      : atom_(atom), binop_(binop), info_(info), rule_(rule) {}
+      : atom_(atom), binop_(binop), info_(info), rule_(rule),
+        repetition_(std::make_shared<Sequence>(
+            atom, Repetition::zom(std::make_shared<Sequence>(binop, atom)))) {}
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
                     std::any &dt) const override;
 
   void accept(Visitor &v) override;
 
-  std::shared_ptr<Ope> atom_;
-  std::shared_ptr<Ope> binop_;
+  const std::shared_ptr<Ope> atom_;
+  const std::shared_ptr<Ope> binop_;
   BinOpeInfo info_;
   const Definition &rule_;
+  // `atom (binop atom)*`, the repetition this parses, which is what the
+  // analyses of a grammar look at.
+  const std::shared_ptr<Ope> repetition_;
 
 private:
   // Sets operand_missing when an operator is left without its right
@@ -2916,8 +2921,7 @@ struct TraversalVisitor : public Ope::Visitor {
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
   void visit(Recovery &ope) override { ope.ope_->accept(*this); }
   void visit(PrecedenceClimbing &ope) override {
-    ope.atom_->accept(*this);
-    ope.binop_->accept(*this);
+    ope.repetition_->accept(*this);
   }
 
   // A walk started inside another goes on from the rules that one is in.
@@ -3052,9 +3056,6 @@ struct DetectLeftRecursion : public TraversalVisitor {
 
   explicit DetectLeftRecursion(const Definition &rule) : rule_(&rule) {}
 
-  // Only the atom matters here; see ComputeCanBeEmpty.
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
-
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
@@ -3144,10 +3145,6 @@ struct ComputeCanBeEmpty : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   bool result = false;
-
-  // The operator comes after the atom, which decides alone whether this
-  // matches empty, loops or recurses on the left.
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
 
   void visit(Sequence &ope) override {
     result = std::all_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
@@ -3290,8 +3287,6 @@ struct HasEmptyElement : public TraversalVisitor {
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
   void visit(Sequence &ope) override;
-  // Only the atom matters here; see ComputeCanBeEmpty.
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(PrioritizedChoice &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
@@ -3340,8 +3335,6 @@ struct DetectInfiniteLoop : public TraversalVisitor {
                      std::unordered_map<std::string, bool> &has_error_cache)
       : refs_(refs), has_error_cache_(has_error_cache) {}
 
-  // Only the atom matters here; see ComputeCanBeEmpty.
-  void visit(PrecedenceClimbing &ope) override { ope.atom_->accept(*this); }
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
@@ -3563,11 +3556,6 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(BackReference &) override { result_.any_char = true; }
   // A recovery gives its label's message wherever it is tried.
   void visit(Recovery &) override { result_.any_char = true; }
-  // An operator follows an atom that matches empty at the same position.
-  void visit(PrecedenceClimbing &ope) override {
-    ope.atom_->accept(*this);
-    if (result_.can_be_empty) { ope.binop_->accept(*this); }
-  }
   // A cut before the first byte stops the enclosing choice even when the
   // expression then fails, so the next byte cannot tell to skip it.
   void visit(Cut &) override { result_.any_char = true; }
@@ -5408,13 +5396,6 @@ struct CollectStartRegion : public TraversalVisitor {
       ope.opes_[i]->accept(*this);
     }
   }
-  // An operator follows an atom that matches empty at the same position.
-  void visit(PrecedenceClimbing &ope) override {
-    ope.atom_->accept(*this);
-    ComputeCanBeEmpty vis;
-    ope.atom_->accept(vis);
-    if (vis.result) { ope.binop_->accept(*this); }
-  }
   void visit(Holder &) override { unknown = true; }
   // A macro too: its body starts where it is called, and a parameter there
   // would make the first set any byte.
@@ -5872,13 +5853,6 @@ inline void Definition::select_packrat_rules() const {
       }
 
       void visit(Sequence &ope) override { collect(ope.opes_, 0); }
-      // An operator is parsed where the atom ends, if it matches empty.
-      void visit(PrecedenceClimbing &ope) override {
-        ope.atom_->accept(*this);
-        ComputeCanBeEmpty empty_vis;
-        ope.atom_->accept(empty_vis);
-        if (empty_vis.result) { ope.binop_->accept(*this); }
-      }
     };
 
     // The rule IDs leftmost-reachable from the given subtree.
