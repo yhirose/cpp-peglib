@@ -1147,6 +1147,21 @@ TEST(MacroArgumentScopeTest, Parameter_forwarded_through_two_macros) {
   EXPECT_FALSE(p.parse("yr"));
 }
 
+// An argument in a macro body that uses the macro's parameter twice doubles
+// at every level. Detection reads it once in each scope, not at every use of
+// the parameter, so a deep chain loads at once.
+TEST(MacroArgumentScopeTest, Argument_using_a_parameter_twice_at_every_level) {
+  std::string grammar = "S <- A30('a'?) 'z'\n";
+  for (int k = 30; k >= 1; k--) {
+    grammar += "A" + std::to_string(k) + "(x) <- A" + std::to_string(k - 1) +
+               "(x x)\n";
+  }
+  grammar += "A0(x) <- x\n";
+  parser p(grammar);
+
+  EXPECT_TRUE(!!p);
+}
+
 TEST(LeftRecursionMacroTest, Nested_macro_with_left_recursion) {
   // A two-level nested macro invoked from a left-recursive rule
   parser pg(R"(

@@ -3109,6 +3109,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
   };
   ResolvedArg resolve_macro_arg(size_t iarg) const;
   void visit_in_defining_scope(const ResolvedArg &arg);
+  void visit_argument(const ResolvedArg &arg);
 
   // A macro's body depends on its arguments, so "already visited" has to be
   // per instantiation, not per rule: in `A <- W('z') / W(A)`, visiting W with
@@ -3129,6 +3130,7 @@ private:
   const Definition *rule_;
   std::set<std::pair<const Definition *, size_t>> refs_;
   std::map<std::vector<const void *>, size_t> macro_inst_ids_;
+  std::map<std::vector<const void *>, bool> args_done_;
   size_t next_macro_inst_ = 1;
   bool done_ = false;
   std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
@@ -4989,7 +4991,7 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   if (ope.rule_ == rule_) {
     error_s = ope.s_;
   } else if (param.ope) {
-    visit_in_defining_scope(param);
+    visit_argument(param);
     if (done_ == false) { return; }
   } else if (ope.is_macro_ &&
              macro_args_stack_.size() >= max_macro_inst_depth) {
@@ -5049,6 +5051,30 @@ inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
                                                 next_macro_inst_);
   if (inserted) { next_macro_inst_++; }
   return it->second;
+}
+
+// An argument written in a macro body can name the parameters of that macro,
+// and would be walked again for every use of them, at every level. Read again
+// in the same scope, it is not walked again: the first walk's result stands.
+// Walked again, it would stop at the rules the first walk went through, and
+// could take what the first walk found can match empty to consume input. An
+// argument written outside a macro body names no parameter, and walking it
+// again costs less than keeping its result.
+inline void DetectLeftRecursion::visit_argument(const ResolvedArg &arg) {
+  if (arg.depth == 0) {
+    visit_in_defining_scope(arg);
+    return;
+  }
+  std::vector<const void *> key(macro_args_stack_.begin(),
+                                macro_args_stack_.begin() + arg.depth);
+  key.push_back(arg.ope.get());
+  auto [it, first] = args_done_.emplace(std::move(key), false);
+  if (first) {
+    visit_in_defining_scope(arg);
+    it->second = done_;
+  } else {
+    done_ = it->second;
+  }
 }
 
 inline void
