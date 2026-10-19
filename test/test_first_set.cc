@@ -446,7 +446,7 @@ TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_it) {
     for (auto with_logger : {false, true}) {
       parser pg(R"(
         S <- R? 'y' G
-        E <- ''
+        E <- 'e'?
         G <- 'g'
       )" + std::string(grammar));
       ASSERT_TRUE(!!pg);
@@ -465,20 +465,52 @@ TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_it) {
   }
 }
 
-// A lookahead may match anything: K matches 'x' inside A.
-TEST(UnstartableRuleTest, Is_entered_to_run_an_action_below_a_lookahead) {
-  parser pg(R"(
-    S <- A? 'x'
-    A <- !K 'y'
-    K <- 'x'
-  )");
-  ASSERT_TRUE(!!pg);
+// A cannot start with 'z'. Entered there, it enters the rule its body starts
+// with, as a parse that enters every rule does: through a lookahead or a
+// macro, after a rule that can match empty, and the macro itself when it is
+// left-recursive.
+TEST(UnstartableRuleTest, Enters_what_a_rule_starts_with) {
+  struct {
+    const char *grammar;
+    const char *rule;
+  } cases[] = {
+      {R"(S <- A? 'z'
+          A <- M('q') 'y'
+          M(x) <- K x
+          K <- 'k')",
+       "K"},
+      {R"(S <- A? 'z'
+          A <- !K 'y'
+          K <- 'k')",
+       "K"},
+      {R"(S <- A? 'z'
+          A <- !(K 'w') 'y'
+          K <- 'k')",
+       "K"},
+      {R"(S <- A? 'z'
+          A <- M('q') 'y'
+          M(x) <- E K x
+          E <- 'e'?
+          K <- 'k')",
+       "K"},
+      {R"(S <- A? 'z'
+          A <- M('q') 'y'
+          M(x) <- M(x) x / 'k')",
+       "M"},
+  };
+  for (const auto &c : cases) {
+    for (auto packrat : {false, true}) {
+      parser pg(c.grammar);
+      ASSERT_TRUE(!!pg) << c.grammar;
+      if (packrat) { pg.enable_packrat_parsing(); }
+      auto count = 0;
+      pg[c.rule].enter = [&](const Context &, const char *, size_t,
+                             std::any &) { count++; };
 
-  auto count = 0;
-  pg["K"] = [&](const SemanticValues &) { count++; };
-
-  EXPECT_TRUE(pg.parse("x"));
-  EXPECT_EQ(1, count);
+      EXPECT_TRUE(pg.parse("z")) << c.grammar;
+      EXPECT_EQ(1, count) << c.grammar << "\npackrat " << packrat;
+    }
+  }
 }
 
 // An AST action depends on its values alone, so running it or not goes

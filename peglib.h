@@ -1412,7 +1412,11 @@ public:
 
   // `rule` is not entered at `a_s`, where it cannot start: this notes the
   // failures trying it would.
-  void note_untried(const Definition &rule, const char *a_s, size_t n);
+  void note_untried(const Definition &rule, const char *a_s) {
+    if (collects_expected_tokens()) {
+      note_failure(a_s, {nullptr, &rule}, false);
+    }
+  }
 
   void push_rule(Definition *rule);
   void pop_rule() {
@@ -3907,8 +3911,7 @@ private:
   void decide_value_use(const std::vector<CollectRuleRefs> &refs,
                         const CollectRuleRefs &whitespace,
                         std::vector<RuleUse> &uses) const;
-  void decide_skippable(const std::vector<CollectRuleRefs> &refs,
-                        std::vector<RuleUse> &uses) const;
+  void decide_skippable(std::vector<RuleUse> &uses) const;
   void decide_must_be_tried(RuleUses &uses) const;
 
   // Whether a rule in `rules` is flagged. One that this start rule does not
@@ -4478,15 +4481,6 @@ CPPPEGLIB_NOINLINE inline void Context::note_failure(const char *a_s,
   }
 }
 
-inline void Context::note_untried(const Definition &rule, const char *a_s,
-                                  size_t n) {
-  const auto &fs = rule.first_set;
-  if (collects_expected_tokens() && !fs.any_char &&
-      (n == 0 || !fs.chars.test(static_cast<unsigned char>(*a_s)))) {
-    note_failure(a_s, {nullptr, &rule}, false);
-  }
-}
-
 inline bool Context::must_be_tried(const FirstSet &fs) const {
   return std::any_of(
       fs.failures.begin(), fs.failures.end(), [&](const auto &f) {
@@ -4720,7 +4714,7 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
       c.has_id(*rule_) && c.rule_use[rule_->id].skippable) {
     if (!c.notices_skipping) { return kFail; }
     if (!c.rule_use[rule_->id].must_be_tried) {
-      c.note_untried(*rule_, s, n);
+      c.note_untried(*rule_, s);
       return kFail;
     }
   }
@@ -5383,30 +5377,18 @@ private:
   size_t thrown_away_ = 0;
 };
 
-// Whether an operator has a cut, without walking into the rules it refers
-// to. A recovery cuts where it matches.
-struct HasCut : public TraversalVisitor {
-  using TraversalVisitor::visit;
-
-  void visit(Cut &) override { result = true; }
-  void visit(Recovery &) override { result = true; }
-  void visit(Holder &) override {}
-
-  bool result = false;
-};
-
-// What a rule's body may try when the rule is entered on a byte its first set
-// excludes, so that nothing consumes it: the rules it enters there, and the
-// rules that may match anything there, below a lookahead or through a macro.
-// A User operator is not looked for: a parse builds everything with one (see
-// Context::builds_everything).
+// The rules a rule's body enters when the rule is entered on a byte its first
+// set excludes. Nothing consumes that byte, so only what the body starts with
+// runs: an alternative that cannot start with the byte is skipped, a
+// lookahead's operand fails at its own start, and a macro's body runs up to
+// its first parameter. Whitespace skipped after an empty match, `&`, a cut, a
+// recovery, a back reference, a User operator or a macro parameter there
+// would make the first set any byte (ComputeFirstSet), so none of them is met.
 struct CollectStartRegion : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   std::vector<Definition *> entered;
-  std::vector<Definition *> reached; // with all the rules below them
-  // A combinator rule, a macro parameter, a recovery, or a cut in what may
-  // match anything.
+  // A rule a combinator embeds, whose nullability is not worked out.
   bool unknown = false;
 
   void visit(Sequence &ope) override {
@@ -5417,8 +5399,6 @@ struct CollectStartRegion : public TraversalVisitor {
       if (!vis.result) { break; }
     }
   }
-  // An alternative that cannot start with the byte is skipped by its first
-  // set.
   void visit(PrioritizedChoice &ope) override {
     for (size_t i = 0; i < ope.opes_.size(); i++) {
       if (i < ope.first_sets().size()) {
@@ -5435,28 +5415,11 @@ struct CollectStartRegion : public TraversalVisitor {
     ope.atom_->accept(vis);
     if (vis.result) { ope.binop_->accept(*this); }
   }
-  void visit(AndPredicate &ope) override { reach(*ope.ope_); }
-  void visit(NotPredicate &ope) override { reach(*ope.ope_); }
-  void visit(Recovery &) override { unknown = true; }
   void visit(Holder &) override { unknown = true; }
+  // A macro too: its body starts where it is called, and a parameter there
+  // would make the first set any byte.
   void visit(Reference &ope) override {
-    if (!ope.rule_) {
-      unknown = true;
-    } else if (ope.rule_->is_macro) {
-      reach(ope);
-    } else {
-      entered.push_back(ope.rule_);
-    }
-  }
-
-private:
-  void reach(Ope &ope) {
-    CollectRuleRefs vis;
-    ope.accept(vis);
-    reached.insert(reached.end(), vis.rules.begin(), vis.rules.end());
-    HasCut cut;
-    ope.accept(cut);
-    if (cut.result) { unknown = true; }
+    if (ope.rule_) { entered.push_back(ope.rule_); }
   }
 };
 
@@ -5525,7 +5488,7 @@ inline std::vector<RuleUse> Definition::analyze_rule_uses() const {
   }
 
   decide_value_use(refs, whitespace, uses);
-  decide_skippable(refs, uses);
+  decide_skippable(uses);
   return uses;
 }
 
@@ -5680,34 +5643,19 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
 // so that skipping it goes unnoticed. Entered there, the rule fails without
 // consuming anything: its enter and leave run, and so do those of the rules
 // it enters at its start, whose actions and predicates run too if they can
-// match empty; a lookahead, a recovery and a macro there may match anything
-// below them, and so may the whitespace and word skipping. A cut there counts
-// as a callback: it reaches the choice around the rule. An AST action depends
-// on its values alone and does not count. A rule that this start rule does
-// not index is taken to run callbacks.
-inline void
-Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
-                             std::vector<RuleUse> &uses) const {
+// match empty (CollectStartRegion). An AST action depends on its values alone
+// and does not count. A rule that this start rule does not index is taken to
+// run callbacks.
+inline void Definition::decide_skippable(std::vector<RuleUse> &uses) const {
   const auto &a = analysis_;
   auto count = a.rules_by_id.size();
-  std::vector<bool> on_enter(count), on_match(count), below(count);
+  std::vector<bool> on_enter(count), on_match(count);
   for (auto *rule : a.rules_by_id) {
     if (!rule) { continue; }
     auto id = rule->id;
     on_enter[id] = rule->enter || rule->leave;
     on_match[id] = rule->predicate || (rule->action && !rule->disable_action &&
                                        !rule->action.ast_node_type());
-    HasCut cut;
-    rule->get_core_operator()->accept(cut);
-    below[id] = on_enter[id] || on_match[id] || cut.result;
-  }
-  // Anything below a rule may run.
-  spread(below, [&](size_t id) -> const auto & { return refs[id].rules; });
-  for (const auto &ope : {whitespaceOpe, wordOpe}) {
-    if (!ope) { continue; }
-    CollectRuleRefs vis;
-    ope->accept(vis);
-    if (any_flagged(below, vis.rules)) { return; }
   }
 
   std::vector<bool> start(count);
@@ -5717,12 +5665,12 @@ Definition::decide_skippable(const std::vector<CollectRuleRefs> &refs,
     auto id = rule->id;
     CollectStartRegion region;
     rule->get_core_operator()->accept(region);
-    start[id] =
-        on_enter[id] || region.unknown || any_flagged(below, region.reached) ||
-        std::any_of(
-            region.entered.begin(), region.entered.end(), [&](const auto *r) {
-              return !a.indexes(*r) || (on_match[r->id] && r->can_be_empty);
-            });
+    start[id] = on_enter[id] || region.unknown ||
+                std::any_of(region.entered.begin(), region.entered.end(),
+                            [&](const auto *r) {
+                              return !a.indexes(*r) ||
+                                     (on_match[r->id] && r->can_be_empty);
+                            });
     entered[id] = std::move(region.entered);
   }
   spread(start, [&](size_t id) -> const auto & { return entered[id]; });
