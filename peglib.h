@@ -5210,27 +5210,29 @@ inline void DetectInfiniteLoop::visit(Reference &ope) {
 }
 
 inline void ReferenceChecker::visit(Reference &ope) {
-  auto it = std::find(params_.begin(), params_.end(), ope.name_);
-  if (it != params_.end()) { return; }
-
-  if (!grammar_.count(ope.name_)) {
-    error_s[ope.name_] = ope.s_;
-    error_message[ope.name_] = "'" + ope.name_ + "' is not defined.";
-  } else {
-    if (!referenced.count(ope.name_)) { referenced.insert(ope.name_); }
-    const auto &rule = grammar_.at(ope.name_);
-    if (rule.is_macro) {
-      if (!ope.is_macro_ || ope.args_.size() != rule.params.size()) {
-        error_s[ope.name_] = ope.s_;
-        error_message[ope.name_] = "incorrect number of arguments.";
-      }
-    } else if (ope.is_macro_) {
+  // A parameter stands for what it was given, which takes no arguments.
+  const Definition *rule = nullptr;
+  if (std::find(params_.begin(), params_.end(), ope.name_) == params_.end()) {
+    if (!grammar_.count(ope.name_)) {
       error_s[ope.name_] = ope.s_;
-      error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
+      error_message[ope.name_] = "'" + ope.name_ + "' is not defined.";
+      return;
     }
-    for (const auto &arg : ope.args_) {
-      arg->accept(*this);
+    referenced.insert(ope.name_);
+    rule = &grammar_.at(ope.name_);
+  }
+
+  if (rule && rule->is_macro) {
+    if (!ope.is_macro_ || ope.args_.size() != rule->params.size()) {
+      error_s[ope.name_] = ope.s_;
+      error_message[ope.name_] = "incorrect number of arguments.";
     }
+  } else if (ope.is_macro_) {
+    error_s[ope.name_] = ope.s_;
+    error_message[ope.name_] = "'" + ope.name_ + "' is not macro.";
+  }
+  for (const auto &arg : ope.args_) {
+    arg->accept(*this);
   }
 }
 

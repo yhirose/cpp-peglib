@@ -68,6 +68,15 @@ TEST(MacroTest, Macro_invalid_macro_reference_error) {
   EXPECT_FALSE(ret);
 }
 
+TEST(MacroTest, Parameter_called_with_arguments_is_an_error) {
+  parser pg;
+  std::string message;
+  pg.set_logger([&](size_t, size_t, const std::string &msg) { message = msg; });
+
+  EXPECT_FALSE(pg.load_grammar("S <- M('a')\nM(x) <- x('b') 'c'"));
+  EXPECT_EQ("'x' is not macro.", message);
+}
+
 TEST(MacroTest, Macro_cannot_be_the_start_rule) {
   parser parser(R"(
 		T(a) <- a
