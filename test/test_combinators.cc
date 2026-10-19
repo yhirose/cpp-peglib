@@ -309,6 +309,49 @@ TEST(CombinatorTest, Rule_attached_after_the_first_parse) {
   EXPECT_TRUE(def_parse(S, "a"));
 }
 
+// --- a combinator rule given to a grammar ---
+
+// A rule made with the combinators refers to itself through no Reference, so
+// the checks run when the grammar is loaded must not walk into it again
+// inside itself, also where one check starts another, as under a repetition.
+TEST(CombinatorTest, Recursive_rule_given_to_a_grammar) {
+  Definition P, A, B;
+  P <= seq(chr('('), zom(P), chr(')'));
+  A <= seq(chr('['), opt(B), chr(']'));
+  B <= seq(chr('{'), opt(A), chr('}'));
+  Definition NUM, LIST, PAREN;
+  NUM <= seq(cls("0-9"), opt(NUM));
+  LIST <= seq(NUM, zom(seq(chr(','), LIST)));
+  PAREN <= seq(chr('('), oom(cho(PAREN, ncls("()"))), chr(')'));
+  struct {
+    Definition &rule;
+    const char *input;
+  } cases[] = {
+      {NUM, "12"},      {P, "(()())"},      {A, "[{[]}]"},
+      {LIST, "1,23,4"}, {PAREN, "(a(b)c)"},
+  };
+  for (const auto &c : cases) {
+    Rules rules = {{"R", c.rule}};
+    parser pg("S <- R", rules);
+    ASSERT_TRUE(pg) << c.input;
+
+    EXPECT_TRUE(pg.parse(c.input)) << c.input;
+  }
+}
+
+// P and Q are left-recursive through each other, P a combinator rule and Q
+// a grammar rule. P grows its seed as a grammar rule does.
+TEST(CombinatorTest, Left_recursion_through_a_rule_given_to_a_grammar) {
+  Grammar unused;
+  Definition P;
+  P <= cho(seq(ref(unused, "Q", "", false, {}), chr('+')), chr('x'));
+  Rules rules = {{"P", P}};
+  parser pg("S <- P\nQ <- P", rules);
+  ASSERT_TRUE(pg);
+
+  EXPECT_TRUE(pg.parse("x+"));
+}
+
 // --- packrat on rules numbered from different start rules ---
 
 TEST(CombinatorTest, Packrat_on_rules_numbered_apart) {

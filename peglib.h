@@ -2894,8 +2894,19 @@ struct TraversalVisitor : public Ope::Visitor {
   void visit(Capture &ope) override { ope.ope_->accept(*this); }
   void visit(TokenBoundary &ope) override { ope.ope_->accept(*this); }
   void visit(Ignore &ope) override { ope.ope_->accept(*this); }
+  // A rule made with the combinators refers to itself through a WeakHolder,
+  // with no Reference to stop at, so it is not walked into again inside
+  // itself. An analysis whose result depends on what such a rule matches
+  // treats it as it does a Reference instead.
   void visit(WeakHolder &ope) override {
-    if (auto holder = ope.weak_.lock()) { holder->accept(*this); }
+    auto holder = ope.weak_.lock();
+    if (!holder || std::find(rules_in_walk_.begin(), rules_in_walk_.end(),
+                             holder.get()) != rules_in_walk_.end()) {
+      return;
+    }
+    rules_in_walk_.push_back(holder.get());
+    holder->accept(*this);
+    rules_in_walk_.pop_back();
   }
   void visit(Holder &ope) override { ope.ope_->accept(*this); }
   void visit(Whitespace &ope) override { ope.ope_->accept(*this); }
@@ -2904,6 +2915,14 @@ struct TraversalVisitor : public Ope::Visitor {
     ope.atom_->accept(*this);
     ope.binop_->accept(*this);
   }
+
+  // A walk started inside another goes on from the rules that one is in.
+  void walk_within(const TraversalVisitor &outer) {
+    rules_in_walk_ = outer.rules_in_walk_;
+  }
+
+private:
+  std::vector<const Ope *> rules_in_walk_;
 };
 
 struct TraceOpeName : public Ope::Visitor {
@@ -3076,6 +3095,7 @@ struct DetectLeftRecursion : public TraversalVisitor {
   void visit(AnyCharacter &) override { done_ = true; }
   void visit(User &) override { done_ = true; }
   void visit(Reference &ope) override;
+  void visit(WeakHolder &ope) override;
   void visit(BackReference &) override { done_ = true; }
   void visit(Cut &) override { done_ = false; }
 
@@ -3331,6 +3351,7 @@ struct DetectInfiniteLoop : public TraversalVisitor {
   void visit(Repetition &ope) override {
     if (ope.max_ == std::numeric_limits<size_t>::max()) {
       HasEmptyElement vis(refs_, has_error_cache_);
+      vis.walk_within(*this);
       ope.ope_->accept(vis);
       if (vis.is_empty) {
         has_error = true;
@@ -3532,6 +3553,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   }
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
+  void visit(WeakHolder &ope) override;
   void visit(BackReference &) override { result_.any_char = true; }
   // A recovery gives its label's message wherever it is tried.
   void visit(Recovery &) override { result_.any_char = true; }
@@ -3570,6 +3592,9 @@ private:
   // and it is that of the rule the parse starts from, which need not be the
   // grammar's.
   void add_whitespace() { result_.any_char = true; }
+
+  // `rule` is being worked out further up, and adds its bytes there.
+  void add_rule_being_computed(const Definition &rule);
 
   FirstSetCache &cache_;
   std::unordered_set<const Definition *> refs_;
@@ -4995,6 +5020,18 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
   }
 }
 
+// A rule that a combinator embeds, as a rule referred to without arguments.
+inline void DetectLeftRecursion::visit(WeakHolder &ope) {
+  auto holder = std::dynamic_pointer_cast<Holder>(ope.weak_.lock());
+  if (!holder) { return; }
+  const auto &rule = *holder->outer_;
+  if (refs_.emplace(&rule, 0).second) {
+    holder->accept(*this);
+    if (done_ == false) { return; }
+  }
+  done_ = !rule.can_be_empty;
+}
+
 inline size_t DetectLeftRecursion::intern_macro_inst(const Reference &ope) {
   // Resolve bare parameter references to what the enclosing instantiation was
   // given, so a macro passing its own parameter through interns to the same
@@ -5054,6 +5091,7 @@ inline void HasEmptyElement::visit(Sequence &ope) {
       ++it;
       while (it != ope.opes_.end()) {
         DetectInfiniteLoop vis(refs_, has_error_cache_);
+        vis.walk_within(*this);
         (*it)->accept(vis);
         if (vis.has_error) {
           is_empty = true;
@@ -5170,13 +5208,7 @@ inline void ComputeFirstSet::visit(Reference &ope) {
     rule_fs = &it->second;
   } else {
     if (!refs_.insert(ope.rule_).second) {
-      cycle_count_++; // cycle / left recursion
-      // The rule adds its bytes where it is being computed, further up. When
-      // it can match empty, what follows it here can start a match as well.
-      if (ope.rule_->can_be_empty) {
-        result_.can_be_empty = true;
-        if (ope.rule_->no_whitespace) { add_whitespace(); }
-      }
+      add_rule_being_computed(*ope.rule_);
       return;
     }
     auto save = std::exchange(result_, FirstSet{});
@@ -5199,6 +5231,31 @@ inline void ComputeFirstSet::visit(Reference &ope) {
 
   result_.merge(*rule_fs);
   if (ope.rule_->no_whitespace && rule_fs->can_be_empty) { add_whitespace(); }
+}
+
+// A rule that a combinator embeds is walked into as a rule is, without the
+// cache, and walked into again inside itself it is a cycle, so that what is
+// computed around it is not cached as complete either.
+inline void ComputeFirstSet::visit(WeakHolder &ope) {
+  auto holder = std::dynamic_pointer_cast<Holder>(ope.weak_.lock());
+  if (!holder) { return; }
+  const auto &rule = *holder->outer_;
+  if (!refs_.insert(&rule).second) {
+    add_rule_being_computed(rule);
+    return;
+  }
+  holder->accept(*this);
+  refs_.erase(&rule);
+}
+
+// When it can match empty, what follows it here can start a match as well.
+// Whatever is computed meanwhile lacks its bytes, and is not cached.
+inline void ComputeFirstSet::add_rule_being_computed(const Definition &rule) {
+  cycle_count_++;
+  if (rule.can_be_empty) {
+    result_.can_be_empty = true;
+    if (rule.no_whitespace) { add_whitespace(); }
+  }
 }
 
 inline void SetupFirstSets::visit(Reference &ope) {
