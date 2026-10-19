@@ -710,6 +710,26 @@ TEST(PackratTest, Packrat_keeps_matches_that_skip_no_whitespace_apart) {
   }
 }
 
+// R is left recursive only through N's argument, which detection misses, and
+// fails inside M(R), which is being parsed at the same position. That failure
+// depends on M(R) around it, so packrat parsing stops once it shows; a memo of
+// it would fail R '?' as well.
+TEST(PackratTest, Packrat_agrees_where_an_instance_is_entered_again) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      S    <- M(R) '!' / R '?' / R '#'
+      R    <- M(Q) 'y' / M(R) 'z' / 'n'
+      Q    <- 'q'
+      M(x) <- N(x 'a') / 'm'
+      N(y) <- y
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_TRUE(pg.parse("mz?")) << packrat;
+  }
+}
+
 // R enters itself at the same position through the whitespace its empty
 // literal skips, where no whitespace is skipped. That fails, with packrat as
 // without it, however the memo keeps the two places apart.

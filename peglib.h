@@ -1574,6 +1574,12 @@ public:
     return def_id < packrat_index->size() ? (*packrat_index)[def_id] : -1;
   }
 
+  // A rule or a macro instance entered again where it is being parsed is on
+  // left recursion that detection missed, and fails there, so a result then
+  // depends on what is being parsed around it. No match is reused from then
+  // on.
+  void stop_packrat_parsing() { packrat_index = nullptr; }
+
   // The cache tables have a run of entries per memoized rule, one for each
   // position, and with whitespace a second run for the matches where none is
   // skipped. A rule that rarely succeeds leaves the pages of its run in
@@ -4663,7 +4669,10 @@ inline size_t Reference::parse_dispatch(const char *s, size_t n,
     if (rule_->is_left_recursive) { return inst.body->parse(s, n, vs, c, dt); }
     // Left recursion that detection missed enters it again where it is being
     // parsed. It fails there, as a rule does (Context::reuse_or_parse).
-    if (inst.active_pos == s) { return kFail; }
+    if (inst.active_pos == s) {
+      c.stop_packrat_parsing();
+      return kFail;
+    }
     // No scope_exit: an exception abandons the Context.
     auto save = std::exchange(inst.active_pos, s);
     auto len = inst.body->parse(s, n, vs, c, dt);
@@ -5691,6 +5700,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
   if (!rule_has_id) {
     auto key = LRKey(rule.holder_.get(), a_s);
     if (!in_progress.insert(key).second) {
+      stop_packrat_parsing();
       match.len = kFail;
       return;
     }
@@ -5701,6 +5711,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
   auto def_id = rule.id;
   if (active_pos[def_id] == a_s) {
+    stop_packrat_parsing();
     match.len = kFail;
     return;
   }

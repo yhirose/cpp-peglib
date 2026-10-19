@@ -295,7 +295,7 @@ TEST(CombinatorTest, Rule_attached_after_the_first_parse) {
 
 // R enters itself at the same position through the whitespace its empty
 // literal skips. That fails as it does for a rule numbered in the first parse
-// (see Context::guard_reentry), so R matches 'a' itself.
+// (see Context::reuse_or_parse), so R matches 'a' itself.
 TEST(CombinatorTest, Rule_attached_after_the_first_parse_reentering) {
   for (auto attach_late : {false, true}) {
     Definition S, A, X, R;
@@ -346,5 +346,39 @@ TEST(CombinatorTest, Packrat_on_a_rule_that_starts_with_itself) {
 
     EXPECT_TRUE(A.parse("a").ret) << packrat;
     EXPECT_FALSE(A.parse("b").ret) << packrat;
+  }
+}
+
+// Nothing detects left recursion in a combinator grammar. R fails inside M,
+// which is being parsed at the same position; that failure depends on M around
+// it, so packrat parsing stops once it shows, and R '?' parses R again.
+TEST(CombinatorTest, Packrat_agrees_where_a_rule_is_entered_again) {
+  for (auto packrat : {false, true}) {
+    Definition S, R, M;
+    S <= cho(seq(M, chr('!')), seq(R, chr('?')), seq(R, chr('#')));
+    R <= cho(seq(M, chr('z')), chr('n'));
+    M <= cho(seq(R, chr('a')), chr('m'));
+    S.enablePackratParsing = packrat;
+
+    EXPECT_TRUE(S.parse("mz?").ret) << packrat;
+  }
+}
+
+// The same with M attached after the first parse, so that it has no number
+// there (see Rule_attached_after_the_first_parse_reentering).
+TEST(CombinatorTest,
+     Packrat_agrees_where_a_rule_attached_late_is_entered_again) {
+  for (auto packrat : {false, true}) {
+    Definition S, R, M, A;
+    S <= cho(seq(A, chr('!')), seq(R, chr('?')), seq(R, chr('#')));
+    R <= chr('n');
+    A <= chr('m');
+    S.enablePackratParsing = packrat;
+    EXPECT_TRUE(S.parse("m!").ret) << packrat;
+
+    M <= cho(seq(R, chr('a')), chr('m'));
+    R <= cho(seq(M, chr('z')), chr('n'));
+    A <= M;
+    EXPECT_TRUE(S.parse("mz?").ret) << packrat;
   }
 }

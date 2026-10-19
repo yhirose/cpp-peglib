@@ -614,7 +614,7 @@ Letter <- [a-z]
 
 A plain macro is transparent to semantic values, but a left-recursive one forms its own scope: an action attached to it fires and its node appears in the AST, exactly as for the equivalent non-macro rule.
 
-Whether a macro is left recursive is decided from its body alone, taking its parameters to consume input. Left recursion that only its arguments bring, as `E` brings to `Pair(E, T)` with `E <- Pair(E, T) / T` and `Pair(A, B) <- A '+' B`, leaves it transparent. Such an instantiation, entered again where it is being parsed, fails there instead of growing a seed: `S <- Pair(E, T)` matches `1+2` but not `1+2+3`, which the equivalent non-macro rules match.
+Whether a macro is left recursive is decided from its body alone, taking its parameters to consume input. Left recursion that only its arguments bring, as `E` brings to `Pair(E, T)` with `E <- Pair(E, T) / T` and `Pair(A, B) <- A '+' B`, leaves it transparent. Such an instantiation, entered again where it is being parsed, fails there instead of growing a seed: `S <- Pair(E, T)` matches `1+2` but not `1+2+3`, which the equivalent non-macro rules match. A result there depends on what is being parsed around it, so once a rule or an instantiation is entered again where it is being parsed, packrat parsing stops for the rest of that parse.
 
 Detection follows a chain of macros whose bodies call the next one 32 levels deep. Macros nested in arguments, as in `Sum(Sum(Digit))`, do not count toward it. Past that depth a rule is silently taken to be not left recursive, and its left-recursive alternative then fails instead of growing a seed.
 
