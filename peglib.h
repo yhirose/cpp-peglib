@@ -1415,10 +1415,14 @@ public:
     }
   }
 
-  size_t in_token_boundary_count = 0;
-
   std::shared_ptr<Ope> whitespaceOpe;
   bool in_whitespace = false;
+
+  // No whitespace is skipped after a match in a token, a no_whitespace rule
+  // or the whitespace, so a rule may match differently there than at the
+  // same position elsewhere. The memos keep matches from the two places
+  // apart. Only a parse with whitespace has the two.
+  bool skips_no_whitespace = false;
 
   std::shared_ptr<Ope> wordOpe;
 
@@ -1465,20 +1469,13 @@ public:
   std::vector<const char *> active_pos;
   std::set<LRKey> in_progress;
 
-  // No whitespace is skipped after a match in a token or in the whitespace,
-  // so a rule may match differently there than at the same position
-  // elsewhere. The memos keep matches from the two places apart.
-  bool skips_no_whitespace() const {
-    return whitespaceOpe && (in_token_boundary_count || in_whitespace);
-  }
-
   // A memo stands in for parsing the rule again, the failures it notes
   // included. The whitespace notes no failure, so a parse in it makes no
   // memo, though it reuses those of the tokens.
   bool makes_memo() const { return !in_whitespace; }
 
   ErrorInfo::MemoKey memo_key(const Holder &rule, const char *a_s) const {
-    return {&rule, a_s, skips_no_whitespace()};
+    return {&rule, a_s, skips_no_whitespace};
   }
 
   // Parses what the memo of `rule` at `a_s` will hold, and keeps what the
@@ -1501,7 +1498,7 @@ public:
 
   static constexpr size_t no_growth = static_cast<size_t>(-1);
 
-  // Confirmed matches of left-recursive rules, by skips_no_whitespace(). One
+  // Confirmed matches of left-recursive rules, by skips_no_whitespace. One
   // built from the seed of a rule growing around it, growing[built_from],
   // goes when that seed changes or stops growing.
   struct LRMemo {
@@ -1520,7 +1517,7 @@ public:
     RuleMatch seed;
     // The innermost growth around this one whose seed its parse used.
     size_t built_from;
-    // The confirmed matches built from this seed, by skips_no_whitespace().
+    // The confirmed matches built from this seed, by skips_no_whitespace.
     std::vector<std::pair<LRKey, bool>> built;
   };
   std::vector<Growth> growing;
@@ -1589,8 +1586,9 @@ public:
   }
 
   size_t cache_index(int32_t slot, const char *pos) const {
+    assert(!skips_no_whitespace || whitespaceOpe);
     auto run = static_cast<size_t>(slot) +
-               (skips_no_whitespace() ? packrat_cached_count : 0);
+               (skips_no_whitespace ? packrat_cached_count : 0);
     return run * (l + 1) + static_cast<size_t>(pos - s);
   }
 
@@ -1843,9 +1841,13 @@ public:
 
   // Skip trailing whitespace with trace suppression.
   // Returns whitespace length, or -1 on failure.
-  // No-op (returns 0) if inside a token boundary or no whitespaceOpe.
+  // No-op (returns 0) where skips_no_whitespace or without whitespaceOpe.
   size_t skip_whitespace(const char *a_s, size_t n, SemanticValues &vs,
                          std::any &dt);
+
+  // Parses `ope` where no whitespace is skipped.
+  size_t parse_without_whitespace(const Ope &ope, const char *a_s, size_t n,
+                                  SemanticValues &vs, std::any &dt);
 
   // Error
   // What skipping whitespace fails to match is not what the input lacks.
@@ -2616,7 +2618,7 @@ public:
     if (c.in_whitespace) { return 0; }
     c.in_whitespace = true;
     auto se = scope_exit([&]() { c.in_whitespace = false; });
-    return ope_->parse(s, n, vs, c, dt);
+    return c.parse_without_whitespace(*ope_, s, n, vs, dt);
   }
 
   void accept(Visitor &v) override;
@@ -4256,9 +4258,17 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
 
 inline size_t Context::skip_whitespace(const char *a_s, size_t n,
                                        SemanticValues &vs, std::any &dt) {
-  if (in_token_boundary_count || !whitespaceOpe) { return 0; }
+  if (skips_no_whitespace || !whitespaceOpe) { return 0; }
   TraceMute mute(*this);
   return whitespaceOpe->parse(a_s, n, vs, *this, dt);
+}
+
+inline size_t Context::parse_without_whitespace(const Ope &ope, const char *a_s,
+                                                size_t n, SemanticValues &vs,
+                                                std::any &dt) {
+  auto saved = std::exchange(skips_no_whitespace, whitespaceOpe != nullptr);
+  auto se = scope_exit([&]() { skips_no_whitespace = saved; });
+  return ope.parse(a_s, n, vs, *this, dt);
 }
 
 // Reads is_token_ as it is: the start rule's analysis has asked every rule
@@ -4350,12 +4360,7 @@ inline size_t TokenBoundary::parse_core(const char *s, size_t n,
                                         std::any &dt) const {
   Context::TraceMute mute(c);
 
-  size_t len;
-  {
-    c.in_token_boundary_count++;
-    auto se = scope_exit([&]() { c.in_token_boundary_count--; });
-    len = ope_->parse(s, n, vs, c, dt);
-  }
+  auto len = c.parse_without_whitespace(*ope_, s, n, vs, dt);
 
   if (success(len)) {
     if (vs.is_read_ && !vs.holds_rule_tokens_) {
@@ -4418,11 +4423,7 @@ inline size_t Holder::parse_ope_body(const char *s, size_t n,
 
   size_t len;
   if (outer_->no_whitespace) {
-    {
-      c.in_token_boundary_count++;
-      auto se = scope_exit([&]() { c.in_token_boundary_count--; });
-      len = ope_->parse(s, n, vs, c, dt);
-    }
+    len = c.parse_without_whitespace(*ope_, s, n, vs, dt);
     if (success(len)) {
       auto wl = c.skip_whitespace(s + len, n - len, vs, dt);
       if (fail(wl)) {
@@ -5770,7 +5771,7 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
     use_seed(i);
     return;
   }
-  auto skips_none = skips_no_whitespace();
+  auto skips_none = skips_no_whitespace;
   auto &memo = lr_memo[skips_none];
   if (auto it = memo.find(lr_key); it != memo.end()) {
     const auto &m = it->second;
