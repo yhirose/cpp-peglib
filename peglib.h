@@ -3989,7 +3989,7 @@ private:
         i += len;
         if (eoi_check) {
           if (i < n) {
-            if (c.error_info.error_pos - c.s < s + i - c.s) {
+            if (c.error_info.error_pos < s + i) {
               c.error_info.set_message(s + i, "expected end of input");
             }
             ret = false;
