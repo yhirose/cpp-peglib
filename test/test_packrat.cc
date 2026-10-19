@@ -912,6 +912,26 @@ TEST(PackratTest, Reused_memo_notes_its_failures_again) {
   EXPECT_EQ(plain, packrat);
 }
 
+// R fails at the 'd' in B, in T's token and in C. C reuses R's memo from B,
+// where whitespace is skipped, so it notes what R expected there, not what it
+// expected in the token, where none is.
+TEST(PackratTest, Reused_memo_notes_the_failures_of_its_context) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S <- B / A / C
+    A <- T 'q'
+    T <- < R >
+    B <- R 'z'
+    C <- R 'w'
+    R <- X 'b' / X ' ' [c]
+    X <- 'a'
+    %whitespace <- ' '*
+  )",
+                                                          "a d");
+  EXPECT_EQ("1:3 syntax error, unexpected 'd', expecting 'b', ' ', <T>.",
+            plain);
+  EXPECT_EQ(plain, packrat);
+}
+
 // A recovery reports the error with T's parse still in progress; R's failure
 // in it is named after T.
 TEST(PackratTest, Report_in_a_memoized_parse_names_its_token_rule) {

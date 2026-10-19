@@ -164,6 +164,22 @@ TEST(CombinatorTest, Tok_token_boundary) {
   EXPECT_EQ(val, "hello world");
 }
 
+// --- wsp() (Whitespace) ---
+
+// A combinator rule may use wsp() with no whitespace for the parse. Nothing
+// is skipped anywhere then, so a rule memoized in it has one place.
+TEST(CombinatorTest, Wsp_in_a_rule_without_a_whitespace) {
+  for (auto packrat : {false, true}) {
+    Definition S, W, A;
+    S <= seq(wsp(zom(W)), chr('a'));
+    W <= cho(seq(A, chr('x')), seq(A, chr('y')));
+    A <= chr(' ');
+    S.enablePackratParsing = packrat;
+
+    EXPECT_TRUE(def_parse(S, " ya")) << packrat;
+  }
+}
+
 // --- ign() (Ignore) ---
 
 TEST(CombinatorTest, Ign_ignore_semantic_value) {
