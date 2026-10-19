@@ -296,6 +296,26 @@ TEST(PackratTest, Packrat_keeps_the_captures_of_a_retried_rule) {
   }
 }
 
+// Sig's cut commits the choice around it, in Func and in Stmt: once "fn" is
+// read, neither tries another alternative. A memo of Sig would not.
+TEST(PackratTest, Packrat_keeps_a_cut_that_commits_the_callers_choice) {
+  for (auto packrat : {false, true}) {
+    parser pg(R"(
+      Item  <- Func / Stmt
+      Func  <- Sig Block / Sig ';'
+      Stmt  <- Sig '=' Name / Name
+      Sig   <- 'fn' ↑ Name '(' ')'
+      Block <- '{' '}'
+      Name  <- < [a-z]+ >
+      %whitespace <- [ ]*
+    )");
+    ASSERT_TRUE(!!pg);
+    if (packrat) { pg.enable_packrat_parsing(); }
+
+    EXPECT_FALSE(pg.parse("fn")) << packrat;
+  }
+}
+
 // Gives the rules AST actions that count their runs in `runs`. Such an action
 // may be skipped where nothing reads its value (see Holder::parse_core), so
 // the counts show which matches built a value.
@@ -802,17 +822,33 @@ TEST(PackratTest, Reused_memo_is_named_by_the_outermost_token_rule) {
   EXPECT_EQ(plain, packrat);
 }
 
-// A recovery reports the error with T's parse still in progress; R's failure
-// in it is named after T.
+// A recovery reports the error with R's memoized parse still in progress
+// inside T; R's failure in it is named after T. The recovery is in R's own
+// choice, so that it commits nothing around R, which is memoized.
 TEST(PackratTest, Report_in_a_memoized_parse_names_its_token_rule) {
   auto [plain, packrat] = errors_with_and_without_packrat(R"(
     S   <- T 'x' / T 'y'
     T   <- < R 'a' / R 'b' >
-    R   <- 'c' [de]^Lbl
+    R   <- 'c' ([de]^Lbl / 'f')
     Lbl <- (!'a' .)*
   )",
                                                           "czax");
   EXPECT_EQ("1:2 syntax error, unexpected 'zax', expecting <T>.", plain);
+  EXPECT_EQ(plain, packrat);
+}
+
+// R's recovery commits the choice around R, in A and in B. A memo of R
+// reused in B would not, and the error after the recovery's would go.
+TEST(PackratTest, Packrat_keeps_a_recovery_that_commits_the_callers_choice) {
+  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+    S    <- A / B
+    A    <- R 'x' / 'q'
+    B    <- R 'y' / [a-z]+
+    R    <- 'k' ';'^semi
+    semi <- (!'x' !'y' .)*
+  )",
+                                                          "kzy");
+  EXPECT_EQ("1:3 syntax error, unexpected 'y', expecting 'x'.", plain);
   EXPECT_EQ(plain, packrat);
 }
 
