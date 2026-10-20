@@ -1377,7 +1377,7 @@ struct StartRuleAnalysis {
 // value that nothing reads (Holder::parse_core), entering a rule that cannot
 // start (Reference::parse_dispatch), trying an alternative that cannot start
 // (PrioritizedChoice::parse_core), and parsing a rule again where errors are
-// muted (Context::makes_memo).
+// muted (Context::makes_packrat_memo).
 struct RuleUse {
   // Whether a match is only recognized: it runs no callback, forms no scope
   // and builds no value.
@@ -1406,7 +1406,7 @@ struct RuleUse {
   bool must_be_tried = true;
   // Whether the rule is parsed only where errors are muted, so that a memo
   // that notes nothing is reused only where nothing is noted either
-  // (Context::makes_memo).
+  // (Context::makes_packrat_memo).
   bool parsed_only_where_muted = false;
 };
 
@@ -1508,11 +1508,13 @@ public:
   std::vector<const char *> active_pos[2];
   std::set<RuleCall> in_progress;
 
-  // A memo stands in for parsing the rule again, the failures it notes
-  // included. The whitespace notes no failure, so a parse in it makes no
-  // memo, though it reuses those of the tokens. Nor does a parse where errors
-  // are muted, unless the rule is parsed only where they are.
-  bool makes_memo(const RuleUse &use) const {
+  // A packrat memo stands in for parsing the rule again, the failures it
+  // notes included. The whitespace notes no failure, so a parse in it makes
+  // no memo, though it reuses those of the tokens. Nor does a parse where
+  // errors are muted, unless the rule is parsed only where they are. (A
+  // left-recursive rule, which needs its matches to grow in linear time,
+  // keeps them otherwise: see LRMemo.)
+  bool makes_packrat_memo(const RuleUse &use) const {
     return !in_whitespace && (!mutes_errors || use.parsed_only_where_muted);
   }
 
@@ -1541,10 +1543,15 @@ public:
 
   // Confirmed matches of left-recursive rules. One built from the seed of a
   // rule growing around it, growing[built_from], goes when that seed changes
-  // or stops growing.
+  // or stops growing. A match is kept wherever it is parsed: each round of
+  // growing a rule parses the rules below it again at its position, and
+  // without their matches would grow them again. One parsed where no failure
+  // is noted (notes_failures) notes none, so it is reused only where none
+  // are noted either, and growing the rule again where they are replaces it.
   struct LRMemo {
     RuleMatch match;
     size_t built_from;
+    bool notes_failures;
   };
   std::map<RuleCall, LRMemo> lr_memo;
 
@@ -1869,8 +1876,8 @@ public:
   // is reused, but one built from the seed of a rule growing around it only
   // while that rule grows the same seed.
   template <typename T>
-  void reuse_or_grow(const char *a_s, const Holder &rule, const RuleUse &use,
-                     RuleMatch &match, T parse);
+  void reuse_or_grow(const char *a_s, const Holder &rule, RuleMatch &match,
+                     T parse);
 
   // Semantic values
   SemanticValues &push_semantic_values_scope() {
@@ -1943,9 +1950,12 @@ public:
                                   SemanticValues &vs, std::any &dt);
 
   // Error
-  // What skipping whitespace fails to match is not what the input lacks.
+  // Where a failure is noted if errors are reported, which does not depend on
+  // whether they are, so that the same rules are entered either way. What
+  // skipping whitespace fails to match is not what the input lacks.
+  bool notes_failures() const { return !mutes_errors && !in_whitespace; }
   bool collects_expected_tokens() const {
-    return reports_here() && !in_whitespace;
+    return reports_errors && notes_failures();
   }
   void set_error_pos(const char *a_s, const char *literal = nullptr,
                      bool copy_literal = false) {
@@ -4682,7 +4692,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   };
 
   if (outer_->is_left_recursive) {
-    c.reuse_or_grow(s, *this, use, match, do_parse);
+    c.reuse_or_grow(s, *this, match, do_parse);
   } else {
     c.reuse_or_parse(s, *outer_, has_id, vs.holds_rule_tokens_, match,
                      do_parse);
@@ -5900,7 +5910,7 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
     }
   }
 
-  if (slot < 0 || !makes_memo(rule_use[def_id])) { return; }
+  if (slot < 0 || !makes_packrat_memo(rule_use[def_id])) { return; }
   if (success(match.len)) {
     write_packrat_cache(idx, match.len, match.val);
   } else {
@@ -5911,17 +5921,16 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
 template <typename T>
 inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
-                                   const RuleUse &use, RuleMatch &match,
-                                   T parse) {
+                                   RuleMatch &match, T parse) {
   auto call = call_of(rule, a_s);
-  assert(mutes_errors || !use.parsed_only_where_muted);
 
   if (auto i = growth_of(call); i != no_growth) {
     match = growing[i].seed;
     use_seed(i);
     return;
   }
-  if (auto it = lr_memo.find(call); it != lr_memo.end()) {
+  if (auto it = lr_memo.find(call);
+      it != lr_memo.end() && (it->second.notes_failures || !notes_failures())) {
     const auto &m = it->second;
     match = m.match;
     if (m.built_from != no_growth) { use_seed(m.built_from); }
@@ -5950,11 +5959,10 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
     }
     forget_built(i);
   });
-  if (!makes_memo(use)) { return; }
 
   // Confirmed, a failure too, so the rule is not seeded here again
   auto built_from = growing[i].built_from;
-  lr_memo[call] = {std::move(growing[i].seed), built_from};
+  lr_memo[call] = {std::move(growing[i].seed), built_from, notes_failures()};
   if (built_from != no_growth) { growing[built_from].built.push_back(call); }
 }
 
@@ -6163,8 +6171,9 @@ inline void Definition::select_packrat_rules() const {
       void visit(Recovery &) override {} // as LeftmostWalker does
     };
 
-    // Neither the whitespace nor the word check makes a memo
-    // (Context::makes_memo, Context::detached), so they are not walked.
+    // Neither the whitespace nor the word check makes a packrat memo
+    // (Context::makes_packrat_memo, Context::detached), so they are not
+    // walked.
     FindBacktrackRules finder(benefits, def_count);
     holder_->accept(finder);
 

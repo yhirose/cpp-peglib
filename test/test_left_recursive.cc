@@ -1259,6 +1259,32 @@ TEST(LeftRecursionTest, Rule_growing_inside_another_is_not_grown_again) {
   EXPECT_EQ(2u, entered);
 }
 
+// E1 grows in `!` and again outside it. In `!`, where no failure is noted,
+// E2 keeps its match as it does elsewhere, so it grows once in each place,
+// entering P for its seed and for the round that does not grow. With a
+// logger or without, the same rules are entered.
+TEST(LeftRecursionTest, Rules_growing_in_a_negation_keep_their_matches) {
+  for (auto with_logger : {false, true}) {
+    parser pg(R"(
+      S  <- !(E1 'z') E1
+      E1 <- E1 '+' E2 / E2
+      E2 <- E2 '*' P / P
+      P  <- [0-9]
+    )");
+    ASSERT_TRUE(!!pg);
+    size_t entered = 0;
+    pg["P"].enter = [&](const Context &, const char *, size_t, std::any &) {
+      entered++;
+    };
+    if (with_logger) {
+      pg.set_logger([](size_t, size_t, const std::string &) {});
+    }
+
+    EXPECT_TRUE(pg.parse("1")) << with_logger;
+    EXPECT_EQ(4u, entered) << with_logger;
+  }
+}
+
 // E grows outside T first, then is reused inside it, where the error is named
 // after T.
 TEST(LeftRecursionTest, Reused_match_notes_its_failures_again) {

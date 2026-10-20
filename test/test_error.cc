@@ -403,9 +403,10 @@ TEST(ErrorTest, Recovery_inside_a_negation_reports_nothing) {
   EXPECT_EQ(0u, errors);
 }
 
-// A memo made in the operand of `!` notes nothing, so a rule parsed outside
-// it too makes none there: reused outside, E's seed and K's memo would list
-// none of what trying them again expects.
+// A memo made in the operand of `!` notes nothing, so it is not reused
+// outside it: E's match made there is not, and K, parsed outside too, makes
+// no packrat memo there. Reused outside, they would list none of what
+// trying them again expects.
 TEST(ErrorTest, Memo_made_inside_a_negation_is_not_reused_outside) {
   parser lr(R"(
     S <- !(E 'x') 'y' / E ';'
@@ -1558,8 +1559,9 @@ TEST(MaxDepthTest, Parse_is_abandoned_not_backtracked) {
   EXPECT_EQ(0, leaves);
 }
 
-// Without a logger as with one, Expr makes no memo in the operand of `!`, so
-// the same rules are entered and the limit is reached either way.
+// Without a logger as with one, the match Expr makes in the operand of `!`
+// is not reused outside it, so the same rules are entered and the limit is
+// reached either way.
 TEST(MaxDepthTest, Logger_does_not_change_what_a_negation_enters) {
   parser pg(R"(
     Stmt     <- !(Expr '=') ExprStmt / Assign
