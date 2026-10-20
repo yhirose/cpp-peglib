@@ -262,6 +262,8 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
+The message a predicate gives is reported where the rejected match starts, unless the parse fails further on (see [Custom error message for definitions](#custom-error-message-for-definitions)).
+
 The predicate can pass data to the action via `predicate_data` to avoid redundant computation:
 
 ```cpp
@@ -890,6 +892,13 @@ CODE        <- < '0x' [a-fA-F0-9]+ > { error_message 'code format error...' }
 
 > peglint custom_message.peg custom_message.txt
 custom_message.txt:1:8: code format error...
+```
+
+A definition's message stands for its failure where that failure is the error: when the parse fails further on, or an alternative tried before it went further, the error there is reported instead. A rule tried wherever whitespace may be fails at nearly every position, so no definition in `%whitespace` gives a message. To report an unterminated comment, give the comment rule a recovery label instead, which reports wherever whitespace is skipped, in `%whitespace` or in a rule of your own:
+
+```peg
+Comment      <- '/*' (!'*/' .)* '*/'^unterminated
+unterminated <- '' { error_message "unterminated comment" }
 ```
 
 NOTE: If there is more than one element with an error message instruction in a prioritized choice, this feature may not work as you expect.

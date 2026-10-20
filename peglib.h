@@ -959,6 +959,10 @@ struct ErrorInfo {
   void clear() {
     error_pos = nullptr;
     clear_expected_tokens();
+    clear_message();
+  }
+
+  void clear_message() {
     message_pos = nullptr;
     message.clear();
     label.clear();
@@ -1039,11 +1043,28 @@ struct ErrorInfo {
 
   void resolve_expected_tokens();
 
+  // A message stands for the error at error_pos: once a failure goes past
+  // that, the message is not read, and resolving the error drops it.
   void set_message(const char *pos, std::string msg,
                    const std::string &lbl = "") {
     message_pos = pos;
     message = std::move(msg);
     label = lbl;
+    message_error_pos_ = error_pos;
+  }
+  bool message_lies_at_or_after(const char *pos) const {
+    return has_message() && pos <= message_pos;
+  }
+
+  // Whether anything has been noted, or the error has moved on or been
+  // resolved, since mark() was taken.
+  struct Mark {
+    size_t generation;
+    size_t noted;
+  };
+  Mark mark() const { return {generation_, events_.size() + removed_}; }
+  bool noted_since(const Mark &m) const {
+    return generation_ != m.generation || events_.size() + removed_ != m.noted;
   }
 
   // A parse went past its max_depth at `pos`, where the rule match or the
@@ -1104,6 +1125,11 @@ private:
   };
   std::vector<Record> records_;
   size_t generation_ = 0;
+  const char *message_error_pos_ = nullptr; // error_pos when it was given
+  bool has_message() const {
+    return message_pos && message_error_pos_ == error_pos;
+  }
+  size_t removed_ = 0; // events remove_repeats has taken out
 
   // What a memoized parse has noted so far: from its start, or from the
   // start of the generation if it began in an earlier one.
@@ -1790,10 +1816,24 @@ public:
     bool save_;
   };
 
-  // Whether a message at `pos` is reported: errors are reported here, and no
-  // message lies further on.
+  // Whether a message at `pos` is reported: a failure here is noted, and no
+  // message given for the same error lies at or past `pos`. So nothing in the
+  // whitespace gives one, as a rule there fails wherever the whitespace stops.
   bool reports_message_at(const char *pos) const {
-    return reports_here() && error_info.message_pos < pos;
+    return collects_expected_tokens() &&
+           !error_info.message_lies_at_or_after(pos);
+  }
+
+  // A failure at `pos` gives the message `make` returns where the failure is
+  // the error: what it noted since `mark` is at the furthest failure, or
+  // `pos` is at or past it and becomes the error.
+  template <typename T>
+  void give_message(const char *pos, const ErrorInfo::Mark &mark, T make,
+                    const std::string &label = "") {
+    if (reports_message_at(pos) &&
+        (error_info.noted_since(mark) || error_info.advance_to(pos))) {
+      error_info.set_message(pos, make(), label);
+    }
   }
 
   // When the returned guard goes, a cut or a recovery made meanwhile has
@@ -4164,6 +4204,7 @@ CPPPEGLIB_NOINLINE inline void ErrorInfo::remove_repeats() {
   for (auto it = first; it != events_.end(); ++it) {
     if (std::find(first, kept, *it) == kept) { *kept++ = *it; }
   }
+  removed_ += static_cast<size_t>(events_.end() - kept);
   events_.erase(kept, events_.end());
   remove_repeats_at_ = std::max(max_events_, 2 * (events_.size() - boundary_));
 }
@@ -4172,6 +4213,8 @@ CPPPEGLIB_NOINLINE inline void ErrorInfo::remove_repeats() {
 // it, and the parse around it names them by its own, if it has one: they are
 // read under the outermost name given from outside.
 inline void ErrorInfo::resolve_expected_tokens() {
+  if (!has_message()) { clear_message(); }
+
   // The spans of the memoized parses, nested. One still in progress spans to
   // the end, and of two with the same span the one done later is around.
   struct Span : Record {
@@ -4590,6 +4633,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         (use.child_values == RuleUse::ChildValues::passed_up &&
          vs.holds_rule_values_);
 
+    const auto mark = c.error_info.mark();
     m.len = parse_ope_body(s, n, chvs, c, dt);
 
     if (success(m.len)) {
@@ -4610,8 +4654,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         std::string msg;
         std::any predicate_data;
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
-          if (!msg.empty() && c.reports_message_at(s)) {
-            c.error_info.set_message(s, std::move(msg), outer_->name);
+          if (!msg.empty()) {
+            c.give_message(
+                s, mark, [&] { return std::move(msg); }, outer_->name);
           }
           m.len = kFail;
         } else if (!c.recovered) {
@@ -4622,9 +4667,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
         m.val = reduce(chvs, dt, predicate_data);
       }
     } else {
-      if (!outer_->error_message.empty() && c.reports_message_at(s)) {
-        c.error_info.set_message(
-            s, resolve_capture_placeholders(outer_->error_message, c),
+      if (!outer_->error_message.empty()) {
+        c.give_message(
+            s, mark,
+            [&] {
+              return resolve_capture_placeholders(outer_->error_message, c);
+            },
             outer_->name);
       }
     }
@@ -4781,9 +4829,9 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     }
   }
 
-  if (c.reports_message_at(s)) {
-    c.error_info.set_message(s, "undefined back reference '$" + name_ + "'...");
-  }
+  c.give_message(s, c.error_info.mark(), [&] {
+    return "undefined back reference '$" + name_ + "'...";
+  });
   return kFail;
 }
 

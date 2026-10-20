@@ -854,6 +854,69 @@ SkipToRCUR ← (!RCUR (LCUR SkipToRCUR / .))* RCUR
   EXPECT_FALSE(ast);
 }
 
+// A rule's message stands for its failure where that failure is the error.
+// Op fails at the end of every expression; the error is past it, where '+'
+// lacks its number.
+TEST(ErrorTest, Message_of_a_failure_behind_the_error_is_not_given) {
+  parser pg(R"(
+    S  <- E ';' E ';'
+    E  <- N (Op N)*
+    Op <- [+-] { error_message "expected an operator" }
+    N  <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected ';', expecting <N>.",
+            syntax_error(pg, "1+2;3+;"));
+  EXPECT_EQ("expected an operator", syntax_error(pg, "1;2"));
+}
+
+// Nor does a message given by an alternative tried later hide the error an
+// earlier one went further to.
+TEST(ErrorTest, Message_of_a_later_alternative_does_not_hide_the_error) {
+  parser pg(R"(
+    S      <- Assign / Call
+    Assign <- Name '=' Num ';'
+    Call   <- Name Args ';'
+    Args   <- '(' ')' { error_message "bad arguments" }
+    Name   <- [a-z]+
+    Num    <- [0-9]+
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected '+', expecting <Num>, ';'.",
+            syntax_error(pg, "x=1+"));
+  EXPECT_EQ("bad arguments", syntax_error(pg, "x(;"));
+}
+
+// Nothing in the whitespace gives a message: Comment fails wherever the
+// whitespace stops.
+TEST(ErrorTest, Message_of_a_whitespace_rule_is_not_given) {
+  parser pg(R"(
+    S       <- 'a' 'c'
+    %whitespace <- ([ \t\n] / Comment)*
+    Comment <- '/*' (!'*/' .)* '*/' { error_message "unterminated comment" }
+  )");
+  ASSERT_TRUE(!!pg);
+
+  EXPECT_EQ("syntax error, unexpected 'b', expecting 'c'.",
+            syntax_error(pg, "a b"));
+  EXPECT_EQ("syntax error, unexpected 'b', expecting 'c'.",
+            syntax_error(pg, "a /* x */ b"));
+}
+
+// A recovery label reports an unterminated comment in the whitespace.
+TEST(ErrorTest, Recovery_in_the_whitespace_reports_its_message) {
+  parser labeled(R"(
+    S       <- 'a' 'c'
+    %whitespace <- ([ \t\n] / Comment)*
+    Comment <- '/*' (!'*/' .)* '*/'^unterminated
+    unterminated <- '' { error_message "unterminated comment" }
+  )");
+  ASSERT_TRUE(!!labeled);
+  EXPECT_EQ("unterminated comment", syntax_error(labeled, "a /* x"));
+}
+
 TEST(ErrorTest, Error_message_with_rule_instruction) {
   parser pg(R"(
 START       <- (LINE (ln LINE)*)? ln?
