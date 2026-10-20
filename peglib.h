@@ -2106,26 +2106,30 @@ constexpr bool takes_shortcuts() { return true; }
 #endif
 
 // The bytes a match of an expression can start with. On any other byte, the
-// expression does the same: it matches empty if it can be empty, and fails
-// if not, and either way notes `failures`, as a parse that tried it would.
-// An expression for which that cannot be said can start with any byte. What
-// trying a rule there does that depends on the parse, such as giving a
-// message, is left to RuleUse::must_be_tried. Used to skip what cannot match
-// without trying it.
+// expression does the same: it matches empty or fails, and either way notes
+// `failures`, as a parse that tried it would. An expression for which that
+// cannot be said can start with any byte. What trying a rule there does that
+// depends on the parse, such as giving a message, is left to
+// RuleUse::must_be_tried. Used to skip what cannot match without trying it.
+//
+// An expression that matches empty on other bytes can match empty, but not
+// the other way round: `&'a'` can, and fails on any byte but 'a'.
 struct FirstSet {
   std::bitset<256> chars;
-  bool can_be_empty = false;
+  bool matches_empty_on_other_bytes = false;
   bool any_char = false;
   std::vector<StartFailure> failures;
 
   bool can_start_with(unsigned char byte) const {
-    return any_char || can_be_empty || chars.test(byte);
+    return any_char || matches_empty_on_other_bytes || chars.test(byte);
   }
 
   // Merges where `other` can start, not what it notes.
   void merge(const FirstSet &other) {
     chars |= other.chars;
-    if (other.can_be_empty) { can_be_empty = true; }
+    if (other.matches_empty_on_other_bytes) {
+      matches_empty_on_other_bytes = true;
+    }
     if (other.any_char) { any_char = true; }
   }
 };
@@ -2276,8 +2280,8 @@ private:
   }
 
   // An error report names what the skipped alternatives expected. Trying
-  // any of them would have noted a failure here: what cannot match empty
-  // fails at a literal, a class or a dictionary.
+  // any of them would have noted a failure here: what does not match empty
+  // there fails at a literal, a class or a dictionary.
   void note_skipped(size_t begin, size_t end, const char *s, Context &c) const {
     if (begin < end && c.error_info.advance_to(s)) {
       c.error_info.add_skipped(this, begin, end, c.current_rule(),
@@ -3617,17 +3621,17 @@ struct ComputeFirstSet : public TraversalVisitor {
     for (const auto &op : ope.opes_) {
       if (!add_start_of(*op)) { return; }
     }
-    result_.can_be_empty = true;
+    result_.matches_empty_on_other_bytes = true;
   }
-  // Where no alternative can start, the first one that can be empty matches,
-  // and the ones after it are not tried. Their bytes are kept all the same:
-  // an alternative that is empty only through left recursion fails while its
-  // seed is grown.
+  // Where no alternative can start, the first one that matches empty there
+  // matches, and the ones after it are not tried. Their bytes are kept all the
+  // same: an alternative that is empty only through left recursion fails while
+  // its seed is grown.
   void visit(PrioritizedChoice &ope) override {
     std::optional<size_t> noted;
     for (const auto &op : ope.opes_) {
       if (add_start_of(*op) && !noted) {
-        result_.can_be_empty = true;
+        result_.matches_empty_on_other_bytes = true;
         noted = result_.failures.size();
       }
     }
@@ -3636,23 +3640,18 @@ struct ComputeFirstSet : public TraversalVisitor {
   // A repetition up to no times does not try its operand.
   void visit(Repetition &ope) override {
     if (ope.max_ > 0) { ope.ope_->accept(*this); }
-    if (ope.min_ == 0) { result_.can_be_empty = true; }
-  }
-  // Where its operand cannot start, the operand fails, and so does this,
-  // though it can match empty where the operand matches.
-  void visit(AndPredicate &) override {
-    result_.can_be_empty = true;
-    result_.any_char = true;
+    if (ope.min_ == 0) { result_.matches_empty_on_other_bytes = true; }
   }
   // Where its operand cannot start, the operand fails and this matches
-  // empty. An operand that can match empty makes this fail there instead.
+  // empty. An operand that matches empty there makes this fail there
+  // instead, which is left to trying it.
   void visit(NotPredicate &ope) override {
     auto first = result_.failures.size();
     if (add_start_of(*ope.ope_)) { result_.any_char = true; }
     for (auto i = first; i < result_.failures.size(); i++) {
       result_.failures[i].listed = false;
     }
-    result_.can_be_empty = true;
+    result_.matches_empty_on_other_bytes = true;
   }
   void visit(Dictionary &ope) override {
     for (const auto &[key, info] : ope.trie_.dic_) {
@@ -3666,7 +3665,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   }
   void visit(LiteralString &ope) override {
     if (ope.lit_.empty()) {
-      result_.can_be_empty = true;
+      result_.matches_empty_on_other_bytes = true;
       add_whitespace();
     } else {
       auto ch = static_cast<unsigned char>(ope.lit_[0]);
@@ -3694,7 +3693,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   void visit(AnyCharacter &) override { result_.any_char = true; }
   void visit(TokenBoundary &ope) override {
     ope.ope_->accept(*this);
-    if (result_.can_be_empty) { add_whitespace(); }
+    if (result_.matches_empty_on_other_bytes) { add_whitespace(); }
   }
   void visit(User &) override { result_.any_char = true; }
   void visit(Reference &ope) override;
@@ -3705,7 +3704,7 @@ struct ComputeFirstSet : public TraversalVisitor {
   // A cut before the first byte stops the enclosing choice even when the
   // expression then fails, so the next byte cannot tell to skip it.
   void visit(Cut &) override {
-    result_.can_be_empty = true;
+    result_.matches_empty_on_other_bytes = true;
     result_.any_char = true;
   }
 
@@ -3724,11 +3723,11 @@ struct ComputeFirstSet : public TraversalVisitor {
 
 private:
   // Adds where `ope` can start, and what it notes where it cannot. Returns
-  // whether it can be empty.
+  // whether it matches empty there.
   bool add_start_of(Ope &ope) {
-    auto can_be_empty = std::exchange(result_.can_be_empty, false);
+    auto save = std::exchange(result_.matches_empty_on_other_bytes, false);
     ope.accept(*this);
-    return std::exchange(result_.can_be_empty, can_be_empty);
+    return std::exchange(result_.matches_empty_on_other_bytes, save);
   }
 
   // A literal, a token boundary and a no_whitespace rule skip whitespace
@@ -4003,8 +4002,8 @@ public:
   bool disable_action = false;
   bool is_left_recursive = false;
   bool can_be_empty = false;
-  // The bytes a match of this rule can start with: any, unless it cannot
-  // match empty and they are known (set up with the first sets).
+  // The bytes a match of this rule can start with: any, unless it fails on
+  // other bytes and they are known (set up with the first sets).
   std::bitset<256> start_bytes = std::bitset<256>().set();
   // The first set of the rule's operator.
   FirstSet first_set;
@@ -5314,7 +5313,9 @@ inline void ComputeFirstSet::visit(Reference &ope) {
   }
 
   result_.merge(*rule_fs);
-  if (ope.rule_->no_whitespace && rule_fs->can_be_empty) { add_whitespace(); }
+  if (ope.rule_->no_whitespace && rule_fs->matches_empty_on_other_bytes) {
+    add_whitespace();
+  }
 }
 
 // A rule that a combinator embeds is walked into as a rule is, without the
@@ -5329,7 +5330,9 @@ inline void ComputeFirstSet::visit(WeakHolder &ope) {
 }
 
 // A rule met again, when it can match empty, lets what follows it here start
-// a match as well.
+// a match as well. Its first set is not worked out yet, and one that matches
+// empty on other bytes can match empty (FirstSet), so can_be_empty takes no
+// less than the first set would.
 inline std::optional<size_t>
 ComputeFirstSet::walk_into(const Definition &rule) {
   auto it = std::find(refs_.begin(), refs_.end(), &rule);
@@ -5340,7 +5343,7 @@ ComputeFirstSet::walk_into(const Definition &rule) {
   least_depth_met_ =
       std::min(least_depth_met_, static_cast<size_t>(it - refs_.begin()));
   if (rule.can_be_empty) {
-    result_.can_be_empty = true;
+    result_.matches_empty_on_other_bytes = true;
     if (rule.no_whitespace) { add_whitespace(); }
   }
   return std::nullopt;
@@ -5363,7 +5366,7 @@ inline void SetupFirstSets::visit(Holder &ope) {
   ope.ope_->accept(cfs);
   rule.first_set = std::move(cfs.result_);
   const auto &fs = rule.first_set;
-  auto known = !fs.any_char && !fs.can_be_empty;
+  auto known = !fs.any_char && !fs.matches_empty_on_other_bytes;
   rule.start_bytes = known ? fs.chars : std::bitset<256>().set();
 
   ope.ope_->accept(*this);
@@ -5500,9 +5503,12 @@ private:
 // set excludes. Nothing consumes that byte, so only what the body starts with
 // runs: an alternative that cannot start with the byte is skipped, a
 // lookahead's operand fails at its own start, and a macro's body runs up to
-// its first parameter. Whitespace skipped after an empty match, `&`, a cut, a
+// its first parameter. Whitespace skipped after an empty match, a cut, a
 // recovery, a back reference, a User operator or a macro parameter there
-// would make the first set any byte (ComputeFirstSet), so none of them is met.
+// would make the first set any byte (ComputeFirstSet), so none of them runs.
+// The walk goes on past what can match empty, also past a lookahead that
+// fails there, so it can collect rules that do not run, which only keeps a
+// rule from being skipped.
 struct CollectStartRegion : public TraversalVisitor {
   using TraversalVisitor::visit;
 
@@ -5520,7 +5526,7 @@ struct CollectStartRegion : public TraversalVisitor {
     for (size_t i = 0; i < ope.opes_.size(); i++) {
       if (i < ope.first_sets().size()) {
         const auto &fs = ope.first_sets()[i];
-        if (!fs.any_char && !fs.can_be_empty) { continue; }
+        if (!fs.any_char && !fs.matches_empty_on_other_bytes) { continue; }
       }
       ope.opes_[i]->accept(*this);
     }
@@ -5799,12 +5805,13 @@ inline void Definition::decide_must_be_tried(RuleUses &uses) const {
   for (auto *rule : a.rules_by_id) {
     if (!rule) { continue; }
     const auto &fs = rule->first_set;
-    // Where it cannot start, a rule that cannot be empty fails, and one that
-    // can runs its predicate on the empty match. A macro that is not
-    // left-recursive gives no message (see Holder::parse_core).
+    // Where it cannot start, a rule fails, or matches empty and runs its
+    // predicate on the empty match. A macro that is not left-recursive gives
+    // no message (see Holder::parse_core).
     auto gives_message =
         !rule->is_macro &&
-        (fs.can_be_empty ? !!rule->predicate : !rule->error_message.empty());
+        (fs.matches_empty_on_other_bytes ? !!rule->predicate
+                                         : !rule->error_message.empty());
     must[rule->id] = gives_message || rule->is_left_recursive;
     for (const auto &f : fs.failures) {
       if (f.rule) { at_start[rule->id].push_back(f.rule); }

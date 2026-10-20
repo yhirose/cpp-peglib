@@ -37,7 +37,7 @@ TEST(FirstSetTest, Case_insensitive_literal) {
   EXPECT_FALSE(pg.parse("DELETE"));
 }
 
-// Alternatives starting with optional elements (can_be_empty) must not be
+// Alternatives starting with optional elements must not be
 // skipped
 TEST(FirstSetTest, Can_be_empty_not_skipped) {
   parser pg(R"(
@@ -386,6 +386,22 @@ TEST(UnstartableRuleTest, Is_not_entered) {
   EXPECT_EQ(1u, tries(pg, "A"));
 }
 
+// A rule that starts with `&` can start only where its operand can.
+TEST(UnstartableRuleTest, Is_not_entered_where_its_lookahead_cannot_start) {
+  parser pg(R"(
+    S  <- Op? 'x'
+    Op <- &([-+]* [~!]) [-+~!]+ / [-+]
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg["S"].collect_packrat_stats = true;
+
+  EXPECT_TRUE(pg.parse("x"));
+  EXPECT_EQ(0u, tries(pg, "Op"));
+  EXPECT_TRUE(pg.parse("+!x"));
+  EXPECT_EQ(1u, tries(pg, "Op"));
+}
+
 TEST(UnstartableRuleTest,
      Is_entered_only_to_give_a_message_when_errors_are_reported) {
   parser pg(R"(
@@ -603,14 +619,15 @@ static void expect_analyses_agree(parser &pg, const std::string &grammar) {
     ComputeFirstSet::FirstSetCache cache;
     ComputeFirstSet first_set(cache);
     rule.accept(first_set);
-    EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
+    EXPECT_EQ(rule.can_be_empty, first_set.result_.matches_empty_on_other_bytes)
         << entry.first << " in " << grammar;
   }
 }
 
-// Whether a rule can match empty is worked out by ComputeCanBeEmpty, for the
-// rules and the left recursion check, and again by ComputeFirstSet, for the
-// first sets. They must agree.
+// ComputeCanBeEmpty works out whether a rule can match empty, for the rules
+// and the left recursion check, and ComputeFirstSet whether it matches empty
+// on a byte it cannot start with, for the first sets. Without `&`, the two
+// are the same.
 TEST(NullabilityTest, Analyses_agree) {
   const char *grammars[] = {
       "S <- 'a'? 'b'?",
@@ -621,7 +638,6 @@ TEST(NullabilityTest, Analyses_agree) {
       "S <- ('a'? / 'b')",
       "S <- ('b' / 'a'?)",
       "S <- ('a' / 'b')",
-      "S <- &'a' 'b'?",
       "S <- !'a'",
       "S <- ''",
       "S <- A B\nA <- ('a'?){2}\nB <- ('b'? / 'c')",
@@ -632,6 +648,41 @@ TEST(NullabilityTest, Analyses_agree) {
     pg.set_logger([](size_t, size_t, const std::string &) {});
     ASSERT_TRUE(pg.load_grammar(grammar)) << grammar;
     expect_analyses_agree(pg, grammar);
+  }
+}
+
+// `&` does what its operand does on a byte the operand cannot start with:
+// `&'a' 'b'?` can match empty, but fails on any byte but 'a'. The other way
+// round, a rule that matches empty there can match empty, which the first set
+// walk relies on (ComputeFirstSet::walk_into).
+TEST(NullabilityTest,
+     And_predicate_does_what_its_operand_does_where_it_cannot_start) {
+  struct Case {
+    const char *grammar;
+    bool can_be_empty;
+    bool matches_empty_on_other_bytes;
+    const char *starts;
+  };
+  const Case cases[] = {
+      {"S <- &'a' 'b'?", true, false, "a"},
+      {"S <- &'a'? 'b'", false, false, "ab"},
+      {"S <- &'a'? 'b'?", true, true, "ab"},
+  };
+  for (const auto &c : cases) {
+    parser pg(c.grammar);
+    ASSERT_TRUE(!!pg) << c.grammar;
+    const auto &rule = pg["S"];
+    const auto &fs = rule.first_set;
+
+    EXPECT_EQ(c.can_be_empty, rule.can_be_empty) << c.grammar;
+    EXPECT_EQ(c.matches_empty_on_other_bytes, fs.matches_empty_on_other_bytes)
+        << c.grammar;
+    EXPECT_FALSE(fs.any_char) << c.grammar;
+    std::bitset<256> starts;
+    for (auto ch : std::string(c.starts)) {
+      starts.set(static_cast<unsigned char>(ch));
+    }
+    EXPECT_EQ(starts, fs.chars) << c.grammar;
   }
 }
 
@@ -775,6 +826,15 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
         R <- $x<'k'?> 'b' { error_message "got [%{x}]" }
       )",
        "qkb"},
+      {R"(
+        Stmt    <- &Keyword Command / Assign
+        Command <- Name Name*
+        Assign  <- Name '=' Name
+        Keyword <- 'print' / 'exit'
+        Name    <- < [a-z]+ >
+        %whitespace <- [ ]*
+      )",
+       "print x"},
   };
   for (const auto &c : cases) {
     parser pg(c.grammar);
