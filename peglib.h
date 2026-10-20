@@ -3286,45 +3286,46 @@ private:
 struct ComputeCanBeEmpty : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  bool result = false;
-
   void visit(Sequence &ope) override {
-    result = std::all_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
-      ComputeCanBeEmpty vis;
-      op->accept(vis);
-      return vis.result;
-    });
+    result_ = std::all_of(ope.opes_.begin(), ope.opes_.end(),
+                          [](auto &op) { return check(*op); });
   }
   void visit(PrioritizedChoice &ope) override {
-    result = std::any_of(ope.opes_.begin(), ope.opes_.end(), [](auto &op) {
-      ComputeCanBeEmpty vis;
-      op->accept(vis);
-      return vis.result;
-    });
+    result_ = std::any_of(ope.opes_.begin(), ope.opes_.end(),
+                          [](auto &op) { return check(*op); });
   }
   void visit(Repetition &ope) override {
     if (ope.min_ == 0) {
-      result = true;
+      result_ = true;
     } else {
       ope.ope_->accept(*this);
     }
   }
-  void visit(AndPredicate &) override { result = true; }
-  void visit(NotPredicate &) override { result = true; }
-  void visit(Dictionary &) override { result = false; }
-  void visit(LiteralString &ope) override { result = ope.lit_.empty(); }
-  void visit(CharacterClass &) override { result = false; }
-  void visit(Character &) override { result = false; }
-  void visit(AnyCharacter &) override { result = false; }
-  void visit(User &) override { result = false; }
+  void visit(AndPredicate &) override { result_ = true; }
+  void visit(NotPredicate &) override { result_ = true; }
+  void visit(Dictionary &) override { result_ = false; }
+  void visit(LiteralString &ope) override { result_ = ope.lit_.empty(); }
+  void visit(CharacterClass &) override { result_ = false; }
+  void visit(Character &) override { result_ = false; }
+  void visit(AnyCharacter &) override { result_ = false; }
+  void visit(User &) override { result_ = false; }
   void visit(Holder &ope) override;
   void visit(Reference &ope) override;
-  void visit(BackReference &) override { result = false; }
-  void visit(Cut &) override { result = true; }
+  void visit(BackReference &) override { result_ = false; }
+  void visit(Cut &) override { result_ = true; }
   // A recovery only matches after an error, and a repetition ends on an
   // empty match, so the checks made when a grammar is loaded take it to
   // consume input.
-  void visit(Recovery &) override { result = false; }
+  void visit(Recovery &) override { result_ = false; }
+
+  static bool check(Ope &ope) {
+    ComputeCanBeEmpty vis;
+    ope.accept(vis);
+    return vis.result_;
+  }
+
+private:
+  bool result_ = false;
 };
 
 // Structural signature of an Ope. Two alternatives whose first k elements
@@ -5111,11 +5112,11 @@ inline void TokenChecker::visit(Reference &ope) {
 // A rule that a combinator embeds, without a Reference. Going into it would
 // never end for a rule that reaches itself at its own start.
 inline void ComputeCanBeEmpty::visit(Holder &ope) {
-  result = ope.outer_->can_be_empty;
+  result_ = ope.outer_->can_be_empty;
 }
 
 inline void ComputeCanBeEmpty::visit(Reference &ope) {
-  result = ope.rule_ && ope.rule_->can_be_empty;
+  result_ = ope.rule_ && ope.rule_->can_be_empty;
 }
 
 inline void DetectLeftRecursion::visit(Reference &ope) {
@@ -5148,9 +5149,7 @@ inline void DetectLeftRecursion::visit(Reference &ope) {
     if (param.ope) {
       // ComputeCanBeEmpty never consults the frame stack, so the scope it
       // runs in cannot matter.
-      ComputeCanBeEmpty cbe;
-      param.ope->accept(cbe);
-      done_ = !cbe.result;
+      done_ = !ComputeCanBeEmpty::check(*param.ope);
     } else {
       done_ = true;
     }
@@ -5590,9 +5589,7 @@ struct CollectStartRegion : public TraversalVisitor {
   void visit(Sequence &ope) override {
     for (const auto &op : ope.opes_) {
       op->accept(*this);
-      ComputeCanBeEmpty vis;
-      op->accept(vis);
-      if (!vis.result) { break; }
+      if (!ComputeCanBeEmpty::check(*op)) { break; }
     }
   }
   void visit(PrioritizedChoice &ope) override {
@@ -6055,9 +6052,7 @@ inline void Definition::select_packrat_rules() const {
       void collect(const std::vector<std::shared_ptr<Ope>> &opes, size_t from) {
         for (auto i = from; i < opes.size(); i++) {
           opes[i]->accept(*this);
-          ComputeCanBeEmpty empty_vis;
-          opes[i]->accept(empty_vis);
-          if (!empty_vis.result) { break; }
+          if (!ComputeCanBeEmpty::check(*opes[i])) { break; }
         }
       }
 
@@ -7843,10 +7838,10 @@ private:
       while (changed) {
         changed = false;
         for (auto *rule : walked.rules) {
-          ComputeCanBeEmpty vis;
-          rule->get_core_operator()->accept(vis);
-          if (vis.result != rule->can_be_empty) {
-            rule->can_be_empty = vis.result;
+          auto can_be_empty =
+              ComputeCanBeEmpty::check(*rule->get_core_operator());
+          if (can_be_empty != rule->can_be_empty) {
+            rule->can_be_empty = can_be_empty;
             changed = true;
           }
         }
