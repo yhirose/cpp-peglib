@@ -929,6 +929,33 @@ inline size_t mix_index(size_t key) {
   return static_cast<size_t>(h ^ (h >> 32));
 }
 
+// Drops the repeats in `v` from `from` on, keeping the first of each in
+// order, and returns how many went. The items kept so far are found by `hash`,
+// so that this takes time linear in the number of items.
+template <typename T, typename Hash>
+size_t drop_repeats(std::vector<T> &v, size_t from, Hash hash) {
+  if (v.size() - from < 2) { return 0; }
+  size_t slots = 1;
+  while (slots < 2 * (v.size() - from)) {
+    slots *= 2;
+  }
+  std::vector<size_t> kept_at(slots); // 1 + where an item is kept, or 0
+  auto kept = from;
+  for (auto i = from; i < v.size(); i++) {
+    auto j = hash(v[i]) & (slots - 1);
+    while (kept_at[j] && !(v[kept_at[j] - 1] == v[i])) {
+      j = (j + 1) & (slots - 1);
+    }
+    if (!kept_at[j]) {
+      v[kept] = v[i];
+      kept_at[j] = ++kept;
+    }
+  }
+  auto dropped = v.size() - kept;
+  v.resize(kept);
+  return dropped;
+}
+
 // A call of a rule: the body it parses (a macro has one per instance), where
 // it starts, and whether whitespace is skipped there. A rule may match
 // differently where none is, so whatever stands for a call, a memo, a seed
@@ -1106,6 +1133,14 @@ private:
              token_rule == e.token_rule && choice == e.choice &&
              begin == e.begin && end == e.end && record == e.record;
     }
+    size_t hash() const {
+      return mix_index(reinterpret_cast<uintptr_t>(failure.literal) ^
+                       reinterpret_cast<uintptr_t>(failure.rule) * 3 ^
+                       reinterpret_cast<uintptr_t>(rule) * 5 ^
+                       reinterpret_cast<uintptr_t>(token_rule) * 7 ^
+                       reinterpret_cast<uintptr_t>(choice) * 11 ^ begin * 13 ^
+                       record * 17);
+    }
   };
   std::vector<ExpectedEvent> events_;
 
@@ -1211,14 +1246,6 @@ private:
       std::vector<std::pair<const Definition *, const Definition *>>;
   void insert_start_failure(const StartFailure &failure, const Definition *rule,
                             const Definition *token_rule, Expanded &expanded);
-
-  void insert_expected(const char *error_literal,
-                       const Definition *error_rule) {
-    for (const auto &[t, r] : expected_tokens) {
-      if (t == error_literal && r == error_rule) { return; }
-    }
-    expected_tokens.emplace_back(error_literal, error_rule);
-  }
 
   // Copies of the literals that the grammar does not own. Held by pointer so
   // that their text stays put as this vector grows, and is shared with the
@@ -4181,7 +4208,9 @@ inline void ErrorInfo::insert_failure(const char *literal,
                                       const Definition *rule,
                                       const Definition *token_rule) {
   const auto *error_rule = token_rule ? token_rule : rule;
-  if (literal || error_rule) { insert_expected(literal, error_rule); }
+  if (literal || error_rule) {
+    expected_tokens.emplace_back(literal, error_rule);
+  }
 }
 
 // Trying a rule notes its own start failures inside it, under itself if it is
@@ -4209,13 +4238,8 @@ inline void ErrorInfo::insert_start_failure(const StartFailure &failure,
 
 // Out of line, so that note() is small enough to be inlined.
 CPPPEGLIB_NOINLINE inline void ErrorInfo::remove_repeats() {
-  auto first = events_.begin() + static_cast<std::ptrdiff_t>(boundary_);
-  auto kept = first;
-  for (auto it = first; it != events_.end(); ++it) {
-    if (std::find(first, kept, *it) == kept) { *kept++ = *it; }
-  }
-  removed_ += static_cast<size_t>(events_.end() - kept);
-  events_.erase(kept, events_.end());
+  removed_ += drop_repeats(events_, boundary_,
+                           [](const ExpectedEvent &e) { return e.hash(); });
   remove_repeats_at_ = std::max(max_events_, 2 * (events_.size() - boundary_));
 }
 
@@ -4295,7 +4319,15 @@ inline void ErrorInfo::resolve_expected_tokens() {
       }
     }
   };
+  // What an earlier resolve left has no repeats.
+  auto resolved = expected_tokens.size();
   read(read, outermost, 0, events_.size(), nullptr);
+  if (expected_tokens.size() != resolved) {
+    drop_repeats(expected_tokens, 0, [](const auto &token) {
+      return mix_index(reinterpret_cast<uintptr_t>(token.first) * 31 +
+                       reinterpret_cast<uintptr_t>(token.second));
+    });
+  }
   next_generation();
 }
 
@@ -4342,32 +4374,32 @@ inline void ErrorInfo::output_log(const Log &log, const ErrorReporter &reporter,
       report.unexpected_token = unexpected_token;
     }
 
-    auto first_item = true;
-    size_t i = 0;
-    while (i < expected_tokens.size()) {
-      auto [error_literal, error_rule] = expected_tokens[i];
-
-      // The same text can come from more than one place in the grammar.
-      const auto &literals = report.expected_literals;
-      auto listed = error_literal && std::find(literals.begin(), literals.end(),
-                                               error_literal) != literals.end();
-
-      // Skip rules start with '_'
-      if (!(error_rule && error_rule->name[0] == '_') && !listed) {
-        msg += (first_item ? ", expecting " : ", ");
-        if (error_literal) {
-          msg += "'";
-          msg += error_literal;
-          msg += "'";
-          report.expected_literals.emplace_back(error_literal);
-        } else {
-          msg += "<" + error_rule->name + ">";
-          report.expected_rules.emplace_back(error_rule->name);
-        }
-        first_item = false;
+    // A literal is listed by its text, which can come from more than one
+    // place in the grammar. Nothing is listed under a rule that starts with
+    // '_'.
+    std::vector<std::pair<std::string_view, const Definition *>> listed;
+    listed.reserve(expected_tokens.size());
+    for (const auto &[literal, rule] : expected_tokens) {
+      if (rule && rule->name[0] == '_') { continue; }
+      listed.emplace_back(literal ? literal : "", literal ? nullptr : rule);
+    }
+    drop_repeats(listed, 0, [](const auto &item) {
+      return std::hash<std::string_view>()(item.first) ^
+             mix_index(reinterpret_cast<uintptr_t>(item.second));
+    });
+    for (const auto &[text, rule] : listed) {
+      msg += report.expected_literals.empty() && report.expected_rules.empty()
+                 ? ", expecting "
+                 : ", ";
+      if (rule) {
+        msg += "<" + rule->name + ">";
+        report.expected_rules.emplace_back(rule->name);
+      } else {
+        msg += "'";
+        msg += text;
+        msg += "'";
+        report.expected_literals.emplace_back(text);
       }
-
-      i++;
     }
     msg += ".";
     if (!report.expected_rules.empty()) {
