@@ -1452,6 +1452,11 @@ public:
 
   ErrorInfo error_info;
   bool recovered = false;
+  // Where each recovery has reported what was pending, if anything. Parsing
+  // a rule again after
+  // backtracking runs a recovery in it again where it ran, and reusing the
+  // rule's memo does not: either way, it reports nothing there again.
+  std::set<std::pair<const Ope *, const char *>> reported_recoveries;
 
   std::vector<std::unique_ptr<SemanticValues>> value_stack;
   size_t value_stack_size = 0;
@@ -5032,9 +5037,11 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
                                    SemanticValues & /*vs*/, Context &c,
                                    std::any & /*dt*/) const {
   const auto *label = this->label();
+  const auto reports =
+      c.reports_here() && !c.reported_recoveries.count({this, s});
 
   // Custom error message
-  if (c.reports_here() && label && !label->error_message.empty()) {
+  if (reports && label && !label->error_message.empty()) {
     c.error_info.set_message(
         s, resolve_capture_placeholders(label->error_message, c), label->name);
   }
@@ -5054,10 +5061,11 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
   if (success(len) && !c.mutes_errors) {
     c.recovered = true;
 
-    if (c.reports_errors) {
+    if (reports) {
       c.error_info.output_log(c.log, c.error_reporter, c.s, c.l,
                               label ? label->name : std::string());
       c.error_info.clear();
+      c.reported_recoveries.emplace(this, s);
     }
   }
 

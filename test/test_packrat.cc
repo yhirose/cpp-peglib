@@ -778,7 +778,8 @@ TEST(PackratTest, Packrat_reports_a_failure_the_whitespace_met_first) {
   }
 }
 
-// Reports the error of parsing `input` with and without packrat parsing.
+// Reports the errors of parsing `input` with and without packrat parsing,
+// one per line.
 static std::pair<std::string, std::string>
 errors_with_and_without_packrat(const std::string &grammar, const char *input) {
   std::string errors[2];
@@ -787,7 +788,8 @@ errors_with_and_without_packrat(const std::string &grammar, const char *input) {
     EXPECT_TRUE(!!pg);
     if (packrat) { pg.enable_packrat_parsing(); }
     pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
-      errors[packrat] =
+      if (!errors[packrat].empty()) { errors[packrat] += '\n'; }
+      errors[packrat] +=
           std::to_string(ln) + ":" + std::to_string(col) + " " + msg;
     });
     EXPECT_FALSE(pg.parse(input));
@@ -856,15 +858,44 @@ TEST(PackratTest, Report_in_a_memoized_parse_names_its_token_rule) {
 // R's recovery commits the choice around R, in A and in B. A memo of R
 // reused in B would not, and the error after the recovery's would go.
 TEST(PackratTest, Packrat_keeps_a_recovery_that_commits_the_callers_choice) {
-  auto [plain, packrat] = errors_with_and_without_packrat(R"(
+  const char *grammar = R"(
     S    <- A / B
     A    <- R 'x' / 'q'
     B    <- R 'y' / [a-z]+
     R    <- 'k' ';'^semi
     semi <- (!'x' !'y' .)*
+  )";
+  {
+    auto [plain, packrat] = errors_with_and_without_packrat(grammar, "kz");
+    EXPECT_EQ("1:2 syntax error, unexpected 'z', expecting ';'.\n"
+              "1:3 syntax error, expecting 'x', 'y'.",
+              plain);
+    EXPECT_EQ(plain, packrat);
+  }
+  {
+    auto [plain, packrat] = errors_with_and_without_packrat(grammar, "kzy");
+    EXPECT_EQ("1:2 syntax error, unexpected 'zy', expecting ';'.", plain);
+    EXPECT_EQ(plain, packrat);
+  }
+}
+
+// Labeled tries Stmt first, whose recovery reports the missing ';'. Item
+// then tries Stmt again, which runs the recovery there again, or reuses
+// Stmt's memo, which does not: either way the recovery reports nothing
+// more, so the ':' that Labeled went on to expect is not reported.
+TEST(PackratTest, Recovery_reports_once_where_it_runs) {
+  auto [plain, packrat] =
+      errors_with_and_without_packrat(R"(
+    Prog    <- Item*
+    Item    <- Labeled / Stmt
+    Labeled <- Stmt ':' Stmt
+    Stmt    <- 'let' Name '=' Name ';'^semi / 'print' Name ';'^semi
+    Name    <- < [a-z]+ >
+    semi    <- (!'let' !'print' .)*
+    %whitespace <- [ \t]*
   )",
-                                                          "kzy");
-  EXPECT_EQ("1:3 syntax error, unexpected 'y', expecting 'x'.", plain);
+                                      "let a = b x print c;");
+  EXPECT_EQ("1:11 syntax error, unexpected 'x', expecting ';'.", plain);
   EXPECT_EQ(plain, packrat);
 }
 
