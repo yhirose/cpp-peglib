@@ -3713,9 +3713,10 @@ struct ComputeFirstSet : public TraversalVisitor {
   // Per-rule cache shared across a SetupFirstSets traversal. Without it,
   // every alternative of every PrioritizedChoice re-walks referenced
   // rules — O(refs^depth) work for grammars with many cross-references.
-  // Only cycle-free rule computations are cached; results computed under
-  // a cycle (left recursion) would be incomplete and unsafe to reuse from
-  // a different call context.
+  // A rule met again in its own walk (left recursion) adds its bytes where
+  // it is first walked into, so a result is cached only if every rule met
+  // again in its walk is the rule or one walked into below it: one met
+  // higher up adds its bytes there, and the result lacks them.
   using FirstSetCache = std::unordered_map<const Definition *, FirstSet>;
 
   explicit ComputeFirstSet(FirstSetCache &cache) : cache_(cache) {}
@@ -3737,12 +3738,17 @@ private:
   // grammar's.
   void add_whitespace() { result_.any_char = true; }
 
-  // `rule` is being worked out further up, and adds its bytes there.
-  void add_rule_being_computed(const Definition &rule);
+  // Puts `rule` on the walk and returns its depth there, unless it is being
+  // worked out further up: it adds its bytes there, and what is worked out
+  // below it lacks them.
+  std::optional<size_t> walk_into(const Definition &rule);
 
   FirstSetCache &cache_;
-  std::unordered_set<const Definition *> refs_;
-  size_t cycle_count_ = 0;
+  // The rules being worked out, each at its depth in the walk.
+  std::vector<const Definition *> refs_;
+  // The least depth of a rule met again since the innermost walk into a
+  // referenced rule began.
+  size_t least_depth_met_ = std::numeric_limits<size_t>::max();
 };
 
 struct SetupFirstSets : public TraversalVisitor {
@@ -5358,26 +5364,22 @@ inline void ComputeFirstSet::visit(Reference &ope) {
   if (it != cache_.end()) {
     rule_fs = &it->second;
   } else {
-    if (!refs_.insert(ope.rule_).second) {
-      add_rule_being_computed(*ope.rule_);
-      return;
-    }
+    auto depth = walk_into(*ope.rule_);
+    if (!depth) { return; }
     auto save = std::exchange(result_, FirstSet{});
-    auto saved_cycle_count = cycle_count_;
+    auto outer_least_depth_met =
+        std::exchange(least_depth_met_, std::numeric_limits<size_t>::max());
     ope.rule_->accept(*this);
     computed = std::move(result_);
     result_ = std::move(save);
-    refs_.erase(ope.rule_);
-    if (cycle_count_ == saved_cycle_count) {
-      // Cycle-free: cached value is complete and safe to reuse.
+    refs_.pop_back();
+    if (least_depth_met_ >= *depth) {
       it = cache_.try_emplace(ope.rule_, std::move(computed)).first;
       rule_fs = &it->second;
     } else {
-      // Cycle was hit during this rule's computation — its result may be
-      // missing contributions from rules that were on the call stack.
-      // Use the value here but do not cache it for other call contexts.
       rule_fs = &computed;
     }
+    least_depth_met_ = std::min(outer_least_depth_met, least_depth_met_);
   }
 
   result_.merge(*rule_fs);
@@ -5386,27 +5388,31 @@ inline void ComputeFirstSet::visit(Reference &ope) {
 
 // A rule that a combinator embeds is walked into as a rule is, without the
 // cache, and walked into again inside itself it is a cycle, so that what is
-// computed around it is not cached as complete either.
+// computed below it is not cached as complete either.
 inline void ComputeFirstSet::visit(WeakHolder &ope) {
   auto holder = std::dynamic_pointer_cast<Holder>(ope.weak_.lock());
   if (!holder) { return; }
-  const auto &rule = *holder->outer_;
-  if (!refs_.insert(&rule).second) {
-    add_rule_being_computed(rule);
-    return;
-  }
+  if (!walk_into(*holder->outer_)) { return; }
   holder->accept(*this);
-  refs_.erase(&rule);
+  refs_.pop_back();
 }
 
-// When it can match empty, what follows it here can start a match as well.
-// Whatever is computed meanwhile lacks its bytes, and is not cached.
-inline void ComputeFirstSet::add_rule_being_computed(const Definition &rule) {
-  cycle_count_++;
+// A rule met again, when it can match empty, lets what follows it here start
+// a match as well.
+inline std::optional<size_t>
+ComputeFirstSet::walk_into(const Definition &rule) {
+  auto it = std::find(refs_.begin(), refs_.end(), &rule);
+  if (it == refs_.end()) {
+    refs_.push_back(&rule);
+    return refs_.size() - 1;
+  }
+  least_depth_met_ =
+      std::min(least_depth_met_, static_cast<size_t>(it - refs_.begin()));
   if (rule.can_be_empty) {
     result_.can_be_empty = true;
     if (rule.no_whitespace) { add_whitespace(); }
   }
+  return std::nullopt;
 }
 
 inline void SetupFirstSets::visit(Reference &ope) {

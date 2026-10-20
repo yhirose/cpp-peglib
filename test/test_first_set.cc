@@ -1,3 +1,4 @@
+#include <chrono>
 #include <gtest/gtest.h>
 #include <peglib.h>
 #include <sstream>
@@ -300,6 +301,28 @@ TEST(FirstSetTest, Left_recursive_rule_referenced_from_multiple_rules) {
   EXPECT_TRUE(pg.parse("p1+2+3"));
   EXPECT_TRUE(pg.parse("q9"));
   EXPECT_FALSE(pg.parse("p+1")); // Expr cannot start with '+'
+}
+
+// Each level of the chain starts with the next one in both alternatives,
+// and the last is left-recursive, so every walk into a level meets a rule
+// again. The first sets are still worked out once per rule: once per path to
+// a rule, loading took time doubling with each level, seconds here.
+TEST(FirstSetTest, Chain_of_levels_starting_with_the_next_loads_quickly) {
+  std::string grammar = "S <- E0 ';'\nE22 <- E22 '.' Id / Id\n"
+                        "Id <- < [a-z]+ >\n%whitespace <- [ ]*\n";
+  for (int i = 0; i < 22; i++) {
+    auto e = "E" + std::to_string(i), next = "E" + std::to_string(i + 1);
+    grammar += e + " <- " + next + " 'o" + std::to_string(i) + "' " + e +
+               " / " + next + "\n";
+  }
+  auto start = std::chrono::steady_clock::now();
+  parser pg(grammar);
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+  ASSERT_TRUE(!!pg);
+
+  // Without packrat parsing, the chain parses each level twice.
+  pg.enable_packrat_parsing();
+  EXPECT_TRUE(pg.parse("a o3 b.c o0 d;"));
 }
 
 // A left-recursive rule that can match empty lets what follows its recursive
