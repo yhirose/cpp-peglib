@@ -828,7 +828,7 @@ BlockStmt   ← '{' (!'}' Stmt^stmtb)* '}' # Annotated with `stmtb`
 Stmt        ← IfStmt / WhileStmt / PrintStmt / DecStmt / AssignStmt / BlockStmt
 IfStmt      ← 'if' '(' Exp ')' Stmt ('else' Stmt)?
 WhileStmt   ← 'while' '(' Exp^condw ')' Stmt # Annotated with `condw`
-DecStmt     ← 'int' NAME ('=' Exp)? ';'
+DecStmt     ← 'int' NAME ('=' Exp)? ';'^semid # Annotated with `semid`
 AssignStmt  ← NAME '=' Exp ';'^semia # Annotated with `semia`
 PrintStmt   ← 'System.out.println' '(' Exp ')' ';'
 Exp         ← RelExp ('==' RelExp)*
@@ -844,12 +844,18 @@ NAME        ← < [a-zA-Z_][a-zA-Z_0-9]* >
 %word       ← NAME
 
 # Recovery operator labels
-semia       ← '' { error_message "missing semicolon in assignment." }
-stmtb       ← (!(Stmt / 'else' / '}') .)* { error_message "invalid statement" }
+semia       ← StmtRest { error_message "missing semicolon in assignment." }
+semid       ← StmtRest { error_message "missing semicolon in declaration." }
+stmtb       ← (';' / Skip StmtRest) { error_message "invalid statement" }
 condw       ← &'==' ('==' RelExp)* / &'<' ('<' AddExp)* / (!')' .)*
+
+# Recovery expressions
+StmtRest    ← (!(';' / StmtKey) Skip)* ';'?
+StmtKey     ← 'if' / 'while' / 'System.out.println' / 'int' / 'else' / '}'
+Skip        ← '{' (!'}' Skip)* '}'? / NAME / NUMBER / .
 ```
 
-For instance, `';'^semia` is a syntactic sugar for `(';' / %recover(semia))`. Where ';' fails, `%recover` reports the custom message of `semia`, "missing semicolon in assignment.", and then recovers by skipping input text with the recovery expression `semia`. `semia` skips nothing, while `stmtb` skips up to the next statement, `else` or `}`.
+For instance, `';'^semia` is a syntactic sugar for `(';' / %recover(semia))`. Where ';' fails, `%recover` reports the custom message of `semia`, "missing semicolon in assignment.", and then recovers by skipping input text with the recovery expression `semia`. `semia` and `semid` skip the rest of the statement, and `stmtb` an invalid one: `StmtRest` stops after `;`, or before `}` or a keyword that starts a statement, and skips a block in braces as one piece, so that an unbalanced brace is still reported. A recovery expression that stops where a rule such as `Stmt` matches can stop in the middle of the statement it skips, and report the rest of it as another error; one that stops at the tokens that end or start a statement does not.
 
 Here is the result:
 
