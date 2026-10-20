@@ -3426,99 +3426,92 @@ private:
   }
 };
 
-struct HasEmptyElement : public TraversalVisitor {
+// Goes down an operand that can match empty to what makes it: the last
+// element of a sequence, the first alternative of a choice that can, and
+// into a rule unless it is already on the way. Ends at the innermost named
+// rule on the way, where it is referred to.
+struct FindEmptyElement : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  HasEmptyElement(std::vector<std::pair<const char *, std::string>> &refs,
-                  std::unordered_map<std::string, bool> &has_error_cache)
-      : refs_(refs), has_error_cache_(has_error_cache) {}
+  FindEmptyElement(const Definition *rule,
+                   std::pair<const char *, std::string> rule_ref)
+      : rule_ref(std::move(rule_ref)), rules_on_way_{rule} {}
 
-  void visit(Sequence &ope) override;
+  void visit(Sequence &ope) override {
+    if (!ope.opes_.empty()) { ope.opes_.back()->accept(*this); }
+  }
   void visit(PrioritizedChoice &ope) override {
     for (const auto &op : ope.opes_) {
-      op->accept(*this);
-      if (is_empty) { return; }
+      if (ComputeCanBeEmpty::check(*op)) {
+        op->accept(*this);
+        return;
+      }
     }
   }
   void visit(Repetition &ope) override {
-    if (ope.min_ == 0) {
-      set_error();
-    } else {
-      ope.ope_->accept(*this);
-    }
+    if (ope.min_ > 0) { ope.ope_->accept(*this); }
   }
-  void visit(AndPredicate &) override { set_error(); }
-  void visit(NotPredicate &) override { set_error(); }
-  void visit(Cut &) override { set_error(); }
-  void visit(LiteralString &ope) override {
-    if (ope.lit_.empty()) { set_error(); }
-  }
+  void visit(AndPredicate &) override {}
+  void visit(NotPredicate &) override {}
   void visit(Reference &ope) override;
-  // See ComputeCanBeEmpty.
-  void visit(Recovery &) override {}
 
-  bool is_empty = false;
-  const char *error_s = nullptr;
-  std::string error_name;
+  std::pair<const char *, std::string> rule_ref;
 
 private:
-  void set_error() {
-    is_empty = true;
-    tie(error_s, error_name) = refs_.back();
-  }
-  std::vector<std::pair<const char *, std::string>> &refs_;
-  std::unordered_map<std::string, bool> &has_error_cache_;
+  std::vector<const Definition *> rules_on_way_;
 };
 
+// Finds, in a rule and the rules it reaches, each walked once, the first
+// unbounded repetition whose operand can match empty. Whether it can is
+// worked out for every rule beforehand, so it is the same wherever the
+// repetition is reached from.
 struct DetectInfiniteLoop : public TraversalVisitor {
   using TraversalVisitor::visit;
 
-  DetectInfiniteLoop(const char *s, const std::string &name,
-                     std::vector<std::pair<const char *, std::string>> &refs,
-                     std::unordered_map<std::string, bool> &has_error_cache)
-      : refs_(refs), has_error_cache_(has_error_cache) {
-    refs_.emplace_back(s, name);
-  }
+  DetectInfiniteLoop(const char *s, const std::string &name)
+      : rule_ref_(s, name) {}
 
-  DetectInfiniteLoop(std::vector<std::pair<const char *, std::string>> &refs,
-                     std::unordered_map<std::string, bool> &has_error_cache)
-      : refs_(refs), has_error_cache_(has_error_cache) {}
-
-  void visit(Sequence &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-      if (has_error) { return; }
-    }
-  }
-  void visit(PrioritizedChoice &ope) override {
-    for (const auto &op : ope.opes_) {
-      op->accept(*this);
-      if (has_error) { return; }
-    }
-  }
+  void visit(Sequence &ope) override { walk_until_error(ope.opes_); }
+  void visit(PrioritizedChoice &ope) override { walk_until_error(ope.opes_); }
   void visit(Repetition &ope) override {
-    if (ope.max_ == std::numeric_limits<size_t>::max()) {
-      HasEmptyElement vis(refs_, has_error_cache_);
+    if (ope.max_ == std::numeric_limits<size_t>::max() &&
+        ComputeCanBeEmpty::check(*ope.ope_)) {
+      FindEmptyElement vis(rule_, rule_ref_);
       vis.walk_within(*this);
       ope.ope_->accept(vis);
-      if (vis.is_empty) {
-        has_error = true;
-        error_s = vis.error_s;
-        error_name = vis.error_name;
-      }
-    } else {
-      ope.ope_->accept(*this);
+      has_error = true;
+      std::tie(error_s, error_name) = vis.rule_ref;
+      return;
     }
+    ope.ope_->accept(*this);
   }
   void visit(Reference &ope) override;
+  // Walks each rule once, whether reached through a Reference or, made with
+  // the combinators, through a WeakHolder.
+  void visit(Holder &ope) override {
+    if (!walked_.insert(ope.outer_).second) { return; }
+    auto save = std::exchange(rule_, ope.outer_);
+    ope.ope_->accept(*this);
+    rule_ = save;
+  }
 
   bool has_error = false;
   const char *error_s = nullptr;
   std::string error_name;
 
 private:
-  std::vector<std::pair<const char *, std::string>> &refs_;
-  std::unordered_map<std::string, bool> &has_error_cache_;
+  void walk_until_error(const std::vector<std::shared_ptr<Ope>> &opes) {
+    for (const auto &op : opes) {
+      if (has_error) { return; }
+      op->accept(*this);
+    }
+  }
+
+  std::unordered_set<const Definition *> walked_;
+  const Definition *rule_ = nullptr;
+  // Where the innermost named rule being walked is referred to, also inside
+  // the rules made with the combinators that it reaches.
+  std::pair<const char *, std::string> rule_ref_;
 };
 
 struct ReferenceChecker : public TraversalVisitor {
@@ -5241,93 +5234,24 @@ DetectLeftRecursion::resolve_macro_arg(size_t iarg) const {
   return {};
 }
 
-inline void HasEmptyElement::visit(Sequence &ope) {
-  auto save_is_empty = false;
-  const char *save_error_s = nullptr;
-  std::string save_error_name;
-
-  auto it = ope.opes_.begin();
-  while (it != ope.opes_.end()) {
-    (*it)->accept(*this);
-    if (!is_empty) {
-      ++it;
-      while (it != ope.opes_.end()) {
-        DetectInfiniteLoop vis(refs_, has_error_cache_);
-        vis.walk_within(*this);
-        (*it)->accept(vis);
-        if (vis.has_error) {
-          is_empty = true;
-          error_s = vis.error_s;
-          error_name = vis.error_name;
-          return;
-        }
-        ++it;
-      }
-      return;
-    }
-
-    save_is_empty = is_empty;
-    save_error_s = error_s;
-    save_error_name = error_name;
-
-    is_empty = false;
-    error_name.clear();
-    ++it;
-  }
-
-  is_empty = save_is_empty;
-  error_s = save_error_s;
-  error_name = save_error_name;
-}
-
-inline void HasEmptyElement::visit(Reference &ope) {
-  auto it = std::find_if(refs_.begin(), refs_.end(),
-                         [&](const std::pair<const char *, std::string> &ref) {
-                           return ope.name_ == ref.second;
-                         });
-  if (it != refs_.end()) {
-    // A rule already being looked into, such as the one whose repetition
-    // this is (`R <- R*`): whether it can match empty was worked out for
-    // every rule beforehand.
-    if (ope.rule_ && ope.rule_->can_be_empty) { set_error(); }
+inline void FindEmptyElement::visit(Reference &ope) {
+  if (!ope.rule_ || std::find(rules_on_way_.begin(), rules_on_way_.end(),
+                              ope.rule_) != rules_on_way_.end()) {
     return;
   }
-
-  if (ope.rule_) {
-    refs_.emplace_back(ope.s_, ope.name_);
-    ope.rule_->accept(*this);
-    refs_.pop_back();
-  }
+  assert(ope.rule_->can_be_empty);
+  rules_on_way_.push_back(ope.rule_);
+  rule_ref = {ope.s_, ope.name_};
+  ope.rule_->accept(*this);
 }
 
 inline void DetectInfiniteLoop::visit(Reference &ope) {
-  auto it = std::find_if(refs_.begin(), refs_.end(),
-                         [&](const std::pair<const char *, std::string> &ref) {
-                           return ope.name_ == ref.second;
-                         });
-  if (it != refs_.end()) { return; }
-
   if (ope.rule_) {
-    auto it = has_error_cache_.find(ope.name_);
-    if (it != has_error_cache_.end()) {
-      has_error = it->second;
-      if (has_error) {
-        error_s = ope.s_;
-        error_name = ope.name_;
-      }
-    } else {
-      refs_.emplace_back(ope.s_, ope.name_);
-      ope.rule_->accept(*this);
-      refs_.pop_back();
-      has_error_cache_[ope.name_] = has_error;
-    }
+    auto save = std::exchange(rule_ref_, {ope.s_, ope.name_});
+    ope.rule_->accept(*this);
+    rule_ref_ = std::move(save);
   }
-
-  if (ope.is_macro_) {
-    for (const auto &arg : ope.args_) {
-      arg->accept(*this);
-    }
-  }
+  if (ope.is_macro_) { walk_until_error(ope.args_); }
 }
 
 inline void ReferenceChecker::visit(Reference &ope) {
@@ -7917,9 +7841,7 @@ private:
 
   bool detect_infiniteLoop(const Data &data, Definition &rule, const Log &log,
                            const char *s) const {
-    std::vector<std::pair<const char *, std::string>> refs;
-    std::unordered_map<std::string, bool> has_error_cache;
-    DetectInfiniteLoop vis(data.start_pos, rule.name, refs, has_error_cache);
+    DetectInfiniteLoop vis(data.start_pos, rule.name);
     rule.accept(vis);
     if (vis.has_error) {
       log_at(log, s, vis.error_s,

@@ -1,3 +1,4 @@
+#include <chrono>
 #include <gtest/gtest.h>
 #include <peglib.h>
 #include <sstream>
@@ -184,6 +185,64 @@ TEST(InfiniteLoopTest, Left_recursion_in_repetition) {
     parser pg(grammar);
     EXPECT_TRUE(!!pg) << grammar;
   }
+}
+
+// The messages logged by a grammar that fails to load, a line each.
+static std::string load_errors(std::string_view grammar,
+                               const Rules &rules = {}) {
+  parser pg;
+  std::string errors;
+  pg.set_logger([&](size_t ln, size_t col, const std::string &msg) {
+    errors +=
+        std::to_string(ln) + ":" + std::to_string(col) + ": " + msg + "\n";
+  });
+  EXPECT_FALSE(pg.load_grammar(grammar, rules));
+  return errors;
+}
+
+// A repetition of something that can match empty is found wherever it is
+// reached from: here in A, which ';' follows in the sequence S repeats, and
+// at the start of the sequence S repeats.
+TEST(InfiniteLoopTest, Repetition_in_a_repeated_sequence) {
+  EXPECT_EQ(load_errors(R"(
+    S <- (A ';')*
+    A <- 'a' B*
+    B <- 'b'?
+  )"),
+            "3:14: infinite loop is detected in 'B'.\n");
+
+  EXPECT_EQ(load_errors("S <- (('a'?)* 'b')*"),
+            "1:1: infinite loop is detected in 'S'.\n");
+}
+
+// The arguments of a macro are walked at every call, the recursive one too.
+TEST(InfiniteLoopTest, Repetition_in_an_argument_of_a_recursive_call) {
+  EXPECT_EQ(load_errors("S <- M('a')\nM(x) <- x ';' M((''?)*) / x"),
+            "1:6: infinite loop is detected in 'M'.\n");
+}
+
+// A rule made with the combinators that repeats itself can match empty, as
+// the same rule written in the grammar can.
+TEST(InfiniteLoopTest, Combinator_rule_repeating_itself) {
+  Definition TREE;
+  TREE <= cho(seq(chr('('), zom(TREE), chr(')')), opt(chr('x')));
+  EXPECT_EQ(load_errors("S <- T ';'", {{"T", TREE}}),
+            "1:6: infinite loop is detected in 'T'.\n");
+}
+
+// Levels that each start with the next, in two alternatives, are walked once
+// each, not once for every path down the chain.
+TEST(InfiniteLoopTest, Chain_of_levels_in_a_repetition_loads_quickly) {
+  std::string grammar = "S <- (E0 ';')*\nE24 <- Id\nId <- [a-z]+\n";
+  for (int i = 0; i < 24; i++) {
+    auto e = "E" + std::to_string(i), next = "E" + std::to_string(i + 1);
+    grammar += e + " <- " + next + " 'o" + std::to_string(i) + "' " + e +
+               " / " + next + "\n";
+  }
+  auto start = std::chrono::steady_clock::now();
+  parser pg(grammar);
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(1));
+  EXPECT_TRUE(!!pg);
 }
 
 TEST(InfiniteLoopTest, Back_reference_in_repetition) {
