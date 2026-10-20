@@ -574,6 +574,17 @@ TEST(UnstartableRuleTest, Is_entered_at_whitespace_after_an_empty_match) {
 // Nullability
 // =============================================================================
 
+static void expect_analyses_agree(parser &pg, const std::string &grammar) {
+  for (const auto &entry : pg.get_grammar()) {
+    auto &rule = pg[entry.first.c_str()];
+    ComputeFirstSet::FirstSetCache cache;
+    ComputeFirstSet first_set(cache);
+    rule.accept(first_set);
+    EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
+        << entry.first << " in " << grammar;
+  }
+}
+
 // Whether a rule can match empty is worked out by ComputeCanBeEmpty, for the
 // rules and the left recursion check, and again by ComputeFirstSet, for the
 // first sets. They must agree.
@@ -597,16 +608,28 @@ TEST(NullabilityTest, Analyses_agree) {
     parser pg;
     pg.set_logger([](size_t, size_t, const std::string &) {});
     ASSERT_TRUE(pg.load_grammar(grammar)) << grammar;
-
-    for (const auto &entry : pg.get_grammar()) {
-      auto &rule = pg[entry.first.c_str()];
-      ComputeFirstSet::FirstSetCache cache;
-      ComputeFirstSet first_set(cache);
-      rule.accept(first_set);
-      EXPECT_EQ(rule.can_be_empty, first_set.result_.can_be_empty)
-          << entry.first << " in " << grammar;
-    }
+    expect_analyses_agree(pg, grammar);
   }
+}
+
+// A rule made with the combinators can match empty too. B is left-recursive
+// through A and can match empty only through X, so where the first sets cut
+// that cycle, whether R can start with 'b' comes from whether X can: without
+// a logger, R was skipped on "br". The left recursion check reads it where it
+// meets X again, and S was not taken to be left-recursive.
+TEST(NullabilityTest, Analyses_agree_on_a_rule_made_with_the_combinators) {
+  Definition X;
+  X <= opt(chr('x'));
+  const char *grammar = "S <- R / 'q'\nR <- B 'r'\nA <- B\nB <- A 'b' / X";
+  parser pg;
+  ASSERT_TRUE(pg.load_grammar(grammar, Rules{{"X", X}}));
+  expect_analyses_agree(pg, grammar);
+  EXPECT_TRUE(pg["R"].first_set.chars['b']);
+  EXPECT_TRUE(pg.parse("br"));
+
+  parser lr;
+  ASSERT_TRUE(lr.load_grammar("S <- X X S 'a' / 'b'", Rules{{"X", X}}));
+  EXPECT_TRUE(lr.parse("baa"));
 }
 
 // What a parse reports: whether it matched, and every error the logger and

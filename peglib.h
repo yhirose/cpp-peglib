@@ -3260,6 +3260,24 @@ private:
   std::vector<const std::vector<std::shared_ptr<Ope>> *> macro_args_stack_;
 };
 
+// The rules an operator walks into, each once: a rule made with the
+// combinators, which no Reference leads to, is walked into through its
+// Holder. A rule comes after those it walks into, unless they reach it.
+struct CollectWalkedRules : public TraversalVisitor {
+  using TraversalVisitor::visit;
+  std::vector<Definition *> rules;
+
+  void visit(Holder &ope) override {
+    if (seen_.insert(ope.outer_).second) {
+      ope.ope_->accept(*this);
+      rules.push_back(ope.outer_);
+    }
+  }
+
+private:
+  std::unordered_set<const Definition *> seen_;
+};
+
 struct ComputeCanBeEmpty : public TraversalVisitor {
   using TraversalVisitor::visit;
 
@@ -7799,16 +7817,22 @@ private:
       rule.accept(vis);
     }
 
-    // Compute can_be_empty for each rule (fixed-point iteration)
+    // Compute can_be_empty for each rule (fixed-point iteration), the rules
+    // made with the combinators that the rules embed included
     {
+      CollectWalkedRules walked;
+      for (auto &[name, rule] : grammar) {
+        rule.accept(walked);
+      }
+
       bool changed = true;
       while (changed) {
         changed = false;
-        for (auto &[name, rule] : grammar) {
+        for (auto *rule : walked.rules) {
           ComputeCanBeEmpty vis;
-          rule.get_core_operator()->accept(vis);
-          if (vis.result != rule.can_be_empty) {
-            rule.can_be_empty = vis.result;
+          rule->get_core_operator()->accept(vis);
+          if (vis.result != rule->can_be_empty) {
+            rule->can_be_empty = vis.result;
             changed = true;
           }
         }
