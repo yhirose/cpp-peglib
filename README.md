@@ -476,6 +476,8 @@ P <- 'a' / 'b' / 'c'
 
 When we parse `(z` with the above grammar, we don't have to backtrack in `S` after `(` is matched, because a cut operator is inserted there.
 
+A cut in a lookahead (`&` or `!`) commits no choice outside it, and neither does a recovery there.
+
 Parameterized Rule or Macro
 ---------------------------
 

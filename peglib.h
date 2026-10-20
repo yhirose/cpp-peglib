@@ -1446,7 +1446,8 @@ public:
   std::vector<std::pair<std::string_view, std::string>> capture_entries;
 
   // False when the grammar contains no Cut or Recovery ope (determined once
-  // at id-assignment time); lets PrioritizedChoice skip all cut_stack work.
+  // at id-assignment time); lets choices and predicates skip all cut_stack
+  // work.
   const bool has_cut;
   // Not std::vector<bool>: GCC 12 to 14 drop its pop_back from a scope_exit
   // on the path an exception takes.
@@ -1784,6 +1785,18 @@ public:
   // message lies further on.
   bool reports_message_at(const char *pos) const {
     return reports_here() && error_info.message_pos < pos;
+  }
+
+  // When the returned guard goes, a cut or a recovery made meanwhile has
+  // committed no choice entered before: a predicate's operand leaves nothing
+  // but its result. Such a cut marks the innermost choice, which the guard
+  // puts back as it was; a choice entered meanwhile has a mark of its own.
+  auto contain_cuts() {
+    const auto choices = has_cut ? cut_stack.size() : 0;
+    const auto marked = choices && cut_stack[choices - 1];
+    return scope_exit([this, choices, marked]() {
+      if (choices) { cut_stack[choices - 1] = marked; }
+    });
   }
 
   // Per-rule packrat stats (populated when packrat_stats is non-null)
@@ -2284,6 +2297,7 @@ public:
     size_t len;
     {
       auto unread = c.unread_in(vs);
+      auto cuts = c.contain_cuts();
       len = ope_->parse(s, n, vs, c, dt);
     }
     c.rollback(vs, snap); // Always rollback — predicates consume nothing
@@ -2310,6 +2324,7 @@ public:
     {
       auto unread = c.unread_in(vs);
       auto muted = c.mute_errors();
+      auto cuts = c.contain_cuts();
       len = ope_->parse(s, n, vs, c, dt);
     }
     c.rollback(vs, snap); // Always rollback — predicates consume nothing
@@ -6115,12 +6130,15 @@ inline void Definition::select_packrat_rules() const {
 
       void visit(Capture &) override { result.captures = true; }
       void visit(BackReference &) override { result.captures = true; }
-      // A choice keeps the cuts made in it, unless it is a label's.
+      // A choice keeps the cuts made in it, unless it is a label's, and so
+      // does a predicate (Context::contain_cuts).
       void visit(PrioritizedChoice &ope) override {
-        if (!ope.for_label_) { in_choice_++; }
+        if (!ope.for_label_) { cut_keepers_++; }
         TraversalVisitor::visit(ope);
-        if (!ope.for_label_) { in_choice_--; }
+        if (!ope.for_label_) { cut_keepers_--; }
       }
+      void visit(AndPredicate &ope) override { keep_cuts_in(*ope.ope_); }
+      void visit(NotPredicate &ope) override { keep_cuts_in(*ope.ope_); }
       void visit(Cut &) override { cut(); }
       void visit(Recovery &ope) override {
         cut();
@@ -6135,9 +6153,14 @@ inline void Definition::select_packrat_rules() const {
       }
 
     private:
-      size_t in_choice_ = 0;
+      size_t cut_keepers_ = 0;
+      void keep_cuts_in(Ope &ope) {
+        cut_keepers_++;
+        ope.accept(*this);
+        cut_keepers_--;
+      }
       void cut() {
-        if (!in_choice_) { result.cuts = true; }
+        if (!cut_keepers_) { result.cuts = true; }
       }
       // A rule this analysis does not index is taken to do both.
       void add(const Definition &rule) {

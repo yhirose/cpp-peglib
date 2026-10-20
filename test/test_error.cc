@@ -1023,6 +1023,29 @@ TEST(CutTest, Cut_does_not_affect_outer_choice) {
   EXPECT_TRUE(pg.parse("fallback"));
 }
 
+// A predicate keeps the cuts and the recoveries in it: Decl committing to
+// itself inside `!` commits no choice around the `!`, so "let x;" is tried
+// as the other declaration.
+TEST(CutTest, Cut_in_a_predicate_commits_no_choice_around_it) {
+  const auto rules = R"(
+    Item <- !Decl Expr ';' / 'let' Name ';' / Decl
+    Expr <- Name / [0-9]+
+    Name <- < [a-z]+ >
+    %whitespace <- [ ]*
+  )";
+  for (auto decl : {"Decl <- 'let' ↑ Name '=' Expr ';'",
+                    "Decl <- 'let' Name '='^eq Expr ';'\neq <- ''"}) {
+    for (auto packrat : {false, true}) {
+      parser pg(std::string(rules) + decl);
+      ASSERT_TRUE(!!pg) << decl;
+      if (packrat) { pg.enable_packrat_parsing(); }
+
+      EXPECT_TRUE(pg.parse("let x;")) << decl << packrat;
+      EXPECT_TRUE(pg.parse("let x = 1;")) << decl << packrat;
+    }
+  }
+}
+
 TEST(CutTest, Cut_with_error_message) {
   parser pg(R"(
     S <- 'begin' ↑ BODY 'end'
