@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include <peglib.h>
 
+#include "ast_dump.h"
+
 using namespace peg;
 
 #if !defined(PEGLIB_NO_UNICODE_CHARS)
@@ -1608,48 +1610,13 @@ TEST(GeneralTest, CollapsedAstMatchesOptimizedAst) {
   }
 }
 
-// Nodes get ids in the order they are first seen, so the same node seen twice
-// (or seen in a callback and then found in the tree) shows up as the same id.
-// The weak_ptrs keep addresses from being reused.
-struct AstIds {
-  std::map<const Ast *, size_t> ids;
-  std::vector<std::weak_ptr<Ast>> keep;
-  size_t id(const std::shared_ptr<Ast> &node) {
-    auto it = ids.find(node.get());
-    if (it != ids.end()) { return it->second; }
-    keep.push_back(node);
-    auto id = ids.size() + 1;
-    ids[node.get()] = id;
-    return id;
-  }
-};
-
-static void dump_ast(const std::shared_ptr<Ast> &node, AstIds &ids,
-                     std::string &out) {
-  out += "#" + std::to_string(ids.id(node)) + " " + node->name + "|" +
-         node->original_name + "|" + std::to_string(node->position) + "+" +
-         std::to_string(node->length) + "|" + std::to_string(node->line) + ":" +
-         std::to_string(node->column) + "|" +
-         std::to_string(node->choice_count) + "/" +
-         std::to_string(node->choice) + "|" +
-         std::to_string(node->original_choice_count) + "/" +
-         std::to_string(node->original_choice) + "|" +
-         std::to_string(node->original_tag) + "|" +
-         std::string(node->is_token ? node->token : "-") + "\n";
-  for (const auto &child : node->nodes) {
-    if (child->parent.lock() != node) { out += "WRONG PARENT\n"; }
-    dump_ast(child, ids, out);
-  }
-}
-
 TEST(GeneralTest, DeferredAstIsUnobservable) {
-  // enable_ast(true) builds a node only once its rule match is kept (see
-  // AstLogEntry). Predicates, leave handlers and user actions must see what
-  // they see when every node is built right away (a tracer forces that), and
-  // the tree must match optimize_ast's. The grammar backtracks over rules that
-  // collapse in chains, token rules with inner rules, ignored rules, a
-  // precedence rule and a macro, and has no left recursion (which would turn
-  // deferring off).
+  // Predicates, leave handlers and user actions must see what they see when
+  // every node is built right away (a tracer forces that), and the tree must
+  // match optimize_ast's. The grammar backtracks over rules that collapse in
+  // chains, token rules with inner rules, ignored rules, a precedence rule and
+  // a macro. Parents are checked in the returned tree only, the one place they
+  // are promised.
   const char *grammar = R"(
     PROGRAM     <-  STATEMENT (';' STATEMENT)*
     STATEMENT   <-  YIELD / CALL / ASSIGN / VALUE
@@ -1687,11 +1654,11 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
       pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
     }
 
-    AstIds ids;
+    NodeIds<Ast> ids;
     std::string out;
     std::vector<std::shared_ptr<Ast>> retained;
     auto see = [&](const std::shared_ptr<Ast> &node) {
-      dump_ast(node, ids, out);
+      dump_ast(node, ids, out, false);
       retained.push_back(node);
     };
 
@@ -1737,10 +1704,10 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
     EXPECT_TRUE(pg.parse(src, ast));
     out += "AFTER\n";
     for (const auto &node : retained) {
-      dump_ast(node, ids, out);
+      dump_ast(node, ids, out, false);
     }
     out += "TREE\n";
-    dump_ast(ast, ids, out);
+    dump_ast(ast, ids, out, true);
     return out;
   };
 
@@ -1751,9 +1718,9 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
     std::shared_ptr<Ast> expected;
     ASSERT_TRUE(full.parse(src, expected));
     expected = full.optimize_ast(expected, opt_mode);
-    AstIds ids;
+    NodeIds<Ast> ids;
     std::string expected_tree = "AFTER\nTREE\n";
-    dump_ast(expected, ids, expected_tree);
+    dump_ast(expected, ids, expected_tree, true);
     EXPECT_EQ(expected_tree, run(false, opt_mode, 0))
         << "opt_mode=" << opt_mode;
 
@@ -1923,13 +1890,13 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
       pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
     }
 
-    AstIds ids;
+    NodeIds<Ast> ids;
     std::string out;
     auto see = [&](const std::any &value) {
       if (!value.has_value()) {
         out += "  (empty)\n";
       } else {
-        dump_ast(std::any_cast<std::shared_ptr<Ast>>(value), ids, out);
+        dump_ast(std::any_cast<std::shared_ptr<Ast>>(value), ids, out, false);
       }
     };
     auto see_scope = [&](const char *name, const SemanticValues &vs) {
@@ -1982,7 +1949,7 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
     EXPECT_TRUE(ast ? pg.parse(src, tree) : pg.parse(src));
     if (tree) {
       out += "TREE\n";
-      dump_ast(tree, ids, out);
+      dump_ast(tree, ids, out, true);
     }
     return out;
   };

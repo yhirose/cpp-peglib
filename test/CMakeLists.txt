@@ -30,6 +30,7 @@ set(PEGLIB_TEST_SOURCES
   test_snapshot.cc
   test_mini_js.cc
   test_serialize.cc
+  test_ast_observation.cc
 )
 
 include(GoogleTest)
