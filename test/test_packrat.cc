@@ -171,6 +171,135 @@ TEST(PackratTest, Packrat_shared_consuming_prefix_is_not_exponential) {
   EXPECT_TRUE(pg.parse(input));
 }
 
+// `open` and `close` around `middle`, `depth` times over.
+static std::string nested(int depth, const std::string &open,
+                          const std::string &middle, const std::string &close) {
+  std::string s;
+  for (auto i = 0; i < depth; i++) {
+    s += open;
+  }
+  s += middle;
+  for (auto i = 0; i < depth; i++) {
+    s += close;
+  }
+  return s;
+}
+
+// How many times the rules are parsed, a match reused from a memo not counted.
+static size_t count_rule_parses(parser &pg, const std::string &input) {
+  size_t count = 0;
+  for (const auto &[name, rule] : pg.get_grammar()) {
+    if (rule.is_macro) { continue; }
+    pg[name.c_str()].enter = [&](const Context &, const char *, size_t,
+                                 std::any &) { count++; };
+  }
+  pg.parse(input);
+  return count;
+}
+
+TEST(PackratTest, Packrat_is_not_exponential_where_recursion_parses_again) {
+  // Each grammar parses its recursive rule again at the same position on
+  // every level, so with no memo on the recursion the parses double per
+  // level. With one, twice the depth takes about twice the parses.
+  struct Case {
+    const char *name;
+    const char *grammar;
+    std::string (*input)(int depth);
+  };
+  const char *through_macro_argument = R"(Top  <- M(S)
+                                          M(p) <- p
+                                          S    <- B 'x' / B 'y' / 'z'
+                                          B    <- '(' S ')')";
+  const Case cases[] = {
+      {"if and if-else as two rules",
+       R"(S      <- IfElse / IfOnly / 'x;'
+          IfElse <- 'if(a)' S 'else' S
+          IfOnly <- 'if(a)' S)",
+       [](int d) { return nested(d, "if(a)", "x;", ""); }},
+      {"two rules around the same rule",
+       R"(S <- A 'x' / B 'y' / 'z'
+          A <- '(' S ')'
+          B <- '(' S ')')",
+       [](int d) { return nested(d, "(", "z", ")y"); }},
+      {"a choice reached only through a macro argument", through_macro_argument,
+       [](int d) { return nested(d, "(", "z", ")y"); }},
+      {"the same, on input that never closes", through_macro_argument,
+       [](int d) { return nested(d, "(", "", ""); }},
+      {"the same macro call in two alternatives",
+       R"(S    <- M(B) 'x' / M(B) 'y' / 'z'
+          M(p) <- p
+          B    <- '(' S ')')",
+       [](int d) { return nested(d, "(", "z", ")y"); }},
+      {"a cycle through macros by two routes",
+       R"(S    <- X('a')
+          X(p) <- R / R2 / p
+          R    <- '[' Y('b') ']'
+          R2   <- '{' Y('b') '}'
+          Y(q) <- A(q) 'y' / B(q)
+          A(q) <- '(' X(q) ')'
+          B(q) <- '(' X(q) ')')",
+       [](int d) { return nested(d, "{(", "b", ")}"); }},
+      {"an option, then the same rule",
+       R"(E <- ('(' E ')' 'a')? '(' E ')' / 'x')",
+       [](int d) { return nested(d, "(", "x", ")"); }},
+      {"a repetition, then the same rule",
+       R"(E <- ('(' E ')' 'a')* '(' E ')' / 'x')",
+       [](int d) { return nested(d, "(", "x", ")"); }},
+      {"a lookahead, then the same rule",
+       R"(E <- &('(' E ')') '(' E ')' / 'x')",
+       [](int d) { return nested(d, "(", "x", ")"); }},
+      {"a failed alternative, then what follows its choice",
+       R"(E <- O '(' E ')' / 'x'
+          O <- '(' E ')' '!' / '')",
+       [](int d) { return nested(d, "(", "x", ")"); }},
+      {"a precedence operator that nests",
+       R"(S  <- E
+          E  <- A (OP A)* { precedence L + - }
+          A  <- 'x'
+          OP <- '(' OP ')' '+' / '(' OP ')' '-' / < '+' > / < '-' >)",
+       [](int d) { return "x" + nested(d, "(", "", ""); }},
+      {"if and if-else as two rules, with whitespace",
+       R"(S      <- IfElse / IfOnly / 'x' ';'
+          IfElse <- 'if' '(' 'a' ')' S 'else' S
+          IfOnly <- 'if' '(' 'a' ')' S
+          %whitespace <- [ ]*)",
+       [](int d) { return nested(d, "if (a) ", "x;", ""); }},
+  };
+
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.name);
+    parser pg(c.grammar);
+    ASSERT_TRUE(pg);
+    pg.enable_packrat_parsing();
+    auto at_8 = count_rule_parses(pg, c.input(8));
+    auto at_16 = count_rule_parses(pg, c.input(16));
+    EXPECT_LE(at_16, 3 * at_8);
+  }
+}
+
+TEST(PackratTest, Packrat_is_not_exponential_on_a_cycle_away_from_the_start) {
+  // Built with the combinators, the cycle U -> B1/B2 -> U does not go through
+  // the start rule S.
+  auto count_parses = [](int depth) {
+    Definition S, U, B1, B2;
+    S <= seq(U);
+    U <= cho(B1, B2, lit("x;"));
+    B1 <= seq(lit("if(a)"), U, lit("else"), U);
+    B2 <= seq(lit("if(a)"), U);
+    size_t count = 0;
+    for (auto *rule : {&S, &U, &B1, &B2}) {
+      rule->enter = [&](const Context &, const char *, size_t, std::any &) {
+        count++;
+      };
+    }
+    S.enablePackratParsing = true;
+    auto input = nested(depth, "if(a)", "x;", "");
+    EXPECT_TRUE(S.parse(input.c_str()).ret);
+    return count;
+  };
+  EXPECT_LE(count_parses(16), 3 * count_parses(8));
+}
+
 TEST(PackratTest, Packrat_rule_below_a_shared_rule_runs_once) {
   parser pg(R"(
     S <- G 'x' / G 'y'

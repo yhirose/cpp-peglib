@@ -5959,11 +5959,9 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
   if (built_from != no_growth) { growing[built_from].built.push_back(call); }
 }
 
-// Compute which rules benefit from packrat memoization.
-// A rule benefits if it's reachable from 2+ alternatives of the same
-// PrioritizedChoice (backtracking will re-visit it at the same position),
-// unless all of them only reach it through one shared rule, which answers
-// from its own memo.
+// Compute which rules packrat parsing memoizes: the rules that alternatives of
+// one choice are likely to try again at the same position, and one rule on
+// every recursion cycle (see BreakRecursion).
 inline void Definition::select_packrat_rules() const {
   std::call_once(packrat_rules_init_, [&]() {
     auto def_count = analysis_.rules_by_id.size();
@@ -5971,10 +5969,10 @@ inline void Definition::select_packrat_rules() const {
 
     // Walks what can be invoked at the *same start position* as the given Ope
     // subtree (leftmost reachability). A packrat cache hit requires the same
-    // rule to be queried twice at the same position, and in a PEG that only
-    // happens when alternatives of a choice share a leftmost prefix — rules
-    // reachable only past a consuming element can never be re-queried by a
-    // sibling alternative.
+    // rule to be queried twice at the same position, which alternatives of a
+    // choice sharing a leftmost prefix do most often. That is not the only
+    // way, so this finds where memos pay, not every rule backtracking parses
+    // again (see BreakRecursion).
     struct LeftmostWalker : public TraversalVisitor {
       using TraversalVisitor::visit;
 
@@ -6035,11 +6033,14 @@ inline void Definition::select_packrat_rules() const {
     struct CollectGateways : public LeftmostWalker {
       using LeftmostWalker::visit;
       const std::vector<size_t> &share_count;    // indexed by def_id
+      const std::vector<bool> &keeps_memo;       // indexed by def_id
       std::vector<std::vector<size_t>> gateways; // indexed by def_id
       const Definition *gateway = nullptr;       // of the path being walked
 
-      CollectGateways(const std::vector<size_t> &share_count)
-          : share_count(share_count), gateways(share_count.size()) {}
+      CollectGateways(const std::vector<size_t> &share_count,
+                      const std::vector<bool> &keeps_memo)
+          : share_count(share_count), keeps_memo(keeps_memo),
+            gateways(share_count.size()) {}
 
       void visit(Holder &ope) override {
         auto id = ope.outer_->id;
@@ -6054,10 +6055,9 @@ inline void Definition::select_packrat_rules() const {
         }
         list.push_back(through);
 
-        // Only a memoized rule answers for what lies below it, and a macro
-        // is never memoized.
+        // Only a rule with a memo answers for what lies below it.
         auto saved = gateway;
-        if (!gateway && share_count[id] >= 2 && !ope.outer_->is_macro) {
+        if (!gateway && share_count[id] >= 2 && keeps_memo[id]) {
           gateway = ope.outer_;
         }
         ope.ope_->accept(*this);
@@ -6068,18 +6068,19 @@ inline void Definition::select_packrat_rules() const {
       }
     };
 
-    // Find rules that benefit: queried by 2+ alternatives of the same choice
-    // at the same position
-    std::vector<bool> benefits(def_count, false);
-
+    // Finds the rules that 2+ alternatives of one choice query at the same
+    // position.
     struct FindBacktrackRules : public TraversalVisitor {
       using TraversalVisitor::visit;
-      std::vector<bool> &benefits;
+      std::vector<bool> &retried;          // indexed by def_id
+      const std::vector<bool> &keeps_memo; // indexed by def_id
       size_t def_count;
       std::vector<bool> visited_rules; // indexed by def_id
 
-      FindBacktrackRules(std::vector<bool> &b, size_t n)
-          : benefits(b), def_count(n), visited_rules(n, false) {}
+      FindBacktrackRules(std::vector<bool> &retried,
+                         const std::vector<bool> &keeps_memo, size_t n)
+          : retried(retried), keeps_memo(keeps_memo), def_count(n),
+            visited_rules(n, false) {}
 
       using Elements = std::vector<std::shared_ptr<Ope>>;
 
@@ -6112,7 +6113,7 @@ inline void Definition::select_packrat_rules() const {
         // A shared rule that is only reached through one other shared rule is
         // not queried again here: by the time a later alternative gets to it,
         // that gateway has answered from its own memo.
-        CollectGateways vis(share_count);
+        CollectGateways vis(share_count, keeps_memo);
         for (const auto &seq : group) {
           vis.collect(seq, k);
         }
@@ -6120,7 +6121,7 @@ inline void Definition::select_packrat_rules() const {
           const auto &gateways = vis.gateways[id];
           if (share_count[id] >= 2 &&
               (gateways.size() != 1 || gateways[0] == id)) {
-            benefits[id] = true;
+            retried[id] = true;
           }
         }
 
@@ -6161,12 +6162,6 @@ inline void Definition::select_packrat_rules() const {
       }
       void visit(Recovery &) override {} // as LeftmostWalker does
     };
-
-    // Neither the whitespace nor the word check makes a packrat memo
-    // (Context::makes_packrat_memo, Context::detached), so they are not
-    // walked.
-    FindBacktrackRules finder(benefits, def_count);
-    holder_->accept(finder);
 
     // The cache keeps a match's length and value, not what else its parse
     // did to the parse around it: the captures it recorded, which a back
@@ -6248,10 +6243,123 @@ inline void Definition::select_packrat_rules() const {
     CollectEffects whitespace(analysis_, effects);
     if (whitespaceOpe) { whitespaceOpe->accept(whitespace); }
     const auto &ws = whitespace.result;
-    for (size_t id = 0; id < def_count; id++) {
+
+    // The rules that can have a memo. A macro parses in its caller's scope,
+    // and a left-recursive rule keeps its matches in lr_memo instead, which
+    // counts as keeping a memo, except a macro's: its instances keep apart.
+    std::vector<bool> memoizable(def_count, false);
+    std::vector<bool> keeps_memo(def_count, false);
+    for (const auto *rule : analysis_.rules) {
+      if (!analysis_.indexes(*rule)) { continue; }
+      auto id = rule->id;
       const auto &e = effects[id];
-      if (ws.captures || ws.cuts || e.captures || e.cuts) {
-        benefits[id] = false;
+      memoizable[id] = !rule->is_macro && !rule->is_left_recursive &&
+                       !ws.captures && !ws.cuts && !e.captures && !e.cuts;
+      keeps_memo[id] =
+          memoizable[id] || (rule->is_left_recursive && !rule->is_macro);
+    }
+
+    // Neither the whitespace nor the word check makes a packrat memo
+    // (Context::makes_packrat_memo, Context::detached), so they are not
+    // walked.
+    std::vector<bool> retried(def_count, false);
+    FindBacktrackRules finder(retried, keeps_memo, def_count);
+    holder_->accept(finder);
+    std::vector<bool> memoized(def_count, false);
+    for (size_t id = 0; id < def_count; id++) {
+      memoized[id] = retried[id] && memoizable[id];
+    }
+
+    // The rules an operator calls, of those this analysis indexes.
+    auto calls_in = [&](Ope &ope) {
+      CollectRuleRefs refs;
+      ope.accept(refs);
+      std::vector<size_t> ids;
+      for (const auto *rule : refs.rules) {
+        if (analysis_.indexes(*rule)) { ids.push_back(rule->id); }
+      }
+      return ids;
+    };
+
+    std::vector<std::vector<size_t>> calls(def_count);
+    for (const auto *rule : analysis_.rules) {
+      if (analysis_.indexes(*rule)) {
+        calls[rule->id] = calls_in(*rule->get_core_operator());
+      }
+    }
+
+    // Backtracking parses a rule again where it parsed it before, and the
+    // repeats multiply only through recursion. A memo on every recursion
+    // cycle keeps them from multiplying, however the grammar backtracks, so
+    // parsing does not take time exponential in the input. A cycle through a
+    // rule that keeps a memo is broken already. Every other one gets a memo at
+    // the rule the recursion comes back to, the target of a back edge in a
+    // depth-first walk. The walk looks through the rules that can keep no
+    // memo, so that the rule it finds can keep one, and leaves a cycle of only
+    // such rules as it is. Nor does a memo help where none is read or made: in
+    // the whitespace, at the operator of a precedence expression, which needs
+    // a token the memo does not keep, and, for a rule also parsed elsewhere,
+    // in the operand of `!` or a recovery's expression.
+    struct BreakRecursion {
+      const std::vector<std::vector<size_t>> &calls;
+      const std::vector<bool> &memoizable;
+      const std::vector<bool> &keeps_memo;
+      std::vector<bool> &memoized;
+
+      BreakRecursion(const std::vector<std::vector<size_t>> &calls,
+                     const std::vector<bool> &memoizable,
+                     const std::vector<bool> &keeps_memo,
+                     std::vector<bool> &memoized)
+          : calls(calls), memoizable(memoizable), keeps_memo(keeps_memo),
+            memoized(memoized), state(calls.size(), State::unvisited) {}
+
+      void walk(size_t id) {
+        if (!memoizable[id] || memoized[id] || state[id] != State::unvisited) {
+          return;
+        }
+        state[id] = State::on_path;
+        std::vector<bool> passed(calls.size(), false);
+        follow(id, passed);
+        state[id] = State::done;
+      }
+
+    private:
+      enum class State { unvisited, on_path, done };
+      std::vector<State> state;
+
+      // Follows the calls from `id` to the rules that can keep a memo,
+      // through the rules that cannot.
+      void follow(size_t id, std::vector<bool> &passed) {
+        for (auto callee : calls[id]) {
+          if (keeps_memo[callee]) {
+            if (state[callee] == State::on_path) {
+              memoized[callee] = true;
+            } else {
+              walk(callee);
+            }
+          } else if (!passed[callee]) {
+            passed[callee] = true;
+            follow(callee, passed);
+          }
+        }
+      }
+    };
+
+    // Only the rules a parse from this rule gets to, the whitespace and the
+    // word check aside, as above.
+    std::vector<bool> reached(def_count, false);
+    auto todo = calls_in(*get_core_operator());
+    while (!todo.empty()) {
+      auto id = todo.back();
+      todo.pop_back();
+      if (reached[id]) { continue; }
+      reached[id] = true;
+      todo.insert(todo.end(), calls[id].begin(), calls[id].end());
+    }
+    BreakRecursion breaker(calls, memoizable, keeps_memo, memoized);
+    for (const auto *rule : analysis_.rules) {
+      if (analysis_.indexes(*rule) && reached[rule->id]) {
+        breaker.walk(rule->id);
       }
     }
 
@@ -6259,13 +6367,7 @@ inline void Definition::select_packrat_rules() const {
     analysis_.packrat_index.assign(def_count, -1);
     int32_t k = 0;
     for (size_t id = 0; id < def_count; id++) {
-      if (!benefits[id]) { continue; }
-      // A macro parses in its caller's scope and is never memoized, and a
-      // left-recursive rule keeps its matches in lr_memo.
-      const auto &rule = *analysis_.rules_by_id[id];
-      if (!rule.is_macro && !rule.is_left_recursive) {
-        analysis_.packrat_index[id] = k++;
-      }
+      if (memoized[id]) { analysis_.packrat_index[id] = k++; }
     }
     analysis_.packrat_cached_count = static_cast<size_t>(k);
   });
