@@ -5331,8 +5331,8 @@ inline void ComputeFirstSet::visit(WeakHolder &ope) {
 
 // A rule met again, when it can match empty, lets what follows it here start
 // a match as well. Its first set is not worked out yet, and one that matches
-// empty on other bytes can match empty (FirstSet), so can_be_empty takes no
-// less than the first set would.
+// empty on other bytes can match empty (asserted in SetupFirstSets), so
+// can_be_empty takes no less than the first set would.
 inline std::optional<size_t>
 ComputeFirstSet::walk_into(const Definition &rule) {
   auto it = std::find(refs_.begin(), refs_.end(), &rule);
@@ -5366,6 +5366,7 @@ inline void SetupFirstSets::visit(Holder &ope) {
   ope.ope_->accept(cfs);
   rule.first_set = std::move(cfs.result_);
   const auto &fs = rule.first_set;
+  assert(!fs.matches_empty_on_other_bytes || rule.can_be_empty);
   auto known = !fs.any_char && !fs.matches_empty_on_other_bytes;
   rule.start_bytes = known ? fs.chars : std::bitset<256>().set();
 
@@ -6332,10 +6333,34 @@ entry_rule_error(const Grammar &g, const Definition &start) {
   return {};
 }
 
+// Works out which rules can match empty, the rules made with the combinators
+// that the rules embed included. The fixed point starts from none, so that it
+// is the least one, whatever the rules held before.
+inline void work_out_can_be_empty(Grammar &g) {
+  CollectWalkedRules walked;
+  for (auto &[name, rule] : g) {
+    rule.accept(walked);
+  }
+  for (auto *rule : walked.rules) {
+    rule->can_be_empty = false;
+  }
+  for (auto changed = true; changed;) {
+    changed = false;
+    for (auto *rule : walked.rules) {
+      auto can_be_empty = ComputeCanBeEmpty::check(*rule->get_core_operator());
+      if (can_be_empty != rule->can_be_empty) {
+        rule->can_be_empty = can_be_empty;
+        changed = true;
+      }
+    }
+  }
+}
+
 // What a loaded grammar is finished with: the start rule skips the
 // %whitespace and checks the %word the grammar defines, and every rule gets
 // its first sets and fast loops (SetupFirstSets). One visitor walks all
-// rules, so that each rule's first sets are worked out once.
+// rules, so that each rule's first sets are worked out once. Which rules can
+// match empty must be worked out before (work_out_can_be_empty).
 inline void finish_grammar(Grammar &g, Definition &start_rule) {
   if (auto it = g.find(WHITESPACE_DEFINITION_NAME); it != g.end()) {
     start_rule.whitespaceOpe = wsp(it->second.get_core_operator());
@@ -6357,8 +6382,9 @@ inline void finish_grammar(Grammar &g, Definition &start_rule) {
  *  prebuilt blob. Structure only: semantic callbacks (actions / enter / leave /
  *  predicate, attached by enable_ast() etc.) are NOT serialized and must be
  *  re-applied after deserialize. References resolve by name (no pointer fixup);
- *  first-sets are recomputed on load (O(N)). The
- *  `precedence` instruction is supported (its operator table is structural).
+ *  first-sets (O(N)) and which rules can match empty are recomputed on load.
+ *  The `precedence` instruction is supported (its operator table is
+ *  structural).
  *  Grammars using the `User` operator or a Capture with a match action are
  *  rejected. The blob is specific to this peglib version's layout.
  *---------------------------------------------------------------------------*/
@@ -6398,6 +6424,7 @@ struct GrammarBlob {
     F_EoiCheck = 8,
     F_EnablePackratParsing = 16,
     F_IsLeftRecursive = 32,
+    // Earlier versions read it; this one works it out again.
     F_CanBeEmpty = 64,
     F_DisableAction = 128,
   };
@@ -6765,7 +6792,6 @@ struct GrammarBlob {
       def.eoi_check = flags & F_EoiCheck;
       def.enablePackratParsing = flags & F_EnablePackratParsing;
       def.is_left_recursive = flags & F_IsLeftRecursive;
-      def.can_be_empty = flags & F_CanBeEmpty;
       def.disable_action = flags & F_DisableAction;
       def.no_whitespace = flags2 & F2_NoWhitespace;
       def.params = std::move(params);
@@ -6795,6 +6821,7 @@ struct GrammarBlob {
       LinkReferences vis(*g, x.second.params);
       x.second.accept(vis);
     }
+    work_out_can_be_empty(*g);
     // The skipping is not stored: it is made again from the definitions.
     finish_grammar(*g, (*g)[start]);
     start_out = std::move(start);
@@ -6853,6 +6880,7 @@ private:
     // next byte cannot match. This is safe -- First-Set filtering only skips
     // alternatives that would have failed anyway, so no semantic action that
     // would have committed is skipped (unlike packrat, which is unsound here).
+    work_out_can_be_empty(g);
     finish_grammar(g, g["Grammar"]);
   }
 
@@ -7757,27 +7785,7 @@ private:
       rule.accept(vis);
     }
 
-    // Compute can_be_empty for each rule (fixed-point iteration), the rules
-    // made with the combinators that the rules embed included
-    {
-      CollectWalkedRules walked;
-      for (auto &[name, rule] : grammar) {
-        rule.accept(walked);
-      }
-
-      bool changed = true;
-      while (changed) {
-        changed = false;
-        for (auto *rule : walked.rules) {
-          auto can_be_empty =
-              ComputeCanBeEmpty::check(*rule->get_core_operator());
-          if (can_be_empty != rule->can_be_empty) {
-            rule->can_be_empty = can_be_empty;
-            changed = true;
-          }
-        }
-      }
-    }
+    work_out_can_be_empty(grammar);
 
     // Check left recursion
     for (auto &[name, rule] : grammar) {

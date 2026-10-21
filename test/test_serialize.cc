@@ -373,6 +373,24 @@ TEST(GrammarBlobTest, RuleWithoutABodyIsLeftOut) {
   EXPECT_TRUE(q.parse("a"));
 }
 
+// Whether a rule can match empty is worked out again, not read from the blob.
+// One saying that E cannot would have P skipped where P cannot start, and E's
+// action not run on its empty match.
+TEST(GrammarBlobTest, WhetherARuleCanMatchEmptyIsWorkedOutAgain) {
+  peg::parser p("S <- P? 'q'\nP <- E 'p'\nE <- 'e'?");
+  ASSERT_TRUE(p);
+  p["E"].can_be_empty = false; // as a blob with F_CanBeEmpty cleared says
+  auto blob = p.serialize_grammar();
+
+  peg::parser q;
+  ASSERT_TRUE(q.load_blob(blob));
+  EXPECT_TRUE(q["E"].can_be_empty);
+  auto runs = 0;
+  q["E"] = [&](const SemanticValues &) { runs++; };
+  EXPECT_TRUE(q.parse("q"));
+  EXPECT_EQ(1, runs);
+}
+
 TEST(GrammarBlobTest, RejectsAMissingOperator) {
   auto blob = blob_of("S", [](GrammarBlob::Writer &w) {
     w.u8(GrammarBlob::T_Sequence);
