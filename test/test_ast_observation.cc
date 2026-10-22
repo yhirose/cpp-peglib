@@ -706,6 +706,51 @@ TEST(AstObservationTest, Memoized_match_seen_again_is_the_same_node) {
   }
 }
 
+// R hands A's node up as its value, with its action disabled or with none:
+// packrat reuses R's match, after the first alternative failed, with R's own
+// length.
+TEST(AstObservationTest, Memo_of_a_rule_that_hands_a_node_up) {
+  for (auto disabled : {true, false}) {
+    parser pg(R"(
+      S <- R 'x' / R 'y'
+      R <- A ';'
+      A <- < [a-z]+ >
+    )");
+    pg.enable_packrat_parsing();
+    if (disabled) {
+      pg.enable_ast();
+      pg["R"].disable_action = true;
+    } else {
+      add_ast_action(pg["S"]);
+      add_ast_action(pg["A"]);
+    }
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse("ab;y", ast)) << "disabled=" << disabled;
+    EXPECT_EQ("+ S/1\n  - A (ab)\n", ast_to_s(ast)) << "disabled=" << disabled;
+  }
+}
+
+// A collapses over the node of B that a leave handler saw, so packrat keeps
+// that node for A's match. The second alternative records E's match before it
+// reuses A's: were A's memo not to keep its record, E's would take its place.
+TEST(AstObservationTest, Memo_of_a_node_a_collapsing_rule_took_over) {
+  parser pg(R"(
+    S <- A 'x' / D
+    D <- E A 'y'
+    E <- Z
+    Z <- ''
+    A <- B
+    B <- < [0-9]+ >
+  )");
+  pg.enable_packrat_parsing();
+  pg.enable_ast(true);
+  pg["B"].leave = [](const Context &, const char *, size_t, size_t, std::any &,
+                     std::any &) {};
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(pg.parse("12y", ast));
+  EXPECT_EQ("+ S/1[D]\n  - E[Z] ()\n  - A[B] (12)\n", ast_to_s(ast));
+}
+
 // An empty match of Z under T, which collapses over it, and under B. The two
 // stay apart: T's node is renamed T and B's is not. With packrat, Z's memo
 // keeps its node, so T copies it.

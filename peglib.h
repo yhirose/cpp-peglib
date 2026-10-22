@@ -1465,6 +1465,12 @@ struct RuleUse {
   // that notes nothing is reused only where nothing is noted either
   // (Context::makes_packrat_memo).
   bool parsed_only_where_muted = false;
+  // Whether a memo of the rule holds the record of the match, which gives its
+  // length and value, in place of them. The rule records its matches, so a
+  // handle in its value is the match's own, not a child's handed up; and as
+  // no leave handler sees them and none is only recognized, few values are no
+  // handle and need a record of their own (Context::memo_record).
+  bool memo_holds_record = false;
 };
 
 // The RuleUse of each rule, by id, and whether some alternative starts with
@@ -1479,7 +1485,9 @@ struct RuleUses {
 };
 
 // The match of an AST rule, recorded where its node would have been built, or
-// a node among the values of one. A record's children are recorded before it,
+// a value of its own: a node among the values of a recorded match, or the
+// value a memo holds of a match whose value is no record's (see
+// Context::memo_record). A record's children are recorded before it,
 // the records of matches that a rollback drops go with them (see
 // Context::release_ast), and the node of one is built only when a callback is
 // about to read it or the parse returns it (see materialize_ast).
@@ -1499,7 +1507,7 @@ struct AstRecord {
   uint32_t length;
   uint32_t choice;
   // A token rule's token (its position and length), or else the child of a
-  // collapsing match (its record, and kCollapsed), the node (where in
+  // collapsing match (its record, and kCollapsed), the value (where in
   // Context::ast_externals, and kExternal) or the children (where in
   // Context::ast_kids, and how many).
   uint32_t a;
@@ -1594,9 +1602,10 @@ public:
   size_t packrat_cached_count;               // number of memoized rules
   std::vector<bool> cache_registered;
   std::vector<bool> cache_success;
-  // Match length per cache_index(), like the bitvectors above. Left
-  // uninitialized on purpose: a slot is only read once cache_success marks
-  // it, which happens after it is written.
+  // Match length per cache_index(), like the bitvectors above, or the record
+  // of the match (RuleUse::memo_holds_record). Left uninitialized on purpose:
+  // a slot is only read once cache_success marks it, which happens after it
+  // is written.
   std::unique_ptr<uint32_t[]> cache_len;
 
   PackratCache cache_values;
@@ -1610,11 +1619,11 @@ public:
   // ast_records.size(), which every Snapshot reads: counted apart, as the
   // size of a vector of 24-byte records takes a division.
   uint32_t ast_record_count = 0;
-  // The nodes among the values of recorded matches, by their records, held
-  // as the node of the match would hold them.
+  // The values of the records that hold one (AstRecord::Kind::external), by
+  // their records, held as the node of a match or a memo would hold them.
   struct AstExternal {
     uint32_t record;
-    std::any node;
+    std::any value;
   };
   std::vector<AstExternal> ast_externals;
   // The nodes built for callbacks of the retained records, as a memo or a
@@ -1643,11 +1652,13 @@ public:
   void retain_ast(const std::any &value) {
     if (!records_ast) { return; }
     if (const auto *handle = std::any_cast<AstHandle>(&value)) {
-      ast_records[handle->record].rule |= AstRecord::kRetained;
-      pinned_ast_records =
-          (std::max)(pinned_ast_records, size_t(handle->record) + 1);
-      pinned_ast_kids = (std::max)(pinned_ast_kids, ast_kids.size());
+      retain_record(handle->record);
     }
+  }
+  void retain_record(uint32_t record) {
+    ast_records[record].rule |= AstRecord::kRetained;
+    pinned_ast_records = (std::max)(pinned_ast_records, size_t(record) + 1);
+    pinned_ast_kids = (std::max)(pinned_ast_kids, ast_kids.size());
   }
   // Mostly there is nothing to drop, and release_ast is an out-of-line call.
   void truncate_ast(uint32_t records) {
@@ -1842,7 +1853,10 @@ public:
     return run * (l + 1) + static_cast<size_t>(pos - s);
   }
 
-  void write_packrat_cache(size_t idx, size_t len, const std::any &val) {
+  // A memo of a rule that `holds_record` (RuleUse::memo_holds_record) holds
+  // the record of the match in place of its length and value.
+  void write_packrat_cache(size_t idx, size_t len, const std::any &val,
+                           bool holds_record) {
     if (!fits_in_32_bits(len)) {
       // A match too long for the 32-bit memo is not memoized, so the rule
       // simply re-parses at this position.
@@ -1850,10 +1864,52 @@ public:
     }
     cache_registered[idx] = true;
     cache_success[idx] = true;
+    if (holds_record) {
+      cache_len[idx] = memo_record(len, val);
+      return;
+    }
     cache_len[idx] = static_cast<uint32_t>(len);
     if (val.has_value()) {
       retain_ast(val);
       cache_values.insert_or_assign(idx, val);
+    }
+  }
+
+  // The record that the memo of a match holds: that of the match, or where
+  // its value is no record's (a node that a collapsing match took over or
+  // copied at once, or nothing after a recovery), a record that holds that
+  // value as the memo would.
+  uint32_t memo_record(size_t len, const std::any &val) {
+    uint32_t record;
+    if (const auto *handle = std::any_cast<AstHandle>(&val)) {
+      record = handle->record;
+    } else {
+      record = record_external(val, len);
+    }
+    assert(ast_records[record].length == len);
+    retain_record(record);
+    return record;
+  }
+
+  // A record of `value`: a node among the values of a recorded match, or the
+  // value a memo holds of a match of `length`. Out of line, as it is rare.
+  CPPPEGLIB_NOINLINE uint32_t record_external(std::any value, size_t length) {
+    ast_externals.push_back({ast_record_count, std::move(value)});
+    ast_records.push_back({0, 0, static_cast<uint32_t>(length), 0,
+                           static_cast<uint32_t>(ast_externals.size() - 1),
+                           AstRecord::kExternal});
+    return ast_record_count++;
+  }
+
+  // The length and value of the match whose record a memo holds: the value
+  // that the record holds, else the record's handle.
+  void read_memo_record(uint32_t record, RuleMatch &match) const {
+    const auto &r = ast_records[record];
+    match.len = r.length;
+    if (r.kind() == AstRecord::Kind::external) {
+      match.val = ast_externals[r.a].value;
+    } else {
+      match.val.emplace<AstHandle>(AstHandle{record});
     }
   }
 
@@ -5061,11 +5117,7 @@ inline std::any Context::record_ast(const Definition &rule,
           continue;
         }
         assert(v.type() == *ast.node_type);
-        ast_externals.push_back({ast_record_count, std::move(v)});
-        ast_records.push_back({0, 0, 0, 0,
-                               static_cast<uint32_t>(ast_externals.size() - 1),
-                               AstRecord::kExternal});
-        ast_kids.push_back(ast_record_count++);
+        ast_kids.push_back(record_external(std::move(v), 0));
       }
     }
   }
@@ -5890,6 +5942,15 @@ Definition::rule_uses(bool builds_everything) const {
         std::any_of(rules.begin(), rules.end(), [](const Definition *r) {
           return r->action.ast_action().materialize;
         });
+    if (uses.records_ast) {
+      for (const auto *rule : analysis_.rules_by_id) {
+        if (!rule) { continue; }
+        auto &use = uses.by_id[rule->id];
+        use.memo_holds_record = rule->action.ast_action().materialize &&
+                                !rule->disable_action && !rule->leave &&
+                                use.recognized == RuleUse::Recognized::never;
+      }
+    }
     rule_uses_ = std::make_shared<const RuleUses>(std::move(uses));
   }
   return rule_uses_;
@@ -6241,11 +6302,13 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
       if (packrat_stats && def_id < packrat_stats->size()) {
         (*packrat_stats)[def_id].hits++;
       }
-      if (cache_success[idx]) {
+      if (!cache_success[idx]) {
+        match.len = kFail;
+      } else if (rule_use[def_id].memo_holds_record) {
+        read_memo_record(cache_len[idx], match);
+      } else {
         match.len = cache_len[idx];
         if (!cache_values.find(idx, match.val)) { match.val.reset(); }
-      } else {
-        match.len = kFail;
       }
       if (collects_expected_tokens()) { error_info.replay(call, token_rule()); }
       return;
@@ -6267,7 +6330,8 @@ inline void Context::reuse_or_parse(const char *a_s, const Definition &rule,
 
   if (slot < 0 || !makes_packrat_memo(rule_use[def_id])) { return; }
   if (success(match.len)) {
-    write_packrat_cache(idx, match.len, match.val);
+    write_packrat_cache(idx, match.len, match.val,
+                        rule_use[def_id].memo_holds_record);
   } else {
     cache_registered[idx] = true;
     cache_success[idx] = false;
@@ -8609,7 +8673,7 @@ std::any materialize_ast(Context &c, uint32_t record, bool observed) {
         continue;
       }
       if (kind == AstRecord::Kind::external) {
-        auto &node = c.ast_externals[r.a].node;
+        auto &node = c.ast_externals[r.a].value;
         built.push_back(observed
                             ? std::any_cast<std::shared_ptr<T>>(std::move(node))
                             : std::any_cast<const std::shared_ptr<T> &>(node));
