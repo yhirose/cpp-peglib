@@ -5092,10 +5092,10 @@ inline std::any Context::record_ast(const Definition &rule,
     if (!rule_use[rule.id].values_are_nodes) {
       for (const auto &v : vs) {
         const auto *handle = std::any_cast<AstHandle>(&v);
-        const auto &type =
-            handle ? *ast_rule(handle->record).action.ast_node_type()
-                   : v.type();
-        if (type != *ast.node_type) { throw std::bad_any_cast(); }
+        if (handle && *ast_rule(handle->record).action.ast_node_type() !=
+                          *ast.node_type) {
+          throw std::bad_any_cast();
+        }
       }
     }
     if (ast.collapse && vs.size() == 1) {
@@ -5116,7 +5116,9 @@ inline std::any Context::record_ast(const Definition &rule,
           assert(ast_kids.back() < ast_records.size());
           continue;
         }
-        assert(v.type() == *ast.node_type);
+        // Checked whatever values_are_nodes says: a rule with its action
+        // disabled can hand on nothing.
+        if (v.type() != *ast.node_type) { throw std::bad_any_cast(); }
         ast_kids.push_back(record_external(std::move(v), 0));
       }
     }

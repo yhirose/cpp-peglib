@@ -839,23 +839,33 @@ TEST(AstObservationTest, Leave_handler_replaces_the_value) {
   }
 }
 
-// A value that is no node under an AST rule makes it throw as soon as it
-// matches; so does a node of another type.
+// A value that is no node under an AST rule, or the nothing that N hands on
+// with its action disabled, makes it throw as soon as it matches, whether the
+// parse is asked for the tree or not; so does a node of another type.
 TEST(AstObservationTest, Ast_rule_throws_on_a_value_that_is_no_node) {
-  {
-    parser pg("S <- P Q\n P <- N N\n Q <- N\n N <- < [0-9] >");
-    pg.enable_ast();
-    pg["N"] = [](const SemanticValues &vs) {
-      return vs.token_to_number<int>();
-    };
-    std::string entered;
-    for (auto name : {"P", "Q"}) {
-      pg[name].enter = [&, name](const Context &, const char *, size_t,
-                                 std::any &) { entered += name; };
+  for (auto disabled : {false, true}) {
+    for (auto takes_tree : {false, true}) {
+      parser pg("S <- P Q\n P <- N N\n Q <- N\n N <- < [0-9] >");
+      pg.enable_ast();
+      if (disabled) {
+        pg["N"].disable_action = true;
+      } else {
+        pg["N"] = [](const SemanticValues &vs) {
+          return vs.token_to_number<int>();
+        };
+      }
+      std::string entered;
+      for (auto name : {"P", "Q"}) {
+        pg[name].enter = [&, name](const Context &, const char *, size_t,
+                                   std::any &) { entered += name; };
+      }
+      std::shared_ptr<Ast> ast;
+      EXPECT_THROW(takes_tree ? pg.parse("123", ast) : pg.parse("123"),
+                   std::bad_any_cast)
+          << "disabled=" << disabled << " takes_tree=" << takes_tree;
+      EXPECT_EQ("P", entered)
+          << "disabled=" << disabled << " takes_tree=" << takes_tree;
     }
-    std::shared_ptr<Ast> ast;
-    EXPECT_THROW(pg.parse("123", ast), std::bad_any_cast);
-    EXPECT_EQ("P", entered);
   }
   {
     Definition S, A;
