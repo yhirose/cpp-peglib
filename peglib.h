@@ -2030,15 +2030,17 @@ public:
   }
 
   // Parses with `parse` into a scope of its own, thrown away with what it
-  // holds.
+  // holds, records included. They are dropped after `parse` returns, not by
+  // the scope_exit: an exception ends the whole parse anyway, and a
+  // scope_exit that only pops keeps this cheap.
   template <typename T> size_t parse_thrown_away(T parse) {
+    auto records = ast_records.size();
     auto &vs = push_semantic_values_scope();
-    auto se = scope_exit([&, records = ast_records.size()]() {
-      pop_semantic_values_scope();
-      truncate_ast(records);
-    });
+    auto se = scope_exit([&]() { pop_semantic_values_scope(); });
     auto unread = unread_in(vs);
-    return parse(vs);
+    auto len = parse(vs);
+    truncate_ast(records);
+    return len;
   }
 
   Context(const char *path, const char *s, size_t l,
@@ -2982,10 +2984,10 @@ public:
 
   void accept(Visitor &v) override;
 
-  std::any reduce(Context &c, SemanticValues &vs, std::any &dt,
+  std::any reduce(SemanticValues &vs, std::any &dt,
                   const std::any &predicate_data) const;
-  bool records(const Context &c) const;
-  std::any record(SemanticValues &vs) const;
+  std::any record_or_reduce(Context &c, SemanticValues &vs, std::any &dt,
+                            const std::any &predicate_data) const;
 
   const std::string &name() const;
   const std::string &trace_name() const;
@@ -5033,12 +5035,13 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           }
           m.len = kFail;
         } else if (!c.recovered) {
-          m.val =
-              records(c) ? record(chvs) : reduce(c, chvs, dt, predicate_data);
+          m.val = c.records_ast ? record_or_reduce(c, chvs, dt, predicate_data)
+                                : reduce(chvs, dt, predicate_data);
         }
       } else if (!c.recovered) {
         std::any predicate_data;
-        m.val = records(c) ? record(chvs) : reduce(c, chvs, dt, predicate_data);
+        m.val = c.records_ast ? record_or_reduce(c, chvs, dt, predicate_data)
+                              : reduce(chvs, dt, predicate_data);
       }
     } else {
       if (!outer_->error_message.empty()) {
@@ -5076,10 +5079,9 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   return match.len;
 }
 
-inline std::any Holder::reduce(Context &c, SemanticValues &vs, std::any &dt,
+inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
                                const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
-    c.observe(vs);
     auto val = outer_->action(vs, dt, predicate_data);
     // Release the values now instead of when this scope is next used: the
     // AST node an action just returned is then held only by the caller, which
@@ -5174,17 +5176,23 @@ inline void Context::build_ast(std::any &value, bool observed) {
   }
 }
 
-// Whether a match of this rule is recorded instead of reduced.
-inline bool Holder::records(const Context &c) const {
-  return c.records(outer_->action) && !outer_->disable_action;
-}
-
-// Out of line, so that the parse of every match keeps reduce inlined.
-CPPPEGLIB_NOINLINE inline std::any Holder::record(SemanticValues &vs) const {
-  auto val = vs.c_->record_ast(*outer_, vs);
-  vs.clear();
-  vs.tags.clear();
-  return val;
+// reduce in a parse that records AST matches: a match of an AST rule is
+// recorded instead, and any other action reads nodes in place of the records
+// among the values. Out of line, so that the parse of every match keeps
+// reduce inlined.
+CPPPEGLIB_NOINLINE inline std::any
+Holder::record_or_reduce(Context &c, SemanticValues &vs, std::any &dt,
+                         const std::any &predicate_data) const {
+  if (!outer_->disable_action) {
+    if (c.records(outer_->action)) {
+      auto val = c.record_ast(*outer_, vs);
+      vs.clear();
+      vs.tags.clear();
+      return val;
+    }
+    if (outer_->action) { c.observe(vs); }
+  }
+  return reduce(vs, dt, predicate_data);
 }
 
 inline const std::string &Holder::name() const { return outer_->name; }
