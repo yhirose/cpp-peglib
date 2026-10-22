@@ -1024,3 +1024,39 @@ TEST(AstObservationTest, Callbacks_set_after_a_parse) {
     EXPECT_EQ(observe(fresh), observe(reused)) << "packrat=" << packrat;
   }
 }
+
+// A parse that backtracks drops the records of the matches it drops, by a
+// choice, a repetition or an option: without packrat, it ends with those of
+// its tree alone, not with as many as it made.
+TEST(AstObservationTest, Parse_keeps_no_records_of_dropped_matches) {
+  std::function<size_t(const std::shared_ptr<Ast> &)> nodes =
+      [&](const std::shared_ptr<Ast> &ast) {
+        size_t n = 1;
+        for (const auto &child : ast->nodes) {
+          n += nodes(child);
+        }
+        return n;
+      };
+  const std::string nested = "((((1+2)*3)+4)*5)";
+  struct {
+    const char *grammar;
+    std::string input;
+  } cases[] = {
+      {"E <- M '+' E / M\n M <- T '*' M / T\n T <- '(' E ')' / N\n"
+       " N <- < [0-9]+ >",
+       nested},
+      {"E <- (M '+')? M\n M <- (T '*')? T\n T <- '(' E ')' / N\n"
+       " N <- < [0-9]+ >",
+       nested},
+      {"L <- (I ',')* I\n I <- '[' L ']' / N\n N <- < [0-9]+ >",
+       "[1,[2,[3,[4,5]]]]"},
+  };
+  for (const auto &[grammar, input] : cases) {
+    parser pg(grammar);
+    ASSERT_TRUE(pg) << grammar;
+    pg.enable_ast();
+    std::shared_ptr<Ast> ast;
+    ASSERT_TRUE(pg.parse(input, ast)) << grammar;
+    EXPECT_EQ(nodes(ast), ast_records_at_end()) << grammar;
+  }
+}
