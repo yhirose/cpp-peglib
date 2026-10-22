@@ -5642,6 +5642,24 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
   auto count = a.rules_by_id.size();
   std::vector<bool> observed(count, true), value_always_empty(count, false);
 
+  // The type of the nodes that a rule's matches hand on. With its action
+  // disabled, a precedence rule with nothing to fold hands on its first value
+  // instead, none if that is of a `~` rule, so it is known only where all its
+  // values are delivered nodes of its type.
+  auto node_type_handed_on =
+      [&](const Definition *r) -> const std::type_info * {
+    auto type = r->action.ast_node_type();
+    if (!type || !r->disable_action) { return type; }
+    if (!a.indexes(*r) || refs[r->id].calls_macro) { return nullptr; }
+    const auto &values = refs[r->id].value_rules;
+    auto all_of_type =
+        std::all_of(values.begin(), values.end(), [&](const Definition *v) {
+          return !v->disable_action && !v->ignoreSemanticValue &&
+                 v->action.ast_node_type() == type;
+        });
+    return all_of_type ? type : nullptr;
+  };
+
   for (auto *rule : a.rules_by_id) {
     if (!rule) { continue; }
     auto id = rule->id;
@@ -5656,7 +5674,7 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
     auto values_are_nodes =
         token_node || (node_type && !refs[id].calls_macro &&
                        std::all_of(rules.begin(), rules.end(), [&](auto *r) {
-                         return r->action.ast_node_type() == node_type;
+                         return node_type_handed_on(r) == node_type;
                        }));
 
     observed[id] = rule->enter || rule->leave || rule->predicate ||

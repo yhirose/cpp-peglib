@@ -2043,6 +2043,34 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
   EXPECT_EQ(2u, leaves);
 }
 
+// A precedence rule with nothing to fold hands on its operand's node, of
+// another type than its own, or nothing for an operand of a `~` rule: the AST
+// rule over it throws on that, also where nothing reads its value.
+TEST(GeneralTest, Ast_rule_throws_on_what_a_precedence_rule_hands_on) {
+  struct Other {};
+  for (auto ignored : {false, true}) {
+    for (auto eager : {false, true}) {
+      parser pg(std::string(R"(
+        S    <- &P NUM ';'
+        P    <- EXPR ';'
+        EXPR <- ATOM (OP ATOM)* { precedence L + }
+        NUM  <- < [0-9]+ >
+        OP   <- < '+' >
+      )") + (ignored ? "~" : "") +
+                "ATOM <- < [0-9]+ >");
+      ASSERT_TRUE(pg);
+      if (!ignored) { add_ast_action<AstBase<Other>>(pg["ATOM"]); }
+      pg.enable_ast();
+      if (eager) {
+        pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+      }
+      std::shared_ptr<Ast> ast;
+      EXPECT_THROW(pg.parse("1;", ast), std::bad_any_cast)
+          << "ignored=" << ignored << " eager=" << eager;
+    }
+  }
+}
+
 TEST(GeneralTest, CollapsedAstParentLinks) {
   std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
       [&](const std::shared_ptr<Ast> &ast) {
