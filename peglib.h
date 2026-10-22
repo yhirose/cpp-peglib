@@ -1485,6 +1485,39 @@ struct RuleUses {
   bool records_ast = false;
 };
 
+// An array that grows by chunks: growing never copies what it holds, nor
+// holds two buffers at once. Shrinking keeps the chunks, so a size that goes
+// back and forth across a chunk's edge allocates nothing.
+template <typename T> class ChunkedArray {
+public:
+  static constexpr size_t kChunkBits = 12;
+  static constexpr size_t kChunkSize = size_t(1) << kChunkBits;
+
+  size_t size() const { return size_; }
+  T &operator[](size_t i) {
+    return chunks_[i >> kChunkBits][i & (kChunkSize - 1)];
+  }
+  const T &operator[](size_t i) const {
+    return chunks_[i >> kChunkBits][i & (kChunkSize - 1)];
+  }
+  void push_back(const T &value) {
+    if ((size_ >> kChunkBits) == chunks_.size()) {
+      // Not zeroed, as std::make_unique<T[]> would: push_back writes each
+      // entry before it is read.
+      chunks_.push_back(std::unique_ptr<T[]>(new T[kChunkSize]));
+    }
+    (*this)[size_++] = value;
+  }
+  void truncate(size_t size) {
+    assert(size <= size_);
+    size_ = size;
+  }
+
+private:
+  std::vector<std::unique_ptr<T[]>> chunks_;
+  size_t size_ = 0;
+};
+
 // The match of an AST rule, recorded where its node would have been built, or
 // a value of its own: a node among the values of a recorded match, or the
 // value a memo holds of a match whose value is no record's (see
@@ -1615,11 +1648,8 @@ public:
   // which are built only when a callback is about to read them or the parse
   // returns them.
   bool records_ast = false;
-  std::vector<AstRecord> ast_records;
-  std::vector<uint32_t> ast_kids;
-  // ast_records.size(), which every Snapshot reads: counted apart, as the
-  // size of a vector of 24-byte records takes a division.
-  uint32_t ast_record_count = 0;
+  ChunkedArray<AstRecord> ast_records;
+  ChunkedArray<uint32_t> ast_kids;
   // The values of the records that hold one (AstRecord::Kind::external), by
   // their records, held as the node of a match or a memo would hold them.
   struct AstExternal {
@@ -1662,8 +1692,8 @@ public:
     pinned_ast_kids = (std::max)(pinned_ast_kids, ast_kids.size());
   }
   // Mostly there is nothing to drop, and release_ast is an out-of-line call.
-  void truncate_ast(uint32_t records) {
-    if (ast_record_count > records) { release_ast(records); }
+  void truncate_ast(size_t records) {
+    if (ast_records.size() > records) { release_ast(records); }
   }
   CPPPEGLIB_NOINLINE void release_ast(size_t records) {
     records = (std::max)(records, pinned_ast_records);
@@ -1672,24 +1702,23 @@ public:
     for (auto i = records; i < ast_records.size(); i++) {
       const auto &r = ast_records[i];
       if (r.kind() == AstRecord::Kind::node) {
-        ast_kids.resize((std::max)(size_t(r.a), pinned_ast_kids));
+        ast_kids.truncate((std::max)(size_t(r.a), pinned_ast_kids));
         break;
       }
     }
     while (!ast_externals.empty() && ast_externals.back().record >= records) {
       ast_externals.pop_back();
     }
-    ast_records.resize(records);
-    ast_record_count = static_cast<uint32_t>(records);
+    ast_records.truncate(records);
   }
 
   // A callback is about to read `value`, or the values of `vs`: the node of
   // a record's handle among them takes its place, for good.
   void observe(std::any &value) {
-    if (ast_record_count) { build_ast(value, true); }
+    if (ast_records.size()) { build_ast(value, true); }
   }
   void observe(SemanticValues &vs) {
-    if (ast_record_count) { observe_values(vs); }
+    if (ast_records.size()) { observe_values(vs); }
   }
   CPPPEGLIB_NOINLINE void observe_values(SemanticValues &vs);
   // Puts in place of `value`, where it is a record's handle, its node: one
@@ -1895,11 +1924,12 @@ public:
   // A record of `value`: a node among the values of a recorded match, or the
   // value a memo holds of a match of `length`. Out of line, as it is rare.
   CPPPEGLIB_NOINLINE uint32_t record_external(std::any value, size_t length) {
-    ast_externals.push_back({ast_record_count, std::move(value)});
+    auto record = static_cast<uint32_t>(ast_records.size());
+    ast_externals.push_back({record, std::move(value)});
     ast_records.push_back({0, 0, static_cast<uint32_t>(length), 0,
                            static_cast<uint32_t>(ast_externals.size() - 1),
                            AstRecord::kExternal});
-    return ast_record_count++;
+    return record;
   }
 
   // The length and value of the match whose record a memo holds: the value
@@ -2003,7 +2033,7 @@ public:
   // holds.
   template <typename T> size_t parse_thrown_away(T parse) {
     auto &vs = push_semantic_values_scope();
-    auto se = scope_exit([&, records = ast_record_count]() {
+    auto se = scope_exit([&, records = ast_records.size()]() {
       pop_semantic_values_scope();
       truncate_ast(records);
     });
@@ -2171,7 +2201,7 @@ public:
     size_t choice_count;
     size_t choice;
     size_t capture_size;
-    uint32_t ast_record_count;
+    size_t ast_records_size;
   };
 
   Snapshot snapshot(const SemanticValues &vs) const {
@@ -2182,7 +2212,7 @@ public:
             vs.choice_count_,
             vs.choice_,
             capture_entries.size(),
-            ast_record_count};
+            ast_records.size()};
   }
 
   // Mostly there is nothing to drop, and resize is an out-of-line call.
@@ -2198,7 +2228,7 @@ public:
     vs.choice_count_ = snap.choice_count;
     vs.choice_ = snap.choice;
     truncate(capture_entries, snap.capture_size);
-    truncate_ast(snap.ast_record_count);
+    truncate_ast(snap.ast_records_size);
   }
 
   // Skip trailing whitespace with trace suppression.
@@ -5074,8 +5104,7 @@ inline std::any Context::record_ast(const Definition &rule,
   const auto &ast = rule.action.ast_action();
   assert(has_id(rule));
   assert(vs.choice_count() == rule.choice_count());
-  assert(ast_record_count == ast_records.size() &&
-         ast_record_count < UINT32_MAX - vs.size());
+  assert(ast_records.size() < UINT32_MAX - vs.size());
 
   AstRecord record;
   record.rule = static_cast<uint32_t>(rule.id);
@@ -5113,8 +5142,8 @@ inline std::any Context::record_ast(const Definition &rule,
       record.b = static_cast<uint32_t>(vs.size());
       for (auto &v : vs) {
         if (const auto *handle = std::any_cast<AstHandle>(&v)) {
+          assert(handle->record < ast_records.size());
           ast_kids.push_back(handle->record);
-          assert(ast_kids.back() < ast_records.size());
           continue;
         }
         // Checked whatever values_are_nodes says: a rule with its action
@@ -5124,8 +5153,9 @@ inline std::any Context::record_ast(const Definition &rule,
       }
     }
   }
+  auto handle = AstHandle{static_cast<uint32_t>(ast_records.size())};
   ast_records.push_back(record);
-  return AstHandle{ast_record_count++};
+  return handle;
 }
 
 inline void Context::observe_values(SemanticValues &vs) {

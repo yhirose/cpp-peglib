@@ -1288,3 +1288,25 @@ TEST(AstObservationTest,
     EXPECT_LT(0u, records(pg, "1+2;")) << grammar;
   }
 }
+
+// The array the records are kept in keeps its entries where they are as it
+// grows, and keeps their values as it shrinks across a chunk's edge and
+// grows again.
+TEST(AstObservationTest, Chunked_array_keeps_its_entries) {
+  constexpr size_t chunk = ChunkedArray<size_t>::kChunkSize;
+  ChunkedArray<size_t> a;
+  a.push_back(0);
+  const auto *first = &a[0];
+  for (size_t i = 1; i < 3 * chunk; i++) {
+    a.push_back(i);
+  }
+  EXPECT_EQ(first, &a[0]);
+  a.truncate(chunk - 1);
+  for (size_t i = chunk - 1; i < chunk + 2; i++) {
+    a.push_back(i);
+  }
+  ASSERT_EQ(chunk + 2, a.size());
+  for (size_t i = 0; i < a.size(); i++) {
+    EXPECT_EQ(i, a[i]) << i;
+  }
+}
