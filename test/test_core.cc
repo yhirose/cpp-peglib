@@ -1733,9 +1733,11 @@ TEST(GeneralTest, DeferredAstIsUnobservable) {
 
 TEST(GeneralTest, DeferredAstBuildsLongPrecedenceChain) {
   // A left-associative chain is parsed in a loop, but its tree is as deep as
-  // the chain is long. Building it must not recurse that deep.
+  // the chain is long. Building it from its records, which packrat parsing
+  // makes, must not recurse that deep.
   parser pg("E <- A (OP A)* { precedence L + }\n A <- < [0-9] >\n OP <- '+'");
   ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
   pg.enable_ast(true);
 
   const size_t n = 100000;
@@ -2048,25 +2050,29 @@ TEST(GeneralTest, RecognizerPathIsUnobservable) {
 // rule over it throws on that, also where nothing reads its value.
 TEST(GeneralTest, Ast_rule_throws_on_what_a_precedence_rule_hands_on) {
   struct Other {};
-  for (auto ignored : {false, true}) {
-    for (auto eager : {false, true}) {
-      parser pg(std::string(R"(
+  for (auto packrat : {false, true}) {
+    for (auto ignored : {false, true}) {
+      for (auto eager : {false, true}) {
+        parser pg(std::string(R"(
         S    <- &P NUM ';'
         P    <- EXPR ';'
         EXPR <- ATOM (OP ATOM)* { precedence L + }
         NUM  <- < [0-9]+ >
         OP   <- < '+' >
       )") + (ignored ? "~" : "") +
-                "ATOM <- < [0-9]+ >");
-      ASSERT_TRUE(pg);
-      if (!ignored) { add_ast_action<AstBase<Other>>(pg["ATOM"]); }
-      pg.enable_ast();
-      if (eager) {
-        pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+                  "ATOM <- < [0-9]+ >");
+        ASSERT_TRUE(pg);
+        if (!ignored) { add_ast_action<AstBase<Other>>(pg["ATOM"]); }
+        if (packrat) { pg.enable_packrat_parsing(); }
+        pg.enable_ast();
+        if (eager) {
+          pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+        }
+        std::shared_ptr<Ast> ast;
+        EXPECT_THROW(pg.parse("1;", ast), std::bad_any_cast)
+            << "packrat=" << packrat << " ignored=" << ignored
+            << " eager=" << eager;
       }
-      std::shared_ptr<Ast> ast;
-      EXPECT_THROW(pg.parse("1;", ast), std::bad_any_cast)
-          << "ignored=" << ignored << " eager=" << eager;
     }
   }
 }
@@ -2076,9 +2082,10 @@ TEST(GeneralTest, Ast_rule_throws_on_what_a_precedence_rule_hands_on) {
 // so too where the leave handler is on a precedence rule, or on an operand that
 // one with nothing to fold hands on.
 TEST(GeneralTest, Ast_rule_throws_on_what_a_leave_handler_hands_on) {
-  for (auto rule : {"N", "EXPR", "ATOM"}) {
-    for (auto eager : {false, true}) {
-      parser pg(R"(
+  for (auto packrat : {false, true}) {
+    for (auto rule : {"N", "EXPR", "ATOM"}) {
+      for (auto eager : {false, true}) {
+        parser pg(R"(
         S    <- &P M ';'
         P    <- (N / EXPR) ';'
         EXPR <- ATOM (OP ATOM)* { precedence L + }
@@ -2087,19 +2094,21 @@ TEST(GeneralTest, Ast_rule_throws_on_what_a_leave_handler_hands_on) {
         ATOM <- < [a-z] >
         OP   <- < '+' >
       )");
-      ASSERT_TRUE(pg);
-      pg.enable_ast();
-      pg[rule].leave = [](const Context &, const char *, size_t, size_t len,
-                          std::any &value, std::any &) {
-        if (success(len)) { value = 1; }
-      };
-      if (eager) {
-        pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+        ASSERT_TRUE(pg);
+        if (packrat) { pg.enable_packrat_parsing(); }
+        pg.enable_ast();
+        pg[rule].leave = [](const Context &, const char *, size_t, size_t len,
+                            std::any &value, std::any &) {
+          if (success(len)) { value = 1; }
+        };
+        if (eager) {
+          pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+        }
+        std::shared_ptr<Ast> ast;
+        auto input = std::string(rule) == "N" ? "1;" : "a;";
+        EXPECT_THROW(pg.parse(input, ast), std::bad_any_cast)
+            << "packrat=" << packrat << " rule=" << rule << " eager=" << eager;
       }
-      std::shared_ptr<Ast> ast;
-      auto input = std::string(rule) == "N" ? "1;" : "a;";
-      EXPECT_THROW(pg.parse(input, ast), std::bad_any_cast)
-          << "rule=" << rule << " eager=" << eager;
     }
   }
 }

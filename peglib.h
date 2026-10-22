@@ -1478,9 +1478,10 @@ struct RuleUse {
 struct RuleUses {
   std::vector<RuleUse> by_id;
   bool some_must_be_tried = true;
-  // Whether AST rules record their matches (see Context::records_ast): some
-  // rule has an AST action that add_ast_action made, and every rule has an id
-  // to record its matches by.
+  // Whether AST rules record their matches (see Context::records_ast): the
+  // parse uses packrat parsing or left recursion, some rule has an AST action
+  // that add_ast_action made, and every rule has an id to record its matches
+  // by.
   bool records_ast = false;
 };
 
@@ -5921,8 +5922,9 @@ struct CollectStartRegion : public TraversalVisitor {
   }
 };
 
-// What goes unnoticed in a match of a rule depends on the callbacks of the
-// rule and of the rules below it, which can be set between parses. So it is
+// What goes unnoticed in a match of a rule, and whether the parse records
+// matches, depend on the callbacks of the rule and of the rules below it and
+// on packrat parsing, all of which can be set between parses. So it is
 // decided again when one of them has changed. A parse keeps the outcome it
 // started with.
 inline std::shared_ptr<const RuleUses>
@@ -5936,8 +5938,16 @@ Definition::rule_uses(bool builds_everything) const {
     decide_must_be_tried(uses);
     decide_parsed_only_where_muted(uses.by_id);
     const auto &rules = analysis_.rules;
+    // Where packrat parsing or left recursion can hold a record in a memo or
+    // a seed in place of a node, records pay off whatever the input. Elsewhere
+    // they pay off only in a parse that drops many matches, and cost time and
+    // memory in one that drops few.
     uses.records_ast =
         !builds_everything &&
+        (enablePackratParsing || std::any_of(rules.begin(), rules.end(),
+                                             [](const Definition *r) {
+                                               return r->is_left_recursive;
+                                             })) &&
         std::all_of(
             rules.begin(), rules.end(),
             [&](const Definition *r) { return analysis_.indexes(*r); }) &&

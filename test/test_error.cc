@@ -1780,26 +1780,30 @@ TEST(MaxDepthTest, Ast_from_another_parse_is_reported_within_the_input) {
     N    <- < 'n' >
     %whitespace <- [ ]*
   )";
-  parser inner(grammar);
-  ASSERT_TRUE(!!inner);
-  inner.enable_ast();
-  parser outer(grammar);
-  ASSERT_TRUE(!!outer);
-  outer["INC"] = [&](const SemanticValues &) {
-    std::shared_ptr<Ast> ast;
-    inner.parse(std::string(100, ' ') + "((((n))))", ast);
-    return ast;
-  };
-  outer.enable_ast();
-  outer.set_max_depth(3);
-  std::string msg;
-  outer.set_logger([&](size_t ln, size_t col, const std::string &m) {
-    msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m;
-  });
+  for (auto packrat : {false, true}) {
+    parser inner(grammar);
+    ASSERT_TRUE(!!inner);
+    inner.enable_ast();
+    parser outer(grammar);
+    ASSERT_TRUE(!!outer);
+    outer["INC"] = [&](const SemanticValues &) {
+      std::shared_ptr<Ast> ast;
+      inner.parse(std::string(100, ' ') + "((((n))))", ast);
+      return ast;
+    };
+    if (packrat) { outer.enable_packrat_parsing(); }
+    outer.enable_ast();
+    outer.set_max_depth(3);
+    std::string msg;
+    outer.set_logger([&](size_t ln, size_t col, const std::string &m) {
+      msg = std::to_string(ln) + ":" + std::to_string(col) + " " + m;
+    });
 
-  std::shared_ptr<Ast> ast;
-  EXPECT_FALSE(outer.parse("include", ast));
-  EXPECT_EQ("1:8 exceeded the maximum nesting depth of 3", msg);
+    std::shared_ptr<Ast> ast;
+    EXPECT_FALSE(outer.parse("include", ast)) << "packrat=" << packrat;
+    EXPECT_EQ("1:8 exceeded the maximum nesting depth of 3", msg)
+        << "packrat=" << packrat;
+  }
 }
 
 // =============================================================================
