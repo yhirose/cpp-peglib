@@ -2071,6 +2071,39 @@ TEST(GeneralTest, Ast_rule_throws_on_what_a_precedence_rule_hands_on) {
   }
 }
 
+// A leave handler can put a value that is no node in place of its rule's: the
+// AST rule over it throws on that, also where nothing reads its value. It does
+// so too where the leave handler is on a precedence rule, or on an operand that
+// one with nothing to fold hands on.
+TEST(GeneralTest, Ast_rule_throws_on_what_a_leave_handler_hands_on) {
+  for (auto rule : {"N", "EXPR", "ATOM"}) {
+    for (auto eager : {false, true}) {
+      parser pg(R"(
+        S    <- &P M ';'
+        P    <- (N / EXPR) ';'
+        EXPR <- ATOM (OP ATOM)* { precedence L + }
+        M    <- < [0-9a-z]+ >
+        N    <- < [0-9]+ >
+        ATOM <- < [a-z] >
+        OP   <- < '+' >
+      )");
+      ASSERT_TRUE(pg);
+      pg.enable_ast();
+      pg[rule].leave = [](const Context &, const char *, size_t, size_t len,
+                          std::any &value, std::any &) {
+        if (success(len)) { value = 1; }
+      };
+      if (eager) {
+        pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+      }
+      std::shared_ptr<Ast> ast;
+      auto input = std::string(rule) == "N" ? "1;" : "a;";
+      EXPECT_THROW(pg.parse(input, ast), std::bad_any_cast)
+          << "rule=" << rule << " eager=" << eager;
+    }
+  }
+}
+
 TEST(GeneralTest, CollapsedAstParentLinks) {
   std::function<size_t(const std::shared_ptr<Ast> &)> wrong_parents =
       [&](const std::shared_ptr<Ast> &ast) {
