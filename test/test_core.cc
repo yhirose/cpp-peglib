@@ -2153,6 +2153,42 @@ TEST(GeneralTest, AstParentLinks) {
   }
 }
 
+// A parse that builds an AST fails on 4 GiB of input or more without parsing
+// it: only the first two bytes of this input exist, and the error message
+// reads no further. One byte less is parsed.
+TEST(GeneralTest, Ast_parse_fails_on_an_input_of_4_GiB_or_more) {
+  if (sizeof(size_t) <= sizeof(uint32_t)) { GTEST_SKIP(); }
+  std::vector<char> input{'x', '\n'};
+  const auto n = static_cast<size_t>(UINT32_MAX) + 1;
+  const std::string too_long =
+      "input is too long to build an AST (4 GiB or more)";
+
+  parser pg("S <- 'y'");
+  ASSERT_TRUE(pg);
+  pg.enable_ast();
+  std::string message;
+  pg.set_logger([&](size_t line, size_t col, const std::string &msg) {
+    message = std::to_string(line) + ":" + std::to_string(col) + ": " + msg;
+  });
+
+  std::shared_ptr<Ast> ast;
+  EXPECT_FALSE(pg.parse_n(input.data(), n, ast));
+  EXPECT_EQ("1:1: " + too_long, message);
+
+  message.clear();
+  EXPECT_FALSE(pg.parse_n(input.data(), n));
+  EXPECT_EQ("1:1: " + too_long, message);
+
+  auto r = pg["S"].parse_and_get_value(input.data(), n, ast);
+  EXPECT_FALSE(r.ret);
+  EXPECT_EQ(too_long, r.error_info.message);
+  EXPECT_EQ(input.data(), r.error_info.message_pos);
+
+  message.clear();
+  EXPECT_FALSE(pg.parse_n(input.data(), n - 1, ast));
+  EXPECT_EQ("1:1: syntax error, unexpected 'x', expecting 'y'.", message);
+}
+
 TEST(GeneralTest, ChoiceWithWhitespace) {
   auto parser = peg::parser(R"(
     type <- 'string' / 'int' / 'double'

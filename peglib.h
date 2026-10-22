@@ -1298,6 +1298,13 @@ private:
   }
 };
 
+// Whether a length or a position of the input fits in the 32 bits that the
+// memo and an AST keep it in.
+inline bool fits_in_32_bits(size_t n) {
+  return sizeof(size_t) <= sizeof(uint32_t) ||
+         n <= static_cast<size_t>(UINT32_MAX);
+}
+
 /*
  * Context
  */
@@ -1398,6 +1405,7 @@ struct StartRuleAnalysis {
   std::vector<const Definition *> alternative_starts;
 
   bool indexes(const Definition &rule) const;
+  bool has_ast_action() const;
 };
 
 // What a rule match goes by to leave out what goes unnoticed: building a
@@ -1683,8 +1691,7 @@ public:
   }
 
   void write_packrat_cache(size_t idx, size_t len, const std::any &val) {
-    if (sizeof(size_t) > sizeof(uint32_t) &&
-        len > static_cast<size_t>(UINT32_MAX)) {
+    if (!fits_in_32_bits(len)) {
       // A match too long for the 32-bit memo is not memoized, so the rule
       // simply re-parses at this position.
       return;
@@ -4092,6 +4099,15 @@ private:
       if (tracer_end) { tracer_end(trace_data); }
     });
 
+    // A parse that builds an AST takes less than 4 GiB of input, so that the
+    // positions and lengths of its nodes fit in 32 bits.
+    if (!fits_in_32_bits(n) && analysis.has_ast_action()) {
+      Result r{false, false, 0, ErrorInfo()};
+      r.error_info.set_message(
+          s, "input is too long to build an AST (4 GiB or more)");
+      return r;
+    }
+
     if (enablePackratParsing) { select_packrat_rules(); }
 
     Context c(path, s, n, &analysis, whitespaceOpe, wordOpe,
@@ -4173,6 +4189,12 @@ private:
 
 inline bool StartRuleAnalysis::indexes(const Definition &rule) const {
   return rule.id < rules_by_id.size() && rules_by_id[rule.id] == &rule;
+}
+
+inline bool StartRuleAnalysis::has_ast_action() const {
+  return std::any_of(rules.begin(), rules.end(), [](const Definition *rule) {
+    return rule->action.ast_node_type();
+  });
 }
 
 /*

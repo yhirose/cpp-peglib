@@ -678,6 +678,8 @@ A node's `parent` is guaranteed only once `parser::parse` has returned: until th
 
 A left-associative `precedence` operator or left recursion turns a long chain such as `1+2+3+...` into a tree as deep as the chain is long. Parsing it and building and releasing its tree take no recursion that deep, but `optimize_ast` and `ast_to_s` walk the tree recursively, as your own code may, and can overflow the stack on a deep enough tree, sooner in a thread with a smaller stack. For such input, use `enable_ast(true)` rather than `optimize_ast`, and `set_max_depth` to make a parse fail on a tree deeper than the code that walks it can take (see [Limit nesting depth](#limit-nesting-depth)). `ast_to_s` indents each node by its depth, so on such a chain its output grows with the square of the chain's length.
 
+With `enable_ast`, a parse fails with an error on an input of 4 GiB or more.
+
 By default an AST node carries the name of the rule that produced it. A rule can override that tag with the `{ ast_name: NodeTag }` instruction, so several rules can emit nodes under a shared tag.
 
 Multiple instructions can be combined in a single `{ ... }` block by separating them with `;`, e.g. `{ no_ast_opt; ast_name: NodeTag }`.
