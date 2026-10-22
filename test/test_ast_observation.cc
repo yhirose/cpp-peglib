@@ -922,6 +922,73 @@ TEST(AstObservationTest, Ast_rule_throws_on_a_value_that_is_no_node) {
   }
 }
 
+// A rule with its action disabled hands on its first value, or nothing where
+// it has none: in a lookahead, where nothing reads the AST rule over it, that
+// rule throws on it all the same, as it does with a tracer. Only a precedence
+// rule of the grammar, which always has an operand, is known to hand on one.
+TEST(AstObservationTest, Ast_rule_throws_on_nothing_handed_on_in_a_lookahead) {
+  struct {
+    const char *grammar;
+    const char *input;
+  } cases[] = {
+      // F has no values.
+      {"S <- &E C C ';'\n E <- F\n F <- < [a-z]+ >\n C <- < [a-z] >", "ab;"},
+      // F has a value on one alternative only.
+      {"S <- &P C C C\n P <- F F\n F <- N / [a-z]\n N <- < [0-9] >\n"
+       " C <- < . >",
+       "ab1"},
+  };
+  for (const auto &[grammar, input] : cases) {
+    for (auto packrat : {false, true}) {
+      for (auto tracer : {false, true}) {
+        parser pg(grammar);
+        ASSERT_TRUE(pg) << grammar;
+        if (packrat) { pg.enable_packrat_parsing(); }
+        pg.enable_ast();
+        pg["F"].disable_action = true;
+        if (tracer) {
+          pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+        }
+        std::shared_ptr<Ast> ast;
+        EXPECT_THROW(pg.parse(input, ast), std::bad_any_cast)
+            << grammar << " packrat=" << packrat << " tracer=" << tracer;
+      }
+    }
+  }
+  // A precedence that is not the rule's body, or whose operand is no rule,
+  // can hand on nothing.
+  for (auto shape : {"precedence in a choice", "operand that is no rule"}) {
+    for (auto tracer : {false, true}) {
+      Definition S, X, E, A, N;
+      PrecedenceClimbing::BinOpeInfo info{{"+", {1, 'L'}}};
+      S <= seq(apd(X), N, chr(';'));
+      X <= seq(E);
+      if (std::string(shape) == "precedence in a choice") {
+        E <= cho(pre(A, tok(chr('+')), info, E), chr('x'));
+      } else {
+        E <= pre(opt(A), tok(chr('+')), info, E);
+      }
+      A <= tok(oom(cls("0-9")));
+      N <= tok(oom(cls("a-z")));
+      S.name = "S";
+      X.name = "X";
+      E.name = "E";
+      A.name = "A";
+      N.name = "N";
+      for (auto *rule : {&S, &X, &E, &A, &N}) {
+        add_ast_action(*rule);
+      }
+      E.disable_action = true;
+      if (tracer) {
+        S.tracer_enter = [](auto &&...) {};
+        S.tracer_leave = [](auto &&...) {};
+      }
+      EXPECT_THROW(S.parse("x;"), std::bad_any_cast)
+          << shape << " tracer=" << tracer;
+    }
+  }
+}
+
 // After a recovery no value is built: callbacks see none where nodes would
 // be, and the parse leaves the tree it was given as it was, as one that fails
 // does.

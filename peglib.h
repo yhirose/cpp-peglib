@@ -6074,15 +6074,28 @@ Definition::decide_value_use(const std::vector<CollectRuleRefs> &refs,
     return r->leave ? nullptr : r->action.ast_node_type();
   };
 
+  // Whether a rule is a precedence rule whose operands are each a rule's
+  // match: with nothing to fold, it hands on the first operand's value.
+  auto folds_rule_operands = [](const Definition *r) {
+    const auto *pre =
+        dynamic_cast<const PrecedenceClimbing *>(r->get_core_operator().get());
+    const auto *atom =
+        pre ? dynamic_cast<const Reference *>(pre->atom_.get()) : nullptr;
+    return atom && atom->rule_;
+  };
+
   // The type of the nodes that a rule's matches hand on. With its action
-  // disabled, a precedence rule with nothing to fold hands on its first value
-  // instead, none if that is of a `~` rule, so it is known only where all its
-  // values are delivered nodes of its type.
+  // disabled, a rule hands on its first value, or nothing where it has none.
+  // Only a rule that folds rule operands always has one, so its type is known
+  // there where all its values are delivered nodes of its type, not of a `~`
+  // rule.
   auto node_type_handed_on =
       [&](const Definition *r) -> const std::type_info * {
     auto type = own_node_type(r);
     if (!type || !r->disable_action) { return type; }
-    if (!a.indexes(*r) || refs[r->id].calls_macro) { return nullptr; }
+    if (!a.indexes(*r) || refs[r->id].calls_macro || !folds_rule_operands(r)) {
+      return nullptr;
+    }
     const auto &values = refs[r->id].value_rules;
     auto all_of_type =
         std::all_of(values.begin(), values.end(), [&](const Definition *v) {
