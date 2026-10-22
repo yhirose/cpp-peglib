@@ -789,14 +789,15 @@ public:
   // An AST action builds a node, held as `node_type`, from the values alone
   // (a token rule's node from its token, not reading the values), so a parse
   // need not run it where nothing reads the node. One that add_ast_action
-  // made, for the rule `made_for`, can also be left out where nothing can see
-  // the values: the match is recorded instead, and `materialize` builds its
-  // node, as the action would have, if the parse returns it.
+  // made, for the rule `made_for`, can also be left out: the match is
+  // recorded instead, and `materialize` builds its node, as the action would
+  // have, when a callback is about to read it or the parse returns it.
   struct AstAction {
     const std::type_info *node_type = nullptr;
     const Definition *made_for = nullptr;
     bool collapse = false;
-    std::any (*materialize)(Context &c, uint32_t record) = nullptr;
+    std::any (*materialize)(Context &c, uint32_t record,
+                            bool observed) = nullptr;
   };
 
   // Declares this action to be an AST action. Assigning another function
@@ -806,7 +807,7 @@ public:
   }
   template <typename Node>
   void declare_ast_action(bool collapse, const Definition &made_for,
-                          std::any (*materialize)(Context &, uint32_t)) {
+                          std::any (*materialize)(Context &, uint32_t, bool)) {
     ast_ = {&typeid(Node), &made_for, collapse, materialize};
   }
   const std::type_info *ast_node_type() const { return ast_.node_type; }
@@ -1471,33 +1472,47 @@ struct RuleUse {
 struct RuleUses {
   std::vector<RuleUse> by_id;
   bool some_must_be_tried = true;
-  // Whether AST rules record their matches (see Context::records_ast): no
-  // predicate, leave handler or action that add_ast_action did not make can
-  // see a value, and every rule has an id to record it by.
+  // Whether AST rules record their matches (see Context::records_ast): some
+  // rule has an AST action that add_ast_action made, and every rule has an id
+  // to record its matches by.
   bool records_ast = false;
 };
 
-// The match of an AST rule, recorded where its node would have been built.
-// A record's children are recorded before it, the records of matches that a
-// rollback drops go with them (see Context::release_ast), and the node of
-// one is built only if the parse returns it (see materialize_ast).
+// The match of an AST rule, recorded where its node would have been built, or
+// a node among the values of one. A record's children are recorded before it,
+// the records of matches that a rollback drops go with them (see
+// Context::release_ast), and the node of one is built only when a callback is
+// about to read it or the parse returns it (see materialize_ast).
 struct AstRecord {
+  enum class Kind { node, token, collapsed, external };
   static constexpr uint32_t kCollapsed = UINT32_MAX;
+  static constexpr uint32_t kExternal = UINT32_MAX - 1;
   static constexpr uint32_t kToken = 0x80000000;
+  // A memo or a left-recursive seed holds its handle (see Context::retain_ast)
+  static constexpr uint32_t kRetained = 0x40000000;
+  // Its node, built for a callback, is in Context::ast_bound
+  static constexpr uint32_t kBound = 0x20000000;
+  static constexpr uint32_t kRuleId = 0x1fffffff;
 
-  uint32_t rule; // its id, with kToken for a token rule's match
+  uint32_t rule; // its id, with the bits above
   uint32_t position;
   uint32_t length;
   uint32_t choice;
   // A token rule's token (its position and length), or else the child of a
-  // collapsing match (its record, and kCollapsed) or the children (where in
+  // collapsing match (its record, and kCollapsed), the node (where in
+  // Context::ast_externals, and kExternal) or the children (where in
   // Context::ast_kids, and how many).
   uint32_t a;
   uint32_t b;
 
-  bool is_token() const { return rule & kToken; }
-  // A token's length can be kCollapsed, so the kind is told by the rule first.
-  bool collapses() const { return !is_token() && b == kCollapsed; }
+  // A token's length can be either sentinel, so the kind is told by the rule
+  // first.
+  Kind kind() const {
+    if (rule & kToken) { return Kind::token; }
+    if (b == kCollapsed) { return Kind::collapsed; }
+    if (b == kExternal) { return Kind::external; }
+    return Kind::node;
+  }
 };
 
 // The value of a recorded match: the index of its record.
@@ -1586,21 +1601,31 @@ public:
 
   PackratCache cache_values;
 
-  // Whether AST rules record their matches instead of building their nodes:
-  // where no callback can see a value, as their nodes are built only for
-  // the tree a parse returns.
+  // Whether AST rules record their matches instead of building their nodes,
+  // which are built only when a callback is about to read them or the parse
+  // returns them.
   bool records_ast = false;
   std::vector<AstRecord> ast_records;
   std::vector<uint32_t> ast_kids;
   // ast_records.size(), which every Snapshot reads: counted apart, as the
   // size of a vector of 24-byte records takes a division.
   uint32_t ast_record_count = 0;
+  // The nodes among the values of recorded matches, by their records, held
+  // as the node of the match would hold them.
+  struct AstExternal {
+    uint32_t record;
+    std::any node;
+  };
+  std::vector<AstExternal> ast_externals;
+  // The nodes built for callbacks of the retained records, as a memo or a
+  // seed would hold them: every read of the handle gets the same node.
+  std::unordered_map<uint32_t, std::any> ast_bound;
 
-  AstHandle record_ast(const Definition &rule, const SemanticValues &vs);
+  std::any record_ast(const Definition &rule, SemanticValues &vs);
   // The rule whose match `record` records.
   const Definition &ast_rule(uint32_t record) const {
     return *analysis
-                ->rules_by_id[ast_records[record].rule & ~AstRecord::kToken];
+                ->rules_by_id[ast_records[record].rule & AstRecord::kRuleId];
   }
   // Whether this parse records the matches of a rule with `action`.
   bool records(const Action &action) const {
@@ -1613,9 +1638,12 @@ public:
   // that backtracks would grow with its work, not with its tree.
   size_t pinned_ast_records = 0;
   size_t pinned_ast_kids = 0;
-  void pin_ast(const std::any &value) {
+  // A memo or a left-recursive seed holds `value`: where it is a handle, its
+  // record is retained, and pinned.
+  void retain_ast(const std::any &value) {
     if (!records_ast) { return; }
     if (const auto *handle = std::any_cast<AstHandle>(&value)) {
+      ast_records[handle->record].rule |= AstRecord::kRetained;
       pinned_ast_records =
           (std::max)(pinned_ast_records, size_t(handle->record) + 1);
       pinned_ast_kids = (std::max)(pinned_ast_kids, ast_kids.size());
@@ -1631,17 +1659,31 @@ public:
     // dropped start at those of the first dropped record that has any.
     for (auto i = records; i < ast_records.size(); i++) {
       const auto &r = ast_records[i];
-      if (!r.is_token() && !r.collapses()) {
+      if (r.kind() == AstRecord::Kind::node) {
         ast_kids.resize((std::max)(size_t(r.a), pinned_ast_kids));
         break;
       }
     }
+    while (!ast_externals.empty() && ast_externals.back().record >= records) {
+      ast_externals.pop_back();
+    }
     ast_records.resize(records);
     ast_record_count = static_cast<uint32_t>(records);
   }
-  // Puts in place of `value`, where it is a record's handle, the node the
-  // parse returns.
-  void materialize(std::any &value);
+
+  // A callback is about to read `value`, or the values of `vs`: the node of
+  // a record's handle among them takes its place, for good.
+  void observe(std::any &value) {
+    if (ast_record_count) { build_ast(value, true); }
+  }
+  void observe(SemanticValues &vs) {
+    if (ast_record_count) { observe_values(vs); }
+  }
+  CPPPEGLIB_NOINLINE void observe_values(SemanticValues &vs);
+  // Puts in place of `value`, where it is a record's handle, its node: one
+  // that a callback is about to read where `observed`, else one the parse
+  // returns (see materialize_ast).
+  CPPPEGLIB_NOINLINE void build_ast(std::any &value, bool observed);
 
   // What a match of a rule produced: its length, and the parts a caller may
   // read.
@@ -1810,7 +1852,7 @@ public:
     cache_success[idx] = true;
     cache_len[idx] = static_cast<uint32_t>(len);
     if (val.has_value()) {
-      pin_ast(val);
+      retain_ast(val);
       cache_values.insert_or_assign(idx, val);
     }
   }
@@ -2239,11 +2281,16 @@ constexpr bool takes_shortcuts() { return true; }
 #endif
 
 #ifdef CPPPEGLIB_TEST
-// The AST records that the last parse on this thread ended with, for the test
-// suite to check that a parse keeps none of the matches it dropped.
-inline size_t &ast_records_at_end() {
-  static thread_local size_t count = 0;
-  return count;
+// The AST records, and the nodes among the values of recorded matches, that
+// the last parse on this thread ended with, for the test suite to check that
+// a parse keeps none of the matches it dropped.
+struct AstRecordsAtEnd {
+  size_t records = 0;
+  size_t externals = 0;
+};
+inline AstRecordsAtEnd &ast_records_at_end() {
+  static thread_local AstRecordsAtEnd at_end;
+  return at_end;
 }
 #endif
 
@@ -2848,7 +2895,7 @@ public:
 
   void accept(Visitor &v) override;
 
-  std::any reduce(SemanticValues &vs, std::any &dt,
+  std::any reduce(Context &c, SemanticValues &vs, std::any &dt,
                   const std::any &predicate_data) const;
   bool records(const Context &c) const;
   std::any record(SemanticValues &vs) const;
@@ -4280,7 +4327,7 @@ private:
 
     auto result = [&](bool ret, size_t len) {
 #ifdef CPPPEGLIB_TEST
-      ast_records_at_end() = c.ast_records.size();
+      ast_records_at_end() = {c.ast_records.size(), c.ast_externals.size()};
 #endif
       c.error_info.resolve_expected_tokens();
       return Result{ret, c.recovered, len, c.error_info};
@@ -4311,7 +4358,9 @@ private:
           }
         }
       }
-      if (ret && returns_value && !vs.empty()) { c.materialize(vs.front()); }
+      if (ret && returns_value && !vs.empty()) {
+        c.build_ast(vs.front(), false);
+      }
       return result(ret, i);
     } catch (const NestingTooDeep &e) {
       c.error_info.set_nesting_too_deep(e.pos, e.rule->name, max_depth);
@@ -4889,6 +4938,7 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
       if (outer_->predicate) {
         std::string msg;
         std::any predicate_data;
+        c.observe(chvs);
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
           if (!msg.empty()) {
             c.give_message(
@@ -4896,11 +4946,12 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
           }
           m.len = kFail;
         } else if (!c.recovered) {
-          m.val = records(c) ? record(chvs) : reduce(chvs, dt, predicate_data);
+          m.val =
+              records(c) ? record(chvs) : reduce(c, chvs, dt, predicate_data);
         }
       } else if (!c.recovered) {
         std::any predicate_data;
-        m.val = records(c) ? record(chvs) : reduce(chvs, dt, predicate_data);
+        m.val = records(c) ? record(chvs) : reduce(c, chvs, dt, predicate_data);
       }
     } else {
       if (!outer_->error_message.empty()) {
@@ -4914,7 +4965,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
     }
 
     // Not from the scope_exit: an exception leaves no result to report.
-    if (outer_->leave) { outer_->leave(c, s, n, m.len, m.val, dt); }
+    if (outer_->leave) {
+      c.observe(m.val);
+      outer_->leave(c, s, n, m.len, m.val, dt);
+    }
   };
 
   if (outer_->is_left_recursive) {
@@ -4935,9 +4989,10 @@ inline size_t Holder::parse_core(const char *s, size_t n, SemanticValues &vs,
   return match.len;
 }
 
-inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
+inline std::any Holder::reduce(Context &c, SemanticValues &vs, std::any &dt,
                                const std::any &predicate_data) const {
   if (outer_->action && !outer_->disable_action) {
+    c.observe(vs);
     auto val = outer_->action(vs, dt, predicate_data);
     // Release the values now instead of when this scope is next used: the
     // AST node an action just returned is then held only by the caller, which
@@ -4953,18 +5008,21 @@ inline std::any Holder::reduce(SemanticValues &vs, std::any &dt,
 }
 
 // Records the match of the AST rule `rule`, which SemanticValues `vs` holds,
-// throwing where its AST action would on a value that is no node of its type.
-inline AstHandle Context::record_ast(const Definition &rule,
-                                     const SemanticValues &vs) {
+// throwing where its AST action would on a value that is no node of its type,
+// and returns its handle. The nodes among the values go to records of their
+// own. One that collapses over a node is built at once instead, as its AST
+// action takes that node over or copies it.
+inline std::any Context::record_ast(const Definition &rule,
+                                    SemanticValues &vs) {
   const auto &ast = rule.action.ast_action();
   assert(has_id(rule));
   assert(vs.choice_count() == rule.choice_count());
   assert(ast_record_count == ast_records.size() &&
-         ast_record_count < UINT32_MAX);
+         ast_record_count < UINT32_MAX - vs.size());
 
   AstRecord record;
   record.rule = static_cast<uint32_t>(rule.id);
-  assert(!(record.rule & AstRecord::kToken));
+  assert(!(record.rule & ~AstRecord::kRuleId));
   record.position = static_cast<uint32_t>(vs.sv().data() - s);
   record.length = static_cast<uint32_t>(vs.sv().size());
   record.choice = static_cast<uint32_t>(vs.choice());
@@ -4978,33 +5036,56 @@ inline AstHandle Context::record_ast(const Definition &rule,
     if (!rule_use[rule.id].values_are_nodes) {
       for (const auto &v : vs) {
         const auto *handle = std::any_cast<AstHandle>(&v);
-        if (!handle || *ast_rule(handle->record).action.ast_node_type() !=
-                           *ast.node_type) {
-          throw std::bad_any_cast();
-        }
+        const auto &type =
+            handle ? *ast_rule(handle->record).action.ast_node_type()
+                   : v.type();
+        if (type != *ast.node_type) { throw std::bad_any_cast(); }
       }
     }
     if (ast.collapse && vs.size() == 1) {
-      record.a = std::any_cast<AstHandle>(vs[0]).record;
+      const auto *handle = std::any_cast<AstHandle>(&vs[0]);
+      if (!handle) {
+        std::any dt;
+        return rule.action(vs, dt, std::any());
+      }
+      record.a = handle->record;
       record.b = AstRecord::kCollapsed;
       assert(record.a < ast_records.size());
     } else {
       record.a = static_cast<uint32_t>(ast_kids.size());
       record.b = static_cast<uint32_t>(vs.size());
-      for (const auto &v : vs) {
-        ast_kids.push_back(std::any_cast<AstHandle>(v).record);
-        assert(ast_kids.back() < ast_records.size());
+      for (auto &v : vs) {
+        if (const auto *handle = std::any_cast<AstHandle>(&v)) {
+          ast_kids.push_back(handle->record);
+          assert(ast_kids.back() < ast_records.size());
+          continue;
+        }
+        assert(v.type() == *ast.node_type);
+        ast_externals.push_back({ast_record_count, std::move(v)});
+        ast_records.push_back({0, 0, 0, 0,
+                               static_cast<uint32_t>(ast_externals.size() - 1),
+                               AstRecord::kExternal});
+        ast_kids.push_back(ast_record_count++);
       }
     }
   }
   ast_records.push_back(record);
-  return {ast_record_count++};
+  return AstHandle{ast_record_count++};
 }
 
-inline void Context::materialize(std::any &value) {
+inline void Context::observe_values(SemanticValues &vs) {
+  for (auto &v : vs) {
+    build_ast(v, true);
+  }
+}
+
+inline void Context::build_ast(std::any &value, bool observed) {
   if (const auto *handle = std::any_cast<AstHandle>(&value)) {
-    const auto &rule = ast_rule(handle->record);
-    value = rule.action.ast_action().materialize(*this, handle->record);
+    auto record = handle->record;
+    // Only a match is handed on as a handle.
+    assert(ast_records[record].kind() != AstRecord::Kind::external);
+    value = ast_rule(record).action.ast_action().materialize(*this, record,
+                                                             observed);
   }
 }
 
@@ -5015,10 +5096,10 @@ inline bool Holder::records(const Context &c) const {
 
 // Out of line, so that the parse of every match keeps reduce inlined.
 CPPPEGLIB_NOINLINE inline std::any Holder::record(SemanticValues &vs) const {
-  auto handle = vs.c_->record_ast(*outer_, vs);
+  auto val = vs.c_->record_ast(*outer_, vs);
   vs.clear();
   vs.tags.clear();
-  return handle;
+  return val;
 }
 
 inline const std::string &Holder::name() const { return outer_->name; }
@@ -5250,6 +5331,7 @@ inline size_t PrecedenceClimbing::parse_expression(
         if (c.records(rule_.action)) {
           val = c.record_ast(rule_, vs);
         } else {
+          c.observe(vs);
           val = rule_.action(vs, dt, empty_predicate_data);
         }
       } else if (!vs.empty()) {
@@ -5799,15 +5881,15 @@ Definition::rule_uses(bool builds_everything) const {
                      : analyze_rule_uses();
     decide_must_be_tried(uses);
     decide_parsed_only_where_muted(uses.by_id);
+    const auto &rules = analysis_.rules;
     uses.records_ast =
         !builds_everything &&
-        std::all_of(analysis_.rules.begin(), analysis_.rules.end(),
-                    [&](const Definition *rule) {
-                      return analysis_.indexes(*rule) && !rule->leave &&
-                             !rule->predicate &&
-                             (!rule->action ||
-                              rule->action.ast_action().materialize);
-                    });
+        std::all_of(
+            rules.begin(), rules.end(),
+            [&](const Definition *r) { return analysis_.indexes(*r); }) &&
+        std::any_of(rules.begin(), rules.end(), [](const Definition *r) {
+          return r->action.ast_action().materialize;
+        });
     rule_uses_ = std::make_shared<const RuleUses>(std::move(uses));
   }
   return rule_uses_;
@@ -6220,14 +6302,14 @@ inline void Context::reuse_or_grow(const char *a_s, const Holder &rule,
   parse_memoized(call, [&]() {
     parse(match);
     if (success(match.len)) {
-      pin_ast(match.val);
+      retain_ast(match.val);
       growing[i].seed = std::move(match);
       while (true) {
         forget_built(i);
         RuleMatch grown;
         parse(grown);
         if (!success(grown.len) || grown.len <= growing[i].seed.len) { break; }
-        pin_ast(grown.val);
+        retain_ast(grown.val);
         growing[i].seed = std::move(grown);
       }
       match = growing[i].seed;
@@ -8473,43 +8555,41 @@ std::shared_ptr<T> make_ast_node(const Definition &rule, const char *path,
   return ast;
 }
 
-// Makes `child` stand for the match of the collapsing AST rule `rule` over
-// it, renamed as the match.
+// Makes `node`, the single child of a match of the collapsing AST rule
+// `rule`, the node of the match. Pass `takes_over` only where nothing else can
+// see the child: it then stands in for the match itself, renamed as the match,
+// instead of a copy of it, and keeps its Annotation, which a copy would reset.
 template <typename T>
-void take_over_ast_node(T &child, const Definition &rule, size_t position,
-                        size_t length, size_t choice_count, size_t choice) {
-  if (!child.preserve_position) {
-    child.position = position;
-    child.length = length;
-  }
-  child.original_name = rule.ast_node_name;
-  child.original_tag = rule.ast_node_tag;
-  child.original_choice_count = choice_count;
-  child.original_choice = choice;
-}
-
-// The node of a match of the collapsing AST rule `rule` over the single node
-// `child`. Pass `takes_over` only where nothing else can see the child: it
-// then stands in for the match itself instead of a copy of it, and keeps its
-// Annotation, which a copy would reset.
-template <typename T>
-std::shared_ptr<T>
-make_collapsed_ast_node(const std::shared_ptr<T> &child, bool takes_over,
-                        const Definition &rule, size_t position, size_t length,
-                        size_t choice_count, size_t choice) {
+void make_collapsed_ast_node(std::shared_ptr<T> &node, bool takes_over,
+                             const Definition &rule, size_t position,
+                             size_t length, size_t choice_count,
+                             size_t choice) {
   if (!takes_over) {
-    return collapse_ast_node(*child, rule.ast_node_name.c_str(), position,
+    node = collapse_ast_node(*node, rule.ast_node_name.c_str(), position,
                              length, choice_count, choice);
+    return;
   }
-  take_over_ast_node(*child, rule, position, length, choice_count, choice);
-  return child;
+  if (!node->preserve_position) {
+    node->position = position;
+    node->length = length;
+  }
+  node->original_name = rule.ast_node_name;
+  node->original_tag = rule.ast_node_tag;
+  node->original_choice_count = choice_count;
+  node->original_choice = choice;
 }
 
 // The tree of the match `record` records, built as the AST actions of its
-// rules would have, but only now that it is kept: nothing has seen any node
-// of it, so a collapsing match takes over its child's node. Built in a loop,
-// as a tree can be deeper than the call stack allows.
-template <typename T> std::any materialize_ast(Context &c, uint32_t record) {
+// rules would have built it as they matched, with the nodes among the values
+// of its matches. A collapsing match takes over its child's node where nothing
+// else holds it, as its action does, else copies it. Where a callback is about
+// to read the tree (`observed`), the node of each retained record is bound to
+// it, so that every read of its handle gets that node, and those nodes are
+// moved in, as no record of the tree is built again. The tree a parse returns
+// binds nothing, and can hold a retained empty match twice, so it copies them.
+// Built in a loop, as a tree can be deeper than the call stack allows.
+template <typename T>
+std::any materialize_ast(Context &c, uint32_t record, bool observed) {
   struct Step {
     uint32_t record;
     bool children_built;
@@ -8519,33 +8599,47 @@ template <typename T> std::any materialize_ast(Context &c, uint32_t record) {
   while (!steps.empty()) {
     auto step = steps.back();
     steps.pop_back();
-    const auto &r = c.ast_records[step.record];
+    auto &r = c.ast_records[step.record];
+    auto kind = r.kind();
+
+    if (!step.children_built) {
+      if (r.rule & AstRecord::kBound) {
+        built.push_back(std::any_cast<const std::shared_ptr<T> &>(
+            c.ast_bound.at(step.record)));
+        continue;
+      }
+      if (kind == AstRecord::Kind::external) {
+        auto &node = c.ast_externals[r.a].node;
+        built.push_back(observed
+                            ? std::any_cast<std::shared_ptr<T>>(std::move(node))
+                            : std::any_cast<const std::shared_ptr<T> &>(node));
+        continue;
+      }
+      if (kind != AstRecord::Kind::token) {
+        steps.push_back({step.record, true});
+        if (kind == AstRecord::Kind::collapsed) {
+          steps.push_back({r.a, false});
+        } else {
+          for (auto i = r.b; i-- > 0;) {
+            steps.push_back({c.ast_kids[r.a + i], false});
+          }
+        }
+        continue;
+      }
+    }
+
     const auto &rule = c.ast_rule(step.record);
     const auto &made_for = *rule.action.ast_action().made_for;
-
-    if (r.is_token()) {
+    if (kind == AstRecord::Kind::token) {
       built.push_back(
           make_ast_token<T>(made_for, c.path, c.line_info(c.s + r.position),
                             std::string_view(c.s + r.a, r.b), r.position,
                             r.length, rule.choice_count(), r.choice));
-      continue;
-    }
-
-    if (!step.children_built) {
-      steps.push_back({step.record, true});
-      if (r.collapses()) {
-        steps.push_back({r.a, false});
-      } else {
-        for (auto i = r.b; i-- > 0;) {
-          steps.push_back({c.ast_kids[r.a + i], false});
-        }
-      }
-      continue;
-    }
-
-    if (r.collapses()) {
-      take_over_ast_node(*built.back(), made_for, r.position, r.length,
-                         rule.choice_count(), r.choice);
+    } else if (kind == AstRecord::Kind::collapsed) {
+      auto &child = built.back();
+      make_collapsed_ast_node(child, child.use_count() == 1, made_for,
+                              r.position, r.length, rule.choice_count(),
+                              r.choice);
     } else {
       auto first = built.end() - static_cast<std::ptrdiff_t>(r.b);
       std::vector<std::shared_ptr<T>> children(
@@ -8554,6 +8648,13 @@ template <typename T> std::any materialize_ast(Context &c, uint32_t record) {
       built.push_back(make_ast_node<T>(
           made_for, c.path, c.line_info(c.s + r.position), std::move(children),
           r.position, r.length, rule.choice_count(), r.choice));
+    }
+
+    if (observed && (r.rule & AstRecord::kRetained)) {
+      // Retained, so pinned: never dropped while bound.
+      assert(step.record < c.pinned_ast_records);
+      c.ast_bound.emplace(step.record, built.back());
+      r.rule |= AstRecord::kBound;
     }
   }
   return std::move(built.back());
@@ -8576,9 +8677,11 @@ void add_ast_action(Definition &rule, bool collapse = false) {
     if (collapse && vs.size() == 1) {
       const auto &child = std::any_cast<const std::shared_ptr<T> &>(vs[0]);
       // Besides vs, a memo or the user can hold the child.
-      return make_collapsed_ast_node(child, child.use_count() == 1, rule,
-                                     position, length, vs.choice_count(),
-                                     vs.choice());
+      auto takes_over = child.use_count() == 1;
+      auto node = child;
+      make_collapsed_ast_node(node, takes_over, rule, position, length,
+                              vs.choice_count(), vs.choice());
+      return node;
     }
 
     return make_ast_node<T>(rule, vs.path, vs.line_info(),

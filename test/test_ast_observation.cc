@@ -526,44 +526,52 @@ TEST(AstObservationTest, Collapse_takes_over_a_node_a_user_action_passed_up) {
 
 // A user action that hands up a node from below the one it is given, as a
 // leave handler can: the node in between goes, and the collapsing rule above
-// takes the one handed up over. With or without a tracer.
+// takes the one handed up over. With or without a tracer, and whether a
+// callback saw that node before or not.
 TEST(AstObservationTest, Collapse_takes_over_a_node_handed_up_from_below) {
   for (auto via_leave : {false, true}) {
     for (auto tracer : {false, true}) {
-      parser pg(R"(
-        S <- T (',' T)*
-        T <- U
-        U <- W
-        W <- '(' N ')' { no_ast_opt }
-        N <- < [0-9]+ >
-      )");
-      pg.enable_ast<MarkedAst>(true);
-      if (tracer) {
-        pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
-      }
-      std::vector<std::weak_ptr<MarkedAst>> seen;
-      auto unwrap = [&](const std::shared_ptr<MarkedAst> &w) {
-        auto child = w->nodes[0];
-        child->mark = 42;
-        seen.push_back(child);
-        return child;
-      };
-      if (via_leave) {
-        pg["W"].leave = [&](const Context &, const char *, size_t, size_t len,
-                            std::any &value, std::any &) {
-          if (success(len)) {
-            value = unwrap(std::any_cast<std::shared_ptr<MarkedAst>>(value));
-          }
+      for (auto seen_before : {false, true}) {
+        parser pg(R"(
+          S <- T (',' T)*
+          T <- U
+          U <- W
+          W <- '(' N ')' { no_ast_opt }
+          N <- < [0-9]+ >
+        )");
+        pg.enable_ast<MarkedAst>(true);
+        if (tracer) {
+          pg.enable_trace([](auto &&...) {}, [](auto &&...) {});
+        }
+        if (seen_before) {
+          pg["N"].leave = [](const Context &, const char *, size_t, size_t,
+                             std::any &, std::any &) {};
+        }
+        std::vector<std::weak_ptr<MarkedAst>> seen;
+        auto unwrap = [&](const std::shared_ptr<MarkedAst> &w) {
+          auto child = w->nodes[0];
+          child->mark = 42;
+          seen.push_back(child);
+          return child;
         };
-      } else {
-        pg["U"] = [&](const SemanticValues &vs) {
-          return unwrap(std::any_cast<std::shared_ptr<MarkedAst>>(vs[0]));
-        };
+        if (via_leave) {
+          pg["W"].leave = [&](const Context &, const char *, size_t, size_t len,
+                              std::any &value, std::any &) {
+            if (success(len)) {
+              value = unwrap(std::any_cast<std::shared_ptr<MarkedAst>>(value));
+            }
+          };
+        } else {
+          pg["U"] = [&](const SemanticValues &vs) {
+            return unwrap(std::any_cast<std::shared_ptr<MarkedAst>>(vs[0]));
+          };
+        }
+        std::shared_ptr<MarkedAst> ast;
+        ASSERT_TRUE(pg.parse("(1),(2)", ast));
+        EXPECT_EQ("N/T 42 seen\nN/T 42 seen\n", marked_children(ast, seen))
+            << "via_leave=" << via_leave << " tracer=" << tracer
+            << " seen_before=" << seen_before;
       }
-      std::shared_ptr<MarkedAst> ast;
-      ASSERT_TRUE(pg.parse("(1),(2)", ast));
-      EXPECT_EQ("N/T 42 seen\nN/T 42 seen\n", marked_children(ast, seen))
-          << "via_leave=" << via_leave << " tracer=" << tracer;
     }
   }
 }
@@ -654,6 +662,48 @@ TEST(AstObservationTest, Empty_match_under_two_parents) {
   EXPECT_NE(seen, ast->nodes[0]->nodes[0]);
   EXPECT_EQ(seen, ast->nodes[1]->nodes[0]);
   EXPECT_EQ(ast->nodes[1], seen->parent.lock());
+}
+
+// Packrat hands the match of R to Q again after P's alternative failed. A
+// predicate on Q sees the node P's did. Without one, that node is the tree's,
+// unless the rules collapse: as R's memo keeps it, Q copies it.
+TEST(AstObservationTest, Memoized_match_seen_again_is_the_same_node) {
+  for (auto collapse : {false, true}) {
+    for (auto q_sees : {false, true}) {
+      parser pg(R"(
+        S <- P 'x' / Q 'y'
+        P <- R
+        Q <- R
+        R <- < [0-9]+ >
+      )");
+      pg.enable_packrat_parsing();
+      pg.enable_ast(collapse);
+      std::weak_ptr<Ast> seen_by_p;
+      std::string seen_by_q;
+      pg["P"].predicate = [&](const SemanticValues &vs, const std::any &,
+                              std::string &) {
+        seen_by_p = std::any_cast<std::shared_ptr<Ast>>(vs[0]);
+        return true;
+      };
+      if (q_sees) {
+        pg["Q"].predicate = [&](const SemanticValues &vs, const std::any &,
+                                std::string &) {
+          auto node = std::any_cast<std::shared_ptr<Ast>>(vs[0]);
+          seen_by_q = node == seen_by_p.lock() ? "same" : "other";
+          return true;
+        };
+      }
+      std::shared_ptr<Ast> ast;
+      ASSERT_TRUE(pg.parse("1y", ast))
+          << "collapse=" << collapse << " q_sees=" << q_sees;
+      if (q_sees) {
+        EXPECT_EQ("same", seen_by_q) << "collapse=" << collapse;
+      } else {
+        auto r = collapse ? ast : ast->nodes[0]->nodes[0];
+        EXPECT_EQ(!collapse, r == seen_by_p.lock()) << "collapse=" << collapse;
+      }
+    }
+  }
 }
 
 // An empty match of Z under T, which collapses over it, and under B. The two
@@ -1027,13 +1077,15 @@ TEST(AstObservationTest, Callbacks_set_after_a_parse) {
 
 // A parse that backtracks drops the records of the matches it drops, by a
 // choice, a repetition or an option: without packrat, it ends with those of
-// its tree alone, not with as many as it made.
+// its tree alone, not with as many as it made. So does one where a leave
+// handler sees the nodes of N, with one record more for each N in its tree,
+// which holds that node among its parent's children.
 TEST(AstObservationTest, Parse_keeps_no_records_of_dropped_matches) {
-  std::function<size_t(const std::shared_ptr<Ast> &)> nodes =
-      [&](const std::shared_ptr<Ast> &ast) {
-        size_t n = 1;
+  std::function<size_t(const std::shared_ptr<Ast> &, const char *)> nodes =
+      [&](const std::shared_ptr<Ast> &ast, const char *name) {
+        size_t n = !name || ast->name == name;
         for (const auto &child : ast->nodes) {
-          n += nodes(child);
+          n += nodes(child, name);
         }
         return n;
       };
@@ -1052,11 +1104,21 @@ TEST(AstObservationTest, Parse_keeps_no_records_of_dropped_matches) {
        "[1,[2,[3,[4,5]]]]"},
   };
   for (const auto &[grammar, input] : cases) {
-    parser pg(grammar);
-    ASSERT_TRUE(pg) << grammar;
-    pg.enable_ast();
-    std::shared_ptr<Ast> ast;
-    ASSERT_TRUE(pg.parse(input, ast)) << grammar;
-    EXPECT_EQ(nodes(ast), ast_records_at_end()) << grammar;
+    for (auto seen : {false, true}) {
+      parser pg(grammar);
+      ASSERT_TRUE(pg) << grammar;
+      pg.enable_ast();
+      if (seen) {
+        pg["N"].leave = [](const Context &, const char *, size_t, size_t,
+                           std::any &, std::any &) {};
+      }
+      std::shared_ptr<Ast> ast;
+      ASSERT_TRUE(pg.parse(input, ast)) << grammar;
+      auto seen_nodes = seen ? nodes(ast, "N") : 0;
+      EXPECT_EQ(nodes(ast, nullptr) + seen_nodes, ast_records_at_end().records)
+          << grammar << " seen=" << seen;
+      EXPECT_EQ(seen_nodes, ast_records_at_end().externals)
+          << grammar << " seen=" << seen;
+    }
   }
 }
