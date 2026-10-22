@@ -8158,59 +8158,88 @@ private:
 struct EmptyType {};
 using Ast = AstBase<EmptyType>;
 
+// The node of a match of the AST rule `rule` that is a token.
+template <typename T>
+std::shared_ptr<T> make_ast_token(const Definition &rule, const char *path,
+                                  std::pair<size_t, size_t> line,
+                                  std::string_view token, size_t position,
+                                  size_t length, size_t choice_count,
+                                  size_t choice) {
+  return std::make_shared<T>(path, line.first, line.second,
+                             rule.ast_node_name.c_str(), token, position,
+                             length, choice_count, choice, rule.no_ast_opt);
+}
+
+// The node of a match of the AST rule `rule` over the nodes `children`.
+template <typename T>
+std::shared_ptr<T> make_ast_node(const Definition &rule, const char *path,
+                                 std::pair<size_t, size_t> line,
+                                 std::vector<std::shared_ptr<T>> children,
+                                 size_t position, size_t length,
+                                 size_t choice_count, size_t choice) {
+  // Construct with no children, then move them in: passing the vector to the
+  // constructor would bind to its `const &` parameter and copy the whole
+  // thing (plus a reference count bump per child).
+  auto ast = std::make_shared<T>(path, line.first, line.second,
+                                 rule.ast_node_name.c_str(),
+                                 std::vector<std::shared_ptr<T>>(), position,
+                                 length, choice_count, choice, rule.no_ast_opt);
+  ast->nodes = std::move(children);
+  for (auto &node : ast->nodes) {
+    node->parent = ast;
+  }
+  return ast;
+}
+
+// The node of a match of the collapsing AST rule `rule` over the single node
+// `child`. Pass `takes_over` only where nothing else can see the child: it
+// then stands in for the match itself instead of a copy of it, and keeps its
+// Annotation, which a copy would reset.
+template <typename T>
+std::shared_ptr<T>
+make_collapsed_ast_node(const std::shared_ptr<T> &child, bool takes_over,
+                        const Definition &rule, size_t position, size_t length,
+                        size_t choice_count, size_t choice) {
+  if (!takes_over) {
+    return collapse_ast_node(*child, rule.ast_node_name.c_str(), position,
+                             length, choice_count, choice);
+  }
+  if (!child->preserve_position) {
+    child->position = position;
+    child->length = length;
+  }
+  child->original_name = rule.ast_node_name;
+  child->original_tag = rule.ast_node_tag;
+  child->original_choice_count = choice_count;
+  child->original_choice = choice;
+  return child;
+}
+
 template <typename T = Ast>
 void add_ast_action(Definition &rule, bool collapse = false) {
   rule.ast_node_name = rule.node_name();
   rule.ast_node_tag = str2tag(rule.ast_node_name);
   rule.action = [&rule, collapse](const SemanticValues &vs) {
-    const char *node_name = rule.ast_node_name.c_str();
     auto position = static_cast<size_t>(std::distance(vs.ss, vs.sv().data()));
     auto length = vs.sv().length();
 
     if (rule.is_token()) {
-      auto line = vs.line_info();
-      return std::make_shared<T>(
-          vs.path, line.first, line.second, node_name, vs.token(), position,
-          length, vs.choice_count(), vs.choice(), rule.no_ast_opt);
+      return make_ast_token<T>(rule, vs.path, vs.line_info(), vs.token(),
+                               position, length, vs.choice_count(),
+                               vs.choice());
     }
 
     if (collapse && vs.size() == 1) {
       const auto &child = std::any_cast<const std::shared_ptr<T> &>(vs[0]);
-
-      // Unless something else holds the child (the packrat cache, a user
-      // action), it stands in for this node itself instead of a copy of it.
-      // It then keeps its Annotation, which a copy would reset.
-      if (child.use_count() == 1) {
-        if (!child->preserve_position) {
-          child->position = position;
-          child->length = length;
-        }
-        child->original_name = rule.ast_node_name;
-        child->original_tag = rule.ast_node_tag;
-        child->original_choice_count = vs.choice_count();
-        child->original_choice = vs.choice();
-        return child;
-      }
-
-      return collapse_ast_node(*child, node_name, position, length,
-                               vs.choice_count(), vs.choice());
+      // Besides vs, a memo or the user can hold the child.
+      return make_collapsed_ast_node(child, child.use_count() == 1, rule,
+                                     position, length, vs.choice_count(),
+                                     vs.choice());
     }
 
-    auto line = vs.line_info();
-
-    // Construct with no children, then move the collected ones in: passing
-    // the vector to the constructor would bind to its `const &` parameter
-    // and copy the whole thing (plus a reference count bump per child).
-    auto ast =
-        std::make_shared<T>(vs.path, line.first, line.second, node_name,
-                            std::vector<std::shared_ptr<T>>(), position, length,
-                            vs.choice_count(), vs.choice(), rule.no_ast_opt);
-    ast->nodes = vs.transform<std::shared_ptr<T>>();
-
-    for (auto &node : ast->nodes) {
-      node->parent = ast;
-    }
-    return ast;
+    return make_ast_node<T>(rule, vs.path, vs.line_info(),
+                            vs.transform<std::shared_ptr<T>>(), position,
+                            length, vs.choice_count(), vs.choice());
   };
   rule.action.template declare_ast_action<std::shared_ptr<T>>(collapse);
 }
