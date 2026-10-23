@@ -1356,6 +1356,33 @@ TEST(AstObservationTest,
   }
 }
 
+// A chain of collapsing matches leaves one record for the collapsed levels,
+// and the tree is the one a parse without records builds, also where a memo
+// holds a level of the chain and a second parent reuses it.
+TEST(AstObservationTest, Ast_collapsed_chain_is_recorded_once) {
+  const char *chain = "S <- A\n A <- B\n B <- C\n C <- D\n D <- N\n"
+                      " N <- < [0-9] >";
+  // The collapsed levels below M are held by its memo.
+  const char *shared = "S <- P 'x' / Q 'y'\n P <- M N\n Q <- M N\n M <- B\n"
+                       " B <- C\n C <- < [0-9] >\n N <- < [a-z] >";
+  auto tree = [](const char *grammar, const char *input, bool packrat) {
+    parser pg(grammar);
+    EXPECT_TRUE(pg) << grammar;
+    if (packrat) { pg.enable_packrat_parsing(); }
+    pg.enable_ast(true);
+    std::shared_ptr<Ast> ast;
+    EXPECT_TRUE(pg.parse(input, ast)) << grammar;
+    return std::make_pair(ast_to_s(ast), ast_records_at_end().records);
+  };
+  EXPECT_EQ(2u, tree(chain, "1", true).second);
+  for (auto [grammar, input] : {std::pair{chain, "1"}, std::pair{shared, "1ax"},
+                                std::pair{shared, "1ay"}}) {
+    EXPECT_EQ(tree(grammar, input, false).first,
+              tree(grammar, input, true).first)
+        << grammar << " " << input;
+  }
+}
+
 // The array the records are kept in keeps its entries where they are as it
 // grows, and keeps their values as it shrinks across a chunk's edge and
 // grows again.

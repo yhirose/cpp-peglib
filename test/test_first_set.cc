@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <peglib.h>
 #include <sstream>
+#include <thread>
 
 #include "grammar_file.h"
 
@@ -853,4 +854,478 @@ TEST(FirstSetTest, Shortcuts_go_unnoticed) {
       check(std::string(c.input).insert(i, "?"));
     }
   }
+}
+
+// A rule that nothing runs around, no memo holds and nobody reads the token of
+// hands its value to its caller as it makes it. The trees are those of a parse
+// that enters every rule the long way, in a chain of such rules and where a
+// rule in the chain has something to run, a memo or a seed.
+TEST(FirstSetTest, Plain_entry_goes_unnoticed) {
+  struct Case {
+    std::string grammar;
+    std::string input;
+    std::function<void(parser &)> set_up = [](parser &) {};
+  };
+  const std::string chain = R"(
+    S  <- A (',' A)*
+    A  <- B Ta*
+    Ta <- '+' B
+    B  <- C Tb*
+    Tb <- '*' C
+    C  <- < [0-9]+ > / '(' S ')'
+    %whitespace <- [ ]*
+  )";
+  const Case cases[] = {
+      {chain, "1 + 2 * (3, 4) , 5"},
+      {chain, "1 + 2 * (3, 4) , 5",
+       [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {chain, "1 + 2 * (3, 4) , 5",
+       [](parser &pg) {
+         pg.enable_packrat_parsing();
+         pg["B"].leave = [](const Context &, const char *, size_t, size_t,
+                            std::any &, std::any &) {};
+       }},
+      {chain, "1 + 2 * (3, 4) , 5",
+       [](parser &pg) {
+         pg.enable_packrat_parsing();
+         pg["B"].predicate = [](const SemanticValues &, const std::any &,
+                                std::string &, std::any &) { return true; };
+       }},
+      {chain, "1 + 2 * (3, 4) , 5",
+       [](parser &pg) { pg["C"].error_message = "a number"; }},
+      {R"(
+        S <- E ';'
+        E <- E '+' T / T
+        T <- F
+        F <- G
+        G <- < [0-9] >
+      )",
+       "1+2+3;", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      // Tokens that are runs of ASCII characters.
+      {R"(
+        S   <- Item (',' Item)*
+        Item <- Num / Id
+        Num <- < [0-9]+ >
+        Id  <- < [a-z_]i [a-z0-9_]i* >
+        %whitespace <- [ ]*
+      )",
+       "12 , ab_1, 3x ,Q"},
+      // Keywords as a choice of literals, with a %word.
+      {R"(
+        S   <- (Kw / Id) (',' (Kw / Id))* ';'
+        Kw  <- 'IN'i / 'INNER'i / 'INT'i / 'INTO'i / 'INTERSECT'i / 'JOIN'i /
+               'ON'i / 'ORDER'i / 'IN'i / 'AS'i / 'ASC'i / 'ALL'i
+        Id  <- < [a-z_]i [a-z0-9_]i* >
+        %whitespace <- [ ]*
+        %word <- [a-zA-Z0-9_]
+      )",
+       "in, INNER , Into,inx, intersect ,int ,asc ,AS;",
+       [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S   <- Kw+ ';'
+        Kw  <- 'IN'i / 'INNER'i / 'INT'i / 'INTO'i / 'JOIN'i / 'ON'i / 'ORDER'i /
+               'AS'i / 'ASC'i / 'a-b' / 'ALL'i
+        %whitespace <- [ ]*
+        %word <- [a-zA-Z0-9_]
+      )",
+       "in inner into a-b asc;", [](parser &pg) { pg.enable_ast(); }},
+      // Chains where tails start, the terminal gives no value, a level is
+      // entered again at the position it forwards from, and recovery runs.
+      {R"(
+        S   <- Add
+        Add <- Mul AddT*
+        AddT <- '+' Mul
+        Mul <- Num MulT*
+        MulT <- '*' Num
+        Num <- < [0-9]+ > / '(' Add ')'
+        %whitespace <- [ ]*
+      )",
+       "1 + 2 * (3 + 4) + 5", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S  <- R0 'z'
+        R0 <- R1 X*
+        R1 <- T
+        ~T <- 'a'
+        X  <- 'x'
+      )",
+       "az", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S  <- L0
+        L0 <- L1 T*
+        L1 <- E
+        E  <- 'x'?
+        T  <- L1 'y'
+      )",
+       "y", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S   <- L0 ';'
+        L0  <- L1 T*
+        L1  <- E
+        E   <- 'a' 'b'^bad
+        bad <- (!';' .)*
+        T   <- 'x'
+      )",
+       "ac;", [](parser &pg) { pg.enable_packrat_parsing(); }},
+      {R"(
+        S <- &P Q
+        P <- M
+        Q <- M N
+        M <- B
+        B <- C
+        C <- < [0-9] >
+        N <- < [a-z] >
+      )",
+       "1a", [](parser &pg) { pg.enable_packrat_parsing(); }},
+  };
+  for (const auto &c : cases) {
+    for (auto collapse : {false, true}) {
+      parser pg(c.grammar);
+      ASSERT_TRUE(!!pg) << c.grammar;
+      c.set_up(pg);
+      pg.enable_ast(collapse);
+      auto tree = [&] {
+        std::shared_ptr<Ast> ast;
+        auto matched = pg.parse(c.input, ast);
+        return std::to_string(matched) + (ast ? ast_to_s(ast) : "");
+      };
+      auto taken = tree();
+      takes_shortcuts() = false;
+      auto untaken = tree();
+      takes_shortcuts() = true;
+      EXPECT_EQ(untaken, taken) << c.grammar << " collapse=" << collapse;
+    }
+  }
+}
+
+// A rule entered the plain way is counted as a packrat miss, as one entered
+// the long way is.
+TEST(FirstSetTest, Plain_entry_is_counted_as_a_packrat_miss) {
+  parser pg("S <- R? 'y'\n R <- E 'x'\n E <- 'e'?");
+  ASSERT_TRUE(!!pg);
+  pg.enable_packrat_parsing();
+  pg.enable_ast(true);
+  pg["S"].collect_packrat_stats = true;
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(pg.parse("exy", ast));
+  EXPECT_EQ(1u, tries(pg, "R"));
+  EXPECT_EQ(1u, tries(pg, "E"));
+}
+
+// A rule that is parsed without whitespace is not entered the plain way, also
+// where that is set between two parses.
+TEST(FirstSetTest, Plain_entry_follows_no_whitespace_set_between_parses) {
+  parser pg(R"(
+    S <- R
+    R <- 'a' 'b'
+    %whitespace <- [ ]*
+  )");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  auto matches = [&](const char *input) {
+    std::shared_ptr<Ast> ast;
+    return pg.parse(input, ast);
+  };
+  EXPECT_TRUE(matches("a b"));
+  pg["R"].no_whitespace = true;
+  EXPECT_FALSE(matches("a b"));
+  EXPECT_TRUE(matches("ab"));
+  pg["R"].no_whitespace = false;
+  EXPECT_TRUE(matches("a b"));
+}
+
+// A value handed on by a chain of rules that forward it has the tag of the
+// outermost rule, as it has where each level gives it on in turn.
+TEST(FirstSetTest, Forwarded_value_has_the_tag_of_the_outermost_rule) {
+  for (auto fuses : {true, false}) {
+    parser pg(R"(
+      S  <- R0 'z'
+      R0 <- R1 X*
+      R1 <- T
+      T  <- 'a'
+      X  <- 'x'
+    )");
+    ASSERT_TRUE(!!pg);
+    pg.enable_packrat_parsing();
+    pg["T"] = [](const SemanticValues &) { return 1; };
+    pg["S"] = [](const SemanticValues &vs) {
+      return static_cast<unsigned int>(vs.tags.at(0));
+    };
+    takes_shortcuts() = fuses;
+    unsigned int tag = 0;
+    EXPECT_TRUE(pg.parse("az", tag));
+    takes_shortcuts() = true;
+    EXPECT_EQ(str2tag("R0"), tag) << fuses;
+  }
+}
+
+// Whether an AST rule collapses can be changed between two parses.
+TEST(FirstSetTest, Forwarding_follows_collapse_set_between_parses) {
+  const char *grammar = R"(
+    S  <- R0 'z'
+    R0 <- R1 X*
+    R1 <- T
+    T  <- < 'a' >
+    X  <- 'x'
+  )";
+  auto tree = [](parser &pg) {
+    std::shared_ptr<Ast> ast;
+    EXPECT_TRUE(pg.parse("az", ast));
+    return ast_to_s(ast);
+  };
+  parser changed(grammar);
+  ASSERT_TRUE(!!changed);
+  changed.enable_packrat_parsing();
+  changed.enable_ast(true);
+  tree(changed);
+  add_ast_action<Ast>(changed["R1"], false);
+
+  parser fresh(grammar);
+  fresh.enable_packrat_parsing();
+  fresh.enable_ast(true);
+  add_ast_action<Ast>(fresh["R1"], false);
+  EXPECT_EQ(tree(fresh), tree(changed));
+}
+
+// What a rule is set to can be changed between two parses by any of the ways
+// it can be set: the parse after it goes by the new setting, as it does where
+// the setting was made before the first parse.
+TEST(FirstSetTest, Rule_settings_changed_between_parses_are_seen) {
+  const char *grammar = R"(
+    S  <- R0 'z'
+    R0 <- R1 X*
+    R1 <- T
+    T  <- < 'a' >
+    X  <- 'x'
+  )";
+  struct Outcome {
+    bool matched;
+    std::string tree;
+    int calls;
+    bool operator==(const Outcome &rhs) const {
+      return matched == rhs.matched && tree == rhs.tree && calls == rhs.calls;
+    }
+  };
+  using Setting = std::function<void(parser &, int &)>;
+  const std::pair<const char *, Setting> settings[] = {
+      {"enter",
+       [](parser &pg, int &calls) {
+         pg["R1"].enter = [&](const Context &, const char *, size_t,
+                              std::any &) { calls++; };
+       }},
+      {"leave",
+       [](parser &pg, int &calls) {
+         pg["R1"].leave = [&](const Context &, const char *, size_t, size_t,
+                              std::any &, std::any &) { calls++; };
+       }},
+      {"predicate",
+       [](parser &pg, int &calls) {
+         pg["T"].predicate = [&](const SemanticValues &, const std::any &,
+                                 std::string &) {
+           calls++;
+           return false;
+         };
+       }},
+      {"ignoreSemanticValue",
+       [](parser &pg, int &) { pg["R1"].ignoreSemanticValue = true; }},
+      {"disable_action",
+       [](parser &pg, int &) { pg["R1"].disable_action = true; }},
+      {"error_message",
+       [](parser &pg, int &calls) {
+         pg["T"].error_message = "a t";
+         pg["T"].error_message += "!";
+         pg.set_logger([&](size_t, size_t, const std::string &msg) {
+           if (msg.find("a t!") != std::string::npos) { calls++; }
+         });
+       }},
+  };
+  for (const auto &[name, set] : settings) {
+    for (auto input : {"az", "xz"}) {
+      auto outcome = [&](bool set_before_first_parse) {
+        parser pg(grammar);
+        EXPECT_TRUE(!!pg);
+        pg.enable_packrat_parsing();
+        pg.enable_ast(true);
+        int calls = 0;
+        auto run = [&]() {
+          std::shared_ptr<Ast> ast;
+          auto matched = pg.parse(input, ast);
+          return Outcome{matched, ast ? ast_to_s(ast) : "", calls};
+        };
+        if (set_before_first_parse) {
+          set(pg, calls);
+          return run();
+        }
+        run();
+        set(pg, calls);
+        calls = 0;
+        return run();
+      };
+      auto before = outcome(true);
+      auto after = outcome(false);
+      EXPECT_TRUE(before == after) << name << " " << input;
+    }
+  }
+}
+
+// A callback of a rule is copied, moved and set as a std::function is.
+TEST(FirstSetTest, Rule_callbacks_copy_like_functions) {
+  parser pg("S <- 'a'\n T <- 'b'\n");
+  ASSERT_TRUE(!!pg);
+  int calls = 0;
+  pg["S"].enter = [&](const Context &, const char *, size_t, std::any &) {
+    calls++;
+  };
+  auto &enter = pg["S"].enter;
+  std::function<void(const Context &, const char *, size_t, std::any &)> plain =
+      enter;
+  auto copy = enter;
+  decltype(pg["T"].enter) other = enter;
+  pg["T"].enter = enter;
+  pg["T"].enter = plain;
+  pg["T"].enter = std::move(other);
+  ASSERT_TRUE(!!pg["T"].enter);
+  pg["T"].enter = nullptr;
+  EXPECT_FALSE(!!pg["T"].enter);
+  EXPECT_TRUE(!!copy);
+  EXPECT_TRUE(pg.parse("a"));
+  EXPECT_EQ(1, calls);
+}
+
+// Trees are made and released over and over, also by other threads than the
+// ones that made them.
+TEST(FirstSetTest, Trees_made_in_one_thread_are_released_in_another) {
+  parser pg("S <- A (',' A)*\n A <- < [a-z]+ >\n %whitespace <- [ ]*\n");
+  ASSERT_TRUE(!!pg);
+  pg.enable_ast();
+  std::vector<std::shared_ptr<Ast>> trees;
+  for (int round = 0; round < 50; round++) {
+    for (int i = 0; i < 200; i++) {
+      std::shared_ptr<Ast> ast;
+      ASSERT_TRUE(pg.parse("ab, cd, ef", ast));
+      trees.push_back(ast);
+    }
+    std::thread other([moved = std::move(trees)]() mutable { moved.clear(); });
+    other.join();
+    trees.clear();
+  }
+  std::shared_ptr<Ast> ast;
+  ASSERT_TRUE(pg.parse("x, y", ast));
+  EXPECT_EQ(2u, ast->nodes.size());
+}
+
+// A keyword of ignore-case letters is a word only where both cases of its
+// letters are word characters.
+TEST(FirstSetTest, Ignore_case_keywords_with_a_word_of_lower_case_only) {
+  parser pg(R"(
+    S <- K 'X'?
+    K <- 'select'i / 'from'i / 'where'i / 'and'i / 'or'i / 'not'i / 'in'i / 'is'i
+    %word <- [a-z]
+  )");
+  ASSERT_TRUE(!!pg);
+  for (const char *input : {"SELECT", "Select", "SELECTX", "select"}) {
+    EXPECT_TRUE(pg.parse(input)) << input;
+  }
+}
+
+// Analyses made and dropped one after another can be at one address.
+TEST(FirstSetTest, Rule_indexing_is_not_kept_for_a_reused_analysis_address) {
+  Definition R, Q, T;
+  Q <= chr('a');
+  R <= seq(chr('a'), chr('a'));
+  T <= seq(Q, chr('z'));
+  T.enablePackratParsing = true;
+  auto once = [&](bool second) {
+    Definition S;
+    if (!second) {
+      S <= seq(R, chr('y'));
+    } else {
+      S <= cho(seq(Q, chr('x')), seq(R, chr('y')));
+    }
+    S.enablePackratParsing = true;
+    return S.parse("aay").ret;
+  };
+  EXPECT_TRUE(once(false));
+  EXPECT_TRUE(T.parse("az").ret);
+  EXPECT_TRUE(once(true));
+}
+
+// Every way of setting a rule's callback or message is seen by the next
+// parse, each on a parser that has parsed before.
+TEST(FirstSetTest, Rule_settings_set_by_copy_or_nothing_are_seen) {
+  auto make = [] {
+    auto pg = std::make_unique<parser>("S <- A 'x'\n A <- 'a'\n");
+    EXPECT_TRUE(!!*pg);
+    EXPECT_TRUE(pg->parse("ax"));
+    return pg;
+  };
+
+  int entered = 0;
+  Definition donor;
+  donor.enter = [&](const Context &, const char *, size_t, std::any &) {
+    entered++;
+  };
+  auto copied = make();
+  (*copied)["A"].enter = donor.enter;
+  EXPECT_TRUE(copied->parse("ax"));
+  EXPECT_EQ(1, entered);
+  (*copied)["A"].enter = {};
+  EXPECT_TRUE(copied->parse("ax"));
+  EXPECT_EQ(1, entered);
+
+  std::string reported;
+  Definition message_donor;
+  message_donor.error_message = "A is missing";
+  auto messaged = make();
+  messaged->set_logger(
+      [&](size_t, size_t, const std::string &msg) { reported = msg; });
+  (*messaged)["A"].error_message = message_donor.error_message;
+  EXPECT_FALSE(messaged->parse("bx"));
+  EXPECT_EQ("A is missing", reported);
+}
+
+// A parse reuses the value frames the last parse of the thread left, also
+// while another parse of the thread is under way.
+TEST(FirstSetTest, Parses_nested_in_actions_do_not_share_value_frames) {
+  parser inner("S <- < [a-z]+ > ' ' < [a-z]+ >\n");
+  ASSERT_TRUE(!!inner);
+  inner["S"] = [](const SemanticValues &vs) { return vs.token_to_string(1); };
+
+  parser outer("S <- A ' ' A\n A <- < [0-9]+ >\n");
+  ASSERT_TRUE(!!outer);
+  outer["A"] = [&](const SemanticValues &vs) {
+    std::string tail;
+    EXPECT_TRUE(inner.parse("ab cd", tail));
+    return vs.token_to_string() + tail;
+  };
+  outer["S"] = [](const SemanticValues &vs) {
+    return std::any_cast<std::string>(vs[0]) + "," +
+           std::any_cast<std::string>(vs[1]);
+  };
+  for (int i = 0; i < 3; i++) {
+    std::string result;
+    ASSERT_TRUE(outer.parse("12 34", result));
+    EXPECT_EQ("12cd,34cd", result);
+  }
+}
+
+// A rule's message is read and cleared as a string would be, and clearing it
+// is seen by the next parse.
+TEST(FirstSetTest, Rule_message_reads_and_clears_like_a_string) {
+  parser pg("S <- A 'x'\n A <- 'a'\n");
+  ASSERT_TRUE(!!pg);
+  std::string reported;
+  pg.set_logger(
+      [&](size_t, size_t, const std::string &msg) { reported = msg; });
+  pg["A"].error_message = "A is missing";
+  EXPECT_FALSE(pg.parse("bx"));
+  EXPECT_EQ("A is missing", reported);
+
+  EXPECT_EQ(12u, pg["A"].error_message.length());
+  std::string_view view = pg["A"].error_message;
+  EXPECT_EQ("A is missing", view);
+
+  pg["A"].error_message.clear();
+  EXPECT_TRUE(pg["A"].error_message.empty());
+  EXPECT_FALSE(pg.parse("bx"));
+  EXPECT_NE("A is missing", reported);
 }
