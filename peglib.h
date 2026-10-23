@@ -503,80 +503,175 @@ template <typename T> T token_to_number_(std::string_view sv) {
 
 class Trie {
 public:
+  // A double-array trie: base_ and check_ hold the transitions, and a word's
+  // end is a child labelled 0 whose base_ holds -(id + 1). Built iteratively,
+  // so a long word cannot exhaust the call stack.
   Trie(const std::vector<std::string> &items, bool ignore_case)
-      : ignore_case_(ignore_case), items_count_(items.size()) {
-    size_t id = 0;
-    for (const auto &item : items) {
-      const auto &s = ignore_case ? to_lower(item) : item;
-      if (item.size() > max_len_) { max_len_ = item.size(); }
-      for (size_t len = 1; len <= item.size(); len++) {
-        auto last = len == item.size();
-        std::string_view sv(s.data(), len);
-        auto it = dic_.find(sv);
-        if (it == dic_.end()) {
-          it = dic_.emplace(sv, Info{true, false, 0}).first;
-        }
-        auto &info = it->second;
-        // A word listed twice keeps its first id, as in a choice.
-        if (!last) {
-          info.done = false;
-        } else if (!info.match) {
-          info.match = true;
-          info.id = id;
-        }
-      }
-      id++;
+      : ignore_case_(ignore_case) {
+    for (int i = 0; i < 256; i++) {
+      fold_[i] = static_cast<unsigned char>(
+          ignore_case ? to_lower(static_cast<char>(i)) : static_cast<char>(i));
     }
+    words_.assign(items.size(), std::string());
+    std::vector<Key> keys;
+    keys.reserve(items.size());
+    for (size_t id = 0; id < items.size(); id++) {
+      if (items[id].empty()) { continue; } // length 0 matches nothing
+      std::string text = items[id];
+      for (auto &ch : text) {
+        ch = static_cast<char>(fold_[static_cast<unsigned char>(ch)]);
+      }
+      keys.push_back(Key{std::move(text), id});
+    }
+    // Stable, so of equal words the first listed keeps its id. The bytes are
+    // compared as unsigned, so the keys under one child are contiguous.
+    std::stable_sort(keys.begin(), keys.end(), [](const Key &a, const Key &b) {
+      return a.text < b.text;
+    });
+    std::vector<Key> distinct;
+    distinct.reserve(keys.size());
+    for (auto &k : keys) {
+      if (distinct.empty() || distinct.back().text != k.text) {
+        distinct.push_back(std::move(k));
+      }
+    }
+    for (const auto &k : distinct) {
+      words_[k.id] = k.text;
+    }
+    build(distinct);
   }
 
+  // The longest word that is a prefix of text[0..text_len), and its id.
+  // Returns 0 when there is none. The word boundary is the caller's to check.
   size_t match(const char *text, size_t text_len, size_t &id) const {
-    auto limit = std::min(text_len, max_len_);
-    std::string lower_text;
-    if (ignore_case_) {
-      lower_text = to_lower(std::string(text, limit));
-      text = lower_text.data();
-    }
-
-    size_t match_len = 0;
-    auto done = false;
-    size_t len = 1;
-    while (!done && len <= limit) {
-      std::string_view sv(text, len);
-      auto it = dic_.find(sv);
-      if (it == dic_.end()) {
-        done = true;
-      } else {
-        if (it->second.match) {
-          match_len = len;
-          id = it->second.id;
-        }
-        if (it->second.done) { done = true; }
+    const int32_t *base = base_.data();
+    const int32_t *check = check_.data();
+    const size_t size = check_.size();
+    int32_t node = 0;
+    size_t best = 0;
+    size_t best_id = 0;
+    for (size_t i = 0;; ++i) {
+      // Only the root and inner nodes are reached, never a word's end. The root
+      // has base 0 only when there are no words.
+      assert(node == 0 || base[node] > 0);
+      auto term = static_cast<size_t>(base[node]);
+      if (term < size && check[term] == node) {
+        best = i;
+        best_id = static_cast<size_t>(-base[term] - 1);
       }
-      len += 1;
+      if (i == text_len) { break; }
+      size_t next = static_cast<size_t>(base[node]) +
+                    fold_[static_cast<unsigned char>(text[i])] + 1;
+      if (next >= size || check[next] != node) { break; }
+      node = static_cast<int32_t>(next);
     }
-    return match_len;
+    if (best == 0) { return 0; }
+    id = best_id;
+    return best;
   }
 
-  size_t size() const { return dic_.size(); }
-  size_t items_count() const { return items_count_; }
+  bool ignore_case() const { return ignore_case_; }
 
-  friend struct ComputeFirstSet;
-  friend struct GrammarBlob;
+  // The words by their ids: a word listed twice keeps its first id, and the
+  // later ids and empty words hold "". Lowercased when ignoring case.
+  const std::vector<std::string> &words() const { return words_; }
 
 private:
-  struct Info {
-    bool done;
-    bool match;
+  struct Key {
+    std::string text;
     size_t id;
   };
+  struct Child {
+    uint32_t label; // 0 = the word ends here, otherwise byte + 1
+    size_t lo, hi;  // the keys under this child
+  };
+  struct Task {
+    int32_t node;
+    size_t lo, hi, depth;
+  };
 
-  // TODO: Use unordered_map when heterogeneous lookup is supported in C++20
-  // std::unordered_map<std::string, Info> dic_;
-  std::map<std::string, Info, std::less<>> dic_;
+  void build(const std::vector<Key> &keys) {
+    base_.assign(1, 0);
+    check_.assign(1, -1);
+    if (keys.empty()) { return; }
+    // Every slot in [1, lowest_free) is taken. Slots are never freed, so the
+    // search below can start there and skip bases that cannot fit.
+    size_t lowest_free = 1;
 
+    std::vector<Task> tasks{Task{0, 0, keys.size(), 0}};
+    while (!tasks.empty()) {
+      auto t = tasks.back();
+      tasks.pop_back();
+
+      // keys[lo, hi) share their first `depth` bytes and are sorted, so a
+      // word ending here comes first.
+      std::vector<Child> children;
+      size_t i = t.lo;
+      if (keys[i].text.size() == t.depth) {
+        children.push_back(Child{0, i, i + 1});
+        ++i;
+      }
+      while (i < t.hi) {
+        uint32_t label = static_cast<unsigned char>(keys[i].text[t.depth]) + 1u;
+        size_t j = i;
+        while (j < t.hi &&
+               static_cast<unsigned char>(keys[j].text[t.depth]) + 1u ==
+                   label) {
+          ++j;
+        }
+        children.push_back(Child{label, i, j});
+        i = j;
+      }
+      // The children come in label order (the word end first), so back() has
+      // the largest label.
+
+      // First fit: the lowest base at which every child's slot is free. The
+      // first child has the smallest label, so bases below this one put it in
+      // a taken slot and cannot fit.
+      int32_t base = std::max<int32_t>(
+          1, static_cast<int32_t>(lowest_free) -
+                 static_cast<int32_t>(children.front().label));
+      for (;; ++base) {
+        bool fits = true;
+        for (const Child &c : children) {
+          auto slot = static_cast<size_t>(base) + c.label;
+          if (slot < check_.size() && check_[slot] != -1) {
+            fits = false;
+            break;
+          }
+        }
+        if (fits) { break; }
+      }
+
+      size_t need = static_cast<size_t>(base) + children.back().label + 1;
+      if (need > check_.size()) {
+        check_.resize(need, -1);
+        base_.resize(need, 0);
+      }
+      base_[t.node] = base;
+      for (const Child &c : children) {
+        check_[static_cast<size_t>(base) + c.label] = t.node;
+      }
+      while (lowest_free < check_.size() && check_[lowest_free] != -1) {
+        lowest_free++;
+      }
+      for (const Child &c : children) {
+        int32_t slot = base + static_cast<int32_t>(c.label);
+        if (c.label == 0) {
+          // The word ends here: its only key is keys[c.lo].
+          base_[slot] = -static_cast<int32_t>(keys[c.lo].id) - 1;
+        } else {
+          tasks.push_back(Task{slot, c.lo, c.hi, t.depth + 1});
+        }
+      }
+    }
+  }
+
+  unsigned char fold_[256];
+  std::vector<int32_t> base_;
+  std::vector<int32_t> check_;
+  std::vector<std::string> words_;
   bool ignore_case_;
-  size_t items_count_;
-  size_t max_len_ = 0;
 };
 
 /*-----------------------------------------------------------------------------
@@ -3223,7 +3318,7 @@ class Dictionary : public Ope {
 public:
   Dictionary(const std::vector<std::string> &v, bool ignore_case)
       : trie_(v, ignore_case) {
-    choice_count = trie_.items_count();
+    choice_count = trie_.words().size();
   }
 
   size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
@@ -4450,11 +4545,11 @@ struct ComputeFirstSet : public TraversalVisitor {
     result_.matches_empty_on_other_bytes = true;
   }
   void visit(Dictionary &ope) override {
-    for (const auto &[key, info] : ope.trie_.dic_) {
-      if (!key.empty()) {
-        auto ch = static_cast<unsigned char>(key[0]);
+    for (const auto &word : ope.trie_.words()) {
+      if (!word.empty()) {
+        auto ch = static_cast<unsigned char>(word[0]);
         result_.chars.set(ch);
-        if (ope.trie_.ignore_case_) { result_.chars.set(other_case(ch)); }
+        if (ope.trie_.ignore_case()) { result_.chars.set(other_case(ch)); }
       }
     }
     result_.failures.emplace_back();
@@ -8052,17 +8147,11 @@ struct GrammarBlob {
     void visit(NotPredicate &x) override { unary(T_Not, x.ope_); }
     void visit(Dictionary &x) override {
       w.u8(T_Dictionary);
-      w.u8(x.trie_.ignore_case_ ? 1 : 0);
-      // Recover words in their original choice-index order. The Trie stores
-      // each full word's id (its index in the constructor vector), which
-      // parse_core reports as vs.choice(). Iterating dic_ directly yields
-      // sorted key order and would renumber the choices, so place each word at
-      // its id. A word listed twice leaves an empty word, which matches
-      // nothing, at its later ids.
-      std::vector<std::string> words(x.trie_.items_count());
-      for (auto &kv : x.trie_.dic_)
-        if (kv.second.match && kv.second.id < words.size())
-          words[kv.second.id] = kv.first;
+      w.u8(x.trie_.ignore_case() ? 1 : 0);
+      // The words by their choice ids, as parse_core reports them: a word
+      // listed twice leaves an empty word, which matches nothing, at its later
+      // ids.
+      const auto &words = x.trie_.words();
       w.u32((uint32_t)words.size());
       for (auto &s : words)
         w.str(s);
