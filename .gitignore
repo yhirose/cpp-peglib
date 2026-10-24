@@ -49,3 +49,6 @@ CMakeCache.txt
 grammar/test/*
 .DS_Store
 .vscode/
+
+# DuckDB comparison: downloaded libraries, the DuckDB source and its builds
+benchmark/duckdb/work/

@@ -11,6 +11,14 @@ test:
     build/test/peglib-test-main
     CPPPEGLIB_TEST_BLOB_ROUNDTRIP=1 build/test/peglib-test-main
 
+# Compares with DuckDB (macOS): fetches its libraries, builds and runs benchmark/duckdb/run.sh.
+# args: [rounds] [iterations]
+duckdb-bench *args:
+    benchmark/duckdb/fetch.sh
+    cmake -B build/duckdb -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
+    cmake --build build/duckdb --parallel {{num_cpus()}}
+    benchmark/duckdb/run.sh build/duckdb {{args}}
+
 bench:
     #!/usr/bin/env bash
     set -euo pipefail

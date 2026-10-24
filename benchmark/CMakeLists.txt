@@ -15,3 +15,5 @@ if(PG_QUERY_LIB AND PG_QUERY_INCLUDE)
 else()
   message(STATUS "libpg_query not found - YACC benchmark disabled")
 endif()
+
+add_subdirectory(duckdb)
