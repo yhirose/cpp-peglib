@@ -1,0 +1,35 @@
+name: TSan
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # ThreadSanitizer on the whole test suite. The concurrency tests (test_thread.cc)
+  # are the ones that exercise threads; the other tests check that no race shows up
+  # on the paths they run. A race is reported as a warning, and any warning fails the job.
+  tsan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake with ThreadSanitizer
+      run: |
+        cmake -B ${{github.workspace}}/build_tsan \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+          -DPEGLIB_BUILD_BENCHMARK=OFF
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build_tsan --target peglib-test-main --parallel 4
+
+    - name: Test
+      env:
+        # exitcode makes a reported race fail the job; halt_on_error stops at the first one.
+        TSAN_OPTIONS: "halt_on_error=1 exitcode=66 second_deadlock_stack=1"
+      run: ${{github.workspace}}/build_tsan/test/peglib-test-main
