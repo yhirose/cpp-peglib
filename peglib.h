@@ -1166,6 +1166,19 @@ struct ErrorReport {
 
 using ErrorReporter = std::function<void(const ErrorReport &report)>;
 
+// Calls `f` under `lock`, which all the callbacks of a parser share, so that
+// parses on several threads call them one at a time: callbacks may keep state.
+template <typename R, typename... A>
+std::function<R(A...)>
+serialized(std::function<R(A...)> f,
+           const std::shared_ptr<std::recursive_mutex> &lock) {
+  if (!f) { return f; }
+  return [f = std::move(f), lock](A... args) -> R {
+    std::lock_guard<std::recursive_mutex> guard(*lock);
+    return f(std::forward<A>(args)...);
+  };
+}
+
 /*
  * ErrorInfo
  */
@@ -4708,6 +4721,13 @@ inline constexpr const char *RECOVER_DEFINITION_NAME = "%recover";
  */
 struct CollectRuleRefs;
 
+// Serializes all analyses of start rules: those of one grammar number the
+// rules they share (see Definition::number_new_rules).
+inline std::mutex &analysis_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
 class Definition {
 public:
   struct Result {
@@ -4956,12 +4976,28 @@ public:
   mutable std::vector<Context::PackratStats> packrat_stats_;
 
 private:
+  mutable std::mutex packrat_stats_mutex_;
+  void
+  add_packrat_stats(const std::vector<Context::PackratStats> &stats) const {
+    std::lock_guard<std::mutex> lock(packrat_stats_mutex_);
+    if (packrat_stats_.size() < stats.size()) {
+      packrat_stats_.resize(stats.size());
+    }
+    for (size_t i = 0; i < stats.size(); i++) {
+      packrat_stats_[i].hits += stats[i].hits;
+      packrat_stats_[i].misses += stats[i].misses;
+    }
+  }
+
   friend class Context;
   friend class Reference;
   friend class ParserGenerator;
 
   const StartRuleAnalysis &analysis() const {
-    std::call_once(analysis_init_, [&]() { analyze(); });
+    std::call_once(analysis_init_, [&]() {
+      std::lock_guard<std::mutex> lock(analysis_mutex());
+      analyze();
+    });
     return analysis_;
   }
 
@@ -5031,10 +5067,17 @@ private:
               enablePackratParsing, tracer_enter, tracer_leave, trace_data,
               verbose_trace, log, error_reporter);
 
+    // Each parse counts into a table of its own and adds it to packrat_stats_
+    // when it ends, so that parses on several threads do not write the same
+    // counts at once.
+    std::vector<Context::PackratStats> stats;
     if (collect_packrat_stats) {
-      packrat_stats_.resize(analysis.rules_by_id.size());
-      c.packrat_stats = &packrat_stats_;
+      stats.resize(analysis.rules_by_id.size());
+      c.packrat_stats = &stats;
     }
+    auto add_stats = scope_exit([&] {
+      if (collect_packrat_stats) { add_packrat_stats(stats); }
+    });
 
     c.builds_everything = c.has_tracer || analysis.has_user;
     auto uses = rule_uses(c.builds_everything);
@@ -10302,20 +10345,23 @@ public:
   }
 
   void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave) {
+    auto enter = serialized(std::move(tracer_enter), callback_lock_);
+    auto leave = serialized(std::move(tracer_leave), callback_lock_);
     with_start_rule([&](Definition &rule) {
-      rule.tracer_enter = tracer_enter;
-      rule.tracer_leave = tracer_leave;
+      rule.tracer_enter = enter;
+      rule.tracer_leave = leave;
     });
   }
 
   void enable_trace(TracerEnter tracer_enter, TracerLeave tracer_leave,
                     TracerStartOrEnd tracer_start,
                     TracerStartOrEnd tracer_end) {
+    enable_trace(std::move(tracer_enter), std::move(tracer_leave));
+    auto start = serialized(std::move(tracer_start), callback_lock_);
+    auto end = serialized(std::move(tracer_end), callback_lock_);
     with_start_rule([&](Definition &rule) {
-      rule.tracer_enter = tracer_enter;
-      rule.tracer_leave = tracer_leave;
-      rule.tracer_start = tracer_start;
-      rule.tracer_end = tracer_end;
+      rule.tracer_start = start;
+      rule.tracer_end = end;
     });
   }
 
@@ -10362,19 +10408,22 @@ public:
     return AstOptimizer(opt_mode, get_no_ast_opt_rules()).optimize(ast);
   }
 
-  void set_logger(Log log) { log_ = log; }
+  void set_logger(Log log) {
+    log_ = serialized(std::move(log), callback_lock_);
+  }
 
   // Receive structured error information instead of (or in addition to) the
   // formatted string passed to the logger.
   void set_error_reporter(ErrorReporter reporter) {
-    error_reporter_ = reporter;
+    error_reporter_ = serialized(std::move(reporter), callback_lock_);
   }
 
   void set_logger(
       std::function<void(size_t line, size_t col, const std::string &msg)>
           log) {
-    log_ = [log](size_t line, size_t col, const std::string &msg,
-                 const std::string & /*rule*/) { log(line, col, msg); };
+    set_logger(
+        Log([log](size_t line, size_t col, const std::string &msg,
+                  const std::string & /*rule*/) { log(line, col, msg); }));
   }
 
 private:
@@ -10489,6 +10538,9 @@ private:
   bool builds_ast_ = false; // enable_ast() was called
   Log log_;
   ErrorReporter error_reporter_;
+  // Shared by the callbacks set on this parser (see serialized).
+  std::shared_ptr<std::recursive_mutex> callback_lock_ =
+      std::make_shared<std::recursive_mutex>();
 };
 
 /*-----------------------------------------------------------------------------
