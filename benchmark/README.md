@@ -8,12 +8,15 @@ A [DuckDB blog post](https://duckdb.org/2024/11/22/runtime-extensible-parsers.ht
 
 ## Test Data
 
-All test data comes from the [peg-parser-experiments](https://github.com/hannes/peg-parser-experiments) repository, except `sql-optimized.peg`:
+All test data comes from the [peg-parser-experiments](https://github.com/hannes/peg-parser-experiments) repository, except `sql-optimized.peg` and the `duckdb-2.0.0*.peg` grammars:
 
 | File | Description | Size |
 | --- | --- | --- |
 | `sql.peg` | PEG grammar for SQL (covers TPC-H and TPC-DS) | 3.9 KB |
 | `sql-optimized.peg` | `sql.peg` rewritten to parse faster | 4.4 KB |
+| `duckdb-2.0.0.peg` | PEG grammar of DuckDB 2.0.0's SQL parser, as the baseline for the optimized grammars | 83 KB |
+| `duckdb-2.0.0-optimized.peg` | `duckdb-2.0.0.peg` rewritten to parse faster, with the same error positions | 86 KB |
+| `duckdb-2.0.0-optimized-dict.peg` | `duckdb-2.0.0-optimized.peg` with keyword lists as dictionaries | 86 KB |
 | `q1.sql` | Single TPC-H query (Q1) | 544 B |
 | `all-tpch.sql` | All 22 TPC-H queries | 14 KB |
 | `big.sql` | TPC-H + TPC-DS queries repeated 6x | 1.2 MB |
