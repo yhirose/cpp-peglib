@@ -6527,7 +6527,7 @@ inline size_t PrecedenceClimbing::parse_expression(
 
 inline size_t Recovery::parse_core(const char *s, size_t n,
                                    SemanticValues & /*vs*/, Context &c,
-                                   std::any & /*dt*/) const {
+                                   std::any &dt) const {
   const auto *label = this->label();
   const auto reports =
       c.reports_here() && !c.reported_recoveries.count({this, s});
@@ -6544,9 +6544,8 @@ inline size_t Recovery::parse_core(const char *s, size_t n,
     auto muted = c.mute_errors();
     Context::TraceMute mute(c);
 
-    std::any dummy_dt;
     len = c.parse_thrown_away(
-        [&](SemanticValues &vs) { return ope_->parse(s, n, vs, c, dummy_dt); });
+        [&](SemanticValues &vs) { return ope_->parse(s, n, vs, c, dt); });
   }
 
   // Where errors are muted, nothing was reported to recover from.

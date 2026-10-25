@@ -1855,3 +1855,22 @@ TEST(ErrorPositionTest, Not_predicate_failure_names_rule) {
 
 // =============================================================================
 // Enter/Leave Handler Tests
+
+// A recovery expression is parsed with the user data of the parse, as the rest
+// of the grammar is.
+TEST(RecoveryTest, Recovery_expression_gets_the_user_data) {
+  parser pg(R"(
+    S    <- (A ';'^skip)*
+    A    <- 'a'
+    skip <- SKIP
+    SKIP <- (!';' .)* ';'?
+  )");
+  ASSERT_TRUE(!!pg);
+  pg["SKIP"] = [](const SemanticValues &, std::any &dt) {
+    (*std::any_cast<int *>(dt))++;
+  };
+  int skipped = 0;
+  std::any dt = &skipped;
+  EXPECT_FALSE(pg.parse("a;ab;a;", dt));
+  EXPECT_EQ(1, skipped);
+}
