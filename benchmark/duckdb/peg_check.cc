@@ -20,6 +20,8 @@
 #include <sstream>
 #include <string>
 
+#include "dollar_quote.h"
+
 namespace {
 
 constexpr size_t stack_size = 512 << 20;
@@ -84,7 +86,8 @@ int main(int argc, char **argv) {
          "       peg_check --dropped-subtrees <grammar.peg>");
   }
   const bool dropped_subtrees = std::strcmp(argv[1], "--dropped-subtrees") == 0;
-  peg::parser parser(read_file(argv[dropped_subtrees ? 2 : 1]));
+  peg::parser parser(read_file(argv[dropped_subtrees ? 2 : 1]),
+                     dollar_quote_rules());
   if (!parser) { fail("failed to load the grammar"); }
 
   if (dropped_subtrees) {

@@ -17,11 +17,15 @@ matches characters, so this script writes both into the grammar:
   whitespace, comments, operators, numbers, strings and identifiers become terminal rules.
 - Only the rules reachable from Program are kept, as DuckDB builds only those.
 
-Not written: a dollar-quoted string with a tag ($tag$...$tag$) needs a backreference, and a capture keeps packrat
-parsing from breaking the cycles of the expression rules, so only $$...$$ is accepted. A keyword directly followed
-by '$' or a non-ASCII character is still read as the keyword, which keeps the word check on its ASCII fast path.
+One rule is not written: DollarQuotedString, a dollar-quoted string ($tag$...$tag$). Matching the closing tag
+against the opening one would take a backreference, and a capture keeps packrat parsing from breaking the cycles
+of the expression rules, so the programs give the rule as a C++ function (dollar_quote.h).
+
+Differences from the tokenizer: a keyword directly followed by '$' or a non-ASCII character is still read as the
+keyword, which keeps the word check on its ASCII fast path.
 ':' is also matched as the first character of '::' and ':=', which DuckDB's tokenizer reads as one token, so
-a[1::2] is accepted.
+a[1::2] is accepted. A unicode space that Parser::StripUnicodeSpaces leaves after a '$' (in x$y$z, or right after
+a '$') is read as a space, where DuckDB reads it as part of a word.
 """
 
 import re
@@ -121,6 +125,7 @@ def non_ascii_word_ranges():
 # One literal for each, so that a choice tells by the first byte where one can start.
 UNICODE_SPACE = " / ".join(f"'{code_point(cp)}'" for lo, hi in UNICODE_SPACES for cp in range(lo, hi + 1))
 NON_ASCII_WORD_CHARS = ranges_text(non_ascii_word_ranges())
+NON_ASCII_CHARS = ranges_text([(0x80, 0x10FFFF)])
 # Tokenizer::CharacterIsKeyword: a word starts with a letter, '_' or a non-ASCII character, and goes on with
 # digits and '$' too.
 WORD_START = f"[a-zA-Z_{NON_ASCII_WORD_CHARS}]"
@@ -167,11 +172,15 @@ NumberExponent <- [eE] [+-]? (NumberDigits / !.)
 NumberContinuation <- '.' / [eE] [+-]? ([0-9] / !.)
 
 # Tokenizer and StringLiteralMatcher: a string token, joined by the standard strings that start the next lines.
-StringLiteral <- < QuotedString (StringLineBreak StandardString)* / DollarQuotedString >
+StringLiteral <- < QuotedString (StringLineBreak StandardString)* / &DollarQuoteStart DollarQuotedString >
 QuotedString <- [eE] '\'' ('\\' . / '\'\'' / [^'])* '\'' / [nNxXbB]? StandardString
 StandardString <- '\'' ('\'\'' / [^'])* '\''
 StringLineBreak <- ([ \t\v\f] / UnicodeSpace / LineComment)* [\n\r] ([ \t\n\r\v\f] / UnicodeSpace / LineComment)*
-DollarQuotedString <- '$$' (!'$$' .)* '$$'
+
+# Tokenizer: '$', a tag that does not start with a digit, and '$' open a dollar-quoted string, which the same three
+# close. Any other '$' is a token of its own. Unicode spaces count as tag characters, as StripUnicodeSpaces leaves
+# them in a tag.
+DollarQuoteStart <- < '$' ([a-zA-Z_{NON_ASCII_CHARS}] [a-zA-Z0-9_]* ([{NON_ASCII_CHARS}] [a-zA-Z0-9_]*)*)? '$' >
 """
 
 
@@ -237,6 +246,7 @@ def translate(text):
         body = WORD_LITERAL.sub(r"'\1'i", body)
         # Parenthesized, so that a suffix such as '?' applies to the lookahead too.
         body = OPERATOR_LITERAL.sub(lambda m: f"({operator_boundary(m.group(1))} '{m.group(1)}')", body)
+        body = body.replace("'$'", "(!DollarQuoteStart '$')")
         out[name] = (parameter, body)
     for name, mask in IDENTIFIER_RULES.items():
         allowed = set().union(*(categories[c] for c in mask))

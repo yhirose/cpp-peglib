@@ -39,10 +39,12 @@ The cpp-peglib grammar of a 2.x or later version is generated from that version'
 
 `make_grammar.py` writes DuckDB's PEG grammar in cpp-peglib's syntax. DuckDB matches its grammar over the tokens of its tokenizer, and replaces some rules with matchers written in C++. The script writes both into the grammar: a literal matches a whole token, ignoring case; an identifier rule takes the keywords of the categories DuckDB allows there; and whitespace, comments, numbers, strings and operators are read as DuckDB's tokenizer reads them. Outside lookaheads, only terminal rules use a token boundary, because cpp-peglib builds a rule that has one as a single AST node and leaves the subtrees under it out.
 
+One rule, `DollarQuotedString`, is not in the grammar: `peg_parse` and `peg_check` give it as a C++ function (`dollar_quote.h`). It reads a dollar-quoted string such as `$tag$...$tag$`, which ends where its opening tag comes again. The grammar could match that only with a backreference, and a capture keeps packrat parsing from breaking the cycles of the expression rules. The function takes the input alone, so cpp-peglib parses as fast as without it.
+
 The generated grammar differs from DuckDB in these cases:
 
-- A dollar-quoted string with a tag, such as `$tag$...$tag$`, is rejected. Only `$$...$$` is accepted, because matching a tag needs a backreference, and a capture keeps packrat parsing from breaking the cycles of the expression rules.
 - A keyword directly followed by `$` or by a non-ASCII letter is read as the keyword, where DuckDB reads one word.
+- DuckDB turns unicode spaces into spaces before it tokenizes, but not after a `$` that this step takes for the start of a dollar-quoted string that is never closed, as in `x$y$z`, or right after a `$`. DuckDB reads such a unicode space as part of a word, and the grammar as a space.
 - `:` also matches the first character of `::` and `:=`, which DuckDB reads as one token, so `a[1::2]` is accepted where DuckDB rejects it.
 - DuckDB rejects some statements after its grammar has accepted them, while it builds the statement, for example a positional reference `#0`. The grammar accepts these.
 
@@ -53,7 +55,7 @@ git clone --depth 1 --branch v2.0.0 https://github.com/duckdb/duckdb benchmark/d
 python3 benchmark/duckdb/check_grammar.py 2.0.0 benchmark/duckdb/work/duckdb-2.0.0 [build/duckdb]
 ```
 
-It fails if a rule leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a statement of DuckDB's tests or on a statement of the input with one token left out or repeated. A statement with a tagged dollar-quoted string does not fail it, and a statement that DuckDB rejects only while it builds the statement counts as accepted.
+It fails if a rule leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a statement of DuckDB's tests, on a few statements around how DuckDB's tokenizer reads `$`, or on a statement of the input with one token left out or repeated. A statement that DuckDB rejects only while it builds the statement counts as accepted.
 
 ## Input
 

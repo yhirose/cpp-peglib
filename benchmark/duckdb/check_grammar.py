@@ -8,10 +8,9 @@
 <build dir> is the build of the DuckDB comparison (default: build/duckdb), with duck_check_<version> and peg_check.
 
 The check fails if a rule of the grammar leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a
-statement. The statements are those of DuckDB's tests (test/sql/**/*.test), and the statements of
-benchmark/data/big.sql with one token left out or repeated, most of which are wrong. DuckDB rejects some statements
-after its grammar has accepted them, in the transformer; those count as accepted. A statement with a tagged
-dollar-quoted string is a known limit of the generated grammar and does not fail the check.
+statement. The statements are those of DuckDB's tests (test/sql/**/*.test), a few around how the tokenizer reads
+'$', and the statements of benchmark/data/big.sql with one token left out or repeated, most of which are wrong.
+DuckDB rejects some statements after its grammar has accepted them, in the transformer; those count as accepted.
 """
 
 import math
@@ -26,7 +25,18 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 
 TOKEN = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d*)?|\S")
 TOKENS_MUTATED_PER_STATEMENT = 25
-TAGGED_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_]|[^\x00-\x7f])(?:[A-Za-z0-9_]|[^\x00-\x7f])*\$")
+NO_BREAK_SPACE = chr(0x00A0)
+# How the tokenizer reads '$': a numbered or a named parameter, or a dollar-quoted string, closed or not, which
+# DuckDB's tests do not all cover.
+DOLLAR_STATEMENTS = [
+    "SELECT $x$abc;", "SELECT $1;", "SELECT $abc;", "SELECT $x$a$x$;", "SELECT $x$a$y$;", "SELECT $1$a$1$;",
+    "SELECT $_a1$x$_a1$;", "SELECT $a-b$x$a-b$;", "SELECT $$;", "SELECT $$a$$;", "SELECT $x$a$$x$;",
+    "SELECT x$y$z;", "SELECT $é$a$é$;", "SELECT $x$a$x$ AS $y$b$y$;", "SELECT $x$a$x$$y$;", "SELECT $x$\n$x$;",
+    "SELECT $;", "SELECT $ x$;", "SELECT 1 $x$;", "SELECT $x $x$;", "SELECT $x$ab$x;", "SELECT $X$a$x$;",
+    "SELECT $x$a$X$ || $X$b$X$;", "SELECT $a$1$a$::INT;", "SELECT $1a$x$1a$;", "PREPARE p AS SELECT $abc;",
+    # A unicode space in a tag, which DuckDB does not turn into a space.
+    f"SELECT $a{NO_BREAK_SPACE}b$x$a{NO_BREAK_SPACE}b$;", f"SELECT $a{NO_BREAK_SPACE}b$x;",
+]
 SHOWN = 10
 
 
@@ -104,18 +114,15 @@ def verdicts(command, statements, work):
 
 
 def compare(name, statements, duck_check, peg_check, work):
-    """Prints the number of disagreements and the first of those that are not a known limit, and returns how
-    many are not."""
+    """Prints the number of disagreements and the first of them, and returns the number."""
     duck = verdicts([duck_check], statements, work)
     peg = verdicts(peg_check, statements, work)
     mismatches = [i for i, (d, p) in enumerate(zip(duck, peg)) if (d == "S") != (p == "R")]
-    unknown = [i for i in mismatches if not TAGGED_DOLLAR_QUOTE.search(statements[i])]
-    print(f"{name}: {len(statements)} statements, {len(mismatches)} disagreements, "
-          f"{len(mismatches) - len(unknown)} of them with a tagged dollar quote")
-    for i in unknown[:SHOWN]:
+    print(f"{name}: {len(statements)} statements, {len(mismatches)} disagreements")
+    for i in mismatches[:SHOWN]:
         verdict = "rejects" if duck[i] == "S" else "accepts"
         print(f"  DuckDB {verdict}: {statements[i][:160]!r}")
-    return len(unknown)
+    return len(mismatches)
 
 
 def main(argv):
@@ -140,6 +147,7 @@ def main(argv):
             big = re.sub(r"\) AT,$", ") AX,", f.read(), flags=re.M)  # as run.sh does
         failures = len(dropped)
         failures += compare("DuckDB tests", test_statements(source_dir), duck_check, [peg_check, grammar], work)
+        failures += compare("statements around '$'", DOLLAR_STATEMENTS, duck_check, [peg_check, grammar], work)
         # big.sql repeats its statements, so each is mutated once.
         statements = list(dict.fromkeys(split_statements(big)))
         failures += compare("big.sql with a token left out or repeated", mutations(statements),

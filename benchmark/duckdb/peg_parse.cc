@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "dollar_quote.h"
+
 namespace {
 
 std::string read_file(const char *path) {
@@ -57,7 +59,7 @@ int main(int argc, char **argv) {
     fail("iterations must be a positive integer");
   }
 
-  peg::parser parser(grammar);
+  peg::parser parser(grammar, dollar_quote_rules());
   if (!parser) { fail("failed to load the grammar"); }
   parser.enable_packrat_parsing();
   parser.enable_ast(true);
