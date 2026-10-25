@@ -151,7 +151,7 @@ A semantic action takes one of these forms, and can take `vs` as `SemanticValues
 * Token information if the rule is literal or uses a token boundary operator
 * Choice number when the rule is 'prioritized choice'
 
-`any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method. `predicate_data` is what the rule's predicate passed on (see below).
+`any& dt` is a 'read-write' context data which can be used for whatever purposes. The initial context data is set in `peg::parser::parse` method. It is the same in every callback, except in those of the rules under `%word` (see [Word expression](#word-expression)). `predicate_data` is what the rule's predicate passed on (see below).
 
 A semantic action can return a value of arbitrary data type, which will be wrapped by `std::any`. An action that returns nothing gives an empty value. A rule without an action gives the first semantic value in `vs`. (Yacc parser has the same behavior.)
 
@@ -422,6 +422,8 @@ parser.parse("helloworld");  // NG
 ```
 
 A `%word` that can match the empty string, such as `[a-z]*`, is rejected.
+
+The parser checks `%word` apart from the rule that uses it, so a callback of the rules under `%word` gets no user data (`dt` is empty) and what it returns is thrown away. Whether a character is part of a word must depend on the input alone.
 
 Capture/Backreference
 ---------------------
