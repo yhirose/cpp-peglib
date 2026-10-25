@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compares DuckDB releases (versions.txt) with cpp-peglib (three grammars) on one input.
+# Compares DuckDB releases (versions.txt) with cpp-peglib on one input.
 #
 #   benchmark/duckdb/run.sh [build_dir] [rounds] [iterations]
 #
@@ -8,6 +8,8 @@
 # Peak memory comes from separate processes that keep the parse result, the median of three.
 #
 # DuckDB 1.x parses with YACC and 2.x and later with PEG, so the rows say so by major version.
+# cpp-peglib parses with the grammar make_grammar.py generates from the PEG grammar of each 2.x and
+# later release (fetched by fetch.sh), and with the two hand-made grammars of benchmark/data.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -21,30 +23,43 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 sed -E 's/\) AT,$/) AX,/' "$data/big.sql" > "$work/big_ax.sql"
 
+versions=()
+while read -r version || [ -n "$version" ]; do
+  case "$version" in
+    ""|\#*) continue ;;
+  esac
+  versions+=("$version")
+done < "$here/versions.txt"
+if [ ${#versions[@]} = 0 ]; then
+  echo "no version in $here/versions.txt" >&2
+  exit 1
+fi
+
 # One row per DuckDB version, then one per cpp-peglib grammar.
 names=()
 kinds=()
 targets=()
-while read -r version; do
-  case "$version" in
-    ""|\#*) continue ;;
-  esac
-  major=${version%%.*}
-  if [ "$major" = 1 ]; then parser=YACC; else parser=PEG; fi
-  names+=("DuckDB $version ($parser)")
-  kinds+=(duck)
-  targets+=("duck_extract_${version//./_}")
-done < "$here/versions.txt"
-for grammar in duckdb-2.0.0.peg duckdb-2.0.0-optimized.peg duckdb-2.0.0-optimized-dict.peg; do
-  case "$grammar" in
-    duckdb-2.0.0.peg) label="cpp-peglib" ;;
-    duckdb-2.0.0-optimized.peg) label="cpp-peglib optimized" ;;
-    *) label="cpp-peglib optimized+dict" ;;
-  esac
-  names+=("$label")
-  kinds+=(peg)
-  targets+=("$data/$grammar")
+row() {
+  names+=("$1")
+  kinds+=("$2")
+  targets+=("$3")
+}
+for version in "${versions[@]}"; do
+  if [ "${version%%.*}" -lt 2 ]; then parser=YACC; else parser=PEG; fi
+  row "DuckDB $version ($parser)" duck "duck_extract_${version//./_}"
 done
+for version in "${versions[@]}"; do
+  if [ "${version%%.*}" -lt 2 ]; then continue; fi
+  gram=$here/work/cache/$version/inlined_grammar.gram
+  if [ ! -f "$gram" ]; then
+    echo "$gram not found: run benchmark/duckdb/fetch.sh first" >&2
+    exit 1
+  fi
+  python3 "$here/make_grammar.py" "$gram" "$work/duckdb-$version.peg"
+  row "cpp-peglib (DuckDB $version)" peg "$work/duckdb-$version.peg"
+done
+row "cpp-peglib optimized" peg "$data/duckdb-2.0.0-optimized.peg"
+row "cpp-peglib optimized+dict" peg "$data/duckdb-2.0.0-optimized-dict.peg"
 
 # run <row> <argument>: the argument is the iteration count, or "rss".
 run() {
@@ -67,7 +82,8 @@ done
 
 for ((r = 1; r <= rounds; r++)); do
   for ((i = 0; i < count; i++)); do
-    read -r min _ n <<< "$(run "$i" "$iterations")"
+    out=$(run "$i" "$iterations") # stops here when a program fails
+    read -r min _ n <<< "$out"
     mins[i]=$(awk -v a="${mins[i]}" -v b="$min" 'BEGIN { print (a < b) ? a : b }')
     counts[i]="${counts[i]} $n"
   done
@@ -82,9 +98,10 @@ for ((i = 0; i < count; i++)); do
 done
 
 # Every program must split and parse the same statements, or the times compare different work.
-for ((i = 0; i < count; i++)); do
-  if [ "$(echo "${counts[i]}" | tr ' ' '\n' | sort -u | grep -c .)" != 1 ]; then
-    echo "statement counts differ: ${names[i]}:${counts[i]}" >&2
-    exit 1
-  fi
-done
+if [ "$(echo "${counts[*]}" | tr ' ' '\n' | sort -u | grep -c .)" != 1 ]; then
+  for ((i = 0; i < count; i++)); do
+    echo "statement counts: ${names[i]}:${counts[i]}" >&2
+  done
+  echo "statement counts differ" >&2
+  exit 1
+fi

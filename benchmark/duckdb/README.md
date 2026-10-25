@@ -6,8 +6,8 @@ This benchmark compares the time and peak memory of cpp-peglib with DuckDB's own
 | --- | --- |
 | DuckDB X.Y.Z (YACC) | `duckdb_extract_statements` of a 1.x release, which parses with DuckDB's YACC parser |
 | DuckDB X.Y.Z (PEG) | `duckdb_extract_statements` of a 2.x or later release, which parses with DuckDB's PEG parser |
-| cpp-peglib | `benchmark/data/duckdb-2.0.0.peg`, a port of DuckDB 2.0.0's SQL grammar |
-| cpp-peglib optimized | `duckdb-2.0.0-optimized.peg`, the same grammar rewritten to parse faster, with the same error positions |
+| cpp-peglib (DuckDB X.Y.Z) | the grammar `make_grammar.py` generates from the PEG grammar of a 2.x or later release (see below) |
+| cpp-peglib optimized | `benchmark/data/duckdb-2.0.0-optimized.peg`, a port of DuckDB 2.0.0's grammar made by hand (`duckdb-2.0.0.peg`) and rewritten to parse faster, with the same error positions |
 | cpp-peglib optimized+dict | `duckdb-2.0.0-optimized-dict.peg`, the optimized grammar with keyword lists as dictionaries |
 
 Each program parses the whole input in one call and builds the result: the extracted statements for DuckDB, and the AST for cpp-peglib (`enable_ast(true)` with packrat parsing). The time includes freeing the result.
@@ -21,19 +21,39 @@ just duckdb-bench [rounds] [iterations]   # defaults: 3 rounds, 5 iterations
 It runs the steps below, which can also be run by hand:
 
 ```bash
-benchmark/duckdb/fetch.sh                  # downloads the DuckDB libraries listed in versions.txt
+benchmark/duckdb/fetch.sh                  # downloads the DuckDB libraries and grammars of versions.txt
 cmake -B build/duckdb -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
 cmake --build build/duckdb --parallel 8
 benchmark/duckdb/run.sh build/duckdb [rounds] [iterations]
 ```
 
-The libraries are not part of the repository. They are stored in `benchmark/duckdb/work/`, which is ignored by git. The programs are built with the other benchmarks (`PEGLIB_BUILD_BENCHMARK`) once the libraries of all versions in `versions.txt` are there, and only on macOS for now. Without them CMake prints a message and skips this directory.
+The libraries and grammars are not part of the repository. They are stored in `benchmark/duckdb/work/`, which is ignored by git. The programs are built with the other benchmarks (`PEGLIB_BUILD_BENCHMARK`) once the libraries of all versions in `versions.txt` are there, and only on macOS for now. Without them CMake prints a message and skips this directory.
 
 ## Changing the DuckDB versions
 
 The DuckDB versions to compare are listed in `versions.txt`, one per line. When DuckDB releases a new version, change the line, then run `just duckdb-bench` again. `fetch.sh` finds the macOS library of each version through the GitHub release API, so no version-specific code is needed.
 
-Upgrading the cpp-peglib grammar is a separate step. The three `.peg` files in `benchmark/data/` are copies of DuckDB 2.0.0's grammar, made by hand. They are not generated from the DuckDB source, so a new DuckDB version does not change them.
+The cpp-peglib grammar of a 2.x or later version is generated from that version's grammar, so it follows the change: `run.sh` generates it at each run, in a temporary directory, from the grammar `fetch.sh` stores in `work/cache/<version>/`. The hand-made grammars in `benchmark/data/` are copies of DuckDB 2.0.0's grammar, so a new DuckDB version does not change them. They were made before the generator, and a few of their rules leave subtrees out of the AST (`peg_check --dropped-subtrees` lists them).
+
+## The generated grammar
+
+`make_grammar.py` writes DuckDB's PEG grammar in cpp-peglib's syntax. DuckDB matches its grammar over the tokens of its tokenizer, and replaces some rules with matchers written in C++. The script writes both into the grammar: a literal matches a whole token, ignoring case; an identifier rule takes the keywords of the categories DuckDB allows there; and whitespace, comments, numbers, strings and operators are read as DuckDB's tokenizer reads them. Outside lookaheads, only terminal rules use a token boundary, because cpp-peglib builds a rule that has one as a single AST node and leaves the subtrees under it out.
+
+The generated grammar differs from DuckDB in these cases:
+
+- A dollar-quoted string with a tag, such as `$tag$...$tag$`, is rejected. Only `$$...$$` is accepted, because matching a tag needs a backreference, and a capture keeps packrat parsing from breaking the cycles of the expression rules.
+- A keyword directly followed by `$` or by a non-ASCII letter is read as the keyword, where DuckDB reads one word.
+- `:` also matches the first character of `::` and `:=`, which DuckDB reads as one token, so `a[1::2]` is accepted where DuckDB rejects it.
+- DuckDB rejects some statements after its grammar has accepted them, while it builds the statement, for example a positional reference `#0`. The grammar accepts these.
+
+`check_grammar.py` checks the generated grammar against DuckDB's own parser. It needs a checkout of the release, for its grammar and its tests:
+
+```bash
+git clone --depth 1 --branch v2.0.0 https://github.com/duckdb/duckdb benchmark/duckdb/work/duckdb-2.0.0
+python3 benchmark/duckdb/check_grammar.py 2.0.0 benchmark/duckdb/work/duckdb-2.0.0 [build/duckdb]
+```
+
+It fails if a rule leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a statement of DuckDB's tests or on a statement of the input with one token left out or repeated. A statement with a tagged dollar-quoted string does not fail it, and a statement that DuckDB rejects only while it builds the statement counts as accepted.
 
 ## Input
 

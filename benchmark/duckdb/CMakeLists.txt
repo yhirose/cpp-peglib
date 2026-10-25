@@ -1,8 +1,9 @@
 # Comparison with DuckDB. Needs the libraries from fetch.sh (macOS only for now); without them
 # nothing here is built.
 #
-# One program is built per DuckDB version listed in versions.txt, because the symbols of two
-# versions clash in one binary. Their names are duck_extract_<version with dots as underscores>.
+# The programs that link DuckDB are built once per version listed in versions.txt, because the
+# symbols of two versions clash in one binary. Their names are duck_extract_<version> and, from
+# 2.0 on, duck_check_<version>, with the dots of the version as underscores.
 
 set(DUCKDB_CACHE ${CMAKE_CURRENT_SOURCE_DIR}/work/cache)
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/versions.txt DUCKDB_VERSION_LINES)
@@ -25,12 +26,22 @@ endforeach()
 foreach(version IN LISTS DUCKDB_VERSIONS)
   set(dir ${DUCKDB_CACHE}/${version})
   string(REPLACE "." "_" suffix ${version})
-  set(target duck_extract_${suffix})
-  add_executable(${target} duck_extract.cc)
-  target_include_directories(${target} PRIVATE ${dir})
-  target_link_libraries(${target} ${dir}/libduckdb.dylib)
-  set_target_properties(${target} PROPERTIES BUILD_RPATH ${dir})
+  set(programs duck_extract)
+  # duck_check classifies the errors of the PEG parser, which DuckDB has from 2.0 on.
+  if(version VERSION_GREATER_EQUAL 2.0)
+    list(APPEND programs duck_check)
+  endif()
+  foreach(program IN LISTS programs)
+    set(target ${program}_${suffix})
+    add_executable(${target} ${program}.cc)
+    target_include_directories(${target} PRIVATE ${dir})
+    target_link_libraries(${target} ${dir}/libduckdb.dylib)
+    set_target_properties(${target} PROPERTIES BUILD_RPATH ${dir})
+  endforeach()
 endforeach()
 
-add_executable(peg_parse peg_parse.cc)
-target_include_directories(peg_parse PRIVATE ${CMAKE_SOURCE_DIR})
+foreach(program peg_parse peg_check)
+  add_executable(${program} ${program}.cc)
+  target_include_directories(${program} PRIVATE ${CMAKE_SOURCE_DIR})
+  target_link_libraries(${program} ${add_link_deps})
+endforeach()
