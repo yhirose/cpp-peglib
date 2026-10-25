@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates a cpp-peglib grammar from DuckDB's PEG grammar, for the DuckDB comparison.
 
-  make_grammar.py <inlined_grammar.gram> <output.peg>
+  make_grammar.py [--lookaheads] <inlined_grammar.gram> <output.peg>
 
 The input is src/include/duckdb/parser/peg/inlined_grammar.gram of a DuckDB release, 2.0.0 or later.
 
@@ -16,6 +16,11 @@ matches characters, so this script writes both into the grammar:
 - The replaced identifier rules are written from the keyword rules of the same grammar, and the tokenizer's
   whitespace, comments, operators, numbers, strings and identifiers become terminal rules.
 - Only the rules reachable from Program are kept, as DuckDB builds only those.
+
+With --lookaheads, the rules that are tried at almost every position and fail almost every time (qualified names,
+type literals, '*', function calls, aliases with a colon) get a lookahead in front, a necessary condition for the
+rule to match. The grammar accepts the same inputs and builds the same trees; a failed alternative costs a short scan
+instead of the rule (see LOOKAHEADS). check_grammar.py checks this.
 
 One rule is not written: DollarQuotedString, a dollar-quoted string ($tag$...$tag$). Matching the closing tag
 against the opening one would take a backreference, and a capture keeps packrat parsing from breaking the cycles
@@ -184,6 +189,67 @@ DollarQuoteStart <- < '$' ([a-zA-Z_{NON_ASCII_CHARS}] [a-zA-Z0-9_]* ([{NON_ASCII
 """
 
 
+# A quoted or an unquoted word, which every identifier rule and keyword rule takes, and so a lookahead can look for.
+NAME = f"({QUOTED} / {PLAIN})"
+# The lookahead rules, which LOOKAHEADS refers to.
+LOOKAHEAD_RULES = {
+    "NameAhead": f"< {NAME} >",
+    # where a qualified name can start: a name or a path, and a dot
+    "QualifierAhead": "(NameAhead / StringLiteral) '.'",
+    "StarAhead": "(NameAhead '.')* '*'",
+    "FunctionAhead": "NameAhead ('.' NameAhead)* '('",
+    "TableFunctionAhead": "'LATERAL'i? NameAhead ('.' NameAhead)* '('",
+    "ColonAliasAhead": "(NameAhead / StringLiteral) ':'",
+    "TypeLiteralAhead": "'SETOF'i / NameAhead ('.' NameAhead)* (TypeLiteralParens &(TypeLiteralString / 'ARRAY'i / "
+                        "'WITHOUT'i / 'WITH'i) / &(TypeLiteralString / TypeLiteralNextWord))",
+    # what a string after a type can start with: a string, or the bracket of an array type
+    "TypeLiteralString": "StringLiteral / '['",
+    # balanced parentheses, which hold names (read whole, as a string can start inside no name), strings and comments
+    "TypeLiteralParens": "'(' (LineComment / BlockComment / StringLiteral / NameAhead / [^()'\"`] / "
+                         "TypeLiteralParens)* ')'",
+    "TypeLiteralNextWord": "'PRECISION'i / 'VARYING'i / 'CHARACTER'i / 'CHAR'i / 'WITHOUT'i / 'WITH'i / 'ARRAY'i / "
+                           "Interval",
+}
+# rule -> lookahead rule. Each rule is one sequence that starts with what the lookahead looks for.
+LOOKAHEADS = {rule: "QualifierAhead" for rule in """
+    CatalogReservedSchemaTypeName SchemaReservedTypeName CatalogReservedSchemaIdentifier
+    SchemaReservedIdentifierOrStringLiteral NestedSchemaTableColumnName CatalogReservedSchemaTableColumnName
+    SchemaReservedTableColumnName TableReservedColumnName CatalogReservedSchemaFunctionName
+    SchemaReservedFunctionName SchemaReservedTable CatalogReservedSchemaTable SchemaReservedIndex
+    CatalogReservedSchemaIndex IdentifierDot""".split()}
+LOOKAHEADS.update({
+    "TypeLiteral": "TypeLiteralAhead",
+    "StarExpression": "StarAhead",
+    "FunctionExpression": "FunctionAhead",
+    "ColIdExpression": "ColonAliasAhead",
+    "TableAliasColon": "ColonAliasAhead",
+    "TableFunctionLateralOpt": "TableFunctionAhead",
+})
+
+
+def is_sequence(body):
+    """Whether a rule body has no choice outside parentheses."""
+    depth = 0
+    for c in LITERAL_OR_CLASS.sub(" ", body):
+        depth += (c == "(") - (c == ")")
+        if c == "/" and depth == 0:
+            return False
+    return True
+
+
+def add_lookaheads(out):
+    """Puts the lookahead in front of each rule of LOOKAHEADS, and defines the lookahead rules."""
+    for rule, ahead in LOOKAHEADS.items():
+        if rule not in out:
+            raise SystemExit(f"the rule {rule} to put a lookahead in front of is not in the grammar")
+        parameter, body = out[rule]
+        if not is_sequence(body):
+            raise SystemExit(f"the rule {rule} is not one sequence: {body!r}")
+        out[rule] = (parameter, f" &{ahead}{body}")
+    for name, body in LOOKAHEAD_RULES.items():
+        out[name] = (None, " " + body)
+
+
 def split_rules(text):
     """Returns the rules in order as [name, parameter, body] and the instruction lines. A body keeps the line
     breaks of its continuation lines; the parameter is None for a rule without one."""
@@ -219,14 +285,14 @@ def keyword_words(bodies, name, active=()):
 
 
 def identifier_rule(name, keywords):
-    shape = f"({QUOTED} / StandardString / {PLAIN})" if name in PATH_RULES else f"({QUOTED} / {PLAIN})"
+    shape = f"({QUOTED} / StandardString / {PLAIN})" if name in PATH_RULES else NAME
     if not keywords:
         return f" < {shape} >"
     choice = " / ".join(f"'{w}'i" for w in sorted(keywords))
     return f" < !(({choice}) !{WORD_CHAR}) {shape} >"
 
 
-def translate(text):
+def translate(text, lookaheads=False):
     rules, instructions = split_rules(text)
     if instructions != ["%whitespace <- [ \\t\\n\\r]*"]:
         raise SystemExit(f"unexpected instructions: {instructions!r}")
@@ -253,6 +319,8 @@ def translate(text):
         out[name] = (None, identifier_rule(name, keywords - allowed))
     for name in RESERVED_RULES:
         out[name] = (None, identifier_rule(name, set()))
+    if lookaheads:
+        add_lookaheads(out)
     lexical = {name for name, _, _ in split_rules(LEXICAL_RULES)[0]}
 
     # The rules reachable from Program, which are the rules DuckDB builds. The lexical rules are all written.
@@ -275,12 +343,14 @@ def translate(text):
 
 
 def main(argv):
+    lookaheads = "--lookaheads" in argv
+    argv = [a for a in argv if a != "--lookaheads"]
     if len(argv) != 3:
         raise SystemExit(__doc__)
     with open(argv[1], encoding="utf-8") as f:
         text = f.read()
     with open(argv[2], "w", encoding="utf-8") as f:
-        f.write(translate(text))
+        f.write(translate(text, lookaheads))
 
 
 if __name__ == "__main__":

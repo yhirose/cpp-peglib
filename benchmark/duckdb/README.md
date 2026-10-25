@@ -6,9 +6,8 @@ This benchmark compares the time and peak memory of cpp-peglib with DuckDB's own
 | --- | --- |
 | DuckDB X.Y.Z (YACC) | `duckdb_extract_statements` of a 1.x release, which parses with DuckDB's YACC parser |
 | DuckDB X.Y.Z (PEG) | `duckdb_extract_statements` of a 2.x or later release, which parses with DuckDB's PEG parser |
-| cpp-peglib (DuckDB X.Y.Z) | the grammar `make_grammar.py` generates from the PEG grammar of a 2.x or later release (see below) |
-| cpp-peglib optimized | `benchmark/data/duckdb-2.0.0-optimized.peg`, a port of DuckDB 2.0.0's grammar made by hand (`duckdb-2.0.0.peg`) and rewritten to parse faster, with the same error positions |
-| cpp-peglib optimized+dict | `duckdb-2.0.0-optimized-dict.peg`, the optimized grammar with keyword lists as dictionaries |
+| cpp-peglib (DuckDB X.Y.Z) | the grammar `make_grammar.py` generates from the PEG grammar of a 2.x or later version (see below) |
+| cpp-peglib (DuckDB X.Y.Z) +lookaheads | the same grammar with a lookahead in front of the rules that are tried everywhere and almost always fail (see below) |
 
 Each program parses the whole input in one call and builds the result: the extracted statements for DuckDB, and the AST for cpp-peglib (`enable_ast(true)` with packrat parsing). The time includes freeing the result.
 
@@ -33,7 +32,7 @@ The libraries and grammars are not part of the repository. They are stored in `b
 
 The DuckDB versions to compare are listed in `versions.txt`, one per line. When DuckDB releases a new version, change the line, then run `just duckdb-bench` again. `fetch.sh` finds the macOS library of each version through the GitHub release API, so no version-specific code is needed.
 
-The cpp-peglib grammar of a 2.x or later version is generated from that version's grammar, so it follows the change: `run.sh` generates it at each run, in a temporary directory, from the grammar `fetch.sh` stores in `work/cache/<version>/`. The hand-made grammars in `benchmark/data/` are copies of DuckDB 2.0.0's grammar, so a new DuckDB version does not change them. They were made before the generator, and a few of their rules leave subtrees out of the AST (`peg_check --dropped-subtrees` lists them).
+The cpp-peglib grammar of a 2.x or later version is generated from that version's grammar, so it follows the change: `run.sh` generates it at each run, in a temporary directory, from the grammar `fetch.sh` stores in `work/cache/<version>/`. The hand-made grammars in `benchmark/data/` are copies of DuckDB 2.0.0's grammar, made before the generator, and `run.sh` does not use them any more: a few of their rules leave subtrees out of the AST (`peg_check --dropped-subtrees` lists them) and they do not read comments.
 
 ## The generated grammar
 
@@ -48,6 +47,8 @@ The generated grammar differs from DuckDB in these cases:
 - `:` also matches the first character of `::` and `:=`, which DuckDB reads as one token, so `a[1::2]` is accepted where DuckDB rejects it.
 - DuckDB rejects some statements after its grammar has accepted them, while it builds the statement, for example a positional reference `#0`. The grammar accepts these.
 
+With `--lookaheads`, `make_grammar.py` puts a lookahead in front of 21 rules: the qualified names, the type literal, `*`, the function call, and the aliases with a colon. Each lookahead is a necessary condition for its rule to match, so that a failed alternative costs a short scan instead of a rule, with the same trees and verdicts. The rules are those that profiling a hand-made port of DuckDB 2.0.0's grammar showed to be tried at almost every position.
+
 `check_grammar.py` checks the generated grammar against DuckDB's own parser. It needs a checkout of the release, for its grammar and its tests:
 
 ```bash
@@ -55,7 +56,7 @@ git clone --depth 1 --branch v2.0.0 https://github.com/duckdb/duckdb benchmark/d
 python3 benchmark/duckdb/check_grammar.py 2.0.0 benchmark/duckdb/work/duckdb-2.0.0 [build/duckdb]
 ```
 
-It fails if a rule leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a statement of DuckDB's tests, on a few statements around how DuckDB's tokenizer reads `$`, or on a statement of the input with one token left out or repeated. A statement that DuckDB rejects only while it builds the statement counts as accepted.
+It fails if a rule leaves subtrees out of the AST, if the grammar with lookaheads accepts another statement than the grammar without them or builds another tree, or if the grammar and DuckDB disagree on a statement of DuckDB's tests, on a few statements around how DuckDB's tokenizer reads `$`, or on a statement of the input with one token left out or repeated. A statement that DuckDB rejects only while it builds the statement counts as accepted.
 
 ## Input
 

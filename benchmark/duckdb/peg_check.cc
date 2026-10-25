@@ -4,11 +4,12 @@
 // with DuckDB's. The parses run on a thread with a large stack under a depth
 // limit, so that the deeply nested statements of DuckDB's tests are parsed
 // rather than overflowing the stack.
-// Usage: peg_check <grammar.peg> <statements file>
-// Usage: peg_check --dropped-subtrees <grammar.peg>
-// prints the rules that cpp-peglib builds as AST tokens although they refer to
-// other rules outside a token boundary, so that the AST leaves out what those
-// rules match.
+// Usage: peg_check [--trees] <grammar.peg> <statements file>
+// With --trees, an accepted statement is followed by the hash of its AST, so
+// that two grammars can be compared by the trees they build. Usage: peg_check
+// --dropped-subtrees <grammar.peg> prints the rules that cpp-peglib builds as
+// AST tokens although they refer to other rules outside a token boundary, so
+// that the AST leaves out what those rules match.
 
 #include <peglib.h>
 #include <pthread.h>
@@ -17,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -62,6 +64,7 @@ struct RefersToRule : public peg::TraversalVisitor {
 struct Job {
   peg::parser *parser;
   const std::string *statements;
+  bool trees;
 };
 
 void *parse_statements(void *arg) {
@@ -72,7 +75,16 @@ void *parse_statements(void *arg) {
     auto end = statements.find('\0', start);
     if (end == std::string::npos) { end = statements.size(); }
     const std::string sql = statements.substr(start, end - start);
-    std::printf("%c\n", job.parser->parse(sql) ? 'A' : 'R');
+    if (job.trees) {
+      std::shared_ptr<peg::Ast> ast;
+      if (job.parser->parse(sql, ast)) {
+        std::printf("A %016zx\n", std::hash<std::string>{}(peg::ast_to_s(ast)));
+      } else {
+        std::printf("R\n");
+      }
+    } else {
+      std::printf("%c\n", job.parser->parse(sql) ? 'A' : 'R');
+    }
     start = end + 1;
   }
   return nullptr;
@@ -81,8 +93,13 @@ void *parse_statements(void *arg) {
 } // namespace
 
 int main(int argc, char **argv) {
+  const bool trees = argc > 1 && std::strcmp(argv[1], "--trees") == 0;
+  if (trees) {
+    argc--;
+    argv++;
+  }
   if (argc != 3) {
-    fail("usage: peg_check <grammar.peg> <statements file>\n"
+    fail("usage: peg_check [--trees] <grammar.peg> <statements file>\n"
          "       peg_check --dropped-subtrees <grammar.peg>");
   }
   const bool dropped_subtrees = std::strcmp(argv[1], "--dropped-subtrees") == 0;
@@ -102,9 +119,10 @@ int main(int argc, char **argv) {
   }
 
   parser.enable_packrat_parsing();
+  if (trees) { parser.enable_ast(true); }
   parser.set_max_depth(max_depth);
   const std::string statements = read_file(argv[2]);
-  Job job{&parser, &statements};
+  Job job{&parser, &statements, trees};
 
   pthread_attr_t attr;
   pthread_attr_init(&attr);

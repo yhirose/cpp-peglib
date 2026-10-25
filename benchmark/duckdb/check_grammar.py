@@ -8,7 +8,8 @@
 <build dir> is the build of the DuckDB comparison (default: build/duckdb), with duck_check_<version> and peg_check.
 
 The check fails if a rule of the grammar leaves subtrees out of the AST, or if the grammar and DuckDB disagree on a
-statement. The statements are those of DuckDB's tests (test/sql/**/*.test), a few around how the tokenizer reads
+statement. It does so for the grammar with lookaheads (make_grammar.py --lookaheads) too, which must also accept
+the same statements and build the same trees as the grammar without them. The statements are those of DuckDB's tests (test/sql/**/*.test), a few around how the tokenizer reads
 '$', and the statements of benchmark/data/big.sql with one token left out or repeated, most of which are wrong.
 DuckDB rejects some statements after its grammar has accepted them, in the transformer; those count as accepted.
 """
@@ -34,6 +35,8 @@ DOLLAR_STATEMENTS = [
     "SELECT x$y$z;", "SELECT $é$a$é$;", "SELECT $x$a$x$ AS $y$b$y$;", "SELECT $x$a$x$$y$;", "SELECT $x$\n$x$;",
     "SELECT $;", "SELECT $ x$;", "SELECT 1 $x$;", "SELECT $x $x$;", "SELECT $x$ab$x;", "SELECT $X$a$x$;",
     "SELECT $x$a$X$ || $X$b$X$;", "SELECT $a$1$a$::INT;", "SELECT $1a$x$1a$;", "PREPARE p AS SELECT $abc;",
+    # Names in type modifiers, where a string can start in no name: an E-string and a dollar quote only look like one.
+    "SELECT DECIMAL(date'\\') '1';", "SELECT DECIMAL(a$t$) '$t$';", "SELECT DECIMAL(a$$) '$$';",
     # A unicode space in a tag, which DuckDB does not turn into a space.
     f"SELECT $a{NO_BREAK_SPACE}b$x$a{NO_BREAK_SPACE}b$;", f"SELECT $a{NO_BREAK_SPACE}b$x;",
 ]
@@ -107,22 +110,28 @@ def verdicts(command, statements, work):
     path = os.path.join(work, "statements")
     with open(path, "wb") as f:
         f.write("\0".join(statements).encode("utf-8", errors="replace"))
-    out = subprocess.run(command + [path], check=True, stdout=subprocess.PIPE, text=True).stdout.split()
+    out = subprocess.run(command + [path], check=True, stdout=subprocess.PIPE, text=True).stdout.splitlines()
     if len(out) != len(statements):
         raise SystemExit(f"{command[0]} gave {len(out)} verdicts for {len(statements)} statements")
     return out
 
 
-def compare(name, statements, duck_check, peg_check, work):
-    """Prints the number of disagreements and the first of them, and returns the number."""
+def compare(name, statements, duck_check, peg_check, grammar, lookahead_grammar, work):
+    """Prints the disagreements with DuckDB of the grammar, and the differences between the grammar and the one with
+    lookaheads, in the verdict or the tree, and returns the number of both."""
     duck = verdicts([duck_check], statements, work)
-    peg = verdicts(peg_check, statements, work)
-    mismatches = [i for i, (d, p) in enumerate(zip(duck, peg)) if (d == "S") != (p == "R")]
-    print(f"{name}: {len(statements)} statements, {len(mismatches)} disagreements")
+    plain = verdicts([peg_check, "--trees", grammar], statements, work)
+    ahead = verdicts([peg_check, "--trees", lookahead_grammar], statements, work)
+    mismatches = [i for i, (d, p) in enumerate(zip(duck, plain)) if (d[0] == "S") != (p[0] == "R")]
+    differences = [i for i, (p, a) in enumerate(zip(plain, ahead)) if p != a]
+    print(f"{name}: {len(statements)} statements, {len(mismatches)} disagreements with DuckDB, "
+          f"{len(differences)} differences with lookaheads")
     for i in mismatches[:SHOWN]:
-        verdict = "rejects" if duck[i] == "S" else "accepts"
+        verdict = "rejects" if duck[i][0] == "S" else "accepts"
         print(f"  DuckDB {verdict}: {statements[i][:160]!r}")
-    return len(mismatches)
+    for i in differences[:SHOWN]:
+        print(f"  lookaheads change the result: {statements[i][:160]!r}")
+    return len(mismatches) + len(differences)
 
 
 def main(argv):
@@ -137,21 +146,26 @@ def main(argv):
 
     with tempfile.TemporaryDirectory() as work:
         grammar = os.path.join(work, "grammar.peg")
-        subprocess.run([sys.executable, os.path.join(HERE, "make_grammar.py"), gram, grammar], check=True)
+        lookahead_grammar = os.path.join(work, "grammar_lookaheads.peg")
+        for path, flags in ((grammar, []), (lookahead_grammar, ["--lookaheads"])):
+            subprocess.run([sys.executable, os.path.join(HERE, "make_grammar.py"), *flags, gram, path], check=True)
 
-        dropped = subprocess.run([peg_check, "--dropped-subtrees", grammar], check=True, stdout=subprocess.PIPE,
-                                 text=True).stdout.split()
+        dropped = []
+        for g in (grammar, lookahead_grammar):
+            dropped += subprocess.run([peg_check, "--dropped-subtrees", g], check=True, stdout=subprocess.PIPE,
+                                      text=True).stdout.split()
         print(f"rules that leave subtrees out of the AST: {len(dropped)} {' '.join(dropped)}")
 
         with open(os.path.join(REPO, "benchmark", "data", "big.sql"), encoding="utf-8") as f:
             big = re.sub(r"\) AT,$", ") AX,", f.read(), flags=re.M)  # as run.sh does
-        failures = len(dropped)
-        failures += compare("DuckDB tests", test_statements(source_dir), duck_check, [peg_check, grammar], work)
-        failures += compare("statements around '$'", DOLLAR_STATEMENTS, duck_check, [peg_check, grammar], work)
         # big.sql repeats its statements, so each is mutated once.
-        statements = list(dict.fromkeys(split_statements(big)))
-        failures += compare("big.sql with a token left out or repeated", mutations(statements),
-                            duck_check, [peg_check, grammar], work)
+        big_statements = list(dict.fromkeys(split_statements(big)))
+        sets = [("DuckDB tests", test_statements(source_dir)),
+                ("statements around '$'", DOLLAR_STATEMENTS),
+                ("big.sql with a token left out or repeated", mutations(big_statements))]
+        failures = len(dropped)
+        for name, statements in sets:
+            failures += compare(name, statements, duck_check, peg_check, grammar, lookahead_grammar, work)
     if failures:
         raise SystemExit("check failed")
     print("ok")

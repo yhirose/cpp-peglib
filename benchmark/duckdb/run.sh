@@ -9,7 +9,7 @@
 #
 # DuckDB 1.x parses with YACC and 2.x and later with PEG, so the rows say so by major version.
 # cpp-peglib parses with the grammar make_grammar.py generates from the PEG grammar of each 2.x and
-# later release (fetched by fetch.sh), and with the two hand-made grammars of benchmark/data.
+# later version (fetched by fetch.sh), without and with its lookaheads.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -17,11 +17,10 @@ repo=$(cd "$here/../.." && pwd)
 build=${1:-$repo/build/duckdb}
 rounds=${2:-3}
 iterations=${3:-5}
-data=$repo/benchmark/data
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-sed -E 's/\) AT,$/) AX,/' "$data/big.sql" > "$work/big_ax.sql"
+sed -E 's/\) AT,$/) AX,/' "$repo/benchmark/data/big.sql" > "$work/big_ax.sql"
 
 versions=()
 while read -r version || [ -n "$version" ]; do
@@ -44,22 +43,24 @@ row() {
   kinds+=("$2")
   targets+=("$3")
 }
+# A release before 2.0 parses with YACC.
+is_yacc() { [ "${1%%.*}" -lt 2 ]; }
 for version in "${versions[@]}"; do
-  if [ "${version%%.*}" -lt 2 ]; then parser=YACC; else parser=PEG; fi
+  if is_yacc "$version"; then parser=YACC; else parser=PEG; fi
   row "DuckDB $version ($parser)" duck "duck_extract_${version//./_}"
 done
 for version in "${versions[@]}"; do
-  if [ "${version%%.*}" -lt 2 ]; then continue; fi
+  if is_yacc "$version"; then continue; fi
   gram=$here/work/cache/$version/inlined_grammar.gram
   if [ ! -f "$gram" ]; then
     echo "$gram not found: run benchmark/duckdb/fetch.sh first" >&2
     exit 1
   fi
   python3 "$here/make_grammar.py" "$gram" "$work/duckdb-$version.peg"
+  python3 "$here/make_grammar.py" --lookaheads "$gram" "$work/duckdb-$version-lookaheads.peg"
   row "cpp-peglib (DuckDB $version)" peg "$work/duckdb-$version.peg"
+  row "cpp-peglib (DuckDB $version) +lookaheads" peg "$work/duckdb-$version-lookaheads.peg"
 done
-row "cpp-peglib optimized" peg "$data/duckdb-2.0.0-optimized.peg"
-row "cpp-peglib optimized+dict" peg "$data/duckdb-2.0.0-optimized-dict.peg"
 
 # run <row> <argument>: the argument is the iteration count, or "rss".
 run() {
@@ -90,10 +91,10 @@ for ((r = 1; r <= rounds; r++)); do
 done
 
 echo
-printf "%-30s %12s %12s %12s\n" "" "min ms" "peak MB" "statements"
+printf "%-40s %12s %12s %12s\n" "" "min ms" "peak MB" "statements"
 for ((i = 0; i < count; i++)); do
   mem=$(for _ in 1 2 3; do run "$i" rss | awk '{print $1}'; done | sort -n | sed -n 2p)
-  printf "%-30s %12.1f %12.1f %12s\n" "${names[i]}" "${mins[i]}" "$mem" \
+  printf "%-40s %12.1f %12.1f %12s\n" "${names[i]}" "${mins[i]}" "$mem" \
     "$(echo "${counts[i]}" | tr ' ' '\n' | sort -u | grep . | tr '\n' ' ')"
 done
 
