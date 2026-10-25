@@ -5820,7 +5820,8 @@ CPPPEGLIB_NOINLINE inline size_t Holder::parse_macro(const char *s, size_t n,
 
 CPPPEGLIB_NOINLINE inline size_t
 Holder::parse_recognized(const char *s, size_t n, SemanticValues &vs,
-                         Context &c, std::any &dt, const RuleUse &use) const {
+                         Context &c, std::any &dt,
+                         [[maybe_unused]] const RuleUse &use) const {
   auto nesting = c.nest(s, *outer_);
   Context::RuleMatch match;
   // A left-recursive rule is observed (Definition::decide_value_use): its
