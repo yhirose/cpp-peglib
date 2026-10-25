@@ -782,7 +782,7 @@ auto syntax = R"(
 
 Rules additional_rules = {
   {
-    "NAME", usr([](const char* s, size_t n, SemanticValues& vs, any& dt) -> size_t {
+    "NAME", usr([](const char* s, size_t n) -> size_t {
       static vector<string> names = { "PEG", "BNF" };
       for (const auto& name: names) {
         if (name.size() <= n && !name.compare(0, name.size(), s, name.size())) {
@@ -801,6 +801,8 @@ peg::parser g(syntax, additional_rules);
 
 assert(g.parse(" Hello BNF! "));
 ```
+
+The function given to `usr` gets the input from the current position, `s`, and its length, `n`, and returns the length it matches, or `-1` where it does not match. It can also take the user data given to `parse`, as `(const char* s, size_t n, any& dt)`, or the semantic values of its rule as well, as `(const char* s, size_t n, SemanticValues& vs, any& dt)`, to read the values parsed before it in the rule and to add values of its own. Taking `vs` costs time: a grammar with such a function builds every value as it parses, even those that nothing reads. The parser can reuse what the function returned at a position, or call it there again, so the result must depend only on the input and on user data that does not change during the parse. The parser cannot tell what the function's match starts with, so it tries the function wherever the rule is reached: a lookahead before it, such as `&[PB] NAME`, keeps it from being tried elsewhere.
 
 Unicode support
 ---------------

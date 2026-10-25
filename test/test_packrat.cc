@@ -580,6 +580,59 @@ TEST(PackratTest, Builds_no_value_nothing_reads) {
   }
 }
 
+// A User operator given the semantic values sees every scope, so with one
+// every value is built, as with a tracer. One that takes the input, with or
+// without the user data, is given no values, and the parse builds no more
+// than without it.
+TEST(PackratTest, Builds_every_value_only_for_a_user_operator_given_values) {
+  auto values = [] {
+    return usr([](const char *, size_t, SemanticValues &,
+                  std::any &) -> size_t { return 0; });
+  };
+  auto input = [] {
+    return usr([](const char *, size_t) -> size_t { return 0; });
+  };
+  auto input_and_data = [] {
+    return usr([](const char *, size_t, std::any &) -> size_t { return 0; });
+  };
+  const std::vector<std::string> names{"S",    "LOOK",  "TOKEN", "INNER",
+                                       "DROP", "BELOW", "KEPT"};
+  const std::set<std::string> read{"S", "TOKEN", "KEPT"};
+  const std::set<std::string> all(names.begin(), names.end());
+  struct Case {
+    const char *label;
+    std::shared_ptr<Ope> first, second;
+    std::set<std::string> expected;
+  };
+  for (auto packrat : {false, true}) {
+    for (const auto &[label, first, second, expected] :
+         {Case{"input, input and data", input(), input_and_data(), read},
+          Case{"values, input", values(), input(), all},
+          Case{"input, values", input(), values(), all}}) {
+      parser pg(R"(
+        S     <- &LOOK TOKEN DROP KEPT ~FIRST ~SECOND
+        LOOK  <- 'i'
+        TOKEN <- < INNER >
+        INNER <- 'i'
+        ~DROP <- BELOW
+        BELOW <- 'b'
+        KEPT  <- 'k'
+      )",
+                {{"FIRST", first}, {"SECOND", second}});
+      ASSERT_TRUE(!!pg);
+      if (packrat) { pg.enable_packrat_parsing(); }
+      std::map<std::string, size_t> runs;
+      count_ast_actions(pg, names, runs);
+      EXPECT_TRUE(pg.parse("ibk"));
+      std::set<std::string> built;
+      for (const auto &[name, _] : runs) {
+        built.insert(name);
+      }
+      EXPECT_EQ(expected, built) << label << " packrat=" << packrat;
+    }
+  }
+}
+
 // A memoized match is handed to every caller at its position. It builds no
 // value when no match of its rule is ever read.
 TEST(PackratTest, Packrat_builds_no_value_for_a_memoized_rule_nothing_reads) {

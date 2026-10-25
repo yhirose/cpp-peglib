@@ -1688,7 +1688,7 @@ struct StartRuleAnalysis {
   std::vector<Definition *> rules;
   std::vector<Definition *> rules_by_id;
   bool has_cut = false;
-  bool has_user = false;
+  bool user_sees_values = false;
   std::vector<int32_t> packrat_index; // def_id -> cache slot or -1
   size_t packrat_cached_count = 0;
   // The rules that the alternatives of choices start with.
@@ -2351,8 +2351,8 @@ public:
   // The body of a match that is only recognized parses into this scope.
   SemanticValues unread_scope;
 
-  // A tracer and a User operator see the scopes as they are, so every match
-  // is built and every value delivered.
+  // A tracer and a User operator given `vs` see the scopes as they are, so
+  // every match is built and every value delivered.
   bool builds_everything = false;
 
   // Whether a rule that cannot start with the next byte may fail without
@@ -3531,7 +3531,8 @@ using Parser = std::function<size_t(const char *s, size_t n, SemanticValues &vs,
 
 class User : public Ope {
 public:
-  User(Parser fn) : fn_(fn) {}
+  User(Parser fn, bool sees_values = true)
+      : fn_(fn), sees_values_(sees_values) {}
   size_t parse_core(const char *s, size_t n, SemanticValues &vs,
                     Context & /*c*/, std::any &dt) const override {
     assert(fn_);
@@ -3541,6 +3542,8 @@ public:
   std::function<size_t(const char *s, size_t n, SemanticValues &vs,
                        std::any &dt)>
       fn_;
+  // Whether the user's function is given `vs`, which it can read and add to.
+  bool sees_values_;
 };
 
 class WeakHolder : public Ope {
@@ -3865,6 +3868,32 @@ usr(std::function<size_t(const char *s, size_t n, SemanticValues &vs,
   return std::make_shared<User>(fn);
 }
 
+// A function that cannot take the semantic values but takes the input,
+// (s, n, dt) or (s, n), is given no values, so a grammar need not build them
+// for it.
+template <typename F>
+inline constexpr bool sees_no_values_v = std::conjunction_v<
+    std::negation<std::is_convertible<F, Parser>>,
+    std::disjunction<
+        std::is_invocable_r<size_t, F &, const char *, size_t, std::any &>,
+        std::is_invocable_r<size_t, F &, const char *, size_t>>>;
+
+template <typename F, std::enable_if_t<sees_no_values_v<F>, int> = 0>
+inline std::shared_ptr<Ope> usr(F fn) {
+  if constexpr (std::is_invocable_r_v<size_t, F &, const char *, size_t,
+                                      std::any &>) {
+    return std::make_shared<User>(
+        [fn](const char *s, size_t n, SemanticValues &,
+             std::any &dt) mutable -> size_t { return fn(s, n, dt); },
+        false);
+  } else {
+    return std::make_shared<User>(
+        [fn](const char *s, size_t n, SemanticValues &,
+             std::any &) mutable -> size_t { return fn(s, n); },
+        false);
+  }
+}
+
 inline std::shared_ptr<Ope> ref(const Grammar &grammar, const std::string &name,
                                 const char *s, bool is_macro,
                                 const std::vector<std::shared_ptr<Ope>> &args) {
@@ -4012,7 +4041,9 @@ struct AssignIDToDefinition : public TraversalVisitor {
     has_cut = true;
     TraversalVisitor::visit(ope);
   }
-  void visit(User &) override { has_user = true; }
+  void visit(User &ope) override {
+    user_sees_values = user_sees_values || ope.sees_values_;
+  }
   void visit(PrioritizedChoice &ope) override {
     for (const auto &fs : ope.first_sets()) {
       for (const auto &f : fs.failures) {
@@ -4024,7 +4055,7 @@ struct AssignIDToDefinition : public TraversalVisitor {
 
   std::unordered_map<void *, size_t> ids;
   bool has_cut = false; // grammar contains a Cut or Recovery ope
-  bool has_user = false;
+  bool user_sees_values = false;
   std::unordered_set<const Definition *> alternative_starts;
 };
 
@@ -5079,7 +5110,7 @@ private:
       if (collect_packrat_stats) { add_packrat_stats(stats); }
     });
 
-    c.builds_everything = c.has_tracer || analysis.has_user;
+    c.builds_everything = c.has_tracer || analysis.user_sees_values;
     auto uses = rule_uses(c.builds_everything);
     c.rule_use = uses->by_id.data();
     c.forward = uses->forward.data();
@@ -6847,7 +6878,7 @@ inline void Definition::analyze() const {
   if (whitespaceOpe) { whitespaceOpe->accept(vis); }
   if (wordOpe) { wordOpe->accept(vis); }
   analysis_.has_cut = vis.has_cut;
-  analysis_.has_user = vis.has_user;
+  analysis_.user_sees_values = vis.user_sees_values;
   analysis_.alternative_starts.assign(vis.alternative_starts.begin(),
                                       vis.alternative_starts.end());
   analysis_.rules.resize(vis.ids.size());
@@ -7357,7 +7388,7 @@ inline void Definition::decide_skippable(std::vector<RuleUse> &uses) const {
 }
 
 // Where a parse builds everything, no rule is plain: a tracer or a User
-// operator can see what a rule goes through.
+// operator given `vs` can see what a rule goes through.
 inline void Definition::decide_plain(std::vector<RuleUse> &uses,
                                      bool builds_everything) const {
   if (builds_everything) { return; }

@@ -1476,6 +1476,41 @@ TEST(UserRuleTest, User_rule_combined_with_peg_rules) {
   EXPECT_FALSE(g.parse("Hello world!"));
 }
 
+TEST(UserRuleTest, User_rule_of_the_input_alone) {
+  auto g = parser(R"(
+    ROOT <- 'Hello ' NAME '!'
+  )",
+                  {{"NAME", usr([](const char *s, size_t n) -> size_t {
+                      return n >= 3 && std::string_view(s, 3) == "PEG"
+                                 ? 3
+                                 : peg::kFail;
+                    })}});
+
+  EXPECT_TRUE(g.parse("Hello PEG!"));
+  EXPECT_FALSE(g.parse("Hello BNF!"));
+}
+
+TEST(UserRuleTest, User_rule_of_the_input_and_the_user_data) {
+  auto g =
+      parser(R"(
+    ROOT <- 'Hello ' NAME '!'
+  )",
+             {{"NAME", usr([](const char *s, size_t n, std::any &dt) -> size_t {
+                 const auto &name = *std::any_cast<std::string *>(dt);
+                 return name.size() <= n &&
+                                !name.compare(0, name.size(), s, name.size())
+                            ? name.size()
+                            : peg::kFail;
+               })}});
+
+  std::string name = "PEG";
+  std::any dt = &name;
+  EXPECT_TRUE(g.parse("Hello PEG!", dt));
+  EXPECT_FALSE(g.parse("Hello BNF!", dt));
+  name = "BNF";
+  EXPECT_TRUE(g.parse("Hello BNF!", dt));
+}
+
 // =============================================================================
 // Dictionary Precedence Tests
 // =============================================================================
