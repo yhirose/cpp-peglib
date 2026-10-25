@@ -6,6 +6,9 @@ default:
 release *args:
     @./scripts/release.sh {{args}}
 
+clean:
+    rm -rf build build_* benchmark/duckdb/work
+
 test:
     cmake --build build -j {{num_cpus()}} --target peglib-test-main
     build/test/peglib-test-main
