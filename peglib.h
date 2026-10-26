@@ -2036,11 +2036,11 @@ public:
   void observe(SemanticValues &vs) {
     if (ast_records.size()) { observe_values(vs); }
   }
-  CPPPEGLIB_NOINLINE void observe_values(SemanticValues &vs);
+  void observe_values(SemanticValues &vs);
   // Puts in place of `value`, where it is a record's handle, its node: one
   // that a callback is about to read where `observed`, else one the parse
   // returns (see materialize_ast).
-  CPPPEGLIB_NOINLINE void build_ast(std::any &value, bool observed);
+  void build_ast(std::any &value, bool observed);
 
   // What a match of a rule produced: its length, and the parts a caller may
   // read.
@@ -6228,13 +6228,14 @@ inline std::any Context::record_ast(const Definition &rule,
   return handle;
 }
 
-inline void Context::observe_values(SemanticValues &vs) {
+CPPPEGLIB_NOINLINE inline void Context::observe_values(SemanticValues &vs) {
   for (auto &v : vs) {
     build_ast(v, true);
   }
 }
 
-inline void Context::build_ast(std::any &value, bool observed) {
+CPPPEGLIB_NOINLINE inline void Context::build_ast(std::any &value,
+                                                  bool observed) {
   if (const auto *handle = std::any_cast<AstHandle>(&value)) {
     auto record = handle->record;
     // Only a match is handed on as a handle.
