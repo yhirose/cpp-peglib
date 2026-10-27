@@ -240,7 +240,7 @@ TEST(AmbiguityTest, First_choice_wins) {
   )");
   EXPECT_TRUE(pg);
 
-  int choice = -1;
+  size_t choice = 99;
   pg["S"] = [&](const SemanticValues &vs) { choice = vs.choice(); };
 
   EXPECT_TRUE(pg.parse("hello"));
