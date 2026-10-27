@@ -309,9 +309,17 @@ inline std::pair<int, size_t> parse_octal_number(const char *s, size_t n,
   return std::pair(ret, i);
 }
 
-inline std::string resolve_escape_sequence(const char *s, size_t n) {
+// `\x` and an octal escape name a byte in a literal, and a code point in a
+// character class, which holds characters.
+inline std::string resolve_escape_sequence(const char *s, size_t n,
+                                           bool as_bytes = true) {
   std::string r;
   r.reserve(n);
+
+  auto numeric_escape = [&](char32_t cp) {
+    return as_bytes ? std::string(1, static_cast<char>(cp))
+                    : encode_codepoint(cp);
+  };
 
   size_t i = 0;
   while (i < n) {
@@ -377,7 +385,7 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
       case 'x': {
         char32_t cp;
         std::tie(cp, i) = parse_hex_number(s, n, i + 1, 2);
-        r += encode_codepoint(cp);
+        r += numeric_escape(cp);
         break;
       }
       case 'u': {
@@ -394,7 +402,7 @@ inline std::string resolve_escape_sequence(const char *s, size_t n) {
         const auto three = '0' <= s[i] && s[i] <= '3';
         char32_t cp;
         std::tie(cp, i) = parse_octal_number(s, n, i, three ? 3 : 2);
-        r += encode_codepoint(cp);
+        r += numeric_escape(cp);
         break;
       }
       }
@@ -9100,19 +9108,19 @@ private:
 
     g["Literal"] = [](const SemanticValues &vs) {
       const auto &tok = vs.tokens.front();
-      return lit(resolve_escape_sequence(tok.data(), tok.size()));
+      return lit(resolve_escape_sequence(tok.data(), tok.size(), true));
     };
     g["LiteralI"] = [](const SemanticValues &vs) {
       const auto &tok = vs.tokens.front();
-      return liti(resolve_escape_sequence(tok.data(), tok.size()));
+      return liti(resolve_escape_sequence(tok.data(), tok.size(), true));
     };
     g["LiteralD"] = [](const SemanticValues &vs) {
       auto &tok = vs.tokens.front();
-      return resolve_escape_sequence(tok.data(), tok.size());
+      return resolve_escape_sequence(tok.data(), tok.size(), true);
     };
     g["LiteralID"] = [](const SemanticValues &vs) {
       auto &tok = vs.tokens.front();
-      return resolve_escape_sequence(tok.data(), tok.size());
+      return resolve_escape_sequence(tok.data(), tok.size(), true);
     };
 
     // A `\d`-style escape or a POSIX class, negated once its class tells
@@ -9203,7 +9211,7 @@ private:
       return PredefinedClass{*ranges, negated};
     };
     g["Char"] = [](const SemanticValues &vs) {
-      return resolve_escape_sequence(vs.sv().data(), vs.sv().length());
+      return resolve_escape_sequence(vs.sv().data(), vs.sv().length(), false);
     };
 
     g["RepetitionRange"] = [](const SemanticValues &vs) {

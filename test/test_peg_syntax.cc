@@ -653,3 +653,32 @@ TEST(GrammarRejectionTest, Accept_known_instruction) {
 
   EXPECT_TRUE(pg.parse("abc"));
 }
+
+TEST(EscapeTest, Hex_and_octal_escapes_are_bytes_in_literals) {
+  // The bytes of U+3042, written one by one.
+  for (auto g : {"S <- '\\xe3\\x81\\x82'", "S <- \"\\xe3\\x81\\x82\"",
+                 "S <- '\\xe3\\x81\\x82'i", "S <- '\\343\\201\\202'",
+                 "S <- '\\xe3\\x81\\x82' | 'x'"}) {
+    parser pg(g);
+    EXPECT_TRUE(pg.parse("\xe3\x81\x82")) << g;
+  }
+
+  parser lone("S <- '\\x80'");
+  EXPECT_TRUE(lone.parse("\x80"));
+  EXPECT_FALSE(lone.parse("\xc2\x80"));
+
+  parser octal("S <- '\\377'");
+  EXPECT_TRUE(octal.parse("\xff"));
+  EXPECT_FALSE(octal.parse("\xc3\xbf"));
+
+  // `\u` is still a code point.
+  parser unicode("S <- '\\u3042'");
+  EXPECT_TRUE(unicode.parse("\xe3\x81\x82"));
+}
+
+TEST(EscapeTest, Hex_and_octal_escapes_are_code_points_in_classes) {
+  parser pg("S <- [\\x80-\\xff]");
+  EXPECT_TRUE(pg.parse("\xc2\x80"));
+  EXPECT_TRUE(pg.parse("\xc3\xbf"));
+  EXPECT_FALSE(pg.parse("\xe3\x81\x82"));
+}

@@ -19,7 +19,7 @@ The PEG syntax is well described on page 2 in the [document](http://www.brynosau
 * `{2,5}`, `{2,}`, `{,5}`, `{2}` (Regex-like repetition operator)
 * `<` ... `>` (Token boundary operator)
 * `~` (Ignore operator)
-* `\x20` (Hex number char)
+* `\x20` (Hex number char: a byte in a literal, a code point in a character class)
 * `\u10FFFF` (Unicode char)
 * `[\d\w\s]`, `[\D\W\S]` (Predefined character classes in a character class, ASCII semantics)
 * `[[:alpha:]]`, `[[:^alpha:]]` (POSIX character classes in a character class, ASCII semantics: `alnum`, `alpha`, `ascii`, `blank`, `cntrl`, `digit`, `graph`, `lower`, `print`, `punct`, `space`, `upper`, `word`, `xdigit`)
