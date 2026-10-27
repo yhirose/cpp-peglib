@@ -3541,10 +3541,12 @@ class User : public Ope {
 public:
   User(Parser fn, bool sees_values = true)
       : fn_(fn), sees_values_(sees_values) {}
-  size_t parse_core(const char *s, size_t n, SemanticValues &vs,
-                    Context & /*c*/, std::any &dt) const override {
+  size_t parse_core(const char *s, size_t n, SemanticValues &vs, Context &c,
+                    std::any &dt) const override {
     assert(fn_);
-    return fn_(s, n, vs, dt);
+    auto len = fn_(s, n, vs, dt);
+    if (fail(len)) { c.set_error_pos(s); }
+    return len;
   }
   void accept(Visitor &v) override;
   std::function<size_t(const char *s, size_t n, SemanticValues &vs,

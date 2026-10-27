@@ -1439,6 +1439,80 @@ TEST(UserRuleTest, User_rule_failure) {
   EXPECT_FALSE(g.parse("anything"));
 }
 
+// NAME matches "PEG", given as a function of the input alone or as one that is
+// given the semantic values.
+static Rules name_rule(bool sees_values) {
+  auto match = [](const char *s, size_t n) -> size_t {
+    return n >= 3 && std::string_view(s, 3) == "PEG" ? 3 : peg::kFail;
+  };
+  if (sees_values) {
+    return {{"NAME", usr([=](const char *s, size_t n, SemanticValues &,
+                             std::any &) -> size_t { return match(s, n); })}};
+  }
+  return {{"NAME", usr(match)}};
+}
+
+// What the logger is told when `grammar` does not parse `input`.
+static std::vector<std::string> errors_of(const char *grammar,
+                                          const char *input, const Rules &rules,
+                                          bool packrat = false,
+                                          bool ast = false) {
+  parser pg(grammar, rules);
+  EXPECT_TRUE(pg) << grammar;
+  std::vector<std::string> errors;
+  pg.set_logger([&](size_t line, size_t col, const std::string &msg) {
+    errors.push_back(std::to_string(line) + ":" + std::to_string(col) + ": " +
+                     msg);
+  });
+  if (packrat) { pg.enable_packrat_parsing(); }
+  std::shared_ptr<Ast> tree;
+  if (ast) { pg.enable_ast(); }
+  EXPECT_FALSE(ast ? pg.parse(input, tree) : pg.parse(input)) << input;
+  return errors;
+}
+
+// A user rule that does not match is reported like any other rule that fails,
+// whether it is given the values or not, in every mode.
+TEST(UserRuleTest, User_rule_failure_is_reported) {
+  struct Case {
+    const char *input, *expected;
+  };
+  for (const auto &[input, expected] : {
+           Case{"Hello x",
+                "1:7: syntax error, unexpected 'x', expecting <NAME>."},
+           Case{"Hello ", "1:7: syntax error, expecting <NAME>."},
+       }) {
+    for (auto sees_values : {false, true}) {
+      for (auto packrat : {false, true}) {
+        for (auto ast : {false, true}) {
+          EXPECT_EQ(std::vector<std::string>{expected},
+                    errors_of("ROOT <- 'Hello ' NAME", input,
+                              name_rule(sees_values), packrat, ast))
+              << input << sees_values << packrat << ast;
+        }
+      }
+    }
+  }
+}
+
+TEST(UserRuleTest, User_rule_failure_is_listed_among_the_expected) {
+  EXPECT_EQ(std::vector<std::string>{"1:7: syntax error, unexpected 'x', "
+                                     "expecting <NAME>, 'BNF'."},
+            errors_of("ROOT <- 'Hello ' (NAME / 'BNF')", "Hello x",
+                      name_rule(false)));
+}
+
+// A failure inside a lookahead is not what the input lacks.
+TEST(UserRuleTest, User_rule_failure_in_a_lookahead_is_not_reported) {
+  for (auto sees_values : {false, true}) {
+    EXPECT_EQ(std::vector<std::string>{"1:7: syntax error, unexpected 'x', "
+                                       "expecting 'z'."},
+              errors_of("ROOT <- 'Hello ' !NAME 'z'", "Hello x",
+                        name_rule(sees_values)))
+        << sees_values;
+  }
+}
+
 TEST(UserRuleTest, User_rule_with_semantic_value) {
   auto g =
       parser(R"(
