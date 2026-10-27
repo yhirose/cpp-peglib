@@ -1094,10 +1094,28 @@ Notes:
   and other callbacks are **not** included and must be re-applied after
   `load_blob`.
 - First-sets are recomputed on load, and references are resolved by name.
-- Grammars that use a named capture (`$name<...>`) or a User operator are not
-  serializable (`serialize_grammar()` throws).
-- `load_blob()` returns `false` on a bad or incompatible blob, and passes the
-  reason to the logger set with `set_logger`.
+- A rule whose whole body is a `usr` operator, such as one given in
+  [Adjust definitions](#adjust-definitions), is stored by name only, since its
+  body is code. Give the same rules again to `load_blob(blob, rules)`, as
+  below.
+- Grammars that use a named capture (`$name<...>`) or a `usr` operator inside
+  a rule body are not serializable (`serialize_grammar()` throws).
+- `load_blob()` returns `false` on a bad or incompatible blob, or when `rules`
+  lacks a rule the blob stores by name or gives it as other than a `usr`
+  operator, and passes the reason to the logger set with `set_logger`.
+
+```cpp
+Rules rules = {
+  {"NAME", usr([](const char* s, size_t n) -> size_t {
+    return n >= 3 && !strncmp(s, "PEG", 3) ? 3 : -1;
+  })},
+};
+peg::parser parser("ROOT <- 'Hello ' NAME", rules);
+auto blob = parser.serialize_grammar(); // NAME is stored by name only
+
+peg::parser parser2;
+parser2.load_blob(blob, rules); // takes the body of NAME from rules
+```
 
 `peglint` can emit a blob with the `--blob` option:
 

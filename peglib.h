@@ -3627,6 +3627,10 @@ private:
 
 using Grammar = std::unordered_map<std::string, Definition>;
 
+// Rules an application gives as operators, by name: a name starting with `~`
+// gives a rule whose value is ignored.
+using Rules = std::unordered_map<std::string, std::shared_ptr<Ope>>;
+
 class Reference : public Ope {
 public:
   // Whether the rule cannot start with the next byte, and so is not entered.
@@ -8136,8 +8140,10 @@ inline void finish_grammar(Grammar &g, Definition &start_rule) {
  *  first-sets (O(N)) and which rules can match empty are recomputed on load.
  *  The `precedence` instruction is supported (its operator table is
  *  structural).
- *  Grammars using the `User` operator or a Capture with a match action are
- *  rejected. The blob is specific to this peglib version's layout.
+ *  A rule whose body is a `User` operator, which holds code, is stored by name
+ *  only, and the application gives its body again on load. A `User` operator
+ *  anywhere else, or a Capture with a match action, is rejected. The blob is
+ *  specific to this peglib version's layout.
  *---------------------------------------------------------------------------*/
 
 struct GrammarBlob {
@@ -8181,9 +8187,36 @@ struct GrammarBlob {
   };
   enum Flag2 : uint8_t {
     F2_NoWhitespace = 1,
+    // A rule stored by name only (see is_given_on_load).
+    F2_GivenOnLoad = 2,
     // The bits this version reads, which a blob may not go beyond.
-    F2_Known = F2_NoWhitespace,
+    F2_Known = F2_NoWhitespace | F2_GivenOnLoad,
   };
+
+  // Whether a rule with the body `ope` is stored by name only, its body given
+  // again on load.
+  static bool is_given_on_load(const std::shared_ptr<Ope> &ope) {
+    return dynamic_cast<const User *>(ope.get()) != nullptr;
+  }
+
+  // The body `rules` gives for the rule `name`, which a blob stores by name.
+  // A `~` before the name in `rules` is allowed, as the text loader takes it;
+  // whether the value is ignored is stored in the blob.
+  static std::shared_ptr<Ope> body_given_on_load(const Rules &rules,
+                                                 const std::string &name) {
+    auto it = rules.find(name);
+    if (it == rules.end()) { it = rules.find("~" + name); }
+    if (it == rules.end()) {
+      throw std::runtime_error("GrammarBlob: rule '" + name +
+                               "' is given on load, but the rules lack it");
+    }
+    if (!is_given_on_load(it->second)) {
+      throw std::runtime_error("GrammarBlob: rule '" + name +
+                               "' is given on load, but not as a User "
+                               "operator");
+    }
+    return it->second;
+  }
 
   struct Writer {
     std::vector<uint8_t> b;
@@ -8297,7 +8330,7 @@ struct GrammarBlob {
     }
 
     // A rule is written by name, so it never gets here; a User operator holds
-    // code.
+    // code, so one is written only as a whole rule body, by the rule's name.
     void visit(Holder &) override { not_serializable(); }
     void visit(WeakHolder &) override { not_serializable(); }
     void visit(User &) override { not_serializable(); }
@@ -8314,8 +8347,8 @@ struct GrammarBlob {
     }
     [[noreturn]] static void not_serializable() {
       throw std::runtime_error(
-          "GrammarBlob: operator not serializable (a custom User operator or "
-          "a Capture with a match action)");
+          "GrammarBlob: operator not serializable (a User operator inside a "
+          "rule body or a Capture with a match action)");
     }
 
     Writer &w;
@@ -8458,7 +8491,7 @@ struct GrammarBlob {
     }
   }
 
-  static const uint32_t MAGIC = 0x50454734; // "PEG4"
+  static const uint32_t MAGIC = 0x50454735; // "PEG5"
 
   static std::vector<uint8_t> serialize(const Grammar &g,
                                         const std::string &start) {
@@ -8483,6 +8516,8 @@ struct GrammarBlob {
     for (auto *kv : defs) {
       const auto &name = kv->first;
       const auto &def = kv->second;
+      const auto &body = def.get_core_operator();
+      const auto given_on_load = is_given_on_load(body);
       w.str(name);
       uint8_t flags = (def.ignoreSemanticValue ? F_IgnoreSemanticValue : 0) |
                       (def.is_macro ? F_IsMacro : 0) |
@@ -8493,19 +8528,22 @@ struct GrammarBlob {
                       (def.can_be_empty ? F_CanBeEmpty : 0) |
                       (def.disable_action ? F_DisableAction : 0);
       w.u8(flags);
-      w.u8(def.no_whitespace ? F2_NoWhitespace : 0);
+      w.u8((def.no_whitespace ? F2_NoWhitespace : 0) |
+           (given_on_load ? F2_GivenOnLoad : 0));
       w.u32((uint32_t)def.params.size());
       for (auto &s : def.params)
         w.str(s);
       w.str(def.ast_name);
       w.str(def.error_message);
-      write_ope(w, def.get_core_operator());
+      if (!given_on_load) { write_ope(w, body); }
     }
     return std::move(w.b);
   }
 
+  // `rules` gives the bodies of the rules the blob stores by name.
   static std::shared_ptr<Grammar> deserialize(const std::vector<uint8_t> &blob,
-                                              std::string &start_out) {
+                                              std::string &start_out,
+                                              const Rules &rules = {}) {
     Reader r{blob.data(), blob.data() + blob.size()};
     if (r.u32() != MAGIC)
       throw std::runtime_error("GrammarBlob: bad magic / not a grammar blob");
@@ -8548,8 +8586,8 @@ struct GrammarBlob {
       def.ast_name = std::move(ast_name);
       def.error_message = std::move(err);
 
-      auto body = read_ope(r, *g, &def);
-      def <= body;
+      def <= (flags2 & F2_GivenOnLoad ? body_given_on_load(rules, name)
+                                      : read_ope(r, *g, &def));
     }
     if (r.p != r.end)
       throw std::runtime_error("GrammarBlob: trailing bytes after the grammar");
@@ -8582,8 +8620,6 @@ struct GrammarBlob {
 /*-----------------------------------------------------------------------------
  *  PEG parser generator
  *---------------------------------------------------------------------------*/
-
-using Rules = std::unordered_map<std::string, std::shared_ptr<Ope>>;
 
 class ParserGenerator {
 public:
@@ -10244,7 +10280,7 @@ public:
       try {
         blob = serialize_grammar();
       } catch (const std::runtime_error &) {}
-      if (!blob.empty() && !load_blob(blob)) {
+      if (!blob.empty() && !load_blob(blob, rules)) {
         throw std::logic_error("a serialized grammar failed to load");
       }
     }
@@ -10266,9 +10302,12 @@ public:
   }
 
   // Serialize the loaded grammar to a portable byte blob (see GrammarBlob).
-  // Semantic callbacks are not included; throws if the grammar is not
-  // serializable (uses the `User` operator or a Capture with a match action).
-  // Without a loaded grammar the blob is empty, which load_blob() rejects.
+  // Semantic callbacks are not included. A rule whose body is a `User`
+  // operator, such as one given in `Rules`, is stored by name only, so
+  // load_blob() needs its body again. Throws if the grammar is not
+  // serializable (a `User` operator inside a rule body, or a Capture with a
+  // match action). Without a loaded grammar the blob is empty, which
+  // load_blob() rejects.
   std::vector<uint8_t> serialize_grammar() const {
     if (grammar_ == nullptr) { return {}; }
     return GrammarBlob::serialize(*grammar_, start_);
@@ -10276,11 +10315,13 @@ public:
 
   // Load a grammar from a blob produced by serialize_grammar() / GrammarBlob,
   // skipping the meta-parse. Re-apply enable_ast() etc. afterwards as needed.
-  // On failure the logger, if any, is told why, at line 0 and column 0 since
-  // a blob has no text.
-  bool load_blob(const std::vector<uint8_t> &blob) {
+  // `rules` gives the bodies of the rules the blob stores by name, as they
+  // were given to load_grammar(); names it does not need are ignored. On
+  // failure the logger, if any, is told why, at line 0 and column 0 since a
+  // blob has no text.
+  bool load_blob(const std::vector<uint8_t> &blob, const Rules &rules) {
     try {
-      grammar_ = GrammarBlob::deserialize(blob, start_);
+      grammar_ = GrammarBlob::deserialize(blob, start_, rules);
     } catch (const std::exception &e) {
       if (log_) { log_(0, 0, e.what(), ""); }
       return false;
@@ -10294,6 +10335,10 @@ public:
       enablePackratParsing_ = true;
     }
     return grammar_ != nullptr;
+  }
+
+  bool load_blob(const std::vector<uint8_t> &blob) {
+    return load_blob(blob, Rules());
   }
 
   bool parse_n(const char *s, size_t n, const char *path = nullptr) const {

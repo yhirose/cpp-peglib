@@ -15,6 +15,20 @@ static void expect_same(const Grammar &orig, const Grammar &deser,
   EXPECT_EQ(r1.len, r2.len) << "input=" << input;
 }
 
+// Parse each input with both parsers, building ASTs, and require the same
+// result and, where both accept, the same tree.
+static void expect_same_asts(parser &p1, parser &p2,
+                             std::initializer_list<const char *> inputs) {
+  p1.enable_ast();
+  p2.enable_ast();
+  for (auto in : inputs) {
+    std::shared_ptr<Ast> a1, a2;
+    auto r1 = p1.parse(in, a1), r2 = p2.parse(in, a2);
+    EXPECT_EQ(r1, r2) << in;
+    if (r1 && r2) { EXPECT_EQ(ast_to_s(a1), ast_to_s(a2)) << in; }
+  }
+}
+
 static std::shared_ptr<Grammar> load(const char *text, std::string &start) {
   Rules rules;
   auto ctx =
@@ -121,17 +135,9 @@ TEST(GrammarBlobTest, RoundTripPrecedence) {
 
   peg::parser p2;
   ASSERT_TRUE(p2.load_blob(blob));
-  p1.enable_ast();
-  p2.enable_ast();
-
-  for (auto in : {"1", "1 + 2 * 3", "1 * 2 + 3", "1 - 2 - 3", "2 * 3 * 4",
-                  "(1 + 2) * 3", "1 + 2 * 3 - 4 / 2", ""}) {
-    std::shared_ptr<peg::Ast> a1, a2;
-    bool r1 = p1.parse(in, a1);
-    bool r2 = p2.parse(in, a2);
-    EXPECT_EQ(r1, r2) << in;
-    if (r1 && r2) EXPECT_EQ(peg::ast_to_s(a1), peg::ast_to_s(a2)) << in;
-  }
+  expect_same_asts(p1, p2,
+                   {"1", "1 + 2 * 3", "1 * 2 + 3", "1 - 2 - 3", "2 * 3 * 4",
+                    "(1 + 2) * 3", "1 + 2 * 3 - 4 / 2", ""});
 }
 
 // Macro-based precedence: the binary operator is a macro parameter, so
@@ -172,8 +178,10 @@ TEST(GrammarBlobTest, RejectsBadMagic) {
 }
 
 // Blobs of earlier versions are not read: v1.20.0 stored `[[:^lower:]]i` as
-// ranges that now match every character, and v1.22.0 a recovery as a call
-// of a built-in `%recover` macro.
+// ranges that now match every character, and v1.22.0 a recovery as a call of
+// a built-in `%recover` macro. The version was raised again because readers
+// of v1.28.0, which do not check flag bits, would read a body where a rule
+// given on load has none; only the current version is read.
 TEST(GrammarBlobTest, RejectsBlobsOfEarlierVersions) {
   struct Case {
     const char *grammar;
@@ -182,6 +190,7 @@ TEST(GrammarBlobTest, RejectsBlobsOfEarlierVersions) {
   for (const auto &[grammar, magic] : std::initializer_list<Case>{
            {"S <- [[:^lower:]]i", {0x32, 0x47, 0x45, 0x50}},
            {"S <- 'a' 'b'^skip\nskip <- (!'b' .)*", {0x33, 0x47, 0x45, 0x50}},
+           {"S <- 'a'", {0x34, 0x47, 0x45, 0x50}},
        }) {
     parser pg(grammar);
     auto blob = pg.serialize_grammar();
@@ -208,16 +217,8 @@ TEST(GrammarBlobTest, ParserLoadBlobWithAst) {
 
   peg::parser p2;
   ASSERT_TRUE(p2.load_blob(blob));
-  p1.enable_ast();
-  p2.enable_ast();
-
-  for (auto in : {"1 + 2 * 3", "(1 + 2) * 3", "10 - 2 - 3", "", "1 +"}) {
-    std::shared_ptr<peg::Ast> a1, a2;
-    bool r1 = p1.parse(in, a1);
-    bool r2 = p2.parse(in, a2);
-    EXPECT_EQ(r1, r2) << in;
-    if (r1 && r2) EXPECT_EQ(peg::ast_to_s(a1), peg::ast_to_s(a2)) << in;
-  }
+  expect_same_asts(p1, p2,
+                   {"1 + 2 * 3", "(1 + 2) * 3", "10 - 2 - 3", "", "1 +"});
 }
 
 // Regression: enable_packrat_parsing() after load_blob() must keep packrat on
@@ -491,6 +492,125 @@ TEST(GrammarBlobTest, FailedLoadBlobTellsTheLoggerWhy) {
   EXPECT_EQ(
       std::vector<std::string>{"GrammarBlob: bad magic / not a grammar blob"},
       messages);
+}
+
+// A rule whose body is a User operator is stored by name, and the
+// application gives its body again on load.
+static const char *grammar_with_rules_given = R"(
+  S    <- ITEM (',' ITEM)*
+  ITEM <- NAME / NUM / MARK
+  NUM  <- < [0-9]+ >
+)";
+
+// NAME matches lowercase letters, and MARK a '#'. MARK is the kind of `usr`
+// operator that is given the semantic values.
+static Rules rules_given() {
+  return {
+      {"NAME", usr([](const char *s, size_t n) -> size_t {
+         size_t i = 0;
+         while (i < n && 'a' <= s[i] && s[i] <= 'z') {
+           i++;
+         }
+         return i ? i : kFail;
+       })},
+      {"MARK",
+       usr([](const char *s, size_t n, SemanticValues &, std::any &) -> size_t {
+         return n && s[0] == '#' ? 1 : kFail;
+       })},
+  };
+}
+
+TEST(GrammarBlobTest, RulesGivenOnLoad) {
+  auto rules = rules_given();
+  parser text(grammar_with_rules_given, rules);
+  ASSERT_TRUE(text);
+  auto blob = text.serialize_grammar();
+
+  parser loaded;
+  ASSERT_TRUE(loaded.load_blob(blob, rules));
+  expect_same_asts(text, loaded,
+                   {"ab", "12", "#", "ab,12,#,cd", "ab,", "AB", "", "#,#"});
+  EXPECT_TRUE(loaded.parse("ab,12,#,cd"));
+
+  // A grammar loaded from the blob is stored the same way again.
+  EXPECT_EQ(blob, loaded.serialize_grammar());
+}
+
+// The reader alone, on a blob that holds `S` by name.
+TEST(GrammarBlobTest, HandMadeBlobOfARuleGivenOnLoad) {
+  auto blob = blob_of(
+      "S", [](GrammarBlob::Writer &) {}, GrammarBlob::F_EoiCheck, {},
+      GrammarBlob::F2_GivenOnLoad);
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
+
+  auto g = GrammarBlob::deserialize(
+      blob, start, {{"S", usr([](const char *, size_t n) { return n; })}});
+  EXPECT_TRUE((*g)["S"].parse("abc").ret);
+}
+
+TEST(GrammarBlobTest, LoadBlobNeedsTheRulesGivenOnLoad) {
+  auto blob =
+      parser(grammar_with_rules_given, rules_given()).serialize_grammar();
+  auto only_mark = rules_given();
+  only_mark.erase("NAME");
+  auto other = only_mark;
+  other["OTHER"] = usr([](const char *, size_t) -> size_t { return 0; });
+
+  struct Case {
+    Rules rules;
+    const char *lacking; // the first lacking rule, in name order
+  };
+  for (const auto &[rules, lacking] :
+       {Case{Rules{}, "'MARK'"}, Case{only_mark, "'NAME'"},
+        Case{other, "'NAME'"}}) {
+    parser p("A <- 'a'");
+    std::vector<std::string> messages;
+    p.set_logger([&](size_t, size_t, const std::string &msg) {
+      messages.push_back(msg);
+    });
+    EXPECT_FALSE(p.load_blob(blob, rules));
+    EXPECT_TRUE(p.parse("a")); // the grammar it had
+    ASSERT_EQ(1u, messages.size());
+    EXPECT_NE(std::string::npos, messages[0].find(lacking)) << messages[0];
+  }
+  EXPECT_FALSE(parser().load_blob(blob));
+}
+
+// The body given on load is a User operator, as the one stored by name was:
+// the blob keeps what was worked out from that, such as whether the rule is
+// left recursive.
+TEST(GrammarBlobTest, RuleGivenOnLoadIsAUserOperator) {
+  auto blob =
+      parser(grammar_with_rules_given, rules_given()).serialize_grammar();
+  for (const auto &body : {lit("a"), std::shared_ptr<Ope>()}) {
+    auto rules = rules_given();
+    rules["NAME"] = body;
+    EXPECT_FALSE(parser().load_blob(blob, rules));
+  }
+}
+
+// `~` in the rules is the text loader's way to ignore a rule's value. On load
+// the name is found either way, and the blob says whether the value is
+// ignored.
+TEST(GrammarBlobTest, RuleGivenOnLoadByNameWithATilde) {
+  auto name_body = rules_given().at("NAME");
+  auto blob = parser("S <- NAME NUM\nNUM <- < [0-9]+ >", {{"~NAME", name_body}})
+                  .serialize_grammar();
+  for (const auto &key : {"NAME", "~NAME"}) {
+    parser p;
+    ASSERT_TRUE(p.load_blob(blob, {{key, name_body}})) << key;
+    size_t values = 0;
+    p["S"] = [&](const SemanticValues &vs) { values = vs.size(); };
+    ASSERT_TRUE(p.parse("ab12")) << key;
+    EXPECT_EQ(1u, values) << key;
+  }
+}
+
+TEST(GrammarBlobTest, UserOperatorInsideARuleIsNotSerializable) {
+  parser p("S <- NAME", {{"NAME", seq(lit("a"), rules_given().at("NAME"))}});
+  ASSERT_TRUE(p);
+  EXPECT_THROW(p.serialize_grammar(), std::runtime_error);
 }
 
 TEST(GrammarBlobTest, SerializeWithoutAGrammarIsEmpty) {
