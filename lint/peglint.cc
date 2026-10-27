@@ -46,6 +46,7 @@ int main(int argc, const char **argv) {
   auto opt_profile = false;
   auto opt_blob = false;
   auto opt_hints = false;
+  peg::Rules externals;
   vector<const char *> path_list;
 
   auto argi = 1;
@@ -80,6 +81,11 @@ int main(int argc, const char **argv) {
       opt_verbose = true;
     } else if (string("--blob") == arg) {
       opt_blob = true;
+    } else if (string("--external") == arg) {
+      if (argi < argc) {
+        externals[argv[argi++]] =
+            peg::usr([](const char *, size_t) { return peg::kFail; });
+      }
     } else if (string("--hints") == arg) {
       opt_hints = true;
     } else {
@@ -102,6 +108,9 @@ int main(int argc, const char **argv) {
     --hints: show hints to make parsing faster
     --blob: write a serialized grammar blob to stdout (load it later with
             peg::parser::load_blob to skip the meta-parse on startup)
+    --external NAME: take NAME as a rule the application gives as a `usr`
+            operator; --blob stores it by name only, and a parse of the
+            source fails where it is reached
     --version: show version information
 )";
 
@@ -123,7 +132,9 @@ int main(int argc, const char **argv) {
     cerr << syntax_path << ":" << ln << ":" << col << ": " << msg << endl;
   });
 
-  if (!parser.load_grammar(syntax.data(), syntax.size())) { return -1; }
+  if (!parser.load_grammar(syntax.data(), syntax.size(), externals)) {
+    return -1;
+  }
 
   if (opt_blob) {
     try {

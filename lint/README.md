@@ -19,6 +19,9 @@ usage: grammar_file_path [source_file_path]
     --hints: show hints to make parsing faster
     --blob: write a serialized grammar blob to stdout (load it later with
             peg::parser::load_blob to skip the meta-parse on startup)
+    --external NAME: take NAME as a rule the application gives as a `usr`
+            operator; --blob stores it by name only, and a parse of the
+            source fails where it is reached
     --version: show version information
 ```
 

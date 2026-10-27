@@ -1031,6 +1031,9 @@ usage: grammar_file_path [source_file_path]
     --hints: show hints to make parsing faster
     --blob: write a serialized grammar blob to stdout (load it later with
             peg::parser::load_blob to skip the meta-parse on startup)
+    --external NAME: take NAME as a rule the application gives as a `usr`
+            operator; --blob stores it by name only, and a parse of the
+            source fails where it is reached
     --version: show version information
 ```
 
@@ -1121,6 +1124,20 @@ parser2.load_blob(blob, rules); // takes the body of NAME from rules
 
 ```
 > peglint --blob a.peg > a.blob
+```
+
+A rule that the application gives as a `usr` operator is named with
+`--external`, so that `peglint` loads the grammar without that rule's body:
+
+```peg
+# b.peg
+ROOT <- 'Hello ' NAME
+```
+
+```
+> peglint --blob b.peg > b.blob
+b.peg:2:18: 'NAME' is not defined.
+> peglint --blob --external NAME b.peg > b.blob
 ```
 
 ### AST
