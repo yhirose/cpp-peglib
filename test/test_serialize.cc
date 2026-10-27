@@ -279,19 +279,19 @@ TEST(GrammarBlobTest, LoadBlobRejectsGarbage) {
 }
 
 // A blob whose start rule is `start` and which defines the one rule `S`, with
-// `flags`, `params` and the body `body` writes.
+// `flags`, `params`, `flags2` and the body `body` writes.
 static std::vector<uint8_t>
 blob_of(const std::string &start,
         const std::function<void(GrammarBlob::Writer &)> &body,
         uint8_t flags = GrammarBlob::F_EoiCheck,
-        const std::vector<std::string> &params = {}) {
+        const std::vector<std::string> &params = {}, uint8_t flags2 = 0) {
   GrammarBlob::Writer w;
   w.u32(GrammarBlob::MAGIC);
   w.str(start);
   w.u32(1);
   w.str("S");
   w.u8(flags);
-  w.u8(0);
+  w.u8(flags2);
   w.u32(static_cast<uint32_t>(params.size()));
   for (const auto &param : params) {
     w.str(param);
@@ -422,6 +422,13 @@ TEST(GrammarBlobTest, RecoveryOfAnyExpressionIsRead) {
   std::string start;
   auto g = GrammarBlob::deserialize(blob, start);
   EXPECT_NO_THROW((*g)["S"].parse("a"));
+}
+
+// A bit this version does not know may change how the rest is read.
+TEST(GrammarBlobTest, RejectsAnUnknownFlag) {
+  auto blob = blob_of("S", write_literal_a, GrammarBlob::F_EoiCheck, {}, 0x80);
+  std::string start;
+  EXPECT_THROW(GrammarBlob::deserialize(blob, start), std::runtime_error);
 }
 
 TEST(GrammarBlobTest, RejectsAnIgnoredStartRule) {

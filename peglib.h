@@ -8181,6 +8181,8 @@ struct GrammarBlob {
   };
   enum Flag2 : uint8_t {
     F2_NoWhitespace = 1,
+    // The bits this version reads, which a blob may not go beyond.
+    F2_Known = F2_NoWhitespace,
   };
 
   struct Writer {
@@ -8519,6 +8521,9 @@ struct GrammarBlob {
       std::string name = r.str();
       uint8_t flags = r.u8();
       uint8_t flags2 = r.u8();
+      if (flags2 & ~F2_Known)
+        throw std::runtime_error("GrammarBlob: rule '" + name +
+                                 "' has a flag this version does not know");
       uint32_t np = r.u32();
       std::vector<std::string> params;
       for (uint32_t k = 0; k < np; k++)
