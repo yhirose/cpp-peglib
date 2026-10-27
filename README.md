@@ -1095,8 +1095,9 @@ Notes:
   `load_blob`.
 - First-sets are recomputed on load, and references are resolved by name.
 - Grammars that use a named capture (`$name<...>`) or a User operator are not
-  serializable (`serialize_grammar()` throws;
-  `load_blob()` returns `false` on a bad or incompatible blob).
+  serializable (`serialize_grammar()` throws).
+- `load_blob()` returns `false` on a bad or incompatible blob, and passes the
+  reason to the logger set with `set_logger`.
 
 `peglint` can emit a blob with the `--blob` option:
 

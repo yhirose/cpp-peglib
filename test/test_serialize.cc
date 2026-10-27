@@ -477,6 +477,22 @@ TEST(GrammarBlobTest, FailedLoadBlobKeepsTheGrammar) {
   EXPECT_FALSE(p.parse("x"));
 }
 
+// load_blob() returns only a bool, so the logger is told why.
+TEST(GrammarBlobTest, FailedLoadBlobTellsTheLoggerWhy) {
+  peg::parser p;
+  std::vector<std::string> messages;
+  p.set_logger([&](size_t line, size_t col, const std::string &msg) {
+    EXPECT_EQ(0u, line);
+    EXPECT_EQ(0u, col);
+    messages.push_back(msg);
+  });
+
+  EXPECT_FALSE(p.load_blob({0, 1, 2, 3}));
+  EXPECT_EQ(
+      std::vector<std::string>{"GrammarBlob: bad magic / not a grammar blob"},
+      messages);
+}
+
 TEST(GrammarBlobTest, SerializeWithoutAGrammarIsEmpty) {
   peg::parser p("S <- A"); // A is undefined
   ASSERT_FALSE(p);

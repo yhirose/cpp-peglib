@@ -10276,10 +10276,15 @@ public:
 
   // Load a grammar from a blob produced by serialize_grammar() / GrammarBlob,
   // skipping the meta-parse. Re-apply enable_ast() etc. afterwards as needed.
+  // On failure the logger, if any, is told why, at line 0 and column 0 since
+  // a blob has no text.
   bool load_blob(const std::vector<uint8_t> &blob) {
     try {
       grammar_ = GrammarBlob::deserialize(blob, start_);
-    } catch (const std::exception &) { return false; }
+    } catch (const std::exception &e) {
+      if (log_) { log_(0, 0, e.what(), ""); }
+      return false;
+    }
     if (grammar_ != nullptr) {
       // enablePackratParsing_ says whether the grammar allows packrat, which
       // only a back reference to a capture in another rule forbids. Such a
