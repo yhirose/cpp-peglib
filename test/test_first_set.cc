@@ -929,6 +929,37 @@ TEST(FirstSetTest, Plain_entry_goes_unnoticed) {
         %word <- [a-zA-Z0-9_]
       )",
        "in inner into a-b asc;", [](parser &pg) { pg.enable_ast(); }},
+      // A %word with non-ASCII characters, and input with them, with a word
+      // that is cut in the middle of a character and a byte that is not UTF-8.
+      {R"(
+        S   <- Item (',' Item)* ';'
+        Item <- Kw Bad? / Id
+        Kw  <- 'IN'i / 'INNER'i / 'INT'i / 'INTO'i / 'INTERSECT'i / 'JOIN'i /
+               'ON'i / 'ORDER'i / 'IN'i / 'AS'i / 'ASC'i / 'ALL'i
+        Id  <- < [^,; ]+ >
+        Bad <- '\xE3\x81' / '\x80'
+        %whitespace <- [ ]*
+        %word <- [a-zA-Z0-9_\u000080-\u10FFFF]
+      )",
+       "in, AS名前 ,int,as\xE3\x81,ASC,\xE3\x81\x82in,into\x80;"},
+      {R"(
+        S   <- (Kw / Id) (',' (Kw / Id))* ';'
+        Kw  <- 'IN'i / 'INNER'i / 'INT'i / 'INTO'i / 'INTERSECT'i / 'JOIN'i /
+               'ON'i / 'ORDER'i / 'IN'i / 'AS'i / 'ASC'i / 'ALL'i
+        Id  <- < [^,; ]+ >
+        %whitespace <- [ ]*
+        %word <- [^ ,;]
+      )",
+       "in, AS名前 ,int,asé,ASC;"},
+      {R"(
+        S   <- (Kw / Id) (',' (Kw / Id))* ';'
+        Kw  <- 'IN'i / 'INNER'i / 'INT'i / 'INTO'i / 'INTERSECT'i / 'JOIN'i /
+               'ON'i / 'ORDER'i / 'IN'i / 'AS'i / 'ASC'i / 'ALL'i
+        Id  <- < [^,; ]+ >
+        %whitespace <- [ ]*
+        %word <- [a-zA-Z0-9_\u000100-\u00017F]
+      )",
+       "in, intŧ,ASC,asé;"},
       // Chains where tails start, the terminal gives no value, a level is
       // entered again at the position it forwards from, and recovery runs.
       {R"(

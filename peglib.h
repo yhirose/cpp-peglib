@@ -734,6 +734,7 @@ inline constexpr unsigned int operator""_(const char *s, size_t l) {
  */
 class Context;
 class Definition;
+class CharacterClass;
 
 struct SemanticValues : protected std::vector<std::any> {
   SemanticValues() = default;
@@ -1917,8 +1918,8 @@ public:
   // The characters of a %whitespace that is a run of them (see
   // find_whitespace_span).
   const std::bitset<256> *whitespace_span = nullptr;
-  // The characters of a %word that is one of them.
-  const std::bitset<256> *word_span = nullptr;
+  // The %word, where it is a character class and shortcuts are taken.
+  const CharacterClass *word_class = nullptr;
   // The word the input starts with at `word_run_at`, which several choices of
   // keywords ask about in turn: its length, and the hash of it as it is and
   // as lower case (only of its first kMaxWordLength bytes). Every caller
@@ -2876,46 +2877,15 @@ constexpr size_t kMaxWordLength = 63;
 class WordTable {
 public:
   // Null where the alternatives are not at least `kMinLiterals` literals made
-  // of characters of `word`, all with or all without case.
+  // of ASCII characters of `word_class`, all with or all without case.
   static std::unique_ptr<WordTable>
   make(const std::vector<std::shared_ptr<Ope>> &opes,
-       const std::bitset<256> &word) {
-    constexpr size_t kMinLiterals = 8; // fewer are no faster than a scan
-    if (opes.size() < kMinLiterals) { return nullptr; }
-    auto table = std::make_unique<WordTable>();
-    table->word_ = word;
-    for (size_t id = 0; id < opes.size(); id++) {
-      const auto *lit = dynamic_cast<const LiteralString *>(opes[id].get());
-      if (!lit || lit->lit_.empty() || lit->lit_.size() > kMaxWordLength) {
-        return nullptr;
-      }
-      for (const auto ch : lit->lit_) {
-        const auto byte = static_cast<unsigned char>(ch);
-        if (!word.test(byte) ||
-            (lit->ignore_case_ &&
-             !word.test(static_cast<unsigned char>(other_case(byte))))) {
-          return nullptr;
-        }
-      }
-      if (id == 0) { table->ignore_case_ = lit->ignore_case_; }
-      if (lit->ignore_case_ != table->ignore_case_) { return nullptr; }
-      table->literals_.push_back(lit);
-    }
-    size_t size = 16;
-    while (size < opes.size() * 2) {
-      size *= 2;
-    }
-    table->slots_.assign(size, Slot());
-    for (size_t id = 0; id < table->literals_.size(); id++) {
-      const auto &text = table->ignore_case_ ? table->literals_[id]->lower_lit_
-                                             : table->literals_[id]->lit_;
-      table->insert(hash(text.data(), text.size()), static_cast<uint32_t>(id));
-    }
-    return table;
-  }
+       const CharacterClass &word_class);
 
   // Whether the table was made for this %word.
-  bool is_for(const std::bitset<256> &word) const { return word_ == word; }
+  bool is_for(const CharacterClass &word_class) const {
+    return word_class_ == &word_class;
+  }
 
   // The id of the literal that is the word the input starts with, or none.
   static constexpr uint32_t none = UINT32_MAX;
@@ -2941,7 +2911,7 @@ private:
     }
     return h;
   }
-  std::bitset<256> word_;
+  const CharacterClass *word_class_ = nullptr;
   struct Slot {
     uint64_t hash = 0;
     uint32_t id = 0;
@@ -3064,11 +3034,11 @@ private:
     const auto list = skips && !checks ? 1 + byte : 0;
     size_t skipped_from = 0;
 
-    if (Listed && c.word_span && !literals_.empty()) {
+    if (Listed && c.word_class && !literals_.empty()) {
       std::call_once(word_table_once_, [&]() {
-        word_table_ = WordTable::make(opes_, *c.word_span);
+        word_table_ = WordTable::make(opes_, *c.word_class);
       });
-      if (word_table_ && word_table_->is_for(*c.word_span)) {
+      if (word_table_ && word_table_->is_for(*c.word_class)) {
         const auto id = word_table_->find(s, n, c);
         if (id == WordTable::none) { return kFail; }
         len = literals_[id]->parse(s, n, vs, c, dt);
@@ -3181,7 +3151,8 @@ private:
   std::shared_ptr<const std::vector<FirstSet>> first_sets_;
   // The alternatives that are literals, by position.
   std::vector<const LiteralString *> literals_;
-  // Made when a parse first has a %word of characters (see WordTable).
+  // Made when a parse first has a %word that is a character class (see
+  // WordTable).
   mutable std::once_flag word_table_once_;
   mutable std::unique_ptr<WordTable> word_table_;
   std::vector<uint32_t> lists_;
@@ -3381,9 +3352,7 @@ public:
 
   size_t parse_core(const char *s, size_t n, SemanticValues & /*vs*/,
                     Context &c, std::any & /*dt*/) const override {
-    char32_t cp = 0;
-    auto len = decode_codepoint(s, n, cp);
-    if (len && matches(cp)) { return len; }
+    if (const auto len = codepoint_match_length(s, n)) { return len; }
 
     c.set_error_pos(s);
     return kFail;
@@ -3395,9 +3364,28 @@ public:
   friend struct OpeSignature;
 
   bool is_ascii_only() const { return is_ascii_only_; }
+  // The ASCII characters of the class. Of a class that is not ascii only, they
+  // are only part of it.
   const std::bitset<256> &ascii_bitset() const { return ascii_bitset_; }
 
+  // The length of the character the class matches at `s`, or 0.
+  size_t match_length(const char *s, size_t n) const {
+    if (n == 0) { return 0; }
+    const auto byte = static_cast<unsigned char>(*s);
+    if (byte <= 0x7F) { return ascii_bitset_.test(byte) ? 1 : 0; }
+    return codepoint_match_length(s, n);
+  }
+
 private:
+  // Apart from match_length, to keep that one small enough to be inlined.
+  // parse_core uses this alone, so that the tests, which turn the shortcuts
+  // off, check the ASCII bitset against it.
+  size_t codepoint_match_length(const char *s, size_t n) const {
+    char32_t cp = 0;
+    const auto len = decode_codepoint(s, n, cp);
+    return len && matches(cp) ? len : 0;
+  }
+
   bool in_ranges(char32_t cp) const {
     return std::any_of(ranges_.begin(), ranges_.end(), [cp](const auto &range) {
       return range.first <= cp && cp <= range.second;
@@ -3411,14 +3399,15 @@ private:
   }
 
   void setup_ascii_bitset() {
-    if (negated_) { return; } // negated classes can match non-ASCII
-    for (const auto &[lo, hi] : ranges_) {
-      if (lo > 0x7F || hi > 0x7F) { return; }
-    }
-    is_ascii_only_ = true;
     for (char32_t cp = 0; cp <= 0x7F; cp++) {
       if (matches(cp)) { ascii_bitset_.set(cp); }
     }
+    // A negated class can match non-ASCII.
+    is_ascii_only_ =
+        !negated_ &&
+        std::all_of(ranges_.begin(), ranges_.end(), [](const auto &range) {
+          return range.first <= 0x7F && range.second <= 0x7F;
+        });
   }
 
   std::vector<std::pair<char32_t, char32_t>> ranges_;
@@ -3427,6 +3416,44 @@ private:
   std::bitset<256> ascii_bitset_;
   bool is_ascii_only_ = false;
 };
+
+inline std::unique_ptr<WordTable>
+WordTable::make(const std::vector<std::shared_ptr<Ope>> &opes,
+                const CharacterClass &word_class) {
+  const auto &word = word_class.ascii_bitset();
+  constexpr size_t kMinLiterals = 8; // fewer are no faster than a scan
+  if (opes.size() < kMinLiterals) { return nullptr; }
+  auto table = std::make_unique<WordTable>();
+  table->word_class_ = &word_class;
+  for (size_t id = 0; id < opes.size(); id++) {
+    const auto *lit = dynamic_cast<const LiteralString *>(opes[id].get());
+    if (!lit || lit->lit_.empty() || lit->lit_.size() > kMaxWordLength) {
+      return nullptr;
+    }
+    for (const auto ch : lit->lit_) {
+      const auto byte = static_cast<unsigned char>(ch);
+      if (!word.test(byte) ||
+          (lit->ignore_case_ &&
+           !word.test(static_cast<unsigned char>(other_case(byte))))) {
+        return nullptr;
+      }
+    }
+    if (id == 0) { table->ignore_case_ = lit->ignore_case_; }
+    if (lit->ignore_case_ != table->ignore_case_) { return nullptr; }
+    table->literals_.push_back(lit);
+  }
+  size_t size = 16;
+  while (size < opes.size() * 2) {
+    size *= 2;
+  }
+  table->slots_.assign(size, Slot());
+  for (size_t id = 0; id < table->literals_.size(); id++) {
+    const auto &text = table->ignore_case_ ? table->literals_[id]->lower_lit_
+                                           : table->literals_[id]->lit_;
+    table->insert(hash(text.data(), text.size()), static_cast<uint32_t>(id));
+  }
+  return table;
+}
 
 class Character : public Ope {
 public:
@@ -5234,9 +5261,7 @@ inline bool StartRuleAnalysis::has_ast_action() const {
  */
 
 inline bool starts_word(const Context &c, const char *s, size_t n) {
-  if (c.word_span) {
-    return n > 0 && c.word_span->test(static_cast<unsigned char>(*s));
-  }
+  if (c.word_class) { return c.word_class->match_length(s, n) > 0; }
   SemanticValues dummy_vs;
   auto dummy_c = Context::detached(c);
   std::any dummy_dt;
@@ -5497,14 +5522,14 @@ inline const Context::WordRun &Context::word_run_at(const char *s, size_t n) {
     word_run.at = s;
     uint64_t h = kHashBasis, lh = kHashBasis;
     size_t length = 0;
-    while (length < n &&
-           word_span->test(static_cast<unsigned char>(s[length]))) {
-      if (length < kMaxWordLength) {
-        const auto ch = static_cast<unsigned char>(s[length]);
-        h = hash_step(h, ch);
-        lh = hash_step(lh, static_cast<unsigned char>(to_lower(s[length])));
-      }
-      length++;
+    while (length < n) {
+      const auto len = word_class->match_length(s + length, n - length);
+      if (!len) { break; }
+      length += len;
+    }
+    for (size_t i = 0; i < std::min(length, kMaxWordLength); i++) {
+      h = hash_step(h, static_cast<unsigned char>(s[i]));
+      lh = hash_step(lh, static_cast<unsigned char>(to_lower(s[i])));
     }
     word_run.length = length;
     word_run.hash = h;
@@ -5518,8 +5543,7 @@ inline const Context::WordRun &Context::word_run_at(const char *s, size_t n) {
 // notes no failure, and gives and reads no value.
 inline void Context::find_whitespace_span() {
   if (wordOpe && takes_shortcuts()) {
-    const auto *word = dynamic_cast<const CharacterClass *>(wordOpe.get());
-    if (word && word->is_ascii_only()) { word_span = &word->ascii_bitset(); }
+    word_class = dynamic_cast<const CharacterClass *>(wordOpe.get());
   }
   if (!whitespaceOpe || has_tracer || !takes_shortcuts()) { return; }
   const auto *w = dynamic_cast<const Whitespace *>(whitespaceOpe.get());
