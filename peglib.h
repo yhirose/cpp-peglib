@@ -1918,8 +1918,13 @@ public:
   // The characters of a %whitespace that is a run of them (see
   // find_whitespace_span).
   const std::bitset<256> *whitespace_span = nullptr;
-  // The %word, where it is a character class and shortcuts are taken.
-  const CharacterClass *word_class = nullptr;
+  // Where a word starts and where it goes on, as the %word says (see
+  // find_word): the %word itself unless it has a shape of those two.
+  const Ope *word_start = nullptr;
+  const Ope *word_rest = nullptr;
+  // Those, where they are character classes and shortcuts are taken.
+  const CharacterClass *word_start_class = nullptr;
+  const CharacterClass *word_rest_class = nullptr;
   // The word the input starts with at `word_run_at`, which several choices of
   // keywords ask about in turn: its length, and the hash of it as it is and
   // as lower case (only of its first kMaxWordLength bytes). Every caller
@@ -1931,6 +1936,7 @@ public:
     uint64_t lower_hash = 0;
   } word_run;
   void find_whitespace_span();
+  void find_word();
   const WordRun &word_run_at(const char *s, size_t n);
 
   // No whitespace is skipped after a match in a token, a no_whitespace rule
@@ -2427,6 +2433,7 @@ public:
         needs_rule_stack(tracer_enter || tracer_leave || reports_errors),
         unread_scope(this) {
     find_whitespace_span();
+    find_word();
     unread_scope.path = path;
     unread_scope.ss = s;
     unread_scope.holds_rule_values_ = false;
@@ -2877,14 +2884,15 @@ constexpr size_t kMaxWordLength = 63;
 class WordTable {
 public:
   // Null where the alternatives are not at least `kMinLiterals` literals made
-  // of ASCII characters of `word_class`, all with or all without case.
+  // of ASCII characters that start a word, then go on one, all with or all
+  // without case.
   static std::unique_ptr<WordTable>
   make(const std::vector<std::shared_ptr<Ope>> &opes,
-       const CharacterClass &word_class);
+       const CharacterClass &start, const CharacterClass &rest);
 
   // Whether the table was made for this %word.
-  bool is_for(const CharacterClass &word_class) const {
-    return word_class_ == &word_class;
+  bool is_for(const CharacterClass &start, const CharacterClass &rest) const {
+    return start_ == &start && rest_ == &rest;
   }
 
   // The id of the literal that is the word the input starts with, or none.
@@ -2911,7 +2919,8 @@ private:
     }
     return h;
   }
-  const CharacterClass *word_class_ = nullptr;
+  const CharacterClass *start_ = nullptr;
+  const CharacterClass *rest_ = nullptr;
   struct Slot {
     uint64_t hash = 0;
     uint32_t id = 0;
@@ -3034,11 +3043,13 @@ private:
     const auto list = skips && !checks ? 1 + byte : 0;
     size_t skipped_from = 0;
 
-    if (Listed && c.word_class && !literals_.empty()) {
+    if (Listed && c.word_start_class && !literals_.empty()) {
       std::call_once(word_table_once_, [&]() {
-        word_table_ = WordTable::make(opes_, *c.word_class);
+        word_table_ =
+            WordTable::make(opes_, *c.word_start_class, *c.word_rest_class);
       });
-      if (word_table_ && word_table_->is_for(*c.word_class)) {
+      if (word_table_ &&
+          word_table_->is_for(*c.word_start_class, *c.word_rest_class)) {
         const auto id = word_table_->find(s, n, c);
         if (id == WordTable::none) { return kFail; }
         len = literals_[id]->parse(s, n, vs, c, dt);
@@ -3151,8 +3162,8 @@ private:
   std::shared_ptr<const std::vector<FirstSet>> first_sets_;
   // The alternatives that are literals, by position.
   std::vector<const LiteralString *> literals_;
-  // Made when a parse first has a %word that is a character class (see
-  // WordTable).
+  // Made when a parse first has a %word of character classes (see find_word
+  // and WordTable).
   mutable std::once_flag word_table_once_;
   mutable std::unique_ptr<WordTable> word_table_;
   std::vector<uint32_t> lists_;
@@ -3419,19 +3430,20 @@ private:
 
 inline std::unique_ptr<WordTable>
 WordTable::make(const std::vector<std::shared_ptr<Ope>> &opes,
-                const CharacterClass &word_class) {
-  const auto &word = word_class.ascii_bitset();
+                const CharacterClass &start, const CharacterClass &rest) {
   constexpr size_t kMinLiterals = 8; // fewer are no faster than a scan
   if (opes.size() < kMinLiterals) { return nullptr; }
   auto table = std::make_unique<WordTable>();
-  table->word_class_ = &word_class;
+  table->start_ = &start;
+  table->rest_ = &rest;
   for (size_t id = 0; id < opes.size(); id++) {
     const auto *lit = dynamic_cast<const LiteralString *>(opes[id].get());
     if (!lit || lit->lit_.empty() || lit->lit_.size() > kMaxWordLength) {
       return nullptr;
     }
-    for (const auto ch : lit->lit_) {
-      const auto byte = static_cast<unsigned char>(ch);
+    for (size_t i = 0; i < lit->lit_.size(); i++) {
+      const auto &word = (i == 0 ? start : rest).ascii_bitset();
+      const auto byte = static_cast<unsigned char>(lit->lit_[i]);
       if (!word.test(byte) ||
           (lit->ignore_case_ &&
            !word.test(static_cast<unsigned char>(other_case(byte))))) {
@@ -4725,30 +4737,44 @@ private:
   size_t least_depth_met_ = std::numeric_limits<size_t>::max();
 };
 
+// A character of `first`, then any number of those of `rest`: `[A] [B]*`, or
+// `[A]+`, where both are A. Both are null where `ope` is not of that shape.
+struct ClassRun {
+  const CharacterClass *first = nullptr;
+  const CharacterClass *rest = nullptr;
+
+  static ClassRun of(const Ope &ope) {
+    if (const auto *run = dynamic_cast<const Repetition *>(&ope)) {
+      const auto *cls = dynamic_cast<const CharacterClass *>(run->ope_.get());
+      if (cls && run->min_ == 1 &&
+          run->max_ == std::numeric_limits<size_t>::max()) {
+        return {cls, cls};
+      }
+    } else if (const auto *seq = dynamic_cast<const Sequence *>(&ope);
+               seq && seq->opes_.size() == 2) {
+      const auto *first =
+          dynamic_cast<const CharacterClass *>(seq->opes_[0].get());
+      const auto *run = dynamic_cast<const Repetition *>(seq->opes_[1].get());
+      const auto *rest =
+          run && run->is_zom()
+              ? dynamic_cast<const CharacterClass *>(run->ope_.get())
+              : nullptr;
+      if (first && rest) { return {first, rest}; }
+    }
+    return {};
+  }
+};
+
 struct SetupFirstSets : public TraversalVisitor {
   using TraversalVisitor::visit;
 
   void visit(TokenBoundary &ope) override {
     TraversalVisitor::visit(ope);
     // [A] [B]*, or [A]+, of ASCII classes.
-    const auto *body = ope.ope_.get();
-    if (const auto *run = dynamic_cast<const Repetition *>(body)) {
-      if (run->span_bitset_ && run->min_ == 1 &&
-          run->max_ == std::numeric_limits<size_t>::max()) {
-        ope.first_ = ope.rest_ = run->span_bitset_;
-      }
-    } else if (const auto *sequence = dynamic_cast<const Sequence *>(body)) {
-      if (sequence->opes_.size() == 2) {
-        const auto *first =
-            dynamic_cast<const CharacterClass *>(sequence->opes_[0].get());
-        const auto *rest =
-            dynamic_cast<const Repetition *>(sequence->opes_[1].get());
-        if (first && first->is_ascii_only() && rest && rest->span_bitset_ &&
-            rest->is_zom()) {
-          ope.first_ = &first->ascii_bitset();
-          ope.rest_ = rest->span_bitset_;
-        }
-      }
+    const auto run = ClassRun::of(*ope.ope_);
+    if (run.first && run.first->is_ascii_only() && run.rest->is_ascii_only()) {
+      ope.first_ = &run.first->ascii_bitset();
+      ope.rest_ = &run.rest->ascii_bitset();
     }
   }
   void visit(PrioritizedChoice &ope) override {
@@ -5260,12 +5286,29 @@ inline bool StartRuleAnalysis::has_ast_action() const {
  * Implementations
  */
 
-inline bool starts_word(const Context &c, const char *s, size_t n) {
-  if (c.word_class) { return c.word_class->match_length(s, n) > 0; }
+// Apart from matches_word, to keep that one small enough to be inlined.
+CPPPEGLIB_NOINLINE inline bool parses_word(const Context &c, const Ope &ope,
+                                           const char *s, size_t n) {
   SemanticValues dummy_vs;
   auto dummy_c = Context::detached(c);
   std::any dummy_dt;
-  return success(c.wordOpe->parse(s, n, dummy_vs, dummy_c, dummy_dt));
+  return success(ope.parse(s, n, dummy_vs, dummy_c, dummy_dt));
+}
+
+inline bool matches_word(const Context &c, const Ope &ope,
+                         const CharacterClass *fast, const char *s, size_t n) {
+  if (fast) { return fast->match_length(s, n) > 0; }
+  return parses_word(c, ope, s, n);
+}
+
+// Whether a word starts at `s`.
+inline bool starts_word(const Context &c, const char *s, size_t n) {
+  return matches_word(c, *c.word_start, c.word_start_class, s, n);
+}
+
+// Whether a word that has begun goes on at `s`.
+inline bool continues_word(const Context &c, const char *s, size_t n) {
+  return matches_word(c, *c.word_rest, c.word_rest_class, s, n);
 }
 
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
@@ -5287,7 +5330,7 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
     std::call_once(init_is_word,
                    [&]() { is_word = starts_word(c, lit.data(), lit.size()); });
 
-    if (is_word && starts_word(c, s + i, n - i)) {
+    if (is_word && continues_word(c, s + i, n - i)) {
       c.set_error_pos(s, lit.data(), copy_lit);
       return kFail;
     }
@@ -5521,9 +5564,11 @@ inline const Context::WordRun &Context::word_run_at(const char *s, size_t n) {
   if (word_run.at != s) {
     word_run.at = s;
     uint64_t h = kHashBasis, lh = kHashBasis;
-    size_t length = 0;
-    while (length < n) {
-      const auto len = word_class->match_length(s + length, n - length);
+    // A word starts with a character of word_start_class and goes on with
+    // those of word_rest_class.
+    auto length = word_start_class->match_length(s, n);
+    while (length && length < n) {
+      const auto len = word_rest_class->match_length(s + length, n - length);
       if (!len) { break; }
       length += len;
     }
@@ -5538,13 +5583,28 @@ inline const Context::WordRun &Context::word_run_at(const char *s, size_t n) {
   return word_run;
 }
 
+// A %word of the shape `[A] [B]*` says that a word starts with a character of
+// A and goes on with characters of B, and one of `[A]` or `[A]+` that both are
+// A. Of any other, a word starts and goes on where it matches. Where those are
+// character classes, a character is looked up in the class itself.
+inline void Context::find_word() {
+  if (!wordOpe) { return; }
+  auto run = ClassRun::of(*wordOpe);
+  if (!run.first) {
+    run.first = run.rest = dynamic_cast<const CharacterClass *>(wordOpe.get());
+  }
+  word_start = run.first ? run.first : wordOpe.get();
+  word_rest = run.rest ? run.rest : wordOpe.get();
+  if (takes_shortcuts()) {
+    word_start_class = run.first;
+    word_rest_class = run.rest;
+  }
+}
+
 // A %whitespace that is a plain run of ASCII characters is skipped with a
 // loop of its own. What skipping it would do otherwise goes unnoticed: it
 // notes no failure, and gives and reads no value.
 inline void Context::find_whitespace_span() {
-  if (wordOpe && takes_shortcuts()) {
-    word_class = dynamic_cast<const CharacterClass *>(wordOpe.get());
-  }
   if (!whitespaceOpe || has_tracer || !takes_shortcuts()) { return; }
   const auto *w = dynamic_cast<const Whitespace *>(whitespaceOpe.get());
   const auto *ignored =
@@ -5644,8 +5704,7 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   vs.choice_ = id;
 
   // Word check
-  // An entry that does not start a word is not checked, as a literal is not.
-  if (c.wordOpe && starts_word(c, s, i) && starts_word(c, s + i, n - i)) {
+  if (c.wordOpe && continues_word(c, s + i, n - i) && starts_word(c, s, i)) {
     c.set_error_pos(s);
     return kFail;
   }

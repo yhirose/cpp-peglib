@@ -490,6 +490,49 @@ TEST(GeneralTest, Word_expression_test_Dictionary) {
   EXPECT_TRUE(parser.parse("toa"));
 }
 
+TEST(GeneralTest, Word_expression_case_ignore_test_Dictionary) {
+  parser parser(R"(
+    Identifier  ← < !Keyword [a-z][a-z]* >
+    Keyword     ← 'def'i | 'to'i
+    %whitespace ← [ \t\r\n]*
+    %word       ← [a-z]+
+  )");
+
+  EXPECT_TRUE(parser.parse("toa"));
+}
+
+// A %word of the shape `[A] [B]*` says what starts a word and what goes on
+// one: here a word may go on with `$` and non-ASCII characters, but not start
+// with a digit or `$`.
+TEST(GeneralTest, Word_expression_start_and_continuation) {
+  const std::string keywords[] = {
+      "'AS'",
+      "'AS' / 'ASC' / 'ALL' / 'AND' / 'ANY' / 'BY' / 'ON' / 'OR'",
+      "'AS' | 'ASC' | 'ALL' | 'AND' | 'ANY' | 'BY' | 'ON' | 'OR'",
+  };
+  for (const auto &kw : keywords) {
+    parser parser("S <- Kw Tail !.\nKw <- " + kw + R"(
+      Tail  <- Param / Name / Num / ''
+      Param <- '$' [0-9]+
+      Num   <- [0-9]+
+      Name  <- [a-zA-Z_\u000080-\u10FFFF] [a-zA-Z0-9_$\u000080-\u10FFFF]*
+      %whitespace <- [ ]*
+      %word <- [a-zA-Z_] [a-zA-Z0-9_$\u000080-\u10FFFF]*
+    )");
+    ASSERT_TRUE(!!parser) << kw;
+    EXPECT_TRUE(parser.parse("AS")) << kw;
+    EXPECT_TRUE(parser.parse("AS x")) << kw;
+    EXPECT_TRUE(parser.parse("AS $1")) << kw;
+    EXPECT_TRUE(parser.parse("AS 1")) << kw;
+    EXPECT_TRUE(parser.parse("AS \xE5\x90\x8D\xE5\x89\x8D")) << kw;
+    // A word goes on with `$`, a digit, `_` and a non-ASCII character.
+    EXPECT_FALSE(parser.parse("AS$1")) << kw;
+    EXPECT_FALSE(parser.parse("AS1")) << kw;
+    EXPECT_FALSE(parser.parse("AS_")) << kw;
+    EXPECT_FALSE(parser.parse("AS\xE5\x90\x8D\xE5\x89\x8D")) << kw;
+  }
+}
+
 TEST(GeneralTest, Word_expression_dictionary_entry_that_is_not_a_word) {
   // An entry of a dictionary that does not start with a word character is
   // not checked for a word boundary, as a literal is not.
@@ -501,15 +544,19 @@ TEST(GeneralTest, Word_expression_dictionary_entry_that_is_not_a_word) {
   EXPECT_FALSE(parser.parse("x1"));
 }
 
-TEST(GeneralTest, Word_expression_case_ignore_test_Dictionary) {
-  parser parser(R"(
-    Identifier  ← < !Keyword [a-z][a-z]* >
-    Keyword     ← 'def'i | 'to'i
-    %whitespace ← [ \t\r\n]*
-    %word       ← [a-z]+
-  )");
-
-  EXPECT_TRUE(parser.parse("toa"));
+TEST(GeneralTest, Word_expression_literal_that_cannot_start_a_word) {
+  // '$' and '1' only go on a word, so they are not word literals, in a choice
+  // of literals and in a dictionary as well.
+  for (std::string dollar :
+       {"'$'", "('$' | 'x')",
+        "('$' / 'a' / 'b' / 'c' / 'd' / 'e' / 'f' / 'g')"}) {
+    parser parser("S <- " + dollar + " '1' " + dollar + " ' '? '2'\n" + R"(
+      %word <- [a-zA-Z_] [a-zA-Z0-9_$]*
+    )");
+    ASSERT_TRUE(!!parser) << dollar;
+    EXPECT_TRUE(parser.parse("$1$2")) << dollar;
+    EXPECT_TRUE(parser.parse("$1$ 2")) << dollar;
+  }
 }
 
 // Without %word, a keyword rejects every identifier it begins, and the

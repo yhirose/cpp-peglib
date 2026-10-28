@@ -423,6 +423,12 @@ parser.parse("helloworld");  // NG
 
 A `%word` that can match the empty string, such as `[a-z]*`, is rejected.
 
+A `%word` of the form `[A] [B]*` tells which characters start a word (`A`) and which go on one (`B`). A literal is checked as a word only if it starts with a character of `A`, and it does not match where a character of `B` follows it. Any other `%word`, such as `[a-z]`, `[a-z]+` or a reference to a rule, says both.
+
+```
+%word  <-  [a-zA-Z_] [a-zA-Z0-9_$]*   # 'AS' does not match in AS$x, and '$' is not a word literal
+```
+
 The parser checks `%word` apart from the rule that uses it, so a callback of the rules under `%word` gets no user data (`dt` is empty) and what it returns is thrown away. Whether a character is part of a word must depend on the input alone.
 
 Capture/Backreference
