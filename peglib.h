@@ -485,6 +485,13 @@ inline std::string to_lower(std::string s) {
   return s;
 }
 
+inline std::string to_upper(std::string s) {
+  for (auto &c : s) {
+    if ('a' <= c && c <= 'z') { c = static_cast<char>(c - 'a' + 'A'); }
+  }
+  return s;
+}
+
 /*-----------------------------------------------------------------------------
  *  token_to_number_ - This function should be removed eventually
  *---------------------------------------------------------------------------*/
@@ -3330,6 +3337,10 @@ public:
   void accept(Visitor &v) override;
 
   Trie trie_;
+  // Whether each word is a word literal (see is_word_literal), made when a
+  // parse first has a %word.
+  mutable std::once_flag init_is_word_;
+  mutable std::vector<char> is_word_;
 };
 
 class CharacterClass : public Ope {
@@ -5311,6 +5322,15 @@ inline bool continues_word(const Context &c, const char *s, size_t n) {
   return matches_word(c, *c.word_rest, c.word_rest_class, s, n);
 }
 
+// Whether a literal starts a word, as the %word says. Where case is ignored, it
+// does if either case of its first character does, so that the spelling of it
+// does not matter; `text` is then in lower case.
+inline bool is_word_literal(const Context &c, const std::string &text,
+                            bool ignore_case) {
+  return starts_word(c, text.data(), text.size()) ||
+         (ignore_case && starts_word(c, to_upper(text).data(), text.size()));
+}
+
 inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
                             Context &c, std::any &dt, const std::string &lit,
                             std::once_flag &init_is_word, bool &is_word,
@@ -5327,8 +5347,9 @@ inline size_t parse_literal(const char *s, size_t n, SemanticValues &vs,
 
   // Word check
   if (c.wordOpe) {
-    std::call_once(init_is_word,
-                   [&]() { is_word = starts_word(c, lit.data(), lit.size()); });
+    std::call_once(init_is_word, [&]() {
+      is_word = is_word_literal(c, ignore_case ? lower_lit : lit, ignore_case);
+    });
 
     if (is_word && continues_word(c, s + i, n - i)) {
       c.set_error_pos(s, lit.data(), copy_lit);
@@ -5704,9 +5725,18 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   vs.choice_ = id;
 
   // Word check
-  if (c.wordOpe && continues_word(c, s + i, n - i) && starts_word(c, s, i)) {
-    c.set_error_pos(s);
-    return kFail;
+  if (c.wordOpe && continues_word(c, s + i, n - i)) {
+    std::call_once(init_is_word_, [&]() {
+      const auto &words = trie_.words();
+      is_word_.resize(words.size());
+      for (size_t k = 0; k < words.size(); k++) {
+        is_word_[k] = is_word_literal(c, words[k], trie_.ignore_case());
+      }
+    });
+    if (is_word_[id]) {
+      c.set_error_pos(s);
+      return kFail;
+    }
   }
 
   // Skip whitespace

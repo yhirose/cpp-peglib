@@ -423,7 +423,7 @@ parser.parse("helloworld");  // NG
 
 A `%word` that can match the empty string, such as `[a-z]*`, is rejected.
 
-A `%word` of the form `[A] [B]*` tells which characters start a word (`A`) and which go on one (`B`). A literal is checked as a word only if it starts with a character of `A`, and it does not match where a character of `B` follows it. Any other `%word`, such as `[a-z]`, `[a-z]+` or a reference to a rule, says both.
+A `%word` of the form `[A] [B]*` tells which characters start a word (`A`) and which go on one (`B`). A literal is checked as a word only if it starts with a character of `A`, and it does not match where a character of `B` follows it. Any other `%word`, such as `[a-z]`, `[a-z]+` or a reference to a rule, says both. A literal that ignores case (`'if'i`) is checked as a word if either case of its first character starts a word.
 
 ```
 %word  <-  [a-zA-Z_] [a-zA-Z0-9_$]*   # 'AS' does not match in AS$x, and '$' is not a word literal

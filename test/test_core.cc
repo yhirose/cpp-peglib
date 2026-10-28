@@ -544,6 +544,55 @@ TEST(GeneralTest, Word_expression_dictionary_entry_that_is_not_a_word) {
   EXPECT_FALSE(parser.parse("x1"));
 }
 
+// A %word of one case of the letters: whether a keyword that ignores case is
+// checked for a word boundary does not depend on how it is spelled, on how
+// it is written (a literal, a choice, a dictionary), or on the case of the
+// input.
+TEST(GeneralTest, Word_expression_ignoring_case_ignores_the_spelling) {
+  const std::string keywords[] = {
+      "'IN'i",
+      "'in'i",
+      "'IN'i / 'ON'i",
+      "'in'i / 'on'i",
+      "'IN'i / 'ON'i / 'AS'i / 'BY'i / 'OR'i / 'TO'i / 'AT'i / 'IF'i",
+      "'in'i / 'on'i / 'as'i / 'by'i / 'or'i / 'to'i / 'at'i / 'if'i",
+      "'IN'i | 'ON'i",
+      "'in'i | 'on'i",
+  };
+  // The word characters of each %word, and a letter that is not one.
+  const struct {
+    const char *word, *goes_on, *does_not;
+  } words[] = {{"[a-z]+", "x", "X"}, {"[A-Z]+", "X", "x"}};
+  for (const auto &w : words) {
+    for (const auto &kw : keywords) {
+      parser parser("S <- (" + kw + ") Rest !.\nRest <- [a-zA-Z0-9]*\n" +
+                    "%word <- " + w.word);
+      ASSERT_TRUE(!!parser) << kw;
+      for (const std::string key : {"in", "IN"}) {
+        const auto what = kw + " " + w.word + " " + key;
+        EXPECT_TRUE(parser.parse(key)) << what;
+        EXPECT_TRUE(parser.parse(key + "1")) << what;
+        EXPECT_TRUE(parser.parse(key + w.does_not)) << what;
+        EXPECT_FALSE(parser.parse(key + w.goes_on)) << what;
+      }
+    }
+  }
+}
+
+TEST(GeneralTest, Word_expression_ignoring_case_with_a_rule_as_the_word) {
+  // The same where the %word is a reference to a rule.
+  parser parser(R"(
+    S    <- 'if'i Rest !.
+    Rest <- [a-zA-Z0-9]*
+    %word <- W
+    W    <- [A-Z]+
+  )");
+  EXPECT_TRUE(parser.parse("ifx"));
+  EXPECT_TRUE(parser.parse("if1"));
+  EXPECT_FALSE(parser.parse("ifX"));
+  EXPECT_FALSE(parser.parse("IFX"));
+}
+
 TEST(GeneralTest, Word_expression_literal_that_cannot_start_a_word) {
   // '$' and '1' only go on a word, so they are not word literals, in a choice
   // of literals and in a dictionary as well.
