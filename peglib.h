@@ -5644,7 +5644,8 @@ inline size_t Dictionary::parse_core(const char *s, size_t n,
   vs.choice_ = id;
 
   // Word check
-  if (c.wordOpe && starts_word(c, s + i, n - i)) {
+  // An entry that does not start a word is not checked, as a literal is not.
+  if (c.wordOpe && starts_word(c, s, i) && starts_word(c, s + i, n - i)) {
     c.set_error_pos(s);
     return kFail;
   }

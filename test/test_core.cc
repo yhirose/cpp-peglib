@@ -490,6 +490,17 @@ TEST(GeneralTest, Word_expression_test_Dictionary) {
   EXPECT_TRUE(parser.parse("toa"));
 }
 
+TEST(GeneralTest, Word_expression_dictionary_entry_that_is_not_a_word) {
+  // An entry of a dictionary that does not start with a word character is
+  // not checked for a word boundary, as a literal is not.
+  parser parser(R"(
+    S <- ('+' | 'x') [0-9]
+    %word <- [a-zA-Z0-9_]
+  )");
+  EXPECT_TRUE(parser.parse("+1"));
+  EXPECT_FALSE(parser.parse("x1"));
+}
+
 TEST(GeneralTest, Word_expression_case_ignore_test_Dictionary) {
   parser parser(R"(
     Identifier  ← < !Keyword [a-z][a-z]* >
