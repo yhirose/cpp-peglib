@@ -264,7 +264,7 @@ ret = parser.parse("200", val);
 assert(ret == false);
 ```
 
-The message a predicate gives is reported where the rejected match starts, unless the parse fails further on (see [Custom error message for definitions](#custom-error-message-for-definitions)).
+The message a predicate gives is reported where the rejected match starts, unless the parse fails past the end of that match (see [Custom error message for definitions](#custom-error-message-for-definitions)).
 
 The predicate can pass data to the action via `predicate_data` to avoid redundant computation:
 

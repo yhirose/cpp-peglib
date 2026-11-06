@@ -308,6 +308,76 @@ TEST(SemanticPredicateTest, Predicate_error_message) {
   EXPECT_EQ("value must be <= 100", error_msg);
 }
 
+TEST(SemanticPredicateTest, Predicate_error_message_counts_at_match_end) {
+  parser pg(R"(
+    S      <- Small / Any / Long
+    Small  <- NUMBER 'kg'
+    Any    <- NUMBER 'g'
+    Long   <- NUMBER 'kg' 'x' 'z'
+    NUMBER <- < [0-9]+ >
+    %whitespace <- [ \t]*
+  )");
+  EXPECT_TRUE(pg);
+
+  pg["Small"].predicate = [](const SemanticValues &vs, const std::any &,
+                             std::string &msg) {
+    if (vs.token_to_number<int>() > 100) {
+      msg = "too heavy for kg";
+      return false;
+    }
+    return true;
+  };
+
+  size_t col = 0;
+  std::string error_msg;
+  pg.set_logger([&](size_t, size_t c, const std::string &msg) {
+    col = c;
+    error_msg = msg;
+  });
+
+  // Any fails within the match Small rejected: the message stands.
+  EXPECT_FALSE(pg.parse("200 kg"));
+  EXPECT_EQ(1, col);
+  EXPECT_EQ("too heavy for kg", error_msg);
+
+  // Long fails past it: the error there is reported.
+  EXPECT_FALSE(pg.parse("200 kg xy"));
+  EXPECT_EQ(9, col);
+  EXPECT_EQ("syntax error, unexpected 'y', expecting 'z'.", error_msg);
+}
+
+TEST(SemanticPredicateTest, Predicate_error_message_past_a_message_in_match) {
+  parser pg(R"(
+    S      <- Small / Any
+    Small  <- NUMBER Unit? 'kg'
+    Unit   <- 'u' 'v' { error_message 'bad unit' }
+    Any    <- NUMBER 'k' 'x'
+    NUMBER <- < [0-9]+ >
+  )");
+  EXPECT_TRUE(pg);
+
+  pg["Small"].predicate = [](const SemanticValues &vs, const std::any &,
+                             std::string &msg) {
+    if (vs.token_to_number<int>() > 100) {
+      msg = "too heavy for kg";
+      return false;
+    }
+    return true;
+  };
+
+  size_t col = 0;
+  std::string error_msg;
+  pg.set_logger([&](size_t, size_t c, const std::string &msg) {
+    col = c;
+    error_msg = msg;
+  });
+
+  // Unit gives its message and Any fails within the match Small rejected.
+  EXPECT_FALSE(pg.parse("200kg"));
+  EXPECT_EQ(1, col);
+  EXPECT_EQ("too heavy for kg", error_msg);
+}
+
 TEST(SemanticPredicateTest, Predicate_with_user_data) {
   parser pg(R"(
     S <- TOKEN+

@@ -2482,22 +2482,21 @@ public:
     bool save_;
   };
 
-  // Whether a message at `pos` is reported: a failure here is noted, and no
-  // message given for the same error lies at or past `pos`. So nothing in the
-  // whitespace gives one, as a rule there fails wherever the whitespace stops.
-  bool reports_message_at(const char *pos) const {
-    return collects_expected_tokens() &&
-           !error_info.message_lies_at_or_after(pos);
-  }
-
-  // A failure at `pos` gives the message `make` returns where the failure is
-  // the error: what it noted since `mark` is at the furthest failure, or
-  // `pos` is at or past it and becomes the error.
+  // A failure that went as far as `fails_at` gives the message `make` returns,
+  // reported at `pos`, where the failure is the error: `fails_at` is at or
+  // past the furthest failure and becomes it, or what it noted since `mark`
+  // is there. A rule fails where it starts; a predicate rejects a match that
+  // went to its end. A message given for the same error at or past `pos`
+  // stands. Nothing gives one where a failure is not noted, so nothing in the
+  // whitespace does, as a rule there fails wherever the whitespace stops.
   template <typename T>
-  void give_message(const char *pos, const ErrorInfo::Mark &mark, T make,
+  void give_message(const char *pos, const char *fails_at,
+                    const ErrorInfo::Mark &mark, T make,
                     const std::string &label = "") {
-    if (reports_message_at(pos) &&
-        (error_info.noted_since(mark) || error_info.advance_to(pos))) {
+    if (!collects_expected_tokens()) { return; }
+    auto is_error =
+        error_info.advance_to(fails_at) || error_info.noted_since(mark);
+    if (is_error && !error_info.message_lies_at_or_after(pos)) {
       error_info.set_message(pos, make(), label);
     }
   }
@@ -6193,7 +6192,8 @@ Holder::parse_general(const char *s, size_t n, SemanticValues &vs, Context &c,
         if (!outer_->predicate(chvs, dt, msg, predicate_data)) {
           if (!msg.empty()) {
             c.give_message(
-                s, mark, [&] { return std::move(msg); }, outer_->name);
+                s, s + m.len, mark, [&] { return std::move(msg); },
+                outer_->name);
           }
           m.len = kFail;
         } else if (!c.recovered) {
@@ -6206,7 +6206,7 @@ Holder::parse_general(const char *s, size_t n, SemanticValues &vs, Context &c,
     } else {
       if (!outer_->error_message.empty()) {
         c.give_message(
-            s, mark,
+            s, s, mark,
             [&] {
               return resolve_capture_placeholders(outer_->error_message, c);
             },
@@ -6517,7 +6517,7 @@ inline size_t BackReference::parse_core(const char *s, size_t n,
     }
   }
 
-  c.give_message(s, c.error_info.mark(), [&] {
+  c.give_message(s, s, c.error_info.mark(), [&] {
     return "undefined back reference '$" + name_ + "'...";
   });
   return kFail;
